@@ -1,114 +1,68 @@
-# QuerobroApp Backend
+# QuerobroApp Monorepo
 
-Backend inicial em Node.js + Express + SQLite para gerenciamento de produtos, clientes, pedidos e pagamentos.
+Monorepo com Turborepo + pnpm:
+
+- `apps/api`: NestJS + Prisma (Postgres)
+- `apps/web`: Next.js + Tailwind + shadcn/ui
+- `apps/mobile`: Expo React Native
+- `packages/shared`: schemas e types com zod
+- `packages/ui`: componentes compartilhados para web
 
 ## Requisitos
 
-- Node.js 18+
+- Node.js 20+
+- pnpm 9+
+- Docker (para Postgres local)
 
-## Setup
+## Setup local
 
-1. Instale dependências:
+1. Instale dependencias:
 
 ```bash
-npm install
+pnpm install
 ```
 
-2. Copie o arquivo de ambiente:
+2. Copie os envs:
 
 ```bash
 cp .env.example .env
+cp apps/api/.env.example apps/api/.env
+cp apps/web/.env.example apps/web/.env
+cp apps/mobile/.env.example apps/mobile/.env
 ```
 
-3. Inicie a API:
+3. Suba o Postgres:
 
 ```bash
-npm run dev
+docker compose up -d
 ```
 
-A API sobe em `http://localhost:3000`.
+4. Gere o client do Prisma:
 
-## Variáveis de ambiente
-
-- `PORT`: porta do servidor
-- `DB_PATH`: caminho do arquivo SQLite
-
-## Endpoints
-
-### Saúde
-- `GET /health`
-
-### Produtos
-- `GET /produtos`
-- `GET /produtos/:id`
-- `POST /produtos`
-- `PUT /produtos/:id`
-- `DELETE /produtos/:id`
-
-### Clientes
-- `GET /clientes`
-- `GET /clientes/:id`
-- `POST /clientes`
-- `PUT /clientes/:id`
-- `DELETE /clientes/:id`
-
-### Pedidos
-- `GET /pedidos`
-- `GET /pedidos/:id`
-- `POST /pedidos`
-- `PUT /pedidos/:id`
-- `DELETE /pedidos/:id`
-
-### Pagamentos
-- `GET /pagamentos`
-- `GET /pagamentos/:id`
-- `POST /pagamentos`
-- `PUT /pagamentos/:id`
-- `DELETE /pagamentos/:id`
-
-## Exemplos de payload
-
-### Criar produto
-
-```json
-{
-  "name": "Cerveja Artesanal",
-  "description": "IPA 500ml",
-  "price": 12.5,
-  "stock": 20
-}
+```bash
+pnpm --filter @querobroapp/api prisma:generate
 ```
 
-### Criar cliente
+5. Rode tudo:
 
-```json
-{
-  "name": "Maria Santos",
-  "email": "maria@email.com",
-  "phone": "+55 11 99999-0000"
-}
+```bash
+pnpm dev
 ```
 
-### Criar pedido
+## Scripts
 
-```json
-{
-  "client_id": 1,
-  "items": [
-    { "product_id": 1, "quantity": 2 },
-    { "product_id": 2, "quantity": 1 }
-  ]
-}
-```
+- `pnpm dev`: roda tudo em paralelo
+- `pnpm build`: build de todos os pacotes
+- `pnpm lint`: lint de todos os pacotes
+- `pnpm typecheck`: typecheck de todos os pacotes
 
-### Criar pagamento
+## URLs
 
-```json
-{
-  "order_id": 1,
-  "amount": 37.5,
-  "method": "pix",
-  "status": "pago",
-  "paid_at": "2026-02-09 12:30:00"
-}
-```
+- API Nest: `http://localhost:3001/health`
+- Web: `http://localhost:3000`
+- Expo: `http://localhost:8081` (default)
+
+## Observacoes
+
+- O Prisma usa `DATABASE_URL` em `apps/api/.env`.
+- Para mudar a porta do Postgres, ajuste `.env` no root.
