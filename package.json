@@ -1,23 +1,16 @@
 {
-  "name": "querobroapp-backend",
-  "version": "0.1.0",
+  "name": "querobroapp",
   "private": true,
-  "type": "module",
-  "description": "Backend Node/Express + SQLite para QuerobroApp",
+  "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
-  },
-  "dependencies": {
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2",
-    "helmet": "^7.1.0",
-    "morgan": "^1.10.0",
-    "sqlite": "^5.1.1",
-    "sqlite3": "^5.1.7"
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck"
   },
   "devDependencies": {
-    "nodemon": "^3.1.0"
+    "eslint": "^8.57.0",
+    "prettier": "^3.4.2",
+    "turbo": "^2.3.3"
   }
 }

@@ -2,6 +2,13 @@ node_modules
 .env
 .env.*
 !/.env.example
+!.env.example
+/dist
+/build
+/.next
+/apps/**/dist
+/apps/**/build
+/apps/**/.next
+/coverage
 /data
-npm-debug.log*
 .DS_Store
