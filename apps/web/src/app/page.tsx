@@ -1,22 +1,35 @@
-import { Button } from '@querobroapp/ui';
+import Link from 'next/link';
+
+const links = [
+  { href: '/dashboard', title: 'Dashboard', desc: 'Visao geral de vendas e operacoes.' },
+  { href: '/produtos', title: 'Produtos', desc: 'Catalogo, precos e status.' },
+  { href: '/clientes', title: 'Clientes', desc: 'Base de clientes e contatos.' },
+  { href: '/pedidos', title: 'Pedidos', desc: 'Acompanhe pedidos e pagamentos.' },
+  { href: '/estoque', title: 'Estoque', desc: 'Movimentacoes e saldo atual.' }
+];
 
 export default function HomePage() {
   return (
-    <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-6 py-16">
+    <section className="grid gap-6">
       <div>
         <p className="text-sm uppercase tracking-[0.3em] text-neutral-500">QuerobroApp</p>
-        <h1 className="mt-4 text-4xl font-semibold text-neutral-900">
-          Stack unificada para vendas, pedidos e pagamentos
-        </h1>
-        <p className="mt-3 max-w-2xl text-lg text-neutral-600">
-          Este monorepo conecta API, web e mobile em uma base compartilhada com tipos e
-          componentes reutilizaveis.
+        <h2 className="mt-3 text-3xl font-semibold">Painel ERP</h2>
+        <p className="mt-2 text-neutral-600">
+          Acesse os modulos principais para gerenciar produtos, clientes, pedidos e estoque.
         </p>
       </div>
-      <div className="flex flex-wrap gap-3">
-        <Button>Entrar</Button>
-        <Button variant="outline">Ver pedidos</Button>
+      <div className="grid gap-4 md:grid-cols-2">
+        {links.map((link) => (
+          <Link
+            key={link.href}
+            href={link.href}
+            className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5"
+          >
+            <h3 className="text-lg font-semibold text-neutral-900">{link.title}</h3>
+            <p className="mt-2 text-sm text-neutral-600">{link.desc}</p>
+          </Link>
+        ))}
       </div>
-    </main>
+    </section>
   );
 }

@@ -37,10 +37,11 @@ cp apps/mobile/.env.example apps/mobile/.env
 docker compose up -d
 ```
 
-4. Gere o client do Prisma:
+4. Gere o client do Prisma e rode seed:
 
 ```bash
 pnpm --filter @querobroapp/api prisma:generate
+pnpm --filter @querobroapp/api prisma:seed
 ```
 
 5. Rode tudo:
@@ -59,8 +60,18 @@ pnpm dev
 ## URLs
 
 - API Nest: `http://localhost:3001/health`
+- Swagger: `http://localhost:3001/docs`
 - Web: `http://localhost:3000`
 - Expo: `http://localhost:8081` (default)
+
+## API (resumo)
+
+- `GET /products`, `POST /products`, `GET /products/:id`, `PUT /products/:id`, `DELETE /products/:id`
+- `GET /customers`, `POST /customers`, `GET /customers/:id`, `PUT /customers/:id`, `DELETE /customers/:id`
+- `GET /orders`, `POST /orders`, `GET /orders/:id`, `PUT /orders/:id`, `DELETE /orders/:id`
+- `POST /orders/:id/items`, `DELETE /orders/:id/items/:itemId`, `PATCH /orders/:id/status`
+- `GET /payments`, `POST /payments`, `PATCH /payments/:id/mark-paid`
+- `GET /stock-movements`, `POST /stock-movements`
 
 ## Observacoes
 
