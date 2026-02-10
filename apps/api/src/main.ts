@@ -3,6 +3,14 @@ import { NestFactory } from '@nestjs/core';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module.js';
 
+process.on('unhandledRejection', (reason) => {
+  console.error('UnhandledRejection:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('UncaughtException:', error);
+});
+
 function ensureDatabaseUrl() {
   const isDev = (process.env.NODE_ENV || 'development') === 'development';
   if (isDev && !process.env.DATABASE_URL) {
@@ -22,14 +30,17 @@ async function bootstrap() {
     credentials: true
   });
 
-  const config = new DocumentBuilder()
-    .setTitle('QuerobroApp API')
-    .setDescription('API ERP para produtos, clientes, pedidos, pagamentos e estoque')
-    .setVersion('0.1.0')
-    .build();
+  const enableSwagger = process.env.ENABLE_SWAGGER === 'true';
+  if (enableSwagger) {
+    const config = new DocumentBuilder()
+      .setTitle('QuerobroApp API')
+      .setDescription('API ERP para produtos, clientes, pedidos, pagamentos e estoque')
+      .setVersion('0.1.0')
+      .build();
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('docs', app, document);
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('docs', app, document);
+  }
 
   const port = process.env.PORT ? Number(process.env.PORT) : 3001;
   const host = process.env.HOST || '0.0.0.0';
@@ -37,4 +48,7 @@ async function bootstrap() {
   console.log(`API Nest rodando em http://${host}:${port}`);
 }
 
-bootstrap();
+bootstrap().catch((err) => {
+  console.error('Bootstrap error:', err);
+  process.exit(1);
+});
