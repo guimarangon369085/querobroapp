@@ -25,8 +25,14 @@ async function bootstrap() {
   ensureDatabaseUrl();
 
   const app = await NestFactory.create(AppModule);
+  const allowedOrigins = new Set(['http://127.0.0.1:3000', 'http://localhost:3000']);
   app.enableCors({
-    origin: true,
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.has(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
     credentials: true
   });
 

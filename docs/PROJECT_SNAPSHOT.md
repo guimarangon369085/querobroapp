@@ -97,6 +97,8 @@ pnpm --filter @querobroapp/api dev
 Cliente HTTP unico:
 - [`apps/web/src/lib/api.ts`](../apps/web/src/lib/api.ts)
 - base URL por `NEXT_PUBLIC_API_URL`
+- fallback em dev quando env ausente: `http://127.0.0.1:3001`
+- CORS da API liberado explicitamente para `http://127.0.0.1:3000` e `http://localhost:3000`
 
 Mapa de consumo por pagina:
 
