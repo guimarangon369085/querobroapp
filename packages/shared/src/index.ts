@@ -17,8 +17,22 @@ export const InventoryCategoryEnum = z.enum(['INGREDIENTE', 'EMBALAGEM_INTERNA',
 export const CustomerSchema = z.object({
   id: z.number().int().positive().optional(),
   name: z.string().min(1),
+  firstName: z.string().optional().nullable(),
+  lastName: z.string().optional().nullable(),
+  email: z.string().email().optional().nullable(),
   phone: z.string().optional().nullable(),
   address: z.string().optional().nullable(),
+  addressLine1: z.string().optional().nullable(),
+  addressLine2: z.string().optional().nullable(),
+  neighborhood: z.string().optional().nullable(),
+  city: z.string().optional().nullable(),
+  state: z.string().optional().nullable(),
+  postalCode: z.string().optional().nullable(),
+  country: z.string().optional().nullable(),
+  placeId: z.string().optional().nullable(),
+  lat: z.number().optional().nullable(),
+  lng: z.number().optional().nullable(),
+  deliveryNotes: z.string().optional().nullable(),
   createdAt: z.string().optional().nullable()
 });
 

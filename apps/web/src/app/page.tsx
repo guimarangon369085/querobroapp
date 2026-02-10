@@ -12,11 +12,26 @@ export default function HomePage() {
   return (
     <section className="grid gap-6">
       <div>
-        <span className="app-chip">Suite ERP</span>
-        <h2 className="mt-3 text-4xl font-semibold">Painel editorial</h2>
+        <span className="app-chip">QUEROBROA</span>
+        <h2 className="mt-3 text-4xl font-semibold">QUEROBROApp</h2>
         <p className="mt-2 text-neutral-600">
-          Acesse os modulos principais para gerenciar produtos, clientes, pedidos e estoque.
+          Operacao premium para produtos artesanais. Acesse os modulos para gerenciar catalogo, clientes,
+          pedidos e estoque.
         </p>
+      </div>
+      <div className="app-gallery">
+        <div className="app-gallery__item">
+          <img src="/querobroa/hero-01.jpg" alt="Bandeja com broas e utensilios" />
+        </div>
+        <div className="app-gallery__item">
+          <img src="/querobroa/hero-02.jpg" alt="Selecao de broas e sabores" />
+        </div>
+        <div className="app-gallery__item">
+          <img src="/querobroa/hero-03.jpg" alt="Composicao com broas e loucas artesanais" />
+        </div>
+        <div className="app-gallery__item">
+          <img src="/querobroa/hero-04.jpg" alt="Doce de leite artesanal" />
+        </div>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         {links.map((link) => (
