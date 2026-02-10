@@ -253,7 +253,8 @@ export default function StockPage() {
                 Capacidade: {entry.maxUnits} caixas
               </p>
               <p className="text-sm text-neutral-500">
-                Custo por caixa: R$ {bomCosts.find((cost) => cost.bomId === entry.bom.id)?.cost.toFixed(2)}
+                Custo por caixa: R${' '}
+                {(bomCosts.find((cost) => cost.bomId === entry.bom.id)?.cost ?? 0).toFixed(2)}
               </p>
             </div>
           ))}
