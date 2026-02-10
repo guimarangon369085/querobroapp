@@ -12,7 +12,7 @@
 
 | Pacote | Stack | Papel | Arquivos de referencia |
 | --- | --- | --- | --- |
-| `apps/api` | NestJS + Prisma + Zod | API ERP (produtos, clientes, pedidos, pagamentos, estoque/inventario, BOM) | [`apps/api/src/app.module.ts`](../apps/api/src/app.module.ts), [`apps/api/prisma/schema.prisma`](../apps/api/prisma/schema.prisma) |
+| `apps/api` | NestJS + Prisma + Zod | API ERP (produtos, clientes, pedidos, pagamentos, estoque/inventario, BOM, D+1 e outbox WhatsApp) | [`apps/api/src/app.module.ts`](../apps/api/src/app.module.ts), [`apps/api/prisma/schema.prisma`](../apps/api/prisma/schema.prisma) |
 | `apps/web` | Next.js 14 App Router + Tailwind | ERP web operacional | [`apps/web/src/app/layout.tsx`](../apps/web/src/app/layout.tsx), [`apps/web/src/lib/api.ts`](../apps/web/src/lib/api.ts) |
 | `apps/mobile` | Expo React Native | App operacional mobile (dashboard + CRUDs basicos + criacao de pedidos) | [`apps/mobile/App.tsx`](../apps/mobile/App.tsx), [`apps/mobile/src/lib/api.ts`](../apps/mobile/src/lib/api.ts) |
 | `packages/shared` | TypeScript + Zod | Schemas/contratos de dominio compartilhados | [`packages/shared/src/index.ts`](../packages/shared/src/index.ts) |
@@ -62,6 +62,9 @@ pnpm --filter @querobroapp/web dev
 
 # api isolada
 pnpm --filter @querobroapp/api dev
+
+# fallback sem watch (quando tsx watch falhar por permissao IPC)
+pnpm --filter @querobroapp/api start:tsx
 ```
 
 ### 2.4 Portas
@@ -82,8 +85,8 @@ pnpm --filter @querobroapp/api dev
 | `/dashboard` | [`apps/web/src/app/dashboard/page.tsx`](../apps/web/src/app/dashboard/page.tsx) | KPIs de produtos, clientes, pedidos e pagamentos |
 | `/produtos` | [`apps/web/src/app/produtos/page.tsx`](../apps/web/src/app/produtos/page.tsx) | CRUD de catalogo |
 | `/clientes` | [`apps/web/src/app/clientes/page.tsx`](../apps/web/src/app/clientes/page.tsx) | CRUD de clientes + autocomplete Google Places |
-| `/pedidos` | [`apps/web/src/app/pedidos/page.tsx`](../apps/web/src/app/pedidos/page.tsx) | Criacao/gestao de pedidos, itens, status e pagamentos |
-| `/estoque` | [`apps/web/src/app/estoque/page.tsx`](../apps/web/src/app/estoque/page.tsx) | Inventario, movimentacoes e BOM/custos |
+| `/pedidos` | [`apps/web/src/app/pedidos/page.tsx`](../apps/web/src/app/pedidos/page.tsx) | Criacao/gestao de pedidos, itens, status e pagamentos com saldo (Total/Pago/Saldo) |
+| `/estoque` | [`apps/web/src/app/estoque/page.tsx`](../apps/web/src/app/estoque/page.tsx) | Inventario, movimentacoes, BOM/custos e quadro D+1 por data |
 
 ### 3.2 Estrutura de shell e navegacao
 
@@ -108,7 +111,8 @@ Mapa de consumo por pagina:
 | `produtos` | `GET/POST /products`, `PUT/DELETE /products/:id` |
 | `clientes` | `GET/POST /customers`, `PUT/DELETE /customers/:id` |
 | `pedidos` | `GET/POST /orders`, `POST /orders/:id/items`, `DELETE /orders/:id/items/:itemId`, `PATCH /orders/:id/status`, `DELETE /orders/:id`, `POST /payments`, `DELETE /payments/:id` |
-| `estoque` | `GET /inventory-items`, `PUT/DELETE /inventory-items/:id`, `GET/POST/DELETE /inventory-movements`, `GET/POST/PUT/DELETE /boms` |
+| `estoque` | `GET /inventory-items`, `PUT/DELETE /inventory-items/:id`, `GET/POST/DELETE /inventory-movements`, `GET/POST/PUT/DELETE /boms`, `GET /production/requirements` |
+| `operacao interna` | `GET /whatsapp/outbox?status=PENDING` |
 
 ## 4. Prisma: Dev Vs Prod
 
@@ -147,6 +151,10 @@ Existe divergencia real entre `schema.prisma` (dev) e `schema.prod.prisma` (prod
 tail -f /tmp/querobroapp-api.log
 tail -f /tmp/querobroapp-web.log
 
+# fallback quando ./scripts/dev-all.sh falhar em ambientes restritos
+pnpm --filter @querobroapp/api start:tsx
+pnpm --filter @querobroapp/web dev
+
 # matar tudo
 ./scripts/stop-all.sh
 ```
@@ -157,6 +165,8 @@ tail -f /tmp/querobroapp-web.log
 curl -s http://127.0.0.1:3001/health
 curl -s http://127.0.0.1:3001/products | head
 curl -s http://127.0.0.1:3001/customers | head
+curl -s \"http://127.0.0.1:3001/production/requirements?date=YYYY-MM-DD\" | head
+curl -s \"http://127.0.0.1:3001/whatsapp/outbox?status=PENDING\" | head
 ```
 
 Health endpoint:
@@ -193,5 +203,8 @@ Fonte primaria dos contratos: [`packages/shared/src/index.ts`](../packages/share
 | Estoque (insumo) / MOV | `InventoryItem` + `InventoryMovement` e consumo automatico por BOM nos pedidos | Implementado |
 | Status de pedido | Enum: `ABERTO -> CONFIRMADO -> EM_PREPARACAO -> PRONTO -> ENTREGUE` (+ cancelamento em pontos permitidos) | Implementado |
 | Status de pagamento | Enum: `PENDENTE`, `PAGO`, `CANCELADO` | Implementado |
+| Status financeiro derivado | `amountPaid`, `balanceDue`, `paymentStatus` (`PENDENTE`, `PARCIAL`, `PAGO`) retornados no pedido | Implementado |
+| Quadro D+1 | `GET /production/requirements` calcula necessidade/disponivel/falta por insumo e alerta BOM ausente | Implementado |
+| Fundacao WhatsApp | `OutboxMessage` + `GET /whatsapp/outbox` para pendencias (sem envio real) | Implementado |
 
 Transicoes de status de pedido estao em [`apps/api/src/modules/orders/orders.service.ts`](../apps/api/src/modules/orders/orders.service.ts).
