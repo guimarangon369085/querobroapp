@@ -8,6 +8,29 @@ Monorepo com Turborepo + pnpm:
 - `packages/shared`: schemas e types com zod
 - `packages/ui`: componentes compartilhados para web
 
+## Fluxo operacional (MVP)
+
+1. Cadastre **produtos/sabores** em `/produtos`.
+2. Crie pedido em `/pedidos` com cliente + itens.
+3. Abra o detalhe do pedido, ajuste status e registre pagamento.
+4. Use o botao **Marcar pedido como pago** para quitar o saldo restante.
+
+Convencao de dominio adotada:
+- `sabor/variedade` e representado como `Product` no catalogo (categoria `Sabores`, ex.: `T/G/S/R/D`).
+
+## Onde mexer
+
+- Dados (Prisma): `apps/api/prisma/schema.prisma`, `apps/api/prisma/seed.ts`
+- Backend (Nest):
+  - Produtos: `apps/api/src/modules/products`
+  - Pedidos/itens/status: `apps/api/src/modules/orders`
+  - Pagamentos: `apps/api/src/modules/payments`
+  - Estoque/BOM/D+1: `apps/api/src/modules/inventory`, `apps/api/src/modules/bom`, `apps/api/src/modules/production`
+- UI (Next):
+  - Produtos/sabores: `apps/web/src/app/produtos/page.tsx`
+  - Pedidos e pagamentos: `apps/web/src/app/pedidos/page.tsx`
+  - Estoque e quadro D+1: `apps/web/src/app/estoque/page.tsx`
+
 ## Requisitos
 
 - Node.js 20+
@@ -38,6 +61,11 @@ pnpm --filter @querobroapp/api prisma:generate:dev
 pnpm --filter @querobroapp/api prisma:migrate:dev
 pnpm --filter @querobroapp/api prisma:seed
 ```
+
+O seed e idempotente e cria dados de exemplo:
+- produtos e sabores de broa,
+- clientes,
+- pedidos com cenarios `PENDENTE`, `PARCIAL` e `PAGO`.
 
 4. Rode tudo:
 
@@ -80,6 +108,7 @@ pnpm --filter @querobroapp/api prisma:migrate:prod
 - `GET /customers`, `POST /customers`, `GET /customers/:id`, `PUT /customers/:id`, `DELETE /customers/:id`
 - `GET /orders`, `POST /orders`, `GET /orders/:id`, `PUT /orders/:id`, `DELETE /orders/:id`
 - `POST /orders/:id/items`, `DELETE /orders/:id/items/:itemId`, `PATCH /orders/:id/status`
+- `PATCH /orders/:id/mark-paid`
 - `GET /payments`, `POST /payments`, `PATCH /payments/:id/mark-paid`
 - `GET /stock-movements`, `POST /stock-movements`
 
