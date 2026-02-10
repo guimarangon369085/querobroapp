@@ -1,10 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service.js';
 import { InventoryItemSchema, InventoryMovementSchema, StockMovementTypeEnum } from '@querobroapp/shared';
 
 @Injectable()
 export class InventoryService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   listItems() {
     return this.prisma.inventoryItem.findMany({ orderBy: { id: 'asc' } });

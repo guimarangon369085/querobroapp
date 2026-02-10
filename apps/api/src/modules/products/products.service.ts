@@ -1,11 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service.js';
 import { ProductSchema } from '@querobroapp/shared';
 import { normalizeMoney, normalizeText, normalizeTitle } from '../../common/normalize.js';
 
 @Injectable()
 export class ProductsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   list() {
     return this.prisma.product.findMany({ orderBy: { id: 'desc' } });
