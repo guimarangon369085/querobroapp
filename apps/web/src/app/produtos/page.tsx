@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Product } from '@querobroapp/shared';
 import { apiFetch } from '@/lib/api';
 import { formatCurrencyBR, titleCase } from '@/lib/format';
@@ -19,6 +19,8 @@ export default function ProductsPage() {
   const [form, setForm] = useState<Partial<Product>>(emptyProduct);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [activeFilter, setActiveFilter] = useState<'TODOS' | 'ATIVOS' | 'INATIVOS'>('TODOS');
 
   const load = () => apiFetch<Product[]>('/products').then(setProducts);
 
@@ -79,11 +81,51 @@ export default function ProductsPage() {
     await load();
   };
 
+  const filteredProducts = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return products.filter((product) => {
+      if (activeFilter === 'ATIVOS' && !product.active) return false;
+      if (activeFilter === 'INATIVOS' && product.active) return false;
+      if (!query) return true;
+      return (
+        product.name.toLowerCase().includes(query) ||
+        (product.category || '').toLowerCase().includes(query) ||
+        `${product.id}`.includes(query)
+      );
+    });
+  }, [products, search, activeFilter]);
+
   return (
     <section className="grid gap-8">
       <div>
         <h2 className="text-2xl font-semibold">Produtos</h2>
         <p className="text-neutral-600">Gerencie catalogo e precos.</p>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <div className="rounded-2xl border border-neutral-200 bg-white p-4">
+          <p className="text-xs uppercase text-neutral-500">Produtos</p>
+          <p className="text-2xl font-semibold">{products.length}</p>
+        </div>
+        <div className="rounded-2xl border border-neutral-200 bg-white p-4 md:col-span-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              className="w-full rounded-full border border-neutral-200 px-4 py-2 text-sm md:w-auto"
+              placeholder="Buscar por nome ou categoria"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <select
+              className="rounded-full border border-neutral-200 px-4 py-2 text-sm"
+              value={activeFilter}
+              onChange={(e) => setActiveFilter(e.target.value as 'TODOS' | 'ATIVOS' | 'INATIVOS')}
+            >
+              <option value="TODOS">Todos</option>
+              <option value="ATIVOS">Ativos</option>
+              <option value="INATIVOS">Inativos</option>
+            </select>
+          </div>
+        </div>
       </div>
 
       <form onSubmit={submit} className="grid gap-4 rounded-2xl border border-neutral-200 bg-white p-6">
@@ -166,7 +208,7 @@ export default function ProductsPage() {
       </form>
 
       <div className="grid gap-3">
-        {products.map((product) => (
+        {filteredProducts.map((product) => (
           <div
             key={product.id}
             className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-neutral-200 bg-white p-4"
@@ -193,6 +235,11 @@ export default function ProductsPage() {
             </div>
           </div>
         ))}
+        {filteredProducts.length === 0 && (
+          <div className="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 p-6 text-sm text-neutral-500">
+            Nenhum produto encontrado com este filtro.
+          </div>
+        )}
       </div>
     </section>
   );

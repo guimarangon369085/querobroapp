@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Customer } from '@querobroapp/shared';
 import { apiFetch } from '@/lib/api';
 import { formatPhoneBR, normalizeAddress, normalizePhone, titleCase } from '@/lib/format';
@@ -18,6 +18,7 @@ export default function CustomersPage() {
   const [form, setForm] = useState<Partial<Customer>>(emptyCustomer);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
   const addressInputRef = useRef<HTMLInputElement | null>(null);
 
   const load = () => apiFetch<Customer[]>('/customers').then(setCustomers);
@@ -100,11 +101,43 @@ export default function CustomersPage() {
     await load();
   };
 
+  const filteredCustomers = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return customers;
+    return customers.filter((customer) => {
+      const name = customer.name.toLowerCase();
+      const phone = customer.phone || '';
+      const address = customer.address || '';
+      return (
+        name.includes(query) ||
+        phone.includes(query) ||
+        address.toLowerCase().includes(query) ||
+        `${customer.id}`.includes(query)
+      );
+    });
+  }, [customers, search]);
+
   return (
     <section className="grid gap-8">
       <div>
         <h2 className="text-2xl font-semibold">Clientes</h2>
         <p className="text-neutral-600">Cadastre e organize sua base de clientes.</p>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <div className="rounded-2xl border border-neutral-200 bg-white p-4">
+          <p className="text-xs uppercase text-neutral-500">Clientes</p>
+          <p className="text-2xl font-semibold">{customers.length}</p>
+        </div>
+        <div className="rounded-2xl border border-neutral-200 bg-white p-4 md:col-span-2">
+          <p className="text-xs uppercase text-neutral-500">Busca rapida</p>
+          <input
+            className="mt-2 w-full rounded-full border border-neutral-200 px-4 py-2 text-sm"
+            placeholder="Buscar por nome, telefone ou endereco"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
       </div>
 
       <form onSubmit={submit} className="grid gap-4 rounded-2xl border border-neutral-200 bg-white p-6">
@@ -160,7 +193,7 @@ export default function CustomersPage() {
       </form>
 
       <div className="grid gap-3">
-        {customers.map((customer) => (
+        {filteredCustomers.map((customer) => (
           <div
             key={customer.id}
             className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-neutral-200 bg-white p-4"
@@ -187,6 +220,11 @@ export default function CustomersPage() {
             </div>
           </div>
         ))}
+        {filteredCustomers.length === 0 && (
+          <div className="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 p-6 text-sm text-neutral-500">
+            Nenhum cliente encontrado com este filtro.
+          </div>
+        )}
       </div>
     </section>
   );

@@ -25,6 +25,8 @@ export default function OrdersPage() {
   const [addItemProductSearch, setAddItemProductSearch] = useState('');
   const [addItemQty, setAddItemQty] = useState<number>(1);
   const [orderError, setOrderError] = useState<string | null>(null);
+  const [orderSearch, setOrderSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('TODOS');
 
   const loadAll = async () => {
     const [ordersData, customersData, productsData] = await Promise.all([
@@ -142,6 +144,29 @@ export default function OrdersPage() {
     return match ? Number(match[1]) : NaN;
   };
 
+  const customerMap = useMemo(() => new Map(customers.map((c) => [c.id!, c])), [customers]);
+
+  const filteredOrders = useMemo(() => {
+    const query = orderSearch.trim().toLowerCase();
+    return orders.filter((order) => {
+      if (statusFilter !== 'TODOS' && order.status !== statusFilter) return false;
+      if (!query) return true;
+      const customerName = customerMap.get(order.customerId)?.name?.toLowerCase() || '';
+      return (
+        `${order.id}`.includes(query) ||
+        customerName.includes(query) ||
+        order.status.toLowerCase().includes(query)
+      );
+    });
+  }, [orders, orderSearch, statusFilter, customerMap]);
+
+  const orderKpis = useMemo(() => {
+    const totalOrders = orders.length;
+    const openOrders = orders.filter((o) => o.status !== 'ENTREGUE' && o.status !== 'CANCELADO').length;
+    const revenue = orders.reduce((sum, o) => sum + (o.total ?? 0), 0);
+    return { totalOrders, openOrders, revenue };
+  }, [orders]);
+
   const draftSubtotal = useMemo(() => {
     return newOrderItems.reduce((sum, item) => {
       const product = productMap.get(item.productId);
@@ -158,6 +183,21 @@ export default function OrdersPage() {
       <div>
         <h2 className="text-2xl font-semibold">Pedidos</h2>
         <p className="text-neutral-600">Acompanhe pedidos, itens e pagamentos.</p>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <div className="rounded-2xl border border-neutral-200 bg-white p-4">
+          <p className="text-xs uppercase text-neutral-500">Pedidos</p>
+          <p className="text-2xl font-semibold">{orderKpis.totalOrders}</p>
+        </div>
+        <div className="rounded-2xl border border-neutral-200 bg-white p-4">
+          <p className="text-xs uppercase text-neutral-500">Em andamento</p>
+          <p className="text-2xl font-semibold">{orderKpis.openOrders}</p>
+        </div>
+        <div className="rounded-2xl border border-neutral-200 bg-white p-4">
+          <p className="text-xs uppercase text-neutral-500">Receita</p>
+          <p className="text-2xl font-semibold">{formatCurrencyBR(orderKpis.revenue)}</p>
+        </div>
       </div>
 
       <div className="grid gap-4 rounded-2xl border border-neutral-200 bg-white p-6">
@@ -291,20 +331,53 @@ export default function OrdersPage() {
         )}
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        {orders.map((order) => (
-          <button
-            key={order.id}
-            className={`rounded-xl border p-4 text-left ${
-              selectedOrder?.id === order.id ? 'border-neutral-900 bg-white' : 'border-neutral-200 bg-white'
-            }`}
-            onClick={() => setSelectedOrder(order)}
-          >
-            <p className="text-lg font-semibold">Pedido #{order.id}</p>
-            <p className="text-sm text-neutral-500">Status: {order.status}</p>
-            <p className="text-sm text-neutral-500">Total: {formatCurrencyBR(order.total)}</p>
-          </button>
-        ))}
+      <div className="grid gap-3 rounded-2xl border border-neutral-200 bg-white p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold">Lista de pedidos</h3>
+          <div className="flex flex-wrap gap-2">
+            <input
+              className="rounded-full border border-neutral-200 px-4 py-2 text-sm"
+              placeholder="Buscar pedido, cliente ou status"
+              value={orderSearch}
+              onChange={(e) => setOrderSearch(e.target.value)}
+            />
+            <select
+              className="rounded-full border border-neutral-200 px-4 py-2 text-sm"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              <option value="TODOS">Todos</option>
+              {orderStatuses.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          {filteredOrders.map((order) => (
+            <button
+              key={order.id}
+              className={`rounded-xl border p-4 text-left ${
+                selectedOrder?.id === order.id ? 'border-neutral-900 bg-white' : 'border-neutral-200 bg-white'
+              }`}
+              onClick={() => setSelectedOrder(order)}
+            >
+              <p className="text-lg font-semibold">Pedido #{order.id}</p>
+              <p className="text-sm text-neutral-500">Status: {order.status}</p>
+              <p className="text-sm text-neutral-500">
+                Cliente: {customerMap.get(order.customerId)?.name || 'Sem cliente'}
+              </p>
+              <p className="text-sm text-neutral-500">Total: {formatCurrencyBR(order.total)}</p>
+            </button>
+          ))}
+          {filteredOrders.length === 0 && (
+            <div className="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 p-6 text-sm text-neutral-500">
+              Nenhum pedido encontrado com os filtros atuais.
+            </div>
+          )}
+        </div>
       </div>
 
       {selectedOrder && (
