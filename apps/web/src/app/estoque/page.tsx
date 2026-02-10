@@ -1,17 +1,36 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import type { Bom, InventoryItem, InventoryMovement, Product } from '@querobroapp/shared';
+import type {
+  Bom,
+  InventoryItem,
+  InventoryMovement,
+  Product,
+  ProductionRequirementRow,
+  ProductionRequirementWarning,
+  ProductionRequirementsResponse,
+} from '@querobroapp/shared';
 import { apiFetch } from '@/lib/api';
 
 const movementTypes = ['IN', 'OUT', 'ADJUST'];
 
 type BomItemInput = {
   itemId: number | '';
-  qtyPerRecipe?: number | '';
-  qtyPerSaleUnit?: number | '';
-  qtyPerUnit?: number | '';
+  qtyPerRecipe?: string;
+  qtyPerSaleUnit?: string;
+  qtyPerUnit?: string;
 };
+
+function defaultTomorrowDate() {
+  const now = new Date();
+  const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+  return tomorrow.toISOString().slice(0, 10);
+}
+
+function formatQty(value: number) {
+  if (!Number.isFinite(value)) return '0';
+  return Number(value).toLocaleString('pt-BR', { maximumFractionDigits: 4 });
+}
 
 export default function StockPage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -32,6 +51,12 @@ export default function StockPage() {
   const [bomSaleUnitLabel, setBomSaleUnitLabel] = useState<string>('Caixa com 7 broas');
   const [bomYieldUnits, setBomYieldUnits] = useState<string>('12');
   const [bomItems, setBomItems] = useState<BomItemInput[]>([]);
+  const [d1Date, setD1Date] = useState<string>(defaultTomorrowDate());
+  const [d1Rows, setD1Rows] = useState<ProductionRequirementRow[]>([]);
+  const [d1Warnings, setD1Warnings] = useState<ProductionRequirementWarning[]>([]);
+  const [d1Basis, setD1Basis] = useState<'deliveryDate' | 'createdAtPlus1'>('createdAtPlus1');
+  const [d1Loading, setD1Loading] = useState(false);
+  const [d1Error, setD1Error] = useState<string | null>(null);
 
   const load = async () => {
     const [productsData, itemsData, movementsData, bomsData] = await Promise.all([
@@ -49,6 +74,29 @@ export default function StockPage() {
   useEffect(() => {
     load().catch(console.error);
   }, []);
+
+  const loadD1 = async (targetDate: string) => {
+    setD1Loading(true);
+    setD1Error(null);
+    try {
+      const data = await apiFetch<ProductionRequirementsResponse>(
+        `/production/requirements?date=${encodeURIComponent(targetDate)}`
+      );
+      setD1Rows(data.rows || []);
+      setD1Warnings(data.warnings || []);
+      setD1Basis(data.basis || 'createdAtPlus1');
+    } catch (err) {
+      setD1Error(err instanceof Error ? err.message : 'Nao foi possivel calcular o quadro D+1.');
+      setD1Rows([]);
+      setD1Warnings([]);
+    } finally {
+      setD1Loading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadD1(d1Date).catch(console.error);
+  }, [d1Date]);
 
   const parseSaleUnits = (label?: string | null) => {
     if (!label) return 1;
@@ -123,9 +171,9 @@ export default function StockPage() {
     setBomYieldUnits(String(bom.yieldUnits ?? ''));
     const items = (bom.items || []).map((item: any) => ({
       itemId: item.itemId,
-      qtyPerRecipe: item.qtyPerRecipe ?? '',
-      qtyPerSaleUnit: item.qtyPerSaleUnit ?? '',
-      qtyPerUnit: item.qtyPerUnit ?? ''
+      qtyPerRecipe: item.qtyPerRecipe == null ? '' : String(item.qtyPerRecipe),
+      qtyPerSaleUnit: item.qtyPerSaleUnit == null ? '' : String(item.qtyPerSaleUnit),
+      qtyPerUnit: item.qtyPerUnit == null ? '' : String(item.qtyPerUnit)
     }));
     setBomItems(items);
   };
@@ -257,6 +305,17 @@ export default function StockPage() {
     return { totalItems, ingredients, packaging };
   }, [items]);
 
+  const d1BreakdownSummary = (row: ProductionRequirementRow) => {
+    const grouped = new Map<string, number>();
+    for (const entry of row.breakdown || []) {
+      const current = grouped.get(entry.productName) || 0;
+      grouped.set(entry.productName, current + entry.quantity);
+    }
+    return Array.from(grouped.entries())
+      .map(([product, qty]) => `${product}: ${formatQty(qty)}`)
+      .join(' | ');
+  };
+
   return (
     <section className="grid gap-8">
       <div className="app-section-title">
@@ -309,6 +368,83 @@ export default function StockPage() {
             </div>
           )}
         </div>
+      </div>
+
+      <div className="app-panel grid gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-xl font-semibold">Quadro D+1 (producao e compras)</h3>
+            <p className="text-sm text-neutral-500">
+              Necessidade por insumo para a data alvo. Base atual: {d1Basis === 'deliveryDate' ? 'deliveryDate' : 'createdAt + 1 dia'}.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="text-sm text-neutral-600">
+              Data
+              <input
+                className="app-input mt-1"
+                type="date"
+                value={d1Date}
+                onChange={(e) => setD1Date(e.target.value)}
+              />
+            </label>
+            <button className="app-button app-button-ghost" onClick={() => loadD1(d1Date)}>
+              Recalcular
+            </button>
+          </div>
+        </div>
+
+        {d1Error ? <p className="text-sm text-red-700">{d1Error}</p> : null}
+        {d1Loading ? <p className="text-sm text-neutral-500">Calculando D+1...</p> : null}
+
+        <div className="overflow-x-auto rounded-lg border border-white/60 bg-white/70">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b border-white/70 text-left text-xs uppercase tracking-[0.18em] text-neutral-500">
+                <th className="px-3 py-2">Insumo</th>
+                <th className="px-3 py-2">Unidade</th>
+                <th className="px-3 py-2">Necessario</th>
+                <th className="px-3 py-2">Disponivel</th>
+                <th className="px-3 py-2">Falta</th>
+                <th className="px-3 py-2">Por produto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d1Rows.map((row) => (
+                <tr key={row.ingredientId} className="border-b border-white/50 align-top">
+                  <td className="px-3 py-2 font-medium text-neutral-800">{row.name}</td>
+                  <td className="px-3 py-2 text-neutral-600">{row.unit}</td>
+                  <td className="px-3 py-2 text-neutral-700">{formatQty(row.requiredQty)}</td>
+                  <td className="px-3 py-2 text-neutral-700">{formatQty(row.availableQty)}</td>
+                  <td className={`px-3 py-2 font-semibold ${row.shortageQty > 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                    {formatQty(row.shortageQty)}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-neutral-600">
+                    {row.breakdown?.length ? d1BreakdownSummary(row) : '-'}
+                  </td>
+                </tr>
+              ))}
+              {!d1Loading && d1Rows.length === 0 && (
+                <tr>
+                  <td className="px-3 py-3 text-sm text-neutral-500" colSpan={6}>
+                    Sem necessidades calculadas para a data selecionada.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {d1Warnings.length > 0 && (
+          <div className="grid gap-2">
+            <h4 className="font-semibold text-neutral-800">Alertas de BOM</h4>
+            {d1Warnings.map((warning, index) => (
+              <div key={`${warning.orderId}-${warning.productId}-${index}`} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                Pedido #{warning.orderId} • {warning.productName}: {warning.message}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="app-panel grid gap-4">

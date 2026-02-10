@@ -7,12 +7,36 @@ import { formatCurrencyBR, parseCurrencyBR } from '@/lib/format';
 import { FormField } from '@/components/form/FormField';
 
 const orderStatuses = ['ABERTO', 'CONFIRMADO', 'EM_PREPARACAO', 'PRONTO', 'ENTREGUE', 'CANCELADO'];
+const paymentMethods = ['pix', 'dinheiro', 'cartao', 'transferencia'];
+
+type OrderView = Order & {
+  items?: OrderItem[];
+  payments?: Payment[];
+  amountPaid?: number;
+  balanceDue?: number;
+  paymentStatus?: 'PENDENTE' | 'PARCIAL' | 'PAGO';
+};
+
+function toMoney(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function paidAmountFromPayments(order: OrderView | null) {
+  if (!order) return 0;
+  return toMoney(
+    (order.payments || []).reduce((sum, payment) => {
+      const isPaid = payment.status === 'PAGO' || Boolean(payment.paidAt);
+      return isPaid ? sum + (payment.amount || 0) : sum;
+    }, 0)
+  );
+}
 
 export default function OrdersPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<OrderView[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<OrderView | null>(null);
   const [newOrderCustomerId, setNewOrderCustomerId] = useState<number | ''>('');
   const [customerSearch, setCustomerSearch] = useState('');
   const [newOrderItems, setNewOrderItems] = useState<Array<{ productId: number; quantity: number }>>([]);
@@ -28,11 +52,16 @@ export default function OrdersPage() {
   const [orderSearch, setOrderSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('TODOS');
 
+  const [paymentAmount, setPaymentAmount] = useState<string>('');
+  const [paymentMethod, setPaymentMethod] = useState<string>('pix');
+  const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+
   const loadAll = async () => {
     const [ordersData, customersData, productsData] = await Promise.all([
-      apiFetch<Order[]>('/orders'),
+      apiFetch<OrderView[]>('/orders'),
       apiFetch<Customer[]>('/customers'),
-      apiFetch<Product[]>('/products')
+      apiFetch<Product[]>('/products'),
     ]);
     setOrders(ordersData);
     setCustomers(customersData);
@@ -46,6 +75,13 @@ export default function OrdersPage() {
   useEffect(() => {
     loadAll().catch(console.error);
   }, []);
+
+  useEffect(() => {
+    setPaymentError(null);
+    setPaymentAmount('');
+    setPaymentMethod('pix');
+    setPaymentDate(new Date().toISOString().slice(0, 10));
+  }, [selectedOrder?.id]);
 
   const addItemDraft = () => {
     if (!draftProductId || draftQty <= 0) return;
@@ -71,8 +107,8 @@ export default function OrdersPage() {
         customerId: Number(newOrderCustomerId),
         items: newOrderItems,
         discount: parseCurrencyBR(newOrderDiscount),
-        notes: newOrderNotes || undefined
-      })
+        notes: newOrderNotes || undefined,
+      }),
     });
     setNewOrderCustomerId('');
     setCustomerSearch('');
@@ -86,7 +122,7 @@ export default function OrdersPage() {
     if (!addItemProductId || addItemQty <= 0) return;
     await apiFetch(`/orders/${orderId}/items`, {
       method: 'POST',
-      body: JSON.stringify({ productId: Number(addItemProductId), quantity: addItemQty })
+      body: JSON.stringify({ productId: Number(addItemProductId), quantity: addItemQty }),
     });
     setAddItemProductId('');
     setAddItemProductSearch('');
@@ -118,23 +154,47 @@ export default function OrdersPage() {
   const updateStatus = async (orderId: number, status: string) => {
     await apiFetch(`/orders/${orderId}/status`, {
       method: 'PATCH',
-      body: JSON.stringify({ status })
+      body: JSON.stringify({ status }),
     });
     await loadAll();
   };
 
-  const markPaid = async (orderId: number, amount: number) => {
-    await apiFetch('/payments', {
-      method: 'POST',
-      body: JSON.stringify({
-        orderId,
-        amount,
-        method: 'pix',
-        status: 'PAGO',
-        paidAt: new Date().toISOString()
-      })
-    });
-    await loadAll();
+  const registerPayment = async () => {
+    if (!selectedOrder?.id) return;
+
+    const amount = parseCurrencyBR(paymentAmount);
+    if (amount <= 0) {
+      setPaymentError('Informe um valor de pagamento maior que zero.');
+      return;
+    }
+
+    if (amount > selectedOrderBalance + 0.00001) {
+      setPaymentError('Pagamento acima do saldo do pedido.');
+      return;
+    }
+
+    setPaymentError(null);
+
+    const paidAtIso = paymentDate
+      ? new Date(`${paymentDate}T12:00:00.000Z`).toISOString()
+      : new Date().toISOString();
+
+    try {
+      await apiFetch('/payments', {
+        method: 'POST',
+        body: JSON.stringify({
+          orderId: selectedOrder.id,
+          amount,
+          method: paymentMethod,
+          status: 'PAGO',
+          paidAt: paidAtIso,
+        }),
+      });
+      setPaymentAmount('');
+      await loadAll();
+    } catch (err) {
+      setPaymentError(err instanceof Error ? err.message : 'Nao foi possivel registrar pagamento.');
+    }
   };
 
   const removePayment = async (paymentId: number) => {
@@ -149,7 +209,7 @@ export default function OrdersPage() {
 
   const selectedPayments = useMemo(() => {
     if (!selectedOrder) return [];
-    return (selectedOrder.payments || []) as Payment[];
+    return selectedOrder.payments || [];
   }, [selectedOrder]);
 
   const productMap = useMemo(() => {
@@ -178,10 +238,12 @@ export default function OrdersPage() {
       if (statusFilter !== 'TODOS' && order.status !== statusFilter) return false;
       if (!query) return true;
       const customerName = customerMap.get(order.customerId)?.name?.toLowerCase() || '';
+      const paymentStatus = (order.paymentStatus || '').toLowerCase();
       return (
         `${order.id}`.includes(query) ||
         customerName.includes(query) ||
-        order.status.toLowerCase().includes(query)
+        order.status.toLowerCase().includes(query) ||
+        paymentStatus.includes(query)
       );
     });
   }, [orders, orderSearch, statusFilter, customerMap]);
@@ -203,6 +265,21 @@ export default function OrdersPage() {
   const draftDiscount = useMemo(() => Math.max(parseCurrencyBR(newOrderDiscount), 0), [newOrderDiscount]);
   const draftTotal = Math.max(draftSubtotal - draftDiscount, 0);
   const canCreateOrder = Boolean(newOrderCustomerId) && newOrderItems.length > 0;
+
+  const selectedOrderTotal = toMoney(selectedOrder?.total ?? 0);
+  const selectedOrderAmountPaid = toMoney(
+    selectedOrder?.amountPaid ?? paidAmountFromPayments(selectedOrder)
+  );
+  const selectedOrderBalance = toMoney(
+    selectedOrder?.balanceDue ?? Math.max(selectedOrderTotal - selectedOrderAmountPaid, 0)
+  );
+  const selectedOrderPaymentStatus =
+    selectedOrder?.paymentStatus ||
+    (selectedOrderAmountPaid <= 0
+      ? 'PENDENTE'
+      : selectedOrderBalance <= 0
+        ? 'PAGO'
+        : 'PARCIAL');
 
   return (
     <section className="grid gap-8">
@@ -332,9 +409,7 @@ export default function OrdersPage() {
                   </div>
                   <button
                     className="app-button app-button-danger"
-                    onClick={() =>
-                      setNewOrderItems((prev) => prev.filter((_, i) => i !== index))
-                    }
+                    onClick={() => setNewOrderItems((prev) => prev.filter((_, i) => i !== index))}
                   >
                     Remover
                   </button>
@@ -369,7 +444,7 @@ export default function OrdersPage() {
           <div className="flex flex-wrap gap-2">
             <input
               className="app-input"
-              placeholder="Buscar pedido, cliente ou status"
+              placeholder="Buscar pedido, cliente, status ou financeiro"
               value={orderSearch}
               onChange={(e) => setOrderSearch(e.target.value)}
             />
@@ -388,22 +463,28 @@ export default function OrdersPage() {
           </div>
         </div>
         <div className="grid gap-3 md:grid-cols-2">
-          {filteredOrders.map((order) => (
-            <button
-              key={order.id}
-              className={`app-panel text-left ${
-                selectedOrder?.id === order.id ? 'ring-2 ring-orange-200' : ''
-              }`}
-              onClick={() => setSelectedOrder(order)}
-            >
-              <p className="text-lg font-semibold">Pedido #{order.id}</p>
-              <p className="text-sm text-neutral-500">Status: {order.status}</p>
-              <p className="text-sm text-neutral-500">
-                Cliente: {customerMap.get(order.customerId)?.name || 'Sem cliente'}
-              </p>
-              <p className="text-sm text-neutral-500">Total: {formatCurrencyBR(order.total)}</p>
-            </button>
-          ))}
+          {filteredOrders.map((order) => {
+            const amountPaid = toMoney(order.amountPaid ?? paidAmountFromPayments(order));
+            const balance = toMoney(order.balanceDue ?? Math.max((order.total ?? 0) - amountPaid, 0));
+            return (
+              <button
+                key={order.id}
+                className={`app-panel text-left ${selectedOrder?.id === order.id ? 'ring-2 ring-orange-200' : ''}`}
+                onClick={() => setSelectedOrder(order)}
+              >
+                <p className="text-lg font-semibold">Pedido #{order.id}</p>
+                <p className="text-sm text-neutral-500">Status: {order.status}</p>
+                <p className="text-sm text-neutral-500">
+                  Cliente: {customerMap.get(order.customerId)?.name || 'Sem cliente'}
+                </p>
+                <p className="text-sm text-neutral-500">Total: {formatCurrencyBR(order.total ?? 0)}</p>
+                <p className="text-sm text-neutral-500">
+                  Financeiro: {order.paymentStatus || 'PENDENTE'} • Pago: {formatCurrencyBR(amountPaid)} • Saldo:{' '}
+                  {formatCurrencyBR(balance)}
+                </p>
+              </button>
+            );
+          })}
           {filteredOrders.length === 0 && (
             <div className="app-panel border-dashed text-sm text-neutral-500">
               Nenhum pedido encontrado com os filtros atuais.
@@ -432,10 +513,29 @@ export default function OrdersPage() {
             </select>
           </div>
 
+          <div className="grid gap-3 md:grid-cols-4">
+            <div className="app-kpi">
+              <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Total</p>
+              <p className="mt-2 text-xl font-semibold">{formatCurrencyBR(selectedOrderTotal)}</p>
+            </div>
+            <div className="app-kpi">
+              <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Pago</p>
+              <p className="mt-2 text-xl font-semibold">{formatCurrencyBR(selectedOrderAmountPaid)}</p>
+            </div>
+            <div className="app-kpi">
+              <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Saldo</p>
+              <p className="mt-2 text-xl font-semibold">{formatCurrencyBR(selectedOrderBalance)}</p>
+            </div>
+            <div className="app-kpi">
+              <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Financeiro</p>
+              <p className="mt-2 text-xl font-semibold">{selectedOrderPaymentStatus}</p>
+            </div>
+          </div>
+
           <div>
             <h4 className="font-semibold">Itens</h4>
             <div className="mt-3 grid gap-2">
-              {(selectedOrder.items as OrderItem[] | undefined)?.map((item) => (
+              {(selectedOrder.items || []).map((item) => (
                 <div
                   key={item.id}
                   className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/60 bg-white/70 px-3 py-2"
@@ -444,7 +544,7 @@ export default function OrdersPage() {
                     <p className="text-sm text-neutral-700">
                       {productMap.get(item.productId)?.name ?? `Produto ${item.productId}`} x {item.quantity}
                     </p>
-                    <p className="text-xs text-neutral-500">Total item: {formatCurrencyBR(item.total)}</p>
+                    <p className="text-xs text-neutral-500">Total item: {formatCurrencyBR(item.total ?? 0)}</p>
                   </div>
                   <button
                     className="app-button app-button-danger"
@@ -482,10 +582,7 @@ export default function OrdersPage() {
               />
             </FormField>
             <div className="flex items-end">
-              <button
-                className="app-button app-button-ghost w-full"
-                onClick={() => addItem(selectedOrder.id!)}
-              >
+              <button className="app-button app-button-ghost w-full" onClick={() => addItem(selectedOrder.id!)}>
                 Adicionar item
               </button>
             </div>
@@ -494,14 +591,52 @@ export default function OrdersPage() {
           <div className="grid gap-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h4 className="font-semibold">Pagamentos</h4>
-              <button
-                className="app-button app-button-danger"
-                onClick={() => removeOrder(selectedOrder.id!)}
-              >
+              <button className="app-button app-button-danger" onClick={() => removeOrder(selectedOrder.id!)}>
                 Excluir pedido
               </button>
             </div>
-            <div className="mt-3 grid gap-2">
+
+            <div className="grid gap-3 md:grid-cols-4">
+              <FormField label="Valor" hint={`Saldo atual: ${formatCurrencyBR(selectedOrderBalance)}`}>
+                <input
+                  className="app-input"
+                  placeholder="0,00"
+                  inputMode="decimal"
+                  value={paymentAmount}
+                  onChange={(e) => setPaymentAmount(e.target.value)}
+                />
+              </FormField>
+              <FormField label="Metodo">
+                <select
+                  className="app-select"
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value)}
+                >
+                  {paymentMethods.map((method) => (
+                    <option key={method} value={method}>
+                      {method}
+                    </option>
+                  ))}
+                </select>
+              </FormField>
+              <FormField label="Data do pagamento">
+                <input
+                  className="app-input"
+                  type="date"
+                  value={paymentDate}
+                  onChange={(e) => setPaymentDate(e.target.value)}
+                />
+              </FormField>
+              <div className="flex items-end">
+                <button className="app-button app-button-primary w-full" onClick={registerPayment}>
+                  Registrar pagamento
+                </button>
+              </div>
+            </div>
+
+            {paymentError ? <p className="text-xs text-red-600">{paymentError}</p> : null}
+
+            <div className="mt-1 grid gap-2">
               {selectedPayments.length === 0 ? (
                 <p className="text-sm text-neutral-500">Nenhum pagamento registrado.</p>
               ) : (
@@ -509,12 +644,10 @@ export default function OrdersPage() {
                   <div key={payment.id} className="rounded-lg border border-white/60 bg-white/70 px-3 py-2 text-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span>
-                        {payment.method} • {payment.status} • {formatCurrencyBR(payment.amount)}
+                        {payment.method} • {payment.status} • {formatCurrencyBR(payment.amount)} •{' '}
+                        {payment.paidAt ? new Date(payment.paidAt).toLocaleDateString('pt-BR') : 'sem data'}
                       </span>
-                      <button
-                        className="app-button app-button-danger"
-                        onClick={() => removePayment(payment.id!)}
-                      >
+                      <button className="app-button app-button-danger" onClick={() => removePayment(payment.id!)}>
                         Remover
                       </button>
                     </div>
@@ -522,12 +655,6 @@ export default function OrdersPage() {
                 ))
               )}
             </div>
-            <button
-              className="app-button app-button-primary mt-3"
-              onClick={() => markPaid(selectedOrder.id!, selectedOrder.total ?? 0)}
-            >
-              Registrar pagamento
-            </button>
           </div>
         </div>
       )}
