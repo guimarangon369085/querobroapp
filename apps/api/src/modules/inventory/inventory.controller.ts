@@ -1,5 +1,9 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
 import { InventoryService } from './inventory.service.js';
+import { parseWithSchema } from '../../common/validation.js';
+import { z } from 'zod';
+
+const idSchema = z.coerce.number().int().positive();
 
 @Controller()
 export class InventoryController {
@@ -13,6 +17,11 @@ export class InventoryController {
   @Post('inventory-items')
   createItem(@Body() body: unknown) {
     return this.service.createItem(body);
+  }
+
+  @Put('inventory-items/:id')
+  updateItem(@Param('id') id: string, @Body() body: unknown) {
+    return this.service.updateItem(parseWithSchema(idSchema, id), body);
   }
 
   @Get('inventory-movements')

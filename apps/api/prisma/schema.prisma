@@ -48,6 +48,7 @@ model Order {
   items      OrderItem[]
   payments   Payment[]
   stockMovements StockMovement[]
+  inventoryMovements InventoryMovement[]
 
   @@index([customerId])
   @@index([status])
@@ -104,6 +105,7 @@ model InventoryItem {
   category         String
   unit             String
   purchasePackSize Float
+  purchasePackCost Float     @default(0)
   createdAt        DateTime @default(now())
   movements        InventoryMovement[]
   bomItems         BomItem[]
@@ -115,13 +117,16 @@ model InventoryItem {
 model InventoryMovement {
   id        Int      @id @default(autoincrement())
   itemId    Int
+  orderId   Int?
   type      String
   quantity  Float
   reason    String?
   createdAt DateTime @default(now())
   item      InventoryItem @relation(fields: [itemId], references: [id])
+  order     Order?        @relation(fields: [orderId], references: [id])
 
   @@index([itemId])
+  @@index([orderId])
   @@index([createdAt])
 }
 

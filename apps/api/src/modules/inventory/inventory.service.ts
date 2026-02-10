@@ -15,6 +15,11 @@ export class InventoryService {
     return this.prisma.inventoryItem.create({ data });
   }
 
+  updateItem(id: number, payload: unknown) {
+    const data = InventoryItemSchema.partial().omit({ id: true, createdAt: true }).parse(payload);
+    return this.prisma.inventoryItem.update({ where: { id }, data });
+  }
+
   listMovements() {
     return this.prisma.inventoryMovement.findMany({
       include: { item: true },
