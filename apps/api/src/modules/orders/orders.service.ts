@@ -168,12 +168,14 @@ export class OrdersService {
   async remove(id: number) {
     const order = await this.get(id);
     await this.prisma.$transaction(async (tx) => {
-      await this.applyInventoryMovements(
-        tx,
-        order.id,
-        (order.items || []).map((item) => ({ productId: item.productId, quantity: item.quantity })),
-        'IN'
-      );
+      if (order.status !== 'CANCELADO') {
+        await this.applyInventoryMovements(
+          tx,
+          order.id,
+          (order.items || []).map((item) => ({ productId: item.productId, quantity: item.quantity })),
+          'IN'
+        );
+      }
       await tx.order.delete({ where: { id } });
     });
   }
@@ -183,6 +185,9 @@ export class OrdersService {
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({ where: { id: orderId }, include: { items: true } });
       if (!order) throw new NotFoundException('Pedido nao encontrado');
+      if (['CANCELADO', 'ENTREGUE'].includes(order.status)) {
+        throw new BadRequestException('Pedido nao permite alterar itens neste status');
+      }
 
       const product = await tx.product.findUnique({ where: { id: data.productId } });
       if (!product) throw new NotFoundException('Produto nao encontrado');
@@ -222,6 +227,9 @@ export class OrdersService {
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({ where: { id: orderId }, include: { items: true } });
       if (!order) throw new NotFoundException('Pedido nao encontrado');
+      if (['CANCELADO', 'ENTREGUE'].includes(order.status)) {
+        throw new BadRequestException('Pedido nao permite alterar itens neste status');
+      }
 
       const item = await tx.orderItem.findUnique({ where: { id: itemId } });
       if (!item || item.orderId !== orderId) throw new NotFoundException('Item nao encontrado');
