@@ -1,6 +1,7 @@
 import './globals.css';
 import type { ReactNode } from 'react';
 import { Nav } from '@/components/nav';
+import { Topbar } from '@/components/topbar';
 import { Manrope, Cormorant_Garamond } from 'next/font/google';
 
 const bodyFont = Manrope({ subsets: ['latin'], variable: '--font-body', display: 'swap' });
@@ -29,24 +30,16 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             </div>
             <Nav />
             <div className="app-sidecard">
-              <p className="app-sidecard__title">Status do dia</p>
-              <p className="app-sidecard__value">Fluxo estavel</p>
+              <p className="app-sidecard__title">Direcao visual</p>
+              <p className="app-sidecard__value">Soft-edge high-end</p>
               <p className="app-sidecard__hint">
-                Producao, estoque e caixa sincronizados com experiencia high-end.
+                Interface redesenhada para priorizar legibilidade, foco operacional e conforto
+                visual.
               </p>
             </div>
           </aside>
           <div className="app-main">
-            <header className="app-topbar">
-              <div>
-                <p className="app-topbar__eyebrow">Painel de operacoes</p>
-                <h2 className="app-topbar__title">Visao geral</h2>
-              </div>
-              <div className="app-topbar__actions">
-                <button className="app-ghost">Exportar</button>
-                <button className="app-primary">Criar novo</button>
-              </div>
-            </header>
+            <Topbar />
             <main className="app-content">{children}</main>
           </div>
         </div>
