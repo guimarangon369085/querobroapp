@@ -49,4 +49,9 @@ export class OrdersController {
   updateStatus(@Param('id') id: string, @Body() body: { status?: string }) {
     return this.service.updateStatus(parseWithSchema(idSchema, id), body?.status);
   }
+
+  @Patch(':id/mark-paid')
+  markPaid(@Param('id') id: string, @Body() body: unknown) {
+    return this.service.markPaid(parseWithSchema(idSchema, id), body);
+  }
 }

@@ -6,6 +6,10 @@ import { OrderItemSchema, OrderSchema, OrderStatusEnum } from '@querobroapp/shar
 import { z } from 'zod';
 
 const updateSchema = OrderSchema.partial().omit({ id: true, createdAt: true, items: true });
+const markPaidSchema = z.object({
+  method: z.string().trim().min(1).optional(),
+  paidAt: z.string().datetime().optional().nullable()
+});
 
 const statusTransitions: Record<string, string[]> = {
   ABERTO: ['CONFIRMADO', 'CANCELADO'],
@@ -386,6 +390,46 @@ export class OrdersService {
       });
       await this.queueOrderStatusOutbox(tx, updatedOrder, status);
       return this.withFinancial(updatedOrder);
+    });
+  }
+
+  async markPaid(orderId: number, payload: unknown) {
+    const data = markPaidSchema.parse(payload ?? {});
+
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        include: { items: true, customer: true, payments: true }
+      });
+      if (!order) throw new NotFoundException('Pedido nao encontrado');
+      if (order.status === 'CANCELADO') {
+        throw new BadRequestException('Nao e possivel registrar pagamento para pedido cancelado.');
+      }
+
+      const total = this.toMoney(order.total ?? 0);
+      const amountPaid = this.getPaidAmount(order.payments || []);
+      const balanceDue = this.toMoney(Math.max(total - amountPaid, 0));
+
+      if (balanceDue <= 0) {
+        return this.withFinancial(order);
+      }
+
+      await tx.payment.create({
+        data: {
+          orderId: order.id,
+          amount: balanceDue,
+          method: data.method?.trim() || 'pix',
+          status: 'PAGO',
+          paidAt: data.paidAt ? new Date(data.paidAt) : new Date()
+        }
+      });
+
+      const updated = await tx.order.findUnique({
+        where: { id: orderId },
+        include: { items: true, customer: true, payments: true }
+      });
+      if (!updated) throw new NotFoundException('Pedido nao encontrado');
+      return this.withFinancial(updated);
     });
   }
 }
