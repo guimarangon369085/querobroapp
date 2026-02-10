@@ -12,8 +12,8 @@ const displayFont = Cormorant_Garamond({
 });
 
 export const metadata = {
-  title: 'QuerobroApp',
-  description: 'Dashboard web do QuerobroApp'
+  title: 'QUEROBROApp',
+  description: 'Dashboard web do QUEROBROApp'
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -24,7 +24,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <aside className="app-sidebar">
             <div className="app-brand">
               <p className="app-brand__eyebrow">ERP</p>
-              <h1 className="app-brand__name">QuerobroApp</h1>
+              <h1 className="app-brand__name">QUEROBROApp</h1>
               <p className="app-brand__tag">Operacao premium e sensorial</p>
             </div>
             <Nav />

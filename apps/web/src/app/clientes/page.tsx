@@ -9,8 +9,22 @@ import { FormField } from '@/components/form/FormField';
 
 const emptyCustomer: Partial<Customer> = {
   name: '',
+  firstName: '',
+  lastName: '',
+  email: '',
   phone: '',
-  address: ''
+  address: '',
+  addressLine1: '',
+  addressLine2: '',
+  neighborhood: '',
+  city: '',
+  state: '',
+  postalCode: '',
+  country: 'Brasil',
+  placeId: '',
+  lat: undefined,
+  lng: undefined,
+  deliveryNotes: ''
 };
 
 export default function CustomersPage() {
@@ -36,14 +50,44 @@ export default function CustomersPage() {
       .then(() => {
         if (!addressInputRef.current) return;
         autocomplete = new google.maps.places.Autocomplete(addressInputRef.current, {
-          fields: ['formatted_address'],
+          fields: ['formatted_address', 'address_components', 'geometry', 'place_id'],
           types: ['address']
         });
         autocomplete.addListener('place_changed', () => {
           const place = autocomplete?.getPlace();
-          if (place?.formatted_address) {
-            setForm((prev) => ({ ...prev, address: place.formatted_address || '' }));
-          }
+          if (!place) return;
+          const findComponent = (type: string) =>
+            place.address_components?.find((component) => component.types.includes(type));
+
+          const streetNumber = findComponent('street_number')?.long_name ?? '';
+          const route = findComponent('route')?.long_name ?? '';
+          const neighborhood =
+            findComponent('sublocality')?.long_name ||
+            findComponent('sublocality_level_1')?.long_name ||
+            findComponent('neighborhood')?.long_name ||
+            '';
+          const city =
+            findComponent('locality')?.long_name ||
+            findComponent('administrative_area_level_2')?.long_name ||
+            '';
+          const state = findComponent('administrative_area_level_1')?.short_name ?? '';
+          const postalCode = findComponent('postal_code')?.long_name ?? '';
+          const country = findComponent('country')?.long_name ?? '';
+          const addressLine1 = [route, streetNumber].filter(Boolean).join(', ');
+
+          setForm((prev) => ({
+            ...prev,
+            address: place.formatted_address || prev.address || '',
+            addressLine1: addressLine1 || prev.addressLine1 || '',
+            neighborhood: neighborhood || prev.neighborhood || '',
+            city: city || prev.city || '',
+            state: state || prev.state || '',
+            postalCode: postalCode || prev.postalCode || '',
+            country: country || prev.country || '',
+            placeId: place.place_id || prev.placeId || '',
+            lat: place.geometry?.location?.lat?.() ?? prev.lat,
+            lng: place.geometry?.location?.lng?.() ?? prev.lng
+          }));
         });
       })
       .catch(console.error);
@@ -61,13 +105,40 @@ export default function CustomersPage() {
       setError('Informe um nome valido.');
       return;
     }
+    if (!form.phone || normalizePhone(form.phone || '').length < 10) {
+      setError('Informe um telefone valido (com DDD).');
+      return;
+    }
+    if (!form.addressLine1 && !form.address) {
+      setError('Informe o endereco (rua e numero).');
+      return;
+    }
     setError(null);
+
+    const fullName = titleCase(form.name || '');
+    const split = fullName.split(' ').filter(Boolean);
+    const fallbackFirst = split[0] || '';
+    const fallbackLast = split.length > 1 ? split.slice(1).join(' ') : '';
 
     const payload = {
       ...form,
-      name: titleCase(form.name || ''),
+      name: fullName,
+      firstName: form.firstName ? titleCase(form.firstName) : fallbackFirst,
+      lastName: form.lastName ? titleCase(form.lastName) : fallbackLast,
       phone: normalizePhone(form.phone || ''),
-      address: normalizeAddress(form.address || '')
+      email: form.email?.trim() || undefined,
+      address: normalizeAddress(form.address || ''),
+      addressLine1: normalizeAddress(form.addressLine1 || ''),
+      addressLine2: normalizeAddress(form.addressLine2 || ''),
+      neighborhood: normalizeAddress(form.neighborhood || ''),
+      city: normalizeAddress(form.city || ''),
+      state: form.state?.trim().toUpperCase() || undefined,
+      postalCode: form.postalCode?.trim() || undefined,
+      country: normalizeAddress(form.country || ''),
+      placeId: form.placeId?.trim() || undefined,
+      lat: form.lat ?? undefined,
+      lng: form.lng ?? undefined,
+      deliveryNotes: form.deliveryNotes?.trim() || undefined
     };
 
     if (editingId) {
@@ -91,8 +162,22 @@ export default function CustomersPage() {
     setEditingId(customer.id!);
     setForm({
       name: customer.name,
+      firstName: customer.firstName ?? '',
+      lastName: customer.lastName ?? '',
+      email: customer.email ?? '',
       phone: formatPhoneBR(customer.phone ?? ''),
-      address: customer.address ?? ''
+      address: customer.address ?? '',
+      addressLine1: customer.addressLine1 ?? '',
+      addressLine2: customer.addressLine2 ?? '',
+      neighborhood: customer.neighborhood ?? '',
+      city: customer.city ?? '',
+      state: customer.state ?? '',
+      postalCode: customer.postalCode ?? '',
+      country: customer.country ?? 'Brasil',
+      placeId: customer.placeId ?? '',
+      lat: customer.lat ?? undefined,
+      lng: customer.lng ?? undefined,
+      deliveryNotes: customer.deliveryNotes ?? ''
     });
   };
 
@@ -113,10 +198,14 @@ export default function CustomersPage() {
       const name = customer.name.toLowerCase();
       const phone = customer.phone || '';
       const address = customer.address || '';
+      const city = customer.city || '';
+      const neighborhood = customer.neighborhood || '';
       return (
         name.includes(query) ||
         phone.includes(query) ||
         address.toLowerCase().includes(query) ||
+        city.toLowerCase().includes(query) ||
+        neighborhood.toLowerCase().includes(query) ||
         `${customer.id}`.includes(query)
       );
     });
@@ -150,7 +239,7 @@ export default function CustomersPage() {
 
       <form onSubmit={submit} className="app-panel grid gap-5">
         <div className="grid gap-3 md:grid-cols-2">
-          <FormField label="Nome" error={error}>
+          <FormField label="Nome completo" error={error}>
             <input
               className="app-input"
               placeholder="Nome completo"
@@ -169,18 +258,121 @@ export default function CustomersPage() {
               onChange={(e) => setForm((prev) => ({ ...prev, phone: formatPhoneBR(e.target.value) }))}
             />
           </FormField>
+          <FormField label="Primeiro nome" hint="Obrigatorio para Uber Direct">
+            <input
+              className="app-input"
+              placeholder="Primeiro nome"
+              value={form.firstName || ''}
+              onChange={(e) => setForm((prev) => ({ ...prev, firstName: e.target.value }))}
+            />
+          </FormField>
+          <FormField label="Sobrenome" hint="Obrigatorio para Uber Direct">
+            <input
+              className="app-input"
+              placeholder="Sobrenome"
+              value={form.lastName || ''}
+              onChange={(e) => setForm((prev) => ({ ...prev, lastName: e.target.value }))}
+            />
+          </FormField>
+          <FormField label="Email" hint="Opcional">
+            <input
+              className="app-input"
+              placeholder="email@exemplo.com"
+              value={form.email || ''}
+              inputMode="email"
+              autoComplete="email"
+              onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
+            />
+          </FormField>
         </div>
-        <FormField label="Endereco" hint="Digite e selecione do autocomplete">
-          <input
-            className="app-input"
-            placeholder="Rua, numero, bairro, cidade"
-            ref={addressInputRef}
-            value={form.address || ''}
-            autoComplete="street-address"
-            onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))}
-            onBlur={(e) => setForm((prev) => ({ ...prev, address: normalizeAddress(e.target.value) || '' }))}
-          />
-        </FormField>
+        <div className="grid gap-3 md:grid-cols-2">
+          <FormField label="Endereco completo" hint="Autocomplete do Google">
+            <input
+              className="app-input"
+              placeholder="Rua, numero, bairro, cidade"
+              ref={addressInputRef}
+              value={form.address || ''}
+              autoComplete="street-address"
+              onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))}
+              onBlur={(e) => setForm((prev) => ({ ...prev, address: normalizeAddress(e.target.value) || '' }))}
+            />
+          </FormField>
+          <FormField label="Rua e numero" hint="Linha 1">
+            <input
+              className="app-input"
+              placeholder="Ex: Rua X, 123"
+              value={form.addressLine1 || ''}
+              onChange={(e) => setForm((prev) => ({ ...prev, addressLine1: e.target.value }))}
+            />
+          </FormField>
+          <FormField label="Complemento" hint="Apartamento, bloco, etc">
+            <input
+              className="app-input"
+              placeholder="Apto, bloco, andar..."
+              value={form.addressLine2 || ''}
+              onChange={(e) => setForm((prev) => ({ ...prev, addressLine2: e.target.value }))}
+            />
+          </FormField>
+          <FormField label="Bairro">
+            <input
+              className="app-input"
+              placeholder="Bairro"
+              value={form.neighborhood || ''}
+              onChange={(e) => setForm((prev) => ({ ...prev, neighborhood: e.target.value }))}
+            />
+          </FormField>
+          <FormField label="Cidade">
+            <input
+              className="app-input"
+              placeholder="Cidade"
+              value={form.city || ''}
+              onChange={(e) => setForm((prev) => ({ ...prev, city: e.target.value }))}
+            />
+          </FormField>
+          <FormField label="Estado (UF)">
+            <input
+              className="app-input"
+              placeholder="SP"
+              value={form.state || ''}
+              onChange={(e) => setForm((prev) => ({ ...prev, state: e.target.value }))}
+            />
+          </FormField>
+          <FormField label="CEP">
+            <input
+              className="app-input"
+              placeholder="00000-000"
+              value={form.postalCode || ''}
+              onChange={(e) => setForm((prev) => ({ ...prev, postalCode: e.target.value }))}
+            />
+          </FormField>
+          <FormField label="Pais">
+            <input
+              className="app-input"
+              placeholder="Brasil"
+              value={form.country || ''}
+              onChange={(e) => setForm((prev) => ({ ...prev, country: e.target.value }))}
+            />
+          </FormField>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <FormField label="Instrucoes de entrega" hint="Portao, referencia, interfone">
+            <input
+              className="app-input"
+              placeholder="Ex: portao preto, tocar 18"
+              value={form.deliveryNotes || ''}
+              onChange={(e) => setForm((prev) => ({ ...prev, deliveryNotes: e.target.value }))}
+            />
+          </FormField>
+          <FormField label="Uber Direct (Place ID)">
+            <input className="app-input" value={form.placeId || ''} readOnly />
+          </FormField>
+          <FormField label="Latitude">
+            <input className="app-input" value={form.lat ?? ''} readOnly />
+          </FormField>
+          <FormField label="Longitude">
+            <input className="app-input" value={form.lng ?? ''} readOnly />
+          </FormField>
+        </div>
         <div className="flex gap-3">
           <button className="app-button app-button-primary" type="submit">
             {editingId ? 'Atualizar' : 'Criar'}
