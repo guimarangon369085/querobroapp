@@ -1,0 +1,26 @@
+import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { BomService } from './bom.service.js';
+import { parseWithSchema } from '../../common/validation.js';
+import { z } from 'zod';
+
+const idSchema = z.coerce.number().int().positive();
+
+@Controller('boms')
+export class BomController {
+  constructor(private readonly service: BomService) {}
+
+  @Get()
+  list() {
+    return this.service.list();
+  }
+
+  @Get(':id')
+  get(@Param('id') id: string) {
+    return this.service.get(parseWithSchema(idSchema, id));
+  }
+
+  @Post()
+  create(@Body() body: unknown) {
+    return this.service.create(body);
+  }
+}

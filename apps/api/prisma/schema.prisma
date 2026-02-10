@@ -28,6 +28,7 @@ model Product {
   createdAt DateTime @default(now())
   items     OrderItem[]
   movements StockMovement[]
+  boms      Bom[]
 
   @@index([name])
   @@index([category])
@@ -95,4 +96,57 @@ model StockMovement {
   @@index([productId])
   @@index([orderId])
   @@index([createdAt])
+}
+
+model InventoryItem {
+  id               Int      @id @default(autoincrement())
+  name             String
+  category         String
+  unit             String
+  purchasePackSize Float
+  createdAt        DateTime @default(now())
+  movements        InventoryMovement[]
+  bomItems         BomItem[]
+
+  @@index([name])
+  @@index([category])
+}
+
+model InventoryMovement {
+  id        Int      @id @default(autoincrement())
+  itemId    Int
+  type      String
+  quantity  Float
+  reason    String?
+  createdAt DateTime @default(now())
+  item      InventoryItem @relation(fields: [itemId], references: [id])
+
+  @@index([itemId])
+  @@index([createdAt])
+}
+
+model Bom {
+  id            Int      @id @default(autoincrement())
+  productId     Int
+  name          String
+  saleUnitLabel String?
+  yieldUnits    Float?
+  product       Product  @relation(fields: [productId], references: [id])
+  items         BomItem[]
+
+  @@index([productId])
+}
+
+model BomItem {
+  id             Int      @id @default(autoincrement())
+  bomId          Int
+  itemId         Int
+  qtyPerRecipe   Float?
+  qtyPerSaleUnit Float?
+  qtyPerUnit     Float?
+  bom            Bom          @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  item           InventoryItem @relation(fields: [itemId], references: [id])
+
+  @@index([bomId])
+  @@index([itemId])
 }
