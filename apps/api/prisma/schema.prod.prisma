@@ -63,6 +63,7 @@ model Order {
   items      OrderItem[]
   payments   Payment[]
   inventoryMovements InventoryMovement[]
+  outboxMessages OutboxMessage[]
 }
 
 model OrderItem {
@@ -143,4 +144,23 @@ model BomItem {
   qtyPerUnit     Float?
   bom            Bom          @relation(fields: [bomId], references: [id], onDelete: Cascade)
   item           InventoryItem @relation(fields: [itemId], references: [id])
+}
+
+model OutboxMessage {
+  id        Int      @id @default(autoincrement())
+  messageId String   @unique
+  channel   String   @default("whatsapp")
+  to        String
+  template  String
+  payload   String
+  status    String   @default("PENDING")
+  orderId   Int?
+  createdAt DateTime @default(now())
+  sentAt    DateTime?
+  order     Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([channel, status])
+  @@index([createdAt])
+  @@index([orderId])
 }

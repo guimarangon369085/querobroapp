@@ -8,6 +8,8 @@ import { PaymentsModule } from './modules/payments/payments.module.js';
 import { StockModule } from './modules/stock/stock.module.js';
 import { InventoryModule } from './modules/inventory/inventory.module.js';
 import { BomModule } from './modules/bom/bom.module.js';
+import { ProductionModule } from './modules/production/production.module.js';
+import { WhatsappModule } from './modules/whatsapp/whatsapp.module.js';
 
 @Module({
   imports: [
@@ -18,7 +20,9 @@ import { BomModule } from './modules/bom/bom.module.js';
     PaymentsModule,
     StockModule,
     InventoryModule,
-    BomModule
+    BomModule,
+    ProductionModule,
+    WhatsappModule
   ],
   controllers: [AppController]
 })
