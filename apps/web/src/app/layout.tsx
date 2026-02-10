@@ -8,36 +8,38 @@ const displayFont = Cormorant_Garamond({
   subsets: ['latin'],
   variable: '--font-display',
   display: 'swap',
-  weight: ['400', '500', '600', '700']
+  weight: ['400', '500', '600', '700'],
 });
 
 export const metadata = {
   title: 'QUEROBROApp',
-  description: 'Dashboard web do QUEROBROApp'
+  description: 'Dashboard web do QUEROBROApp',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="pt-BR">
-      <body className={`${bodyFont.variable} ${displayFont.variable} bg-neutral-50 text-neutral-900`}>
+      <body className={`${bodyFont.variable} ${displayFont.variable}`}>
         <div className="app-shell">
           <aside className="app-sidebar">
             <div className="app-brand">
-              <p className="app-brand__eyebrow">ERP</p>
+              <p className="app-brand__eyebrow">ERP artesanal</p>
               <h1 className="app-brand__name">QUEROBROApp</h1>
-              <p className="app-brand__tag">Operacao premium e sensorial</p>
+              <p className="app-brand__tag">Operacao premium, sensorial e orientada por dados.</p>
             </div>
             <Nav />
             <div className="app-sidecard">
               <p className="app-sidecard__title">Status do dia</p>
               <p className="app-sidecard__value">Fluxo estavel</p>
-              <p className="app-sidecard__hint">Estoques, pedidos e caixa em sincronia.</p>
+              <p className="app-sidecard__hint">
+                Producao, estoque e caixa sincronizados com experiencia high-end.
+              </p>
             </div>
           </aside>
           <div className="app-main">
             <header className="app-topbar">
               <div>
-                <p className="app-topbar__eyebrow">Painel</p>
+                <p className="app-topbar__eyebrow">Painel de operacoes</p>
                 <h2 className="app-topbar__title">Visao geral</h2>
               </div>
               <div className="app-topbar__actions">
