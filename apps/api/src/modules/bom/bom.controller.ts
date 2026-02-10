@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
 import { BomService } from './bom.service.js';
 import { parseWithSchema } from '../../common/validation.js';
 import { z } from 'zod';
@@ -22,5 +22,10 @@ export class BomController {
   @Post()
   create(@Body() body: unknown) {
     return this.service.create(body);
+  }
+
+  @Put(':id')
+  update(@Param('id') id: string, @Body() body: unknown) {
+    return this.service.update(parseWithSchema(idSchema, id), body);
   }
 }

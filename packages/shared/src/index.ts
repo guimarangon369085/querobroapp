@@ -80,12 +80,14 @@ export const InventoryItemSchema = z.object({
   category: InventoryCategoryEnum,
   unit: z.string().min(1),
   purchasePackSize: z.number().nonnegative(),
+  purchasePackCost: z.number().nonnegative().optional().nullable(),
   createdAt: z.string().optional().nullable()
 });
 
 export const InventoryMovementSchema = z.object({
   id: z.number().int().positive().optional(),
   itemId: z.number().int().positive(),
+  orderId: z.number().int().positive().optional().nullable(),
   type: StockMovementTypeEnum,
   quantity: z.number().nonnegative(),
   reason: z.string().optional().nullable(),

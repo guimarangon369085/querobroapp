@@ -74,4 +74,56 @@ export class BomService {
       include: { items: true, product: true }
     });
   }
+
+  async update(id: number, payload: unknown) {
+    const data = BomSchema.pick({
+      productId: true,
+      name: true,
+      saleUnitLabel: true,
+      yieldUnits: true
+    }).parse(payload as BomPayload);
+
+    const itemsPayload = (payload as BomPayload).items ?? [];
+    const items = itemsPayload.map((item) =>
+      BomItemSchema.pick({
+        itemId: true,
+        qtyPerRecipe: true,
+        qtyPerSaleUnit: true,
+        qtyPerUnit: true,
+        bomId: true
+      })
+        .omit({ bomId: true })
+        .parse({ ...item, bomId: id })
+    );
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.bom.update({
+        where: { id },
+        data: {
+          productId: data.productId,
+          name: data.name,
+          saleUnitLabel: data.saleUnitLabel ?? null,
+          yieldUnits: data.yieldUnits ?? null
+        }
+      });
+
+      await tx.bomItem.deleteMany({ where: { bomId: id } });
+      if (items.length > 0) {
+        await tx.bomItem.createMany({
+          data: items.map((item) => ({
+            bomId: id,
+            itemId: item.itemId,
+            qtyPerRecipe: item.qtyPerRecipe ?? null,
+            qtyPerSaleUnit: item.qtyPerSaleUnit ?? null,
+            qtyPerUnit: item.qtyPerUnit ?? null
+          }))
+        });
+      }
+
+      return tx.bom.findUnique({
+        where: { id },
+        include: { items: { include: { item: true } }, product: true }
+      });
+    });
+  }
 }

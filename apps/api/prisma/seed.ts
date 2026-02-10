@@ -29,19 +29,19 @@ async function main() {
   const broaProduct = await prisma.product.findFirst({ where: { name: 'Broa (Caixa c/7)' } });
 
   const inventoryItems = [
-    { name: 'Farinha de trigo', category: 'INGREDIENTE', unit: 'g', purchasePackSize: 1000 },
-    { name: 'Fuba de canjica', category: 'INGREDIENTE', unit: 'g', purchasePackSize: 1000 },
-    { name: 'Acucar', category: 'INGREDIENTE', unit: 'g', purchasePackSize: 1000 },
-    { name: 'Manteiga', category: 'INGREDIENTE', unit: 'g', purchasePackSize: 200 },
-    { name: 'Leite', category: 'INGREDIENTE', unit: 'ml', purchasePackSize: 1000 },
-    { name: 'Ovos', category: 'INGREDIENTE', unit: 'uni', purchasePackSize: 20 },
-    { name: 'Goiabada', category: 'INGREDIENTE', unit: 'g', purchasePackSize: 300 },
-    { name: 'Doce de leite', category: 'INGREDIENTE', unit: 'g', purchasePackSize: 200 },
-    { name: 'Queijo do serro', category: 'INGREDIENTE', unit: 'g', purchasePackSize: 500 },
-    { name: 'Requeijao de corte', category: 'INGREDIENTE', unit: 'g', purchasePackSize: 240 },
-    { name: 'Sacola', category: 'EMBALAGEM_EXTERNA', unit: 'uni', purchasePackSize: 10 },
-    { name: 'Caixa de plastico', category: 'EMBALAGEM_INTERNA', unit: 'uni', purchasePackSize: 100 },
-    { name: 'Papel manteiga', category: 'EMBALAGEM_INTERNA', unit: 'cm', purchasePackSize: 7000 }
+    { name: 'Farinha de trigo', category: 'INGREDIENTE', unit: 'g', purchasePackSize: 1000, purchasePackCost: 0 },
+    { name: 'Fuba de canjica', category: 'INGREDIENTE', unit: 'g', purchasePackSize: 1000, purchasePackCost: 0 },
+    { name: 'Acucar', category: 'INGREDIENTE', unit: 'g', purchasePackSize: 1000, purchasePackCost: 0 },
+    { name: 'Manteiga', category: 'INGREDIENTE', unit: 'g', purchasePackSize: 200, purchasePackCost: 0 },
+    { name: 'Leite', category: 'INGREDIENTE', unit: 'ml', purchasePackSize: 1000, purchasePackCost: 0 },
+    { name: 'Ovos', category: 'INGREDIENTE', unit: 'uni', purchasePackSize: 20, purchasePackCost: 0 },
+    { name: 'Goiabada', category: 'INGREDIENTE', unit: 'g', purchasePackSize: 300, purchasePackCost: 0 },
+    { name: 'Doce de leite', category: 'INGREDIENTE', unit: 'g', purchasePackSize: 200, purchasePackCost: 0 },
+    { name: 'Queijo do serro', category: 'INGREDIENTE', unit: 'g', purchasePackSize: 500, purchasePackCost: 0 },
+    { name: 'Requeijao de corte', category: 'INGREDIENTE', unit: 'g', purchasePackSize: 240, purchasePackCost: 0 },
+    { name: 'Sacola', category: 'EMBALAGEM_EXTERNA', unit: 'uni', purchasePackSize: 10, purchasePackCost: 0 },
+    { name: 'Caixa de plastico', category: 'EMBALAGEM_INTERNA', unit: 'uni', purchasePackSize: 100, purchasePackCost: 0 },
+    { name: 'Papel manteiga', category: 'EMBALAGEM_INTERNA', unit: 'cm', purchasePackSize: 7000, purchasePackCost: 0 }
   ];
 
   const inventoryMap = new Map<string, number>();
