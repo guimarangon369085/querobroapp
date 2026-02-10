@@ -206,32 +206,38 @@ export default function OrdersPage() {
 
   return (
     <section className="grid gap-8">
-      <div>
-        <h2 className="text-2xl font-semibold">Pedidos</h2>
-        <p className="text-neutral-600">Acompanhe pedidos, itens e pagamentos.</p>
+      <div className="app-section-title">
+        <div>
+          <span className="app-chip">Operacao</span>
+          <h2 className="mt-3 text-3xl font-semibold">Pedidos</h2>
+          <p className="text-neutral-600">Acompanhe pedidos, itens e pagamentos.</p>
+        </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">
-        <div className="rounded-2xl border border-neutral-200 bg-white p-4">
-          <p className="text-xs uppercase text-neutral-500">Pedidos</p>
-          <p className="text-2xl font-semibold">{orderKpis.totalOrders}</p>
+        <div className="app-kpi">
+          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Pedidos</p>
+          <p className="mt-2 text-3xl font-semibold">{orderKpis.totalOrders}</p>
         </div>
-        <div className="rounded-2xl border border-neutral-200 bg-white p-4">
-          <p className="text-xs uppercase text-neutral-500">Em andamento</p>
-          <p className="text-2xl font-semibold">{orderKpis.openOrders}</p>
+        <div className="app-kpi">
+          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Em andamento</p>
+          <p className="mt-2 text-3xl font-semibold">{orderKpis.openOrders}</p>
         </div>
-        <div className="rounded-2xl border border-neutral-200 bg-white p-4">
-          <p className="text-xs uppercase text-neutral-500">Receita</p>
-          <p className="text-2xl font-semibold">{formatCurrencyBR(orderKpis.revenue)}</p>
+        <div className="app-kpi">
+          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Receita</p>
+          <p className="mt-2 text-3xl font-semibold">{formatCurrencyBR(orderKpis.revenue)}</p>
         </div>
       </div>
 
-      <div className="grid gap-4 rounded-2xl border border-neutral-200 bg-white p-6">
-        <h3 className="text-lg font-semibold">Novo pedido</h3>
+      <div className="app-panel grid gap-5">
+        <div>
+          <span className="app-chip">Criacao</span>
+          <h3 className="mt-3 text-xl font-semibold">Novo pedido</h3>
+        </div>
         <div className="grid gap-3 md:grid-cols-3">
           <FormField label="Cliente" hint="Digite para buscar e selecione">
             <input
-              className="rounded-lg border border-neutral-200 px-3 py-2"
+              className="app-input"
               list="customers-list"
               placeholder="Buscar cliente..."
               value={customerSearch}
@@ -250,7 +256,7 @@ export default function OrdersPage() {
           </FormField>
           <FormField label="Produto" hint="Digite para buscar">
             <input
-              className="rounded-lg border border-neutral-200 px-3 py-2"
+              className="app-input"
               list="products-list"
               placeholder="Buscar produto..."
               value={draftProductSearch}
@@ -269,7 +275,7 @@ export default function OrdersPage() {
           </FormField>
           <FormField label="Quantidade">
             <input
-              className="rounded-lg border border-neutral-200 px-3 py-2"
+              className="app-input"
               type="number"
               min={1}
               value={draftQty}
@@ -280,7 +286,7 @@ export default function OrdersPage() {
         <div className="grid gap-3 md:grid-cols-3">
           <FormField label="Desconto (R$)" hint="Opcional">
             <input
-              className="rounded-lg border border-neutral-200 px-3 py-2"
+              className="app-input"
               placeholder="0,00"
               value={newOrderDiscount}
               inputMode="decimal"
@@ -289,7 +295,7 @@ export default function OrdersPage() {
           </FormField>
           <FormField label="Observacoes" hint="Opcional">
             <input
-              className="rounded-lg border border-neutral-200 px-3 py-2 md:col-span-2"
+              className="app-input md:col-span-2"
               placeholder="Observacoes do pedido"
               value={newOrderNotes}
               onChange={(e) => setNewOrderNotes(e.target.value)}
@@ -297,11 +303,11 @@ export default function OrdersPage() {
           </FormField>
         </div>
         <div className="flex flex-wrap gap-3">
-          <button className="rounded-full border border-neutral-200 px-4 py-2" onClick={addItemDraft}>
+          <button className="app-button app-button-ghost" onClick={addItemDraft}>
             Adicionar item
           </button>
           <button
-            className="rounded-full bg-neutral-900 px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="app-button app-button-primary disabled:cursor-not-allowed disabled:opacity-60"
             onClick={createOrder}
             disabled={!canCreateOrder}
           >
@@ -316,7 +322,7 @@ export default function OrdersPage() {
               return (
                 <div
                   key={`${item.productId}-${index}`}
-                  className="flex items-center justify-between rounded-lg border border-neutral-100 px-3 py-2"
+                  className="flex items-center justify-between rounded-lg border border-white/60 bg-white/70 px-3 py-2"
                 >
                   <div>
                     <p className="text-neutral-800">
@@ -325,7 +331,7 @@ export default function OrdersPage() {
                     <p className="text-xs text-neutral-500">{formatCurrencyBR(total)}</p>
                   </div>
                   <button
-                    className="rounded-full border border-red-200 px-2 py-1 text-xs text-red-600"
+                    className="app-button app-button-danger"
                     onClick={() =>
                       setNewOrderItems((prev) => prev.filter((_, i) => i !== index))
                     }
@@ -335,15 +341,15 @@ export default function OrdersPage() {
                 </div>
               );
             })}
-            <div className="flex flex-wrap items-center justify-between rounded-lg bg-neutral-50 px-3 py-2 text-sm">
+            <div className="flex flex-wrap items-center justify-between rounded-lg bg-white/70 px-3 py-2 text-sm">
               <span>Subtotal</span>
               <span className="font-semibold">{formatCurrencyBR(draftSubtotal)}</span>
             </div>
-            <div className="flex flex-wrap items-center justify-between rounded-lg bg-neutral-50 px-3 py-2 text-sm">
+            <div className="flex flex-wrap items-center justify-between rounded-lg bg-white/70 px-3 py-2 text-sm">
               <span>Desconto</span>
               <span className="font-semibold">{formatCurrencyBR(draftDiscount)}</span>
             </div>
-            <div className="flex flex-wrap items-center justify-between rounded-lg bg-neutral-100 px-3 py-2 text-sm">
+            <div className="flex flex-wrap items-center justify-between rounded-lg bg-white/90 px-3 py-2 text-sm">
               <span>Total</span>
               <span className="font-semibold">{formatCurrencyBR(draftTotal)}</span>
             </div>
@@ -357,18 +363,18 @@ export default function OrdersPage() {
         )}
       </div>
 
-      <div className="grid gap-3 rounded-2xl border border-neutral-200 bg-white p-6">
+      <div className="app-panel grid gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-lg font-semibold">Lista de pedidos</h3>
+          <h3 className="text-xl font-semibold">Lista de pedidos</h3>
           <div className="flex flex-wrap gap-2">
             <input
-              className="rounded-full border border-neutral-200 px-4 py-2 text-sm"
+              className="app-input"
               placeholder="Buscar pedido, cliente ou status"
               value={orderSearch}
               onChange={(e) => setOrderSearch(e.target.value)}
             />
             <select
-              className="rounded-full border border-neutral-200 px-4 py-2 text-sm"
+              className="app-select"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
             >
@@ -385,8 +391,8 @@ export default function OrdersPage() {
           {filteredOrders.map((order) => (
             <button
               key={order.id}
-              className={`rounded-xl border p-4 text-left ${
-                selectedOrder?.id === order.id ? 'border-neutral-900 bg-white' : 'border-neutral-200 bg-white'
+              className={`app-panel text-left ${
+                selectedOrder?.id === order.id ? 'ring-2 ring-orange-200' : ''
               }`}
               onClick={() => setSelectedOrder(order)}
             >
@@ -399,7 +405,7 @@ export default function OrdersPage() {
             </button>
           ))}
           {filteredOrders.length === 0 && (
-            <div className="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 p-6 text-sm text-neutral-500">
+            <div className="app-panel border-dashed text-sm text-neutral-500">
               Nenhum pedido encontrado com os filtros atuais.
             </div>
           )}
@@ -407,14 +413,14 @@ export default function OrdersPage() {
       </div>
 
       {selectedOrder && (
-        <div className="grid gap-4 rounded-2xl border border-neutral-200 bg-white p-6">
+        <div className="app-panel grid gap-4">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h3 className="text-lg font-semibold">Pedido #{selectedOrder.id}</h3>
+              <h3 className="text-xl font-semibold">Pedido #{selectedOrder.id}</h3>
               <p className="text-sm text-neutral-500">Status atual: {selectedOrder.status}</p>
             </div>
             <select
-              className="rounded-lg border border-neutral-200 px-3 py-2"
+              className="app-select"
               value={selectedOrder.status}
               onChange={(e) => updateStatus(selectedOrder.id!, e.target.value)}
             >
@@ -432,7 +438,7 @@ export default function OrdersPage() {
               {(selectedOrder.items as OrderItem[] | undefined)?.map((item) => (
                 <div
                   key={item.id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-neutral-200 px-3 py-2"
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/60 bg-white/70 px-3 py-2"
                 >
                   <div>
                     <p className="text-sm text-neutral-700">
@@ -441,7 +447,7 @@ export default function OrdersPage() {
                     <p className="text-xs text-neutral-500">Total item: {formatCurrencyBR(item.total)}</p>
                   </div>
                   <button
-                    className="rounded-full border border-red-200 px-2 py-1 text-xs text-red-600"
+                    className="app-button app-button-danger"
                     onClick={() => removeItem(selectedOrder.id!, item.id!)}
                   >
                     Remover
@@ -454,7 +460,7 @@ export default function OrdersPage() {
           <div className="grid gap-3 md:grid-cols-3">
             <FormField label="Produto">
               <input
-                className="rounded-lg border border-neutral-200 px-3 py-2"
+                className="app-input"
                 list="products-list"
                 placeholder="Buscar produto..."
                 value={addItemProductSearch}
@@ -468,7 +474,7 @@ export default function OrdersPage() {
             </FormField>
             <FormField label="Quantidade">
               <input
-                className="rounded-lg border border-neutral-200 px-3 py-2"
+                className="app-input"
                 type="number"
                 min={1}
                 value={addItemQty}
@@ -477,7 +483,7 @@ export default function OrdersPage() {
             </FormField>
             <div className="flex items-end">
               <button
-                className="w-full rounded-full border border-neutral-200 px-4 py-2"
+                className="app-button app-button-ghost w-full"
                 onClick={() => addItem(selectedOrder.id!)}
               >
                 Adicionar item
@@ -485,38 +491,39 @@ export default function OrdersPage() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h4 className="font-semibold">Pagamentos</h4>
-            <button
-              className="rounded-full border border-red-200 px-3 py-1 text-sm text-red-600"
-              onClick={() => removeOrder(selectedOrder.id!)}
-            >
-              Excluir pedido
-            </button>
-          </div>
-          <div className="mt-3 grid gap-2">
-            {selectedPayments.length === 0 ? (
-              <p className="text-sm text-neutral-500">Nenhum pagamento registrado.</p>
-            ) : (
-              selectedPayments.map((payment) => (
-                  <div key={payment.id} className="rounded-lg border border-neutral-200 px-3 py-2 text-sm">
+          <div className="grid gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h4 className="font-semibold">Pagamentos</h4>
+              <button
+                className="app-button app-button-danger"
+                onClick={() => removeOrder(selectedOrder.id!)}
+              >
+                Excluir pedido
+              </button>
+            </div>
+            <div className="mt-3 grid gap-2">
+              {selectedPayments.length === 0 ? (
+                <p className="text-sm text-neutral-500">Nenhum pagamento registrado.</p>
+              ) : (
+                selectedPayments.map((payment) => (
+                  <div key={payment.id} className="rounded-lg border border-white/60 bg-white/70 px-3 py-2 text-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span>
                         {payment.method} • {payment.status} • {formatCurrencyBR(payment.amount)}
                       </span>
                       <button
-                        className="rounded-full border border-red-200 px-3 py-1 text-xs text-red-600"
+                        className="app-button app-button-danger"
                         onClick={() => removePayment(payment.id!)}
                       >
                         Remover
                       </button>
                     </div>
                   </div>
-              ))
-            )}
-          </div>
+                ))
+              )}
+            </div>
             <button
-              className="mt-3 rounded-full bg-neutral-900 px-4 py-2 text-white"
+              className="app-button app-button-primary mt-3"
               onClick={() => markPaid(selectedOrder.id!, selectedOrder.total ?? 0)}
             >
               Registrar pagamento

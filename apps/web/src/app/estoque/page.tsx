@@ -259,34 +259,37 @@ export default function StockPage() {
 
   return (
     <section className="grid gap-8">
-      <div>
-        <h2 className="text-2xl font-semibold">Estoque detalhado</h2>
-        <p className="text-neutral-600">Ingredientes + embalagens com capacidade de producao.</p>
+      <div className="app-section-title">
+        <div>
+          <span className="app-chip">Inventario</span>
+          <h2 className="mt-3 text-3xl font-semibold">Estoque detalhado</h2>
+          <p className="text-neutral-600">Ingredientes + embalagens com capacidade de producao.</p>
+        </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">
-        <div className="rounded-2xl border border-neutral-200 bg-white p-4">
-          <p className="text-xs uppercase text-neutral-500">Itens</p>
-          <p className="text-2xl font-semibold">{inventoryKpis.totalItems}</p>
+        <div className="app-kpi">
+          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Itens</p>
+          <p className="mt-2 text-3xl font-semibold">{inventoryKpis.totalItems}</p>
         </div>
-        <div className="rounded-2xl border border-neutral-200 bg-white p-4">
-          <p className="text-xs uppercase text-neutral-500">Ingredientes</p>
-          <p className="text-2xl font-semibold">{inventoryKpis.ingredients}</p>
+        <div className="app-kpi">
+          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Ingredientes</p>
+          <p className="mt-2 text-3xl font-semibold">{inventoryKpis.ingredients}</p>
         </div>
-        <div className="rounded-2xl border border-neutral-200 bg-white p-4">
-          <p className="text-xs uppercase text-neutral-500">Embalagens</p>
-          <p className="text-2xl font-semibold">{inventoryKpis.packaging}</p>
+        <div className="app-kpi">
+          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Embalagens</p>
+          <p className="mt-2 text-3xl font-semibold">{inventoryKpis.packaging}</p>
         </div>
       </div>
 
-      <div className="grid gap-3 rounded-2xl border border-neutral-200 bg-white p-6">
+      <div className="app-panel grid gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-lg font-semibold">Capacidade por produto (caixas)</h3>
+          <h3 className="text-xl font-semibold">Capacidade por produto (caixas)</h3>
           <p className="text-sm text-neutral-500">Custo por caixa calculado por BOM</p>
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           {capacity.map((entry) => (
-            <div key={entry.bom.id} className="rounded-xl border border-neutral-200 bg-white p-4">
+            <div key={entry.bom.id} className="app-panel">
               <p className="font-semibold">{entry.bom.name}</p>
               <p className="text-sm text-neutral-500">
                 Produto: {entry.bom.product?.name || 'Produto'}
@@ -301,18 +304,18 @@ export default function StockPage() {
             </div>
           ))}
           {capacity.length === 0 && (
-            <div className="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 p-6 text-sm text-neutral-500">
+            <div className="app-panel border-dashed text-sm text-neutral-500">
               Nenhuma BOM cadastrada.
             </div>
           )}
         </div>
       </div>
 
-      <div className="grid gap-4 rounded-2xl border border-neutral-200 bg-white p-6">
+      <div className="app-panel grid gap-4">
         <h3 className="text-lg font-semibold">Nova movimentacao de insumo</h3>
         <div className="grid gap-3 md:grid-cols-4">
           <select
-            className="rounded-lg border border-neutral-200 px-3 py-2"
+            className="app-select"
             value={itemId}
             onChange={(e) => setItemId(Number(e.target.value))}
           >
@@ -324,7 +327,7 @@ export default function StockPage() {
             ))}
           </select>
           <select
-            className="rounded-lg border border-neutral-200 px-3 py-2"
+            className="app-select"
             value={type}
             onChange={(e) => setType(e.target.value)}
           >
@@ -335,28 +338,28 @@ export default function StockPage() {
             ))}
           </select>
           <input
-            className="rounded-lg border border-neutral-200 px-3 py-2"
+            className="app-input"
             type="number"
             value={quantity}
             onChange={(e) => setQuantity(Number(e.target.value))}
           />
           <input
-            className="rounded-lg border border-neutral-200 px-3 py-2"
+            className="app-input"
             placeholder="Motivo"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
           />
         </div>
-        <button className="rounded-full bg-neutral-900 px-4 py-2 text-white" onClick={createMovement}>
+        <button className="app-button app-button-primary" onClick={createMovement}>
           Registrar
         </button>
       </div>
 
-      <div className="grid gap-4 rounded-2xl border border-neutral-200 bg-white p-6">
+      <div className="app-panel grid gap-4">
         <h3 className="text-lg font-semibold">Fichas tecnicas (BOM)</h3>
         <div className="grid gap-3 md:grid-cols-2">
           <select
-            className="rounded-lg border border-neutral-200 px-3 py-2"
+            className="app-select"
             value={bomProductId}
             onChange={(e) => setBomProductId(Number(e.target.value))}
           >
@@ -368,19 +371,19 @@ export default function StockPage() {
             ))}
           </select>
           <input
-            className="rounded-lg border border-neutral-200 px-3 py-2"
+            className="app-input"
             placeholder="Nome da ficha tecnica"
             value={bomName}
             onChange={(e) => setBomName(e.target.value)}
           />
           <input
-            className="rounded-lg border border-neutral-200 px-3 py-2"
+            className="app-input"
             placeholder="Unidade de venda (ex: Caixa com 7)"
             value={bomSaleUnitLabel}
             onChange={(e) => setBomSaleUnitLabel(e.target.value)}
           />
           <input
-            className="rounded-lg border border-neutral-200 px-3 py-2"
+            className="app-input"
             placeholder="Rendimento (caixas por receita)"
             value={bomYieldUnits}
             onChange={(e) => setBomYieldUnits(e.target.value)}
@@ -390,7 +393,7 @@ export default function StockPage() {
           {bomItems.map((item, index) => (
             <div key={`${item.itemId}-${index}`} className="grid gap-3 md:grid-cols-5">
               <select
-                className="rounded-lg border border-neutral-200 px-3 py-2"
+                className="app-select"
                 value={item.itemId}
                 onChange={(e) => updateBomItem(index, { itemId: Number(e.target.value) })}
               >
@@ -402,25 +405,25 @@ export default function StockPage() {
                 ))}
               </select>
               <input
-                className="rounded-lg border border-neutral-200 px-3 py-2"
+                className="app-input"
                 placeholder="Qtd receita"
                 value={item.qtyPerRecipe ?? ''}
                 onChange={(e) => updateBomItem(index, { qtyPerRecipe: e.target.value })}
               />
               <input
-                className="rounded-lg border border-neutral-200 px-3 py-2"
+                className="app-input"
                 placeholder="Qtd caixa"
                 value={item.qtyPerSaleUnit ?? ''}
                 onChange={(e) => updateBomItem(index, { qtyPerSaleUnit: e.target.value })}
               />
               <input
-                className="rounded-lg border border-neutral-200 px-3 py-2"
+                className="app-input"
                 placeholder="Qtd unidade"
                 value={item.qtyPerUnit ?? ''}
                 onChange={(e) => updateBomItem(index, { qtyPerUnit: e.target.value })}
               />
               <button
-                className="rounded-full border border-red-200 px-3 py-1 text-sm text-red-600"
+                className="app-button app-button-danger"
                 onClick={() => removeBomItem(index)}
               >
                 Remover
@@ -429,11 +432,11 @@ export default function StockPage() {
           ))}
         </div>
         <div className="flex flex-wrap gap-3">
-          <button className="rounded-full border border-neutral-200 px-4 py-2" onClick={addBomItem}>
+          <button className="app-button app-button-ghost" onClick={addBomItem}>
             Adicionar item
           </button>
           <button
-            className="rounded-full bg-neutral-900 px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="app-button app-button-primary disabled:cursor-not-allowed disabled:opacity-60"
             onClick={saveBom}
             disabled={!canSaveBom}
           >
@@ -443,7 +446,7 @@ export default function StockPage() {
 
         <div className="grid gap-3">
           {boms.map((bom: any) => (
-            <div key={bom.id} className="rounded-xl border border-neutral-200 bg-white p-4">
+            <div key={bom.id} className="app-panel">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="font-semibold">{bom.name}</p>
@@ -453,13 +456,13 @@ export default function StockPage() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button
-                    className="rounded-full border border-neutral-200 px-3 py-1 text-sm"
+                    className="app-button app-button-ghost"
                     onClick={() => startEditBom(bom)}
                   >
                     Editar
                   </button>
                   <button
-                    className="rounded-full border border-red-200 px-3 py-1 text-sm text-red-600"
+                    className="app-button app-button-danger"
                     onClick={() => removeBom(bom.id)}
                   >
                     Remover
@@ -479,11 +482,11 @@ export default function StockPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 rounded-2xl border border-neutral-200 bg-white p-6">
+      <div className="app-panel grid gap-4">
         <h3 className="text-lg font-semibold">Custo de compra por embalagem</h3>
         <div className="grid gap-3 md:grid-cols-3">
           <select
-            className="rounded-lg border border-neutral-200 px-3 py-2"
+            className="app-select"
             value={editingItemId}
             onChange={(e) => {
               const id = Number(e.target.value);
@@ -499,19 +502,19 @@ export default function StockPage() {
             ))}
           </select>
           <input
-            className="rounded-lg border border-neutral-200 px-3 py-2"
+            className="app-input"
             placeholder="Tamanho embalagem"
             value={packSize}
             onChange={(e) => setPackSize(e.target.value)}
           />
           <input
-            className="rounded-lg border border-neutral-200 px-3 py-2"
+            className="app-input"
             placeholder="Custo embalagem (R$)"
             value={packCost}
             onChange={(e) => setPackCost(e.target.value)}
           />
         </div>
-        <button className="rounded-full bg-neutral-900 px-4 py-2 text-white" onClick={updateItem}>
+        <button className="app-button app-button-primary" onClick={updateItem}>
           Atualizar custo
         </button>
       </div>
@@ -519,11 +522,11 @@ export default function StockPage() {
       <div className="grid gap-3">
         <h3 className="text-lg font-semibold">Saldo por item</h3>
         {items.map((item) => (
-          <div key={item.id} className="rounded-xl border border-neutral-200 bg-white p-4">
+          <div key={item.id} className="app-panel">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="font-semibold">{item.name}</p>
               <button
-                className="rounded-full border border-red-200 px-3 py-1 text-xs text-red-600"
+                className="app-button app-button-danger"
                 onClick={() => removeItem(item.id!)}
               >
                 Remover
@@ -540,14 +543,14 @@ export default function StockPage() {
       <div className="grid gap-3">
         <h3 className="text-lg font-semibold">Movimentacoes</h3>
         {movements.map((movement) => (
-          <div key={movement.id} className="rounded-xl border border-neutral-200 bg-white p-4 text-sm">
+          <div key={movement.id} className="app-panel text-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 {itemMap.get(movement.itemId)?.name || `Item ${movement.itemId}`} • {movement.type} •{' '}
                 {movement.quantity} • {movement.reason || 'Sem motivo'}
               </div>
               <button
-                className="rounded-full border border-red-200 px-3 py-1 text-xs text-red-600"
+                className="app-button app-button-danger"
                 onClick={() => removeMovement(movement.id!)}
               >
                 Remover

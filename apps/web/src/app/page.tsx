@@ -12,8 +12,8 @@ export default function HomePage() {
   return (
     <section className="grid gap-6">
       <div>
-        <p className="text-sm uppercase tracking-[0.3em] text-neutral-500">QuerobroApp</p>
-        <h2 className="mt-3 text-3xl font-semibold">Painel ERP</h2>
+        <span className="app-chip">Suite ERP</span>
+        <h2 className="mt-3 text-4xl font-semibold">Painel editorial</h2>
         <p className="mt-2 text-neutral-600">
           Acesse os modulos principais para gerenciar produtos, clientes, pedidos e estoque.
         </p>
@@ -23,7 +23,7 @@ export default function HomePage() {
           <Link
             key={link.href}
             href={link.href}
-            className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5"
+            className="app-panel transition hover:-translate-y-0.5"
           >
             <h3 className="text-lg font-semibold text-neutral-900">{link.title}</h3>
             <p className="mt-2 text-sm text-neutral-600">{link.desc}</p>

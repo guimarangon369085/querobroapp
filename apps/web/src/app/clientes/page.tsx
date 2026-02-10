@@ -124,20 +124,23 @@ export default function CustomersPage() {
 
   return (
     <section className="grid gap-8">
-      <div>
-        <h2 className="text-2xl font-semibold">Clientes</h2>
-        <p className="text-neutral-600">Cadastre e organize sua base de clientes.</p>
+      <div className="app-section-title">
+        <div>
+          <span className="app-chip">Relacionamento</span>
+          <h2 className="mt-3 text-3xl font-semibold">Clientes</h2>
+          <p className="text-neutral-600">Cadastre e organize sua base de clientes.</p>
+        </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">
-        <div className="rounded-2xl border border-neutral-200 bg-white p-4">
-          <p className="text-xs uppercase text-neutral-500">Clientes</p>
-          <p className="text-2xl font-semibold">{customers.length}</p>
+        <div className="app-kpi">
+          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Clientes</p>
+          <p className="mt-2 text-3xl font-semibold">{customers.length}</p>
         </div>
-        <div className="rounded-2xl border border-neutral-200 bg-white p-4 md:col-span-2">
-          <p className="text-xs uppercase text-neutral-500">Busca rapida</p>
+        <div className="app-panel md:col-span-2">
+          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Busca rapida</p>
           <input
-            className="mt-2 w-full rounded-full border border-neutral-200 px-4 py-2 text-sm"
+            className="app-input mt-2"
             placeholder="Buscar por nome, telefone ou endereco"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -145,11 +148,11 @@ export default function CustomersPage() {
         </div>
       </div>
 
-      <form onSubmit={submit} className="grid gap-4 rounded-2xl border border-neutral-200 bg-white p-6">
+      <form onSubmit={submit} className="app-panel grid gap-5">
         <div className="grid gap-3 md:grid-cols-2">
           <FormField label="Nome" error={error}>
             <input
-              className="rounded-lg border border-neutral-200 px-3 py-2"
+              className="app-input"
               placeholder="Nome completo"
               value={form.name || ''}
               onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
@@ -158,7 +161,7 @@ export default function CustomersPage() {
           </FormField>
           <FormField label="Telefone" hint="DDD + numero (WhatsApp)">
             <input
-              className="rounded-lg border border-neutral-200 px-3 py-2"
+              className="app-input"
               placeholder="(11) 99999-9999"
               value={form.phone || ''}
               inputMode="tel"
@@ -169,7 +172,7 @@ export default function CustomersPage() {
         </div>
         <FormField label="Endereco" hint="Digite e selecione do autocomplete">
           <input
-            className="rounded-lg border border-neutral-200 px-3 py-2"
+            className="app-input"
             placeholder="Rua, numero, bairro, cidade"
             ref={addressInputRef}
             value={form.address || ''}
@@ -179,12 +182,12 @@ export default function CustomersPage() {
           />
         </FormField>
         <div className="flex gap-3">
-          <button className="rounded-full bg-neutral-900 px-4 py-2 text-white" type="submit">
+          <button className="app-button app-button-primary" type="submit">
             {editingId ? 'Atualizar' : 'Criar'}
           </button>
           {editingId && (
             <button
-              className="rounded-full border border-neutral-200 px-4 py-2"
+              className="app-button app-button-ghost"
               type="button"
               onClick={() => {
                 setEditingId(null);
@@ -201,7 +204,7 @@ export default function CustomersPage() {
         {filteredCustomers.map((customer) => (
           <div
             key={customer.id}
-            className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-neutral-200 bg-white p-4"
+            className="app-panel flex flex-wrap items-center justify-between gap-4"
           >
             <div>
               <p className="text-lg font-semibold">{customer.name}</p>
@@ -211,13 +214,13 @@ export default function CustomersPage() {
             </div>
             <div className="flex gap-2">
               <button
-                className="rounded-full border border-neutral-200 px-3 py-1 text-sm"
+                className="app-button app-button-ghost"
                 onClick={() => startEdit(customer)}
               >
                 Editar
               </button>
               <button
-                className="rounded-full border border-red-200 px-3 py-1 text-sm text-red-600"
+                className="app-button app-button-danger"
                 onClick={() => remove(customer.id!)}
               >
                 Remover
@@ -226,7 +229,7 @@ export default function CustomersPage() {
           </div>
         ))}
         {filteredCustomers.length === 0 && (
-          <div className="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 p-6 text-sm text-neutral-500">
+          <div className="app-panel border-dashed text-sm text-neutral-500">
             Nenhum cliente encontrado com este filtro.
           </div>
         )}

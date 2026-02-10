@@ -79,7 +79,14 @@ export default function ProductsPage() {
   const remove = async (id: number) => {
     if (!confirm('Remover este produto?')) return;
     try {
-      await apiFetch(`/products/${id}`, { method: 'DELETE' });
+      const result = await apiFetch<{ archived?: boolean; deleted?: boolean }>(`/products/${id}`, {
+        method: 'DELETE'
+      });
+      if (result?.archived) {
+        alert('Produto arquivado porque possui pedidos, movimentacoes ou ficha tecnica vinculados.');
+      } else if (result?.deleted) {
+        alert('Produto removido.');
+      }
       await load();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Nao foi possivel remover o produto.');
@@ -102,26 +109,29 @@ export default function ProductsPage() {
 
   return (
     <section className="grid gap-8">
-      <div>
-        <h2 className="text-2xl font-semibold">Produtos</h2>
-        <p className="text-neutral-600">Gerencie catalogo e precos.</p>
+      <div className="app-section-title">
+        <div>
+          <span className="app-chip">Catalogo</span>
+          <h2 className="mt-3 text-3xl font-semibold">Produtos</h2>
+          <p className="text-neutral-600">Gerencie catalogo e precos.</p>
+        </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">
-        <div className="rounded-2xl border border-neutral-200 bg-white p-4">
-          <p className="text-xs uppercase text-neutral-500">Produtos</p>
-          <p className="text-2xl font-semibold">{products.length}</p>
+        <div className="app-kpi">
+          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Produtos</p>
+          <p className="mt-2 text-3xl font-semibold">{products.length}</p>
         </div>
-        <div className="rounded-2xl border border-neutral-200 bg-white p-4 md:col-span-2">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="app-panel md:col-span-2">
+          <div className="flex flex-wrap items-center gap-3">
             <input
-              className="w-full rounded-full border border-neutral-200 px-4 py-2 text-sm md:w-auto"
+              className="app-input md:w-auto"
               placeholder="Buscar por nome ou categoria"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
             <select
-              className="rounded-full border border-neutral-200 px-4 py-2 text-sm"
+              className="app-select"
               value={activeFilter}
               onChange={(e) => setActiveFilter(e.target.value as 'TODOS' | 'ATIVOS' | 'INATIVOS')}
             >
@@ -133,11 +143,11 @@ export default function ProductsPage() {
         </div>
       </div>
 
-      <form onSubmit={submit} className="grid gap-4 rounded-2xl border border-neutral-200 bg-white p-6">
+      <form onSubmit={submit} className="app-panel grid gap-5">
         <div className="grid gap-3 md:grid-cols-2">
           <FormField label="Nome" error={error}>
             <input
-              className="rounded-lg border border-neutral-200 px-3 py-2"
+              className="app-input"
               placeholder="Nome do produto"
               value={form.name || ''}
               onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
@@ -146,7 +156,7 @@ export default function ProductsPage() {
           </FormField>
           <FormField label="Categoria" hint="Ex: Bebidas, Lanches">
             <input
-              className="rounded-lg border border-neutral-200 px-3 py-2"
+              className="app-input"
               placeholder="Categoria"
               value={form.category || ''}
               onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}
@@ -155,7 +165,7 @@ export default function ProductsPage() {
           </FormField>
           <FormField label="Unidade" hint="Ex: un, kg, pct">
             <input
-              className="rounded-lg border border-neutral-200 px-3 py-2"
+              className="app-input"
               placeholder="Unidade"
               value={form.unit || ''}
               onChange={(e) => setForm((prev) => ({ ...prev, unit: e.target.value }))}
@@ -169,7 +179,7 @@ export default function ProductsPage() {
           </FormField>
           <FormField label="Preco" hint="Use ponto para centavos">
             <input
-              className="rounded-lg border border-neutral-200 px-3 py-2"
+              className="app-input"
               placeholder="0.00"
               type="number"
               step="0.01"
@@ -185,7 +195,7 @@ export default function ProductsPage() {
             />
           </FormField>
         </div>
-        <label className="flex items-center gap-2 text-sm">
+        <label className="flex items-center gap-2 text-sm text-neutral-700">
           <input
             type="checkbox"
             checked={form.active ?? true}
@@ -194,12 +204,12 @@ export default function ProductsPage() {
           Ativo
         </label>
         <div className="flex gap-3">
-          <button className="rounded-full bg-neutral-900 px-4 py-2 text-white" type="submit">
+          <button className="app-button app-button-primary" type="submit">
             {editingId ? 'Atualizar' : 'Criar'}
           </button>
           {editingId && (
             <button
-              className="rounded-full border border-neutral-200 px-4 py-2"
+              className="app-button app-button-ghost"
               type="button"
               onClick={() => {
                 setEditingId(null);
@@ -216,7 +226,7 @@ export default function ProductsPage() {
         {filteredProducts.map((product) => (
           <div
             key={product.id}
-            className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-neutral-200 bg-white p-4"
+            className="app-panel flex flex-wrap items-center justify-between gap-4"
           >
             <div>
               <p className="text-lg font-semibold">{product.name}</p>
@@ -226,13 +236,13 @@ export default function ProductsPage() {
             </div>
             <div className="flex gap-2">
               <button
-                className="rounded-full border border-neutral-200 px-3 py-1 text-sm"
+                className="app-button app-button-ghost"
                 onClick={() => startEdit(product)}
               >
                 Editar
               </button>
               <button
-                className="rounded-full border border-red-200 px-3 py-1 text-sm text-red-600"
+                className="app-button app-button-danger"
                 onClick={() => remove(product.id!)}
               >
                 Remover
@@ -241,7 +251,7 @@ export default function ProductsPage() {
           </div>
         ))}
         {filteredProducts.length === 0 && (
-          <div className="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 p-6 text-sm text-neutral-500">
+          <div className="app-panel border-dashed text-sm text-neutral-500">
             Nenhum produto encontrado com este filtro.
           </div>
         )}
