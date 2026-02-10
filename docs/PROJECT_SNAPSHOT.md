@@ -85,7 +85,7 @@ pnpm --filter @querobroapp/api start:tsx
 | `/dashboard` | [`apps/web/src/app/dashboard/page.tsx`](../apps/web/src/app/dashboard/page.tsx) | KPIs de produtos, clientes, pedidos e pagamentos |
 | `/produtos` | [`apps/web/src/app/produtos/page.tsx`](../apps/web/src/app/produtos/page.tsx) | CRUD de catalogo |
 | `/clientes` | [`apps/web/src/app/clientes/page.tsx`](../apps/web/src/app/clientes/page.tsx) | CRUD de clientes + autocomplete Google Places |
-| `/pedidos` | [`apps/web/src/app/pedidos/page.tsx`](../apps/web/src/app/pedidos/page.tsx) | Criacao/gestao de pedidos, itens, status e pagamentos com saldo (Total/Pago/Saldo) |
+| `/pedidos` | [`apps/web/src/app/pedidos/page.tsx`](../apps/web/src/app/pedidos/page.tsx) | Criacao/gestao de pedidos, itens, status e pagamentos com saldo (Total/Pago/Saldo), filtros financeiros e acao "Marcar pedido como pago" |
 | `/estoque` | [`apps/web/src/app/estoque/page.tsx`](../apps/web/src/app/estoque/page.tsx) | Inventario, movimentacoes, BOM/custos e quadro D+1 por data |
 
 ### 3.2 Estrutura de shell e navegacao
@@ -110,7 +110,7 @@ Mapa de consumo por pagina:
 | `dashboard` | `GET /products`, `GET /customers`, `GET /orders`, `GET /payments` |
 | `produtos` | `GET/POST /products`, `PUT/DELETE /products/:id` |
 | `clientes` | `GET/POST /customers`, `PUT/DELETE /customers/:id` |
-| `pedidos` | `GET/POST /orders`, `POST /orders/:id/items`, `DELETE /orders/:id/items/:itemId`, `PATCH /orders/:id/status`, `DELETE /orders/:id`, `POST /payments`, `DELETE /payments/:id` |
+| `pedidos` | `GET/POST /orders`, `POST /orders/:id/items`, `DELETE /orders/:id/items/:itemId`, `PATCH /orders/:id/status`, `PATCH /orders/:id/mark-paid`, `DELETE /orders/:id`, `POST /payments`, `DELETE /payments/:id` |
 | `estoque` | `GET /inventory-items`, `PUT/DELETE /inventory-items/:id`, `GET/POST/DELETE /inventory-movements`, `GET/POST/PUT/DELETE /boms`, `GET /production/requirements` |
 | `operacao interna` | `GET /whatsapp/outbox?status=PENDING` |
 
