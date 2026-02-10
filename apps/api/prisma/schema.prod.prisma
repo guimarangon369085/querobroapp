@@ -3,8 +3,29 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+enum OrderStatus {
+  ABERTO
+  CONFIRMADO
+  EM_PREPARACAO
+  PRONTO
+  ENTREGUE
+  CANCELADO
+}
+
+enum PaymentStatus {
+  PENDENTE
+  PAGO
+  CANCELADO
+}
+
+enum StockMovementType {
+  IN
+  OUT
+  ADJUST
 }
 
 model Customer {
@@ -14,8 +35,6 @@ model Customer {
   address   String?
   createdAt DateTime @default(now())
   orders    Order[]
-
-  @@index([name])
 }
 
 model Product {
@@ -28,16 +47,12 @@ model Product {
   createdAt DateTime @default(now())
   items     OrderItem[]
   movements StockMovement[]
-
-  @@index([name])
-  @@index([category])
-  @@index([active])
 }
 
 model Order {
   id         Int         @id @default(autoincrement())
   customerId Int
-  status     String      @default("ABERTO")
+  status     OrderStatus @default(ABERTO)
   subtotal   Float       @default(0)
   discount   Float       @default(0)
   total      Float       @default(0)
@@ -46,10 +61,6 @@ model Order {
   customer   Customer    @relation(fields: [customerId], references: [id])
   items      OrderItem[]
   payments   Payment[]
-  stockMovements StockMovement[]
-
-  @@index([customerId])
-  @@index([status])
 }
 
 model OrderItem {
@@ -61,9 +72,6 @@ model OrderItem {
   total     Float
   order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product   Product @relation(fields: [productId], references: [id])
-
-  @@index([orderId])
-  @@index([productId])
 }
 
 model Payment {
@@ -71,28 +79,21 @@ model Payment {
   orderId     Int
   amount      Float
   method      String
-  status      String        @default("PENDENTE")
+  status      PaymentStatus @default(PENDENTE)
   paidAt      DateTime?
   dueDate     DateTime?
   providerRef String?
   order       Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
-
-  @@index([orderId])
-  @@index([status])
 }
 
 model StockMovement {
   id        Int               @id @default(autoincrement())
   productId Int
-  type      String
+  type      StockMovementType
   quantity  Int
   reason    String?
   orderId   Int?
   createdAt DateTime          @default(now())
   product   Product           @relation(fields: [productId], references: [id])
   order     Order?            @relation(fields: [orderId], references: [id])
-
-  @@index([productId])
-  @@index([orderId])
-  @@index([createdAt])
 }

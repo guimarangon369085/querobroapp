@@ -12,3 +12,7 @@ node_modules
 /coverage
 /data
 .DS_Store
+/.turbo
+/apps/api/prisma/dev.db*
+/apps/mobile/.expo
+/packages/shared/dist

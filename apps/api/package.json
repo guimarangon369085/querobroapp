@@ -4,13 +4,21 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --watch --loader ts-node/esm src/main.ts",
+    "dev": "nodemon --watch src --ext ts --exec \"node --loader ts-node/esm src/main.ts\"",
+    "start:tsx": "tsx src/main.ts",
+    "start": "node dist/main.js",
+    "start:prod": "NODE_ENV=production node dist/main.js",
     "build": "tsc -p tsconfig.json",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:seed": "prisma db seed"
+    "prisma:seed": "pnpm prisma:seed:dev",
+    "prisma:seed:dev": "NODE_ENV=development DATABASE_URL=file:./dev.db prisma db seed",
+    "prisma:generate:dev": "NODE_ENV=development DATABASE_URL=file:./dev.db prisma generate",
+    "prisma:migrate:dev": "NODE_ENV=development DATABASE_URL=file:./dev.db prisma migrate dev",
+    "prisma:generate:prod": "NODE_ENV=production DATABASE_URL=\"$DATABASE_URL_PROD\" prisma generate --schema prisma/schema.prod.prisma",
+    "prisma:migrate:prod": "NODE_ENV=production DATABASE_URL=\"$DATABASE_URL_PROD\" prisma migrate deploy --schema prisma/schema.prod.prisma"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.3",
@@ -21,11 +29,14 @@
     "@querobroapp/shared": "workspace:*",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "swagger-ui-express": "^5.0.1"
+    "swagger-ui-express": "^5.0.1",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
+    "nodemon": "^3.1.0",
     "prisma": "^5.18.0",
+    "tsx": "^4.19.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.4"
   },

@@ -38,7 +38,8 @@ export class OrdersService {
     const data = OrderSchema.pick({ customerId: true, notes: true, discount: true, items: true }).parse(
       payload
     );
-    if (!data.items || data.items.length === 0) {
+    const items = data.items ?? [];
+    if (items.length === 0) {
       throw new BadRequestException('Itens sao obrigatorios');
     }
 
@@ -46,16 +47,23 @@ export class OrdersService {
       const customer = await tx.customer.findUnique({ where: { id: data.customerId } });
       if (!customer) throw new NotFoundException('Cliente nao encontrado');
 
+      const parsedItems = items.map((item) =>
+        OrderItemSchema.pick({ productId: true, quantity: true }).parse(item)
+      );
+
+      const productIds = Array.from(new Set(parsedItems.map((item) => item.productId)));
+      const products = await tx.product.findMany({ where: { id: { in: productIds } } });
+      const productMap = new Map(products.map((product) => [product.id, product]));
+
       let subtotal = 0;
       const itemsData = [] as Array<{ productId: number; quantity: number; unitPrice: number; total: number }>;
-      for (const item of data.items) {
-        const parsed = OrderItemSchema.pick({ productId: true, quantity: true }).parse(item);
-        const product = await tx.product.findUnique({ where: { id: parsed.productId } });
+      for (const item of parsedItems) {
+        const product = productMap.get(item.productId);
         if (!product) throw new NotFoundException('Produto nao encontrado');
         const unitPrice = product.price;
-        const total = unitPrice * parsed.quantity;
+        const total = unitPrice * item.quantity;
         subtotal += total;
-        itemsData.push({ productId: parsed.productId, quantity: parsed.quantity, unitPrice, total });
+        itemsData.push({ productId: item.productId, quantity: item.quantity, unitPrice, total });
       }
 
       const discount = data.discount ?? 0;
