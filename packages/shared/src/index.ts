@@ -12,6 +12,7 @@ export const OrderStatusEnum = z.enum([
 export const PaymentStatusEnum = z.enum(['PENDENTE', 'PAGO', 'CANCELADO']);
 
 export const StockMovementTypeEnum = z.enum(['IN', 'OUT', 'ADJUST']);
+export const InventoryCategoryEnum = z.enum(['INGREDIENTE', 'EMBALAGEM_INTERNA', 'EMBALAGEM_EXTERNA']);
 
 export const CustomerSchema = z.object({
   id: z.number().int().positive().optional(),
@@ -73,6 +74,41 @@ export const StockMovementSchema = z.object({
   createdAt: z.string().optional().nullable()
 });
 
+export const InventoryItemSchema = z.object({
+  id: z.number().int().positive().optional(),
+  name: z.string().min(1),
+  category: InventoryCategoryEnum,
+  unit: z.string().min(1),
+  purchasePackSize: z.number().nonnegative(),
+  createdAt: z.string().optional().nullable()
+});
+
+export const InventoryMovementSchema = z.object({
+  id: z.number().int().positive().optional(),
+  itemId: z.number().int().positive(),
+  type: StockMovementTypeEnum,
+  quantity: z.number().nonnegative(),
+  reason: z.string().optional().nullable(),
+  createdAt: z.string().optional().nullable()
+});
+
+export const BomSchema = z.object({
+  id: z.number().int().positive().optional(),
+  productId: z.number().int().positive(),
+  name: z.string().min(1),
+  saleUnitLabel: z.string().optional().nullable(),
+  yieldUnits: z.number().nonnegative().optional().nullable()
+});
+
+export const BomItemSchema = z.object({
+  id: z.number().int().positive().optional(),
+  bomId: z.number().int().positive(),
+  itemId: z.number().int().positive(),
+  qtyPerRecipe: z.number().nonnegative().optional().nullable(),
+  qtyPerSaleUnit: z.number().nonnegative().optional().nullable(),
+  qtyPerUnit: z.number().nonnegative().optional().nullable()
+});
+
 export type OrderStatus = z.infer<typeof OrderStatusEnum>;
 export type PaymentStatus = z.infer<typeof PaymentStatusEnum>;
 export type StockMovementType = z.infer<typeof StockMovementTypeEnum>;
@@ -83,3 +119,8 @@ export type OrderItem = z.infer<typeof OrderItemSchema>;
 export type Order = z.infer<typeof OrderSchema>;
 export type Payment = z.infer<typeof PaymentSchema>;
 export type StockMovement = z.infer<typeof StockMovementSchema>;
+export type InventoryCategory = z.infer<typeof InventoryCategoryEnum>;
+export type InventoryItem = z.infer<typeof InventoryItemSchema>;
+export type InventoryMovement = z.infer<typeof InventoryMovementSchema>;
+export type Bom = z.infer<typeof BomSchema>;
+export type BomItem = z.infer<typeof BomItemSchema>;
