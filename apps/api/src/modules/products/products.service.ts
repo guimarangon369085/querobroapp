@@ -47,6 +47,20 @@ export class ProductsService {
 
   async remove(id: number) {
     await this.get(id);
+    const [itemsCount, movementsCount, bomsCount] = await this.prisma.$transaction([
+      this.prisma.orderItem.count({ where: { productId: id } }),
+      this.prisma.stockMovement.count({ where: { productId: id } }),
+      this.prisma.bom.count({ where: { productId: id } })
+    ]);
+
+    if (itemsCount > 0 || movementsCount > 0 || bomsCount > 0) {
+      await this.prisma.product.update({
+        where: { id },
+        data: { active: false }
+      });
+      return;
+    }
+
     await this.prisma.product.delete({ where: { id } });
   }
 }

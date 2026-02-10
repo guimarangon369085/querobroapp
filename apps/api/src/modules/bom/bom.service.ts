@@ -126,4 +126,9 @@ export class BomService {
       });
     });
   }
+
+  async remove(id: number) {
+    await this.get(id);
+    await this.prisma.bom.delete({ where: { id } });
+  }
 }

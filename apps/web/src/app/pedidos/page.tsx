@@ -95,8 +95,24 @@ export default function OrdersPage() {
   };
 
   const removeItem = async (orderId: number, itemId: number) => {
-    await apiFetch(`/orders/${orderId}/items/${itemId}`, { method: 'DELETE' });
-    await loadAll();
+    if (!confirm('Remover este item do pedido?')) return;
+    try {
+      await apiFetch(`/orders/${orderId}/items/${itemId}`, { method: 'DELETE' });
+      await loadAll();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Nao foi possivel remover o item.');
+    }
+  };
+
+  const removeOrder = async (orderId: number) => {
+    if (!confirm('Excluir este pedido?')) return;
+    try {
+      await apiFetch(`/orders/${orderId}`, { method: 'DELETE' });
+      setSelectedOrder(null);
+      await loadAll();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Nao foi possivel excluir o pedido.');
+    }
   };
 
   const updateStatus = async (orderId: number, status: string) => {
@@ -119,6 +135,16 @@ export default function OrdersPage() {
       })
     });
     await loadAll();
+  };
+
+  const removePayment = async (paymentId: number) => {
+    if (!confirm('Remover este pagamento?')) return;
+    try {
+      await apiFetch(`/payments/${paymentId}`, { method: 'DELETE' });
+      await loadAll();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Nao foi possivel remover o pagamento.');
+    }
   };
 
   const selectedPayments = useMemo(() => {
@@ -459,19 +485,36 @@ export default function OrdersPage() {
             </div>
           </div>
 
-          <div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <h4 className="font-semibold">Pagamentos</h4>
-            <div className="mt-3 grid gap-2">
-              {selectedPayments.length === 0 ? (
-                <p className="text-sm text-neutral-500">Nenhum pagamento registrado.</p>
-              ) : (
-                selectedPayments.map((payment) => (
+            <button
+              className="rounded-full border border-red-200 px-3 py-1 text-sm text-red-600"
+              onClick={() => removeOrder(selectedOrder.id!)}
+            >
+              Excluir pedido
+            </button>
+          </div>
+          <div className="mt-3 grid gap-2">
+            {selectedPayments.length === 0 ? (
+              <p className="text-sm text-neutral-500">Nenhum pagamento registrado.</p>
+            ) : (
+              selectedPayments.map((payment) => (
                   <div key={payment.id} className="rounded-lg border border-neutral-200 px-3 py-2 text-sm">
-                    {payment.method} • {payment.status} • {formatCurrencyBR(payment.amount)}
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span>
+                        {payment.method} • {payment.status} • {formatCurrencyBR(payment.amount)}
+                      </span>
+                      <button
+                        className="rounded-full border border-red-200 px-3 py-1 text-xs text-red-600"
+                        onClick={() => removePayment(payment.id!)}
+                      >
+                        Remover
+                      </button>
+                    </div>
                   </div>
-                ))
-              )}
-            </div>
+              ))
+            )}
+          </div>
             <button
               className="mt-3 rounded-full bg-neutral-900 px-4 py-2 text-white"
               onClick={() => markPaid(selectedOrder.id!, selectedOrder.total ?? 0)}

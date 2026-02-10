@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, Inject } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service.js';
 import { CustomerSchema } from '@querobroapp/shared';
 import { normalizePhone, normalizeTitle } from '../../common/normalize.js';
@@ -45,6 +45,10 @@ export class CustomersService {
 
   async remove(id: number) {
     await this.get(id);
+    const ordersCount = await this.prisma.order.count({ where: { customerId: id } });
+    if (ordersCount > 0) {
+      throw new ConflictException('Cliente possui pedidos vinculados.');
+    }
     await this.prisma.customer.delete({ where: { id } });
   }
 }

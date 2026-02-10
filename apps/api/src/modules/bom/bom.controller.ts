@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Inject } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Delete, Inject } from '@nestjs/common';
 import { BomService } from './bom.service.js';
 import { parseWithSchema } from '../../common/validation.js';
 import { z } from 'zod';
@@ -27,5 +27,11 @@ export class BomController {
   @Put(':id')
   update(@Param('id') id: string, @Body() body: unknown) {
     return this.service.update(parseWithSchema(idSchema, id), body);
+  }
+
+  @Delete(':id')
+  async remove(@Param('id') id: string) {
+    await this.service.remove(parseWithSchema(idSchema, id));
+    return { ok: true };
   }
 }

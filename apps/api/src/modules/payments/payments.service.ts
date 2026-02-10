@@ -40,4 +40,10 @@ export class PaymentsService {
       }
     });
   }
+
+  async remove(id: number) {
+    const payment = await this.prisma.payment.findUnique({ where: { id } });
+    if (!payment) throw new NotFoundException('Pagamento nao encontrado');
+    await this.prisma.payment.delete({ where: { id } });
+  }
 }

@@ -74,6 +74,16 @@ export default function StockPage() {
     await load();
   };
 
+  const removeMovement = async (id: number) => {
+    if (!confirm('Remover esta movimentacao?')) return;
+    try {
+      await apiFetch(`/inventory-movements/${id}`, { method: 'DELETE' });
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Nao foi possivel remover a movimentacao.');
+    }
+  };
+
   const startEditItem = (item: InventoryItem) => {
     setEditingItemId(item.id!);
     setPackSize(String(item.purchasePackSize ?? 0));
@@ -93,6 +103,16 @@ export default function StockPage() {
     setPackSize('0');
     setPackCost('0');
     await load();
+  };
+
+  const removeItem = async (id: number) => {
+    if (!confirm('Remover este item do estoque?')) return;
+    try {
+      await apiFetch(`/inventory-items/${id}`, { method: 'DELETE' });
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Nao foi possivel remover o item.');
+    }
   };
 
   const startEditBom = (bom: any) => {
@@ -123,6 +143,16 @@ export default function StockPage() {
   };
 
   const saveBom = async () => {
+    if (!bomProductId || Number(bomProductId) <= 0) {
+      alert('Selecione um produto para a ficha tecnica.');
+      return;
+    }
+
+    if (!bomName.trim()) {
+      alert('Informe o nome da ficha tecnica.');
+      return;
+    }
+
     const payload = {
       productId: Number(bomProductId),
       name: bomName,
@@ -149,6 +179,18 @@ export default function StockPage() {
     setBomItems([]);
     await load();
   };
+
+  const removeBom = async (id: number) => {
+    if (!confirm('Remover esta ficha tecnica?')) return;
+    try {
+      await apiFetch(`/boms/${id}`, { method: 'DELETE' });
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Nao foi possivel remover a ficha tecnica.');
+    }
+  };
+
+  const canSaveBom = Boolean(bomProductId) && bomName.trim().length > 0;
 
   const balances = useMemo(() => {
     const balance = new Map<number, number>();
@@ -390,7 +432,11 @@ export default function StockPage() {
           <button className="rounded-full border border-neutral-200 px-4 py-2" onClick={addBomItem}>
             Adicionar item
           </button>
-          <button className="rounded-full bg-neutral-900 px-4 py-2 text-white" onClick={saveBom}>
+          <button
+            className="rounded-full bg-neutral-900 px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={saveBom}
+            disabled={!canSaveBom}
+          >
             {editingBomId ? 'Atualizar ficha tecnica' : 'Criar ficha tecnica'}
           </button>
         </div>
@@ -405,12 +451,20 @@ export default function StockPage() {
                     Produto: {bom.product?.name || 'Produto'} • {bom.saleUnitLabel || 'Unidade'}
                   </p>
                 </div>
-                <button
-                  className="rounded-full border border-neutral-200 px-3 py-1 text-sm"
-                  onClick={() => startEditBom(bom)}
-                >
-                  Editar
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    className="rounded-full border border-neutral-200 px-3 py-1 text-sm"
+                    onClick={() => startEditBom(bom)}
+                  >
+                    Editar
+                  </button>
+                  <button
+                    className="rounded-full border border-red-200 px-3 py-1 text-sm text-red-600"
+                    onClick={() => removeBom(bom.id)}
+                  >
+                    Remover
+                  </button>
+                </div>
               </div>
               <div className="mt-3 grid gap-2 text-sm text-neutral-500">
                 {(bom.items || []).map((item: any) => (
@@ -466,7 +520,15 @@ export default function StockPage() {
         <h3 className="text-lg font-semibold">Saldo por item</h3>
         {items.map((item) => (
           <div key={item.id} className="rounded-xl border border-neutral-200 bg-white p-4">
-            <p className="font-semibold">{item.name}</p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="font-semibold">{item.name}</p>
+              <button
+                className="rounded-full border border-red-200 px-3 py-1 text-xs text-red-600"
+                onClick={() => removeItem(item.id!)}
+              >
+                Remover
+              </button>
+            </div>
             <p className="text-sm text-neutral-500">
               {item.category} • {balances.get(item.id!) ?? 0} {item.unit} • custo unitario R${' '}
               {(unitCostMap.get(item.id!) ?? 0).toFixed(4)}
@@ -479,8 +541,18 @@ export default function StockPage() {
         <h3 className="text-lg font-semibold">Movimentacoes</h3>
         {movements.map((movement) => (
           <div key={movement.id} className="rounded-xl border border-neutral-200 bg-white p-4 text-sm">
-            {itemMap.get(movement.itemId)?.name || `Item ${movement.itemId}`} • {movement.type} •{' '}
-            {movement.quantity} • {movement.reason || 'Sem motivo'}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                {itemMap.get(movement.itemId)?.name || `Item ${movement.itemId}`} • {movement.type} •{' '}
+                {movement.quantity} • {movement.reason || 'Sem motivo'}
+              </div>
+              <button
+                className="rounded-full border border-red-200 px-3 py-1 text-xs text-red-600"
+                onClick={() => removeMovement(movement.id!)}
+              >
+                Remover
+              </button>
+            </div>
           </div>
         ))}
       </div>
