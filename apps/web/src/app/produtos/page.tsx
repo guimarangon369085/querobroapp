@@ -19,13 +19,29 @@ export default function ProductsPage() {
   const [form, setForm] = useState<Partial<Product>>(emptyProduct);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'TODOS' | 'ATIVOS' | 'INATIVOS'>('TODOS');
 
-  const load = () => apiFetch<Product[]>('/products').then(setProducts);
+  const load = async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await apiFetch<Product[]>('/products');
+      setProducts(data);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Falha ao carregar catalogo.');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    load().catch(console.error);
+    load().catch(() => {
+      // erro tratado via loadError
+    });
   }, []);
 
   const submit = async (event: React.FormEvent) => {
@@ -112,10 +128,25 @@ export default function ProductsPage() {
       <div className="app-section-title">
         <div>
           <span className="app-chip">Catalogo</span>
-          <h2 className="mt-3 text-3xl font-semibold">Produtos</h2>
-          <p className="text-neutral-600">Gerencie catalogo e precos.</p>
+          <h2 className="mt-3 text-3xl font-semibold">Produtos e sabores</h2>
+          <p className="text-neutral-600">
+            Gerencie broas/produtos e variedades de sabor no mesmo cadastro.
+          </p>
         </div>
       </div>
+
+      <div className="app-panel">
+        <p className="text-sm text-neutral-600">
+          Convencao atual: cada sabor/variedade e cadastrado como <strong>produto</strong> na
+          categoria <strong>Sabores</strong> (ex.: T, G, S, R, D).
+        </p>
+      </div>
+
+      {loadError ? (
+        <div className="app-panel">
+          <p className="text-sm text-red-700">Nao foi possivel carregar produtos: {loadError}</p>
+        </div>
+      ) : null}
 
       <div className="grid gap-3 md:grid-cols-3">
         <div className="app-kpi">
@@ -157,7 +188,7 @@ export default function ProductsPage() {
           <FormField label="Categoria" hint="Ex: Bebidas, Lanches">
             <input
               className="app-input"
-              placeholder="Categoria"
+              placeholder="Categoria (ex.: Sabores)"
               value={form.category || ''}
               onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}
               onBlur={(e) => setForm((prev) => ({ ...prev, category: titleCase(e.target.value) }))}
@@ -223,37 +254,47 @@ export default function ProductsPage() {
       </form>
 
       <div className="grid gap-3">
-        {filteredProducts.map((product) => (
-          <div
-            key={product.id}
-            className="app-panel flex flex-wrap items-center justify-between gap-4"
-          >
-            <div>
-              <p className="text-lg font-semibold">{product.name}</p>
-              <p className="text-sm text-neutral-500">
-                {product.category || 'Sem categoria'} • {product.unit || 'un'} • {formatCurrencyBR(product.price)}
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                className="app-button app-button-ghost"
-                onClick={() => startEdit(product)}
-              >
-                Editar
-              </button>
-              <button
-                className="app-button app-button-danger"
-                onClick={() => remove(product.id!)}
-              >
-                Remover
-              </button>
-            </div>
-          </div>
-        ))}
-        {filteredProducts.length === 0 && (
+        {loading ? (
           <div className="app-panel border-dashed text-sm text-neutral-500">
-            Nenhum produto encontrado com este filtro.
+            Carregando produtos...
           </div>
+        ) : (
+          <>
+            {filteredProducts.map((product) => (
+              <div
+                key={product.id}
+                className="app-panel flex flex-wrap items-center justify-between gap-4"
+              >
+                <div>
+                  <p className="text-lg font-semibold">{product.name}</p>
+                  <p className="text-sm text-neutral-500">
+                    {product.category || 'Sem categoria'} • {product.unit || 'un'} • {formatCurrencyBR(product.price)}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    className="app-button app-button-ghost"
+                    onClick={() => startEdit(product)}
+                  >
+                    Editar
+                  </button>
+                  <button
+                    className="app-button app-button-danger"
+                    onClick={() => remove(product.id!)}
+                  >
+                    Remover
+                  </button>
+                </div>
+              </div>
+            ))}
+            {filteredProducts.length === 0 && (
+              <div className="app-panel border-dashed text-sm text-neutral-500">
+                {products.length === 0
+                  ? 'Sem produtos/sabores ainda — cadastre o primeiro.'
+                  : 'Nenhum produto encontrado com este filtro.'}
+              </div>
+            )}
+          </>
         )}
       </div>
     </section>
