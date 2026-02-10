@@ -33,4 +33,10 @@ export class StockService {
       }
     });
   }
+
+  async remove(id: number) {
+    const movement = await this.prisma.stockMovement.findUnique({ where: { id } });
+    if (!movement) throw new NotFoundException('Movimentacao nao encontrada');
+    await this.prisma.stockMovement.delete({ where: { id } });
+  }
 }

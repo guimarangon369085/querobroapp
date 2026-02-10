@@ -97,8 +97,13 @@ export default function CustomersPage() {
   };
 
   const remove = async (id: number) => {
-    await apiFetch(`/customers/${id}`, { method: 'DELETE' });
-    await load();
+    if (!confirm('Remover este cliente?')) return;
+    try {
+      await apiFetch(`/customers/${id}`, { method: 'DELETE' });
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Nao foi possivel remover o cliente.');
+    }
   };
 
   const filteredCustomers = useMemo(() => {

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Inject } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Delete, Inject } from '@nestjs/common';
 import { InventoryService } from './inventory.service.js';
 import { parseWithSchema } from '../../common/validation.js';
 import { z } from 'zod';
@@ -24,6 +24,12 @@ export class InventoryController {
     return this.service.updateItem(parseWithSchema(idSchema, id), body);
   }
 
+  @Delete('inventory-items/:id')
+  async removeItem(@Param('id') id: string) {
+    await this.service.removeItem(parseWithSchema(idSchema, id));
+    return { ok: true };
+  }
+
   @Get('inventory-movements')
   listMovements() {
     return this.service.listMovements();
@@ -32,5 +38,11 @@ export class InventoryController {
   @Post('inventory-movements')
   createMovement(@Body() body: unknown) {
     return this.service.createMovement(body);
+  }
+
+  @Delete('inventory-movements/:id')
+  async removeMovement(@Param('id') id: string) {
+    await this.service.removeMovement(parseWithSchema(idSchema, id));
+    return { ok: true };
   }
 }

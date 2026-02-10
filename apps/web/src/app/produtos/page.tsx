@@ -77,8 +77,13 @@ export default function ProductsPage() {
   };
 
   const remove = async (id: number) => {
-    await apiFetch(`/products/${id}`, { method: 'DELETE' });
-    await load();
+    if (!confirm('Remover este produto?')) return;
+    try {
+      await apiFetch(`/products/${id}`, { method: 'DELETE' });
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Nao foi possivel remover o produto.');
+    }
   };
 
   const filteredProducts = useMemo(() => {
