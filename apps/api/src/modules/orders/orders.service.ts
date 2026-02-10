@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException, Inject } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
 import { OrderItemSchema, OrderSchema, OrderStatusEnum } from '@querobroapp/shared';
@@ -15,9 +16,105 @@ const statusTransitions: Record<string, string[]> = {
   CANCELADO: []
 };
 
+type OrderWithRelations = Prisma.OrderGetPayload<{
+  include: { items: true; customer: true; payments: true };
+}>;
+
 @Injectable()
 export class OrdersService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  private toMoney(value: number) {
+    if (!Number.isFinite(value)) return 0;
+    return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+
+  private getPaidAmount(
+    payments: Array<{
+      amount: number;
+      status: string;
+      paidAt: Date | null;
+    }>
+  ) {
+    return this.toMoney(
+      payments.reduce((sum, payment) => {
+        const isPaid = payment.status === 'PAGO' || Boolean(payment.paidAt);
+        return isPaid ? sum + payment.amount : sum;
+      }, 0)
+    );
+  }
+
+  private deriveOrderPaymentStatus(total: number, amountPaid: number) {
+    if (amountPaid <= 0) return 'PENDENTE';
+    if (amountPaid + 0.00001 >= total) return 'PAGO';
+    return 'PARCIAL';
+  }
+
+  private withFinancial(order: OrderWithRelations) {
+    const total = this.toMoney(order.total ?? 0);
+    const amountPaid = this.getPaidAmount(order.payments || []);
+    const balanceDue = this.toMoney(Math.max(total - amountPaid, 0));
+    const paymentStatus = this.deriveOrderPaymentStatus(total, amountPaid);
+    return {
+      ...order,
+      amountPaid,
+      balanceDue,
+      paymentStatus
+    };
+  }
+
+  private shouldQueueWhatsappStatus(status: string) {
+    return ['CONFIRMADO', 'PRONTO', 'ENTREGUE'].includes(status);
+  }
+
+  private async queueOrderStatusOutbox(
+    tx: Prisma.TransactionClient,
+    order: OrderWithRelations,
+    status: string
+  ) {
+    if (!this.shouldQueueWhatsappStatus(status)) return;
+    const destination = order.customer?.phone?.trim();
+    if (!destination) return;
+
+    const amountPaid = this.getPaidAmount(order.payments || []);
+    const payload = {
+      event: 'ORDER_STATUS_CHANGED',
+      orderId: order.id,
+      status,
+      customer: {
+        id: order.customer?.id,
+        name: order.customer?.name
+      },
+      totals: {
+        total: this.toMoney(order.total ?? 0),
+        amountPaid,
+        balanceDue: this.toMoney(Math.max((order.total ?? 0) - amountPaid, 0)),
+        paymentStatus: this.deriveOrderPaymentStatus(this.toMoney(order.total ?? 0), amountPaid)
+      },
+      createdAt: new Date().toISOString()
+    };
+
+    await tx.outboxMessage.create({
+      data: {
+        messageId: randomUUID(),
+        channel: 'whatsapp',
+        to: destination,
+        template: 'order_status_changed',
+        payload: JSON.stringify(payload),
+        status: 'PENDING',
+        orderId: order.id
+      }
+    });
+  }
+
+  private async getRaw(id: number) {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      include: { items: true, customer: true, payments: true }
+    });
+    if (!order) throw new NotFoundException('Pedido nao encontrado');
+    return order;
+  }
 
   private parseSaleUnits(label?: string | null) {
     if (!label) return 1;
@@ -73,20 +170,17 @@ export class OrdersService {
     }
   }
 
-  list() {
-    return this.prisma.order.findMany({
+  async list() {
+    const orders = await this.prisma.order.findMany({
       include: { items: true, customer: true, payments: true },
       orderBy: { id: 'desc' }
     });
+    return orders.map((order) => this.withFinancial(order));
   }
 
   async get(id: number) {
-    const order = await this.prisma.order.findUnique({
-      where: { id },
-      include: { items: true, customer: true, payments: true }
-    });
-    if (!order) throw new NotFoundException('Pedido nao encontrado');
-    return order;
+    const order = await this.getRaw(id);
+    return this.withFinancial(order);
   }
 
   async create(payload: unknown) {
@@ -115,16 +209,17 @@ export class OrdersService {
       for (const item of parsedItems) {
         const product = productMap.get(item.productId);
         if (!product) throw new NotFoundException('Produto nao encontrado');
-        const unitPrice = product.price;
-        const total = unitPrice * item.quantity;
+        const unitPrice = this.toMoney(product.price);
+        const total = this.toMoney(unitPrice * item.quantity);
         subtotal += total;
         itemsData.push({ productId: item.productId, quantity: item.quantity, unitPrice, total });
       }
 
-      const discount = data.discount ?? 0;
-      const total = Math.max(subtotal - discount, 0);
+      subtotal = this.toMoney(subtotal);
+      const discount = this.toMoney(data.discount ?? 0);
+      const total = this.toMoney(Math.max(subtotal - discount, 0));
 
-      return tx.order.create({
+      const createdOrder = await tx.order.create({
         data: {
           customerId: data.customerId,
           notes: data.notes ?? null,
@@ -136,37 +231,43 @@ export class OrdersService {
           }
         },
         include: { items: true, customer: true, payments: true }
-      }).then(async (order) => {
-        await this.applyInventoryMovements(
-          tx,
-          order.id,
-          itemsData.map((item) => ({ productId: item.productId, quantity: item.quantity })),
-          'OUT'
-        );
-        return order;
       });
+
+      await this.applyInventoryMovements(
+        tx,
+        createdOrder.id,
+        itemsData.map((item) => ({ productId: item.productId, quantity: item.quantity })),
+        'OUT'
+      );
+
+      return this.withFinancial(createdOrder);
     });
   }
 
   async update(id: number, payload: unknown) {
-    await this.get(id);
+    const existing = await this.getRaw(id);
     const data = updateSchema.parse(payload);
 
-    const discount = data.discount ?? undefined;
-    return this.prisma.order.update({
+    const subtotal = this.toMoney(existing.items.reduce((sum, item) => sum + item.total, 0));
+    const discount = this.toMoney(data.discount ?? existing.discount ?? 0);
+    const total = this.toMoney(Math.max(subtotal - discount, 0));
+
+    const updated = await this.prisma.order.update({
       where: { id },
       data: {
         notes: data.notes ?? undefined,
         discount,
-        subtotal: data.subtotal ?? undefined,
-        total: data.total ?? undefined
+        subtotal,
+        total
       },
       include: { items: true, customer: true, payments: true }
     });
+
+    return this.withFinancial(updated);
   }
 
   async remove(id: number) {
-    const order = await this.get(id);
+    const order = await this.getRaw(id);
     await this.prisma.$transaction(async (tx) => {
       if (order.status !== 'CANCELADO') {
         await this.applyInventoryMovements(
@@ -192,8 +293,8 @@ export class OrdersService {
       const product = await tx.product.findUnique({ where: { id: data.productId } });
       if (!product) throw new NotFoundException('Produto nao encontrado');
 
-      const unitPrice = product.price;
-      const total = unitPrice * data.quantity;
+      const unitPrice = this.toMoney(product.price);
+      const total = this.toMoney(unitPrice * data.quantity);
 
       await tx.orderItem.create({
         data: {
@@ -205,8 +306,8 @@ export class OrdersService {
         }
       });
 
-      const newSubtotal = order.items.reduce((sum, item) => sum + item.total, 0) + total;
-      const newTotal = Math.max(newSubtotal - order.discount, 0);
+      const newSubtotal = this.toMoney(order.items.reduce((sum, item) => sum + item.total, 0) + total);
+      const newTotal = this.toMoney(Math.max(newSubtotal - order.discount, 0));
       await tx.order.update({ where: { id: orderId }, data: { subtotal: newSubtotal, total: newTotal } });
 
       await this.applyInventoryMovements(
@@ -216,10 +317,12 @@ export class OrdersService {
         'OUT'
       );
 
-      return tx.order.findUnique({
+      const updatedOrder = await tx.order.findUnique({
         where: { id: orderId },
         include: { items: true, customer: true, payments: true }
       });
+      if (!updatedOrder) throw new NotFoundException('Pedido nao encontrado');
+      return this.withFinancial(updatedOrder);
     });
   }
 
@@ -237,8 +340,8 @@ export class OrdersService {
       await tx.orderItem.delete({ where: { id: itemId } });
 
       const remaining = order.items.filter((i) => i.id !== itemId);
-      const newSubtotal = remaining.reduce((sum, i) => sum + i.total, 0);
-      const newTotal = Math.max(newSubtotal - order.discount, 0);
+      const newSubtotal = this.toMoney(remaining.reduce((sum, i) => sum + i.total, 0));
+      const newTotal = this.toMoney(Math.max(newSubtotal - order.discount, 0));
 
       await tx.order.update({ where: { id: orderId }, data: { subtotal: newSubtotal, total: newTotal } });
 
@@ -249,16 +352,18 @@ export class OrdersService {
         'IN'
       );
 
-      return tx.order.findUnique({
+      const updatedOrder = await tx.order.findUnique({
         where: { id: orderId },
         include: { items: true, customer: true, payments: true }
       });
+      if (!updatedOrder) throw new NotFoundException('Pedido nao encontrado');
+      return this.withFinancial(updatedOrder);
     });
   }
 
   async updateStatus(orderId: number, nextStatus: unknown) {
     const status = OrderStatusEnum.parse(nextStatus);
-    const order = await this.get(orderId);
+    const order = await this.getRaw(orderId);
 
     const allowed = statusTransitions[order.status] || [];
     if (!allowed.includes(status)) {
@@ -274,11 +379,13 @@ export class OrdersService {
           'IN'
         );
       }
-      return tx.order.update({
+      const updatedOrder = await tx.order.update({
         where: { id: orderId },
         data: { status },
         include: { items: true, customer: true, payments: true }
       });
+      await this.queueOrderStatusOutbox(tx, updatedOrder, status);
+      return this.withFinancial(updatedOrder);
     });
   }
 }

@@ -10,9 +10,12 @@ export const OrderStatusEnum = z.enum([
 ]);
 
 export const PaymentStatusEnum = z.enum(['PENDENTE', 'PAGO', 'CANCELADO']);
+export const OrderPaymentStatusEnum = z.enum(['PENDENTE', 'PARCIAL', 'PAGO']);
 
 export const StockMovementTypeEnum = z.enum(['IN', 'OUT', 'ADJUST']);
 export const InventoryCategoryEnum = z.enum(['INGREDIENTE', 'EMBALAGEM_INTERNA', 'EMBALAGEM_EXTERNA']);
+export const OutboxChannelEnum = z.enum(['whatsapp']);
+export const OutboxStatusEnum = z.enum(['PENDING', 'SENT', 'FAILED']);
 
 export const CustomerSchema = z.object({
   id: z.number().int().positive().optional(),
@@ -62,6 +65,9 @@ export const OrderSchema = z.object({
   subtotal: z.number().nonnegative().optional(),
   discount: z.number().nonnegative().optional(),
   total: z.number().nonnegative().optional(),
+  amountPaid: z.number().nonnegative().optional(),
+  balanceDue: z.number().nonnegative().optional(),
+  paymentStatus: OrderPaymentStatusEnum.optional(),
   notes: z.string().optional().nullable(),
   createdAt: z.string().optional().nullable(),
   items: z.array(OrderItemSchema).optional()
@@ -94,7 +100,7 @@ export const InventoryItemSchema = z.object({
   category: InventoryCategoryEnum,
   unit: z.string().min(1),
   purchasePackSize: z.number().nonnegative(),
-  purchasePackCost: z.number().nonnegative().optional().nullable(),
+  purchasePackCost: z.number().nonnegative().optional(),
   createdAt: z.string().optional().nullable()
 });
 
@@ -125,9 +131,57 @@ export const BomItemSchema = z.object({
   qtyPerUnit: z.number().nonnegative().optional().nullable()
 });
 
+export const OutboxMessageSchema = z.object({
+  id: z.number().int().positive().optional(),
+  messageId: z.string().min(1),
+  channel: OutboxChannelEnum.default('whatsapp'),
+  to: z.string().min(1),
+  template: z.string().min(1),
+  payload: z.unknown(),
+  status: OutboxStatusEnum.default('PENDING'),
+  createdAt: z.string().optional().nullable(),
+  sentAt: z.string().optional().nullable()
+});
+
+export const ProductionRequirementBreakdownSchema = z.object({
+  productId: z.number().int().positive(),
+  productName: z.string(),
+  orderId: z.number().int().positive().optional(),
+  orderItemId: z.number().int().positive().optional(),
+  quantity: z.number().nonnegative()
+});
+
+export const ProductionRequirementRowSchema = z.object({
+  ingredientId: z.number().int().positive(),
+  name: z.string(),
+  unit: z.string(),
+  requiredQty: z.number().nonnegative(),
+  availableQty: z.number(),
+  shortageQty: z.number().nonnegative(),
+  breakdown: z.array(ProductionRequirementBreakdownSchema).optional()
+});
+
+export const ProductionRequirementWarningSchema = z.object({
+  type: z.enum(['BOM_MISSING', 'BOM_ITEM_MISSING_QTY']),
+  orderId: z.number().int().positive(),
+  productId: z.number().int().positive(),
+  productName: z.string(),
+  message: z.string()
+});
+
+export const ProductionRequirementsResponseSchema = z.object({
+  date: z.string(),
+  basis: z.enum(['deliveryDate', 'createdAtPlus1']),
+  rows: z.array(ProductionRequirementRowSchema),
+  warnings: z.array(ProductionRequirementWarningSchema)
+});
+
 export type OrderStatus = z.infer<typeof OrderStatusEnum>;
 export type PaymentStatus = z.infer<typeof PaymentStatusEnum>;
+export type OrderPaymentStatus = z.infer<typeof OrderPaymentStatusEnum>;
 export type StockMovementType = z.infer<typeof StockMovementTypeEnum>;
+export type OutboxChannel = z.infer<typeof OutboxChannelEnum>;
+export type OutboxStatus = z.infer<typeof OutboxStatusEnum>;
 
 export type Customer = z.infer<typeof CustomerSchema>;
 export type Product = z.infer<typeof ProductSchema>;
@@ -140,3 +194,8 @@ export type InventoryItem = z.infer<typeof InventoryItemSchema>;
 export type InventoryMovement = z.infer<typeof InventoryMovementSchema>;
 export type Bom = z.infer<typeof BomSchema>;
 export type BomItem = z.infer<typeof BomItemSchema>;
+export type OutboxMessage = z.infer<typeof OutboxMessageSchema>;
+export type ProductionRequirementBreakdown = z.infer<typeof ProductionRequirementBreakdownSchema>;
+export type ProductionRequirementRow = z.infer<typeof ProductionRequirementRowSchema>;
+export type ProductionRequirementWarning = z.infer<typeof ProductionRequirementWarningSchema>;
+export type ProductionRequirementsResponse = z.infer<typeof ProductionRequirementsResponseSchema>;
