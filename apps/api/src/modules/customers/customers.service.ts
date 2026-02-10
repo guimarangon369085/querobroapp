@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service.js';
 import { CustomerSchema } from '@querobroapp/shared';
+import { normalizePhone, normalizeTitle } from '../../common/normalize.js';
 
 @Injectable()
 export class CustomersService {
@@ -18,13 +19,28 @@ export class CustomersService {
 
   create(payload: unknown) {
     const data = CustomerSchema.omit({ id: true, createdAt: true }).parse(payload);
-    return this.prisma.customer.create({ data });
+    return this.prisma.customer.create({
+      data: {
+        ...data,
+        name: normalizeTitle(data.name) ?? data.name,
+        phone: normalizePhone(data.phone),
+        address: normalizeTitle(data.address ?? undefined)
+      }
+    });
   }
 
   async update(id: number, payload: unknown) {
     await this.get(id);
     const data = CustomerSchema.partial().omit({ id: true, createdAt: true }).parse(payload);
-    return this.prisma.customer.update({ where: { id }, data });
+    return this.prisma.customer.update({
+      where: { id },
+      data: {
+        ...data,
+        name: data.name ? normalizeTitle(data.name) ?? data.name : undefined,
+        phone: data.phone !== undefined ? normalizePhone(data.phone) : undefined,
+        address: data.address !== undefined ? normalizeTitle(data.address) ?? null : undefined
+      }
+    });
   }
 
   async remove(id: number) {

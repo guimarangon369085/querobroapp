@@ -2,7 +2,7 @@
 
 Monorepo com Turborepo + pnpm:
 
-- `apps/api`: NestJS + Prisma (Postgres)
+- `apps/api`: NestJS + Prisma (SQLite em dev, Postgres em prod)
 - `apps/web`: Next.js + Tailwind + shadcn/ui
 - `apps/mobile`: Expo React Native
 - `packages/shared`: schemas e types com zod
@@ -12,9 +12,9 @@ Monorepo com Turborepo + pnpm:
 
 - Node.js 20+
 - pnpm 9+
-- Docker (para Postgres local)
+- Docker (opcional, apenas para Postgres local)
 
-## Setup local
+## Setup local (SQLite)
 
 1. Instale dependencias:
 
@@ -31,23 +31,33 @@ cp apps/web/.env.example apps/web/.env
 cp apps/mobile/.env.example apps/mobile/.env
 ```
 
-3. Suba o Postgres:
+3. Gere o client do Prisma, rode migracao e seed:
+
+```bash
+pnpm --filter @querobroapp/api prisma:generate:dev
+pnpm --filter @querobroapp/api prisma:migrate:dev
+pnpm --filter @querobroapp/api prisma:seed
+```
+
+4. Rode tudo:
+
+```bash
+pnpm dev
+```
+
+## Setup local (Postgres)
+
+1. Suba o Postgres:
 
 ```bash
 docker compose up -d
 ```
 
-4. Gere o client do Prisma e rode seed:
+2. Ajuste `DATABASE_URL_PROD` em `apps/api/.env` e rode:
 
 ```bash
-pnpm --filter @querobroapp/api prisma:generate
-pnpm --filter @querobroapp/api prisma:seed
-```
-
-5. Rode tudo:
-
-```bash
-pnpm dev
+pnpm --filter @querobroapp/api prisma:generate:prod
+pnpm --filter @querobroapp/api prisma:migrate:prod
 ```
 
 ## Scripts
@@ -75,5 +85,5 @@ pnpm dev
 
 ## Observacoes
 
-- O Prisma usa `DATABASE_URL` em `apps/api/.env`.
-- Para mudar a porta do Postgres, ajuste `.env` no root.
+- Em desenvolvimento, o Prisma usa SQLite (`DATABASE_URL=file:./dev.db`).
+- Em producao, use `DATABASE_URL_PROD` com Postgres e os scripts `prisma:*:prod`.
