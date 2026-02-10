@@ -1,4 +1,4 @@
-# QuerobroApp Monorepo
+# QUEROBROApp Monorepo
 
 Monorepo com Turborepo + pnpm:
 
