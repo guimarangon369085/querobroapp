@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, Post, Inject } from '@nestjs/common';
 import { StockService } from './stock.service.js';
 
 @Controller('stock-movements')
 export class StockController {
-  constructor(private readonly service: StockService) {}
+  constructor(@Inject(StockService) private readonly service: StockService) {}
 
   @Get()
   list() {

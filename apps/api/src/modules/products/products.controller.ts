@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, Param, Body, Post, Put } from '@nestjs/common';
+import { Controller, Delete, Get, Param, Body, Post, Put, Inject } from '@nestjs/common';
 import { ProductsService } from './products.service.js';
 import { parseWithSchema } from '../../common/validation.js';
 import { z } from 'zod';
@@ -8,7 +8,7 @@ const idSchema = z.coerce.number().int().positive();
 
 @Controller('products')
 export class ProductsController {
-  constructor(private readonly service: ProductsService) {}
+  constructor(@Inject(ProductsService) private readonly service: ProductsService) {}
 
   @Get()
   list() {

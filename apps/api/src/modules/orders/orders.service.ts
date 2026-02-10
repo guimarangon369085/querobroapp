@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Inject } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
 import { OrderItemSchema, OrderSchema, OrderStatusEnum } from '@querobroapp/shared';
@@ -17,7 +17,7 @@ const statusTransitions: Record<string, string[]> = {
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   private parseSaleUnits(label?: string | null) {
     if (!label) return 1;

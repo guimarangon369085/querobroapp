@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Inject } from '@nestjs/common';
 import { InventoryService } from './inventory.service.js';
 import { parseWithSchema } from '../../common/validation.js';
 import { z } from 'zod';
@@ -7,7 +7,7 @@ const idSchema = z.coerce.number().int().positive();
 
 @Controller()
 export class InventoryController {
-  constructor(private readonly service: InventoryService) {}
+  constructor(@Inject(InventoryService) private readonly service: InventoryService) {}
 
   @Get('inventory-items')
   listItems() {
