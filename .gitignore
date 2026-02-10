@@ -16,3 +16,4 @@ node_modules
 /apps/api/prisma/dev.db*
 /apps/mobile/.expo
 /packages/shared/dist
+/docs/.cache
