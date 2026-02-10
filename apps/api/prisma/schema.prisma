@@ -8,14 +8,29 @@ datasource db {
 }
 
 model Customer {
-  id        Int      @id @default(autoincrement())
-  name      String
-  phone     String?
-  address   String?
-  createdAt DateTime @default(now())
-  orders    Order[]
+  id           Int      @id @default(autoincrement())
+  name         String
+  firstName    String?
+  lastName     String?
+  email        String?
+  phone        String?
+  address      String?
+  addressLine1 String?
+  addressLine2 String?
+  neighborhood String?
+  city         String?
+  state        String?
+  postalCode   String?
+  country      String?
+  placeId      String?
+  lat          Float?
+  lng          Float?
+  deliveryNotes String?
+  createdAt    DateTime @default(now())
+  orders       Order[]
 
   @@index([name])
+  @@index([email])
 }
 
 model Product {
