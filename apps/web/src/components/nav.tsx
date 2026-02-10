@@ -19,19 +19,23 @@ export function Nav() {
   const pathname = usePathname();
 
   return (
-    <nav className="app-nav">
-      {links.map((link) => (
-        <Link
-          key={link.href}
-          href={link.href}
-          className={`app-nav__link ${isActive(pathname, link.href) ? 'app-nav__link--active' : ''}`}
-        >
-          <span aria-hidden className="app-nav__icon">
-            {link.icon}
-          </span>
-          {link.label}
-        </Link>
-      ))}
+    <nav className="app-nav" aria-label="Navegacao principal">
+      {links.map((link) => {
+        const active = isActive(pathname, link.href);
+        return (
+          <Link
+            key={link.href}
+            href={link.href}
+            aria-current={active ? 'page' : undefined}
+            className={`app-nav__link ${active ? 'app-nav__link--active' : ''}`}
+          >
+            <span aria-hidden className="app-nav__icon">
+              {link.icon}
+            </span>
+            {link.label}
+          </Link>
+        );
+      })}
     </nav>
   );
 }

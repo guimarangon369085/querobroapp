@@ -40,6 +40,26 @@ function derivePaymentStatus(order: OrderView) {
   return 'PARCIAL';
 }
 
+function paymentStatusBadgeClass(status: 'PENDENTE' | 'PARCIAL' | 'PAGO') {
+  if (status === 'PAGO') return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+  if (status === 'PARCIAL') return 'bg-amber-100 text-amber-800 border-amber-200';
+  return 'bg-rose-100 text-rose-800 border-rose-200';
+}
+
+function orderStatusBadgeClass(status: string) {
+  if (status === 'ENTREGUE') return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+  if (status === 'CANCELADO') return 'bg-rose-100 text-rose-800 border-rose-200';
+  if (status === 'PRONTO') return 'bg-blue-100 text-blue-800 border-blue-200';
+  return 'bg-neutral-100 text-neutral-700 border-neutral-200';
+}
+
+function paymentRecordBadgeClass(status: string) {
+  if (status === 'PAGO') return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+  if (status === 'PENDENTE') return 'bg-rose-100 text-rose-800 border-rose-200';
+  if (status === 'CANCELADO') return 'bg-neutral-100 text-neutral-700 border-neutral-200';
+  return 'bg-amber-100 text-amber-800 border-amber-200';
+}
+
 export default function OrdersPage() {
   const [orders, setOrders] = useState<OrderView[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -556,14 +576,26 @@ export default function OrdersPage() {
                     onClick={() => setSelectedOrder(order)}
                   >
                     <p className="text-lg font-semibold">Pedido #{order.id}</p>
-                    <p className="text-sm text-neutral-500">Status: {order.status}</p>
+                    <p className="text-sm text-neutral-500">
+                      Status:{' '}
+                      <span
+                        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${orderStatusBadgeClass(order.status || '')}`}
+                      >
+                        {order.status}
+                      </span>
+                    </p>
                     <p className="text-sm text-neutral-500">
                       Cliente: {customerMap.get(order.customerId)?.name || 'Sem cliente'}
                     </p>
                     <p className="text-sm text-neutral-500">Total: {formatCurrencyBR(order.total ?? 0)}</p>
                     <p className="text-sm text-neutral-500">
-                      Financeiro: {derivePaymentStatus(order)} • Pago: {formatCurrencyBR(amountPaid)} • Saldo:{' '}
-                      {formatCurrencyBR(balance)}
+                      Financeiro:{' '}
+                      <span
+                        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${paymentStatusBadgeClass(derivePaymentStatus(order))}`}
+                      >
+                        {derivePaymentStatus(order)}
+                      </span>{' '}
+                      • Pago: {formatCurrencyBR(amountPaid)} • Saldo: {formatCurrencyBR(balance)}
                     </p>
                   </button>
                 );
@@ -585,7 +617,14 @@ export default function OrdersPage() {
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h3 className="text-xl font-semibold">Pedido #{selectedOrder.id}</h3>
-              <p className="text-sm text-neutral-500">Status atual: {selectedOrder.status}</p>
+              <p className="text-sm text-neutral-500">
+                Status atual:{' '}
+                <span
+                  className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${orderStatusBadgeClass(selectedOrder.status || '')}`}
+                >
+                  {selectedOrder.status}
+                </span>
+              </p>
             </div>
             <select
               className="app-select"
@@ -615,7 +654,13 @@ export default function OrdersPage() {
             </div>
             <div className="app-kpi">
               <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Financeiro</p>
-              <p className="mt-2 text-xl font-semibold">{selectedOrderPaymentStatus}</p>
+              <p className="mt-2 text-xl font-semibold">
+                <span
+                  className={`inline-flex items-center rounded-full border px-2 py-1 text-xs font-semibold ${paymentStatusBadgeClass(selectedOrderPaymentStatus)}`}
+                >
+                  {selectedOrderPaymentStatus}
+                </span>
+              </p>
             </div>
           </div>
 
@@ -742,7 +787,13 @@ export default function OrdersPage() {
                   <div key={payment.id} className="rounded-lg border border-white/60 bg-white/70 px-3 py-2 text-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span>
-                        {payment.method} • {payment.status} • {formatCurrencyBR(payment.amount)} •{' '}
+                        {payment.method} •{' '}
+                        <span
+                          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${paymentRecordBadgeClass(payment.status || '')}`}
+                        >
+                          {payment.status}
+                        </span>{' '}
+                        • {formatCurrencyBR(payment.amount)} •{' '}
                         {payment.paidAt ? new Date(payment.paidAt).toLocaleDateString('pt-BR') : 'sem data'}
                       </span>
                       <button className="app-button app-button-danger" onClick={() => removePayment(payment.id!)}>
