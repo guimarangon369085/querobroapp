@@ -38,16 +38,19 @@ export default function DashboardPage() {
   ];
 
   return (
-    <section className="grid gap-6">
-      <div>
-        <h2 className="text-2xl font-semibold">Dashboard</h2>
-        <p className="text-neutral-600">Resumo rapido do ERP.</p>
+    <section className="grid gap-8">
+      <div className="app-section-title">
+        <div>
+          <span className="app-chip">Panorama</span>
+          <h2 className="mt-3 text-3xl font-semibold">Dashboard executivo</h2>
+          <p className="text-neutral-600">Resumo premium da operacao em tempo real.</p>
+        </div>
       </div>
       <div className="grid gap-4 md:grid-cols-4">
         {cards.map((card) => (
-          <div key={card.label} className="rounded-xl border border-neutral-200 bg-white p-4">
-            <p className="text-sm text-neutral-500">{card.label}</p>
-            <p className="mt-2 text-2xl font-semibold">{card.value}</p>
+          <div key={card.label} className="app-kpi">
+            <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">{card.label}</p>
+            <p className="mt-3 text-3xl font-semibold">{card.value}</p>
           </div>
         ))}
       </div>

@@ -35,7 +35,6 @@ export class ProductsController {
 
   @Delete(':id')
   async remove(@Param('id') id: string) {
-    await this.service.remove(parseWithSchema(idSchema, id));
-    return { ok: true };
+    return this.service.remove(parseWithSchema(idSchema, id));
   }
 }

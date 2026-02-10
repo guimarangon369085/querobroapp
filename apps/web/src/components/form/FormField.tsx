@@ -9,8 +9,8 @@ type FormFieldProps = {
 
 export function FormField({ label, hint, error, children }: FormFieldProps) {
   return (
-    <label className="grid gap-1 text-sm">
-      <span className="font-medium text-neutral-800">{label}</span>
+    <label className="grid gap-2 text-sm text-neutral-700">
+      <span className="text-xs uppercase tracking-[0.2em] text-neutral-500">{label}</span>
       {children}
       {error ? (
         <span className="text-xs text-red-600">{error}</span>

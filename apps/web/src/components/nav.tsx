@@ -10,12 +10,12 @@ const links = [
 
 export function Nav() {
   return (
-    <nav className="flex flex-wrap items-center gap-4 text-sm text-neutral-600">
+    <nav className="app-nav">
       {links.map((link) => (
         <Link
           key={link.href}
           href={link.href}
-          className="rounded-full border border-neutral-200 px-3 py-1 text-neutral-700 hover:bg-neutral-100"
+          className="app-nav__link"
         >
           {link.label}
         </Link>

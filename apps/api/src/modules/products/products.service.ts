@@ -58,9 +58,10 @@ export class ProductsService {
         where: { id },
         data: { active: false }
       });
-      return;
+      return { archived: true };
     }
 
     await this.prisma.product.delete({ where: { id } });
+    return { deleted: true };
   }
 }
