@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { formatPhoneBR, normalizeAddress, normalizePhone, titleCase } from '@/lib/format';
 import { loadGoogleMaps } from '@/lib/googleMaps';
 import { FormField } from '@/components/form/FormField';
+import { useSearchParams } from 'next/navigation';
 
 const emptyCustomer: Partial<Customer> = {
   name: '',
@@ -28,12 +29,14 @@ const emptyCustomer: Partial<Customer> = {
 };
 
 export default function CustomersPage() {
+  const searchParams = useSearchParams();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [form, setForm] = useState<Partial<Customer>>(emptyCustomer);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const addressInputRef = useRef<HTMLInputElement | null>(null);
+  const openedCustomerIdRef = useRef<number | null>(null);
 
   const load = () => apiFetch<Customer[]>('/customers').then(setCustomers);
 
@@ -180,6 +183,19 @@ export default function CustomersPage() {
       deliveryNotes: customer.deliveryNotes ?? ''
     });
   };
+
+  useEffect(() => {
+    const raw = searchParams.get('editCustomerId');
+    if (!raw) return;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    if (openedCustomerIdRef.current === parsed) return;
+
+    const customer = customers.find((entry) => entry.id === parsed);
+    if (!customer) return;
+    openedCustomerIdRef.current = parsed;
+    startEdit(customer);
+  }, [searchParams, customers]);
 
   const remove = async (id: number) => {
     if (!confirm('Remover este cliente?')) return;

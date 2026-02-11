@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import type { Customer, Order, Product, OrderItem, Payment } from '@querobroapp/shared';
 import { apiFetch } from '@/lib/api';
@@ -626,17 +627,25 @@ export default function OrdersPage() {
                 </span>
               </p>
             </div>
-            <select
-              className="app-select"
-              value={selectedOrder.status}
-              onChange={(e) => updateStatus(selectedOrder.id!, e.target.value)}
-            >
-              {orderStatuses.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
+            <div className="flex flex-wrap items-center gap-2">
+              <Link
+                className="app-button app-button-ghost"
+                href={`/clientes?editCustomerId=${selectedOrder.customerId}`}
+              >
+                Ver cliente
+              </Link>
+              <select
+                className="app-select"
+                value={selectedOrder.status}
+                onChange={(e) => updateStatus(selectedOrder.id!, e.target.value)}
+              >
+                {orderStatuses.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div className="grid gap-3 md:grid-cols-4">
