@@ -17,3 +17,4 @@ node_modules
 /apps/mobile/.expo
 /packages/shared/dist
 /docs/.cache
+tsconfig.tsbuildinfo
