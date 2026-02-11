@@ -11,17 +11,41 @@ import {
   TextInput,
   View
 } from 'react-native';
-import type { Customer, Order, OrderItem, Product } from '@querobroapp/shared';
+import type { Customer, Order, OrderItem, Payment, Product } from '@querobroapp/shared';
 import { apiFetch } from './src/lib/api';
 import { formatCurrencyBR, formatPhoneBR, normalizePhone, parseCurrencyBR, titleCase } from './src/lib/format';
 
 type TabKey = 'dashboard' | 'customers' | 'products' | 'orders';
 
+type OrderView = Order & {
+  items?: OrderItem[];
+  payments?: Payment[];
+  amountPaid?: number;
+  balanceDue?: number;
+  paymentStatus?: 'PENDENTE' | 'PARCIAL' | 'PAGO';
+};
+
+const paymentMethods = ['pix', 'dinheiro', 'cartao', 'transferencia'] as const;
+
+function toMoney(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function derivePaymentStatus(order: OrderView) {
+  const total = toMoney(order.total ?? 0);
+  const amountPaid = toMoney(order.amountPaid ?? 0);
+  if (amountPaid <= 0) return 'PENDENTE';
+  if (amountPaid + 0.00001 >= total) return 'PAGO';
+  return 'PARCIAL';
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<OrderView[]>([]);
+  const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
 
   const [customerForm, setCustomerForm] = useState<Partial<Customer>>({ name: '', phone: '', address: '' });
   const [editingCustomerId, setEditingCustomerId] = useState<number | null>(null);
@@ -46,6 +70,9 @@ export default function App() {
   const [showCustomerList, setShowCustomerList] = useState(false);
   const [showProductList, setShowProductList] = useState(false);
 
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<(typeof paymentMethods)[number]>('pix');
+
   const productMap = useMemo(() => new Map(products.map((p) => [p.id!, p])), [products]);
   const orderSubtotal = useMemo(() => {
     return orderItems.reduce((sum, item) => {
@@ -60,7 +87,7 @@ export default function App() {
     const [customersData, productsData, ordersData] = await Promise.all([
       apiFetch<Customer[]>('/customers'),
       apiFetch<Product[]>('/products'),
-      apiFetch<Order[]>('/orders')
+      apiFetch<OrderView[]>('/orders')
     ]);
     setCustomers(customersData);
     setProducts(productsData);
@@ -202,6 +229,87 @@ export default function App() {
   const filteredProducts = products.filter((p) =>
     p.name.toLowerCase().includes(productSearch.toLowerCase())
   );
+
+  const selectedOrder = useMemo(() => {
+    if (!selectedOrderId) return null;
+    return orders.find((order) => order.id === selectedOrderId) || null;
+  }, [orders, selectedOrderId]);
+
+  const selectedOrderTotals = useMemo(() => {
+    if (!selectedOrder) return null;
+    const total = toMoney(selectedOrder.total ?? 0);
+    const amountPaid = toMoney(selectedOrder.amountPaid ?? 0);
+    const balanceDue = toMoney(selectedOrder.balanceDue ?? Math.max(total - amountPaid, 0));
+    const paymentStatus = selectedOrder.paymentStatus ?? derivePaymentStatus(selectedOrder);
+    return { total, amountPaid, balanceDue, paymentStatus };
+  }, [selectedOrder]);
+
+  const registerPayment = async () => {
+    if (!selectedOrder?.id) return;
+
+    const amount = parseCurrencyBR(paymentAmount);
+    if (amount <= 0) {
+      Alert.alert('Validacao', 'Informe um valor de pagamento maior que zero.');
+      return;
+    }
+
+    const balance = selectedOrderTotals?.balanceDue ?? 0;
+    if (amount > balance + 0.00001) {
+      Alert.alert('Validacao', 'Pagamento acima do saldo do pedido.');
+      return;
+    }
+
+    try {
+      await apiFetch('/payments', {
+        method: 'POST',
+        body: JSON.stringify({
+          orderId: selectedOrder.id,
+          amount,
+          method: paymentMethod,
+          status: 'PAGO',
+          paidAt: new Date().toISOString()
+        })
+      });
+      setPaymentAmount('');
+      await loadAll();
+      Alert.alert('OK', 'Pagamento registrado.');
+    } catch (err) {
+      Alert.alert('Erro', err instanceof Error ? err.message : 'Nao foi possivel registrar pagamento.');
+    }
+  };
+
+  const markOrderPaid = async () => {
+    if (!selectedOrder?.id) return;
+    const balance = selectedOrderTotals?.balanceDue ?? 0;
+    if (balance <= 0) {
+      Alert.alert('OK', 'Este pedido ja esta totalmente pago.');
+      return;
+    }
+
+    Alert.alert(
+      'Confirmar',
+      `Marcar pedido #${selectedOrder.id} como pago no valor de ${formatCurrencyBR(balance)}?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Marcar pago',
+          style: 'default',
+          onPress: async () => {
+            try {
+              await apiFetch(`/orders/${selectedOrder.id}/mark-paid`, {
+                method: 'PATCH',
+                body: JSON.stringify({ method: paymentMethod })
+              });
+              await loadAll();
+              Alert.alert('OK', 'Pedido marcado como pago.');
+            } catch (err) {
+              Alert.alert('Erro', err instanceof Error ? err.message : 'Nao foi possivel marcar como pago.');
+            }
+          }
+        }
+      ]
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -519,17 +627,109 @@ export default function App() {
             keyExtractor={(item) => String(item.id)}
             scrollEnabled={false}
             renderItem={({ item }) => (
-              <View style={styles.listItem}>
+              <Pressable style={styles.listItem} onPress={() => setSelectedOrderId(item.id!)}>
                 <Text style={styles.listTitle}>Pedido #{item.id}</Text>
+                <View style={styles.badgeRow}>
+                  <Text style={styles.listSubtitle}>{item.status}</Text>
+                  <View style={[styles.badge, styles[`badge_${derivePaymentStatus(item)}` as const]]}>
+                    <Text style={styles.badgeText}>{item.paymentStatus ?? derivePaymentStatus(item)}</Text>
+                  </View>
+                </View>
+                <Text style={styles.listSubtitle}>Total: {formatCurrencyBR(item.total)}</Text>
                 <Text style={styles.listSubtitle}>
-                  {item.status} • {formatCurrencyBR(item.total)}
+                  Pago: {formatCurrencyBR(item.amountPaid ?? 0)} • Saldo: {formatCurrencyBR(item.balanceDue ?? 0)}
                 </Text>
-                <Text style={styles.listSubtitle}>
-                  Itens: {(item.items as OrderItem[] | undefined)?.length ?? 0}
-                </Text>
-              </View>
+              </Pressable>
             )}
           />
+
+          {orders.length === 0 ? (
+            <Text style={styles.emptyHint}>Sem pedidos ainda — crie o primeiro.</Text>
+          ) : null}
+
+          {selectedOrder && selectedOrderTotals ? (
+            <View style={styles.formCard}>
+              <View style={styles.rowBetween}>
+                <Text style={styles.sectionTitle}>Pedido #{selectedOrder.id}</Text>
+                <Pressable style={styles.secondaryButton} onPress={() => setSelectedOrderId(null)}>
+                  <Text style={styles.secondaryButtonText}>Fechar</Text>
+                </Pressable>
+              </View>
+
+              <Pressable
+                style={styles.selectInput}
+                onPress={() => {
+                  const customer = customers.find((c) => c.id === selectedOrder.customerId);
+                  if (customer) {
+                    editCustomer(customer);
+                  } else {
+                    setActiveTab('customers');
+                  }
+                }}
+              >
+                <Text style={styles.selectLabel}>
+                  Cliente: {customers.find((c) => c.id === selectedOrder.customerId)?.name ?? `#${selectedOrder.customerId}`}
+                </Text>
+              </Pressable>
+
+              <View style={styles.summary}>
+                <View style={styles.summaryRow}>
+                  <Text>Total</Text>
+                  <Text>{formatCurrencyBR(selectedOrderTotals.total)}</Text>
+                </View>
+                <View style={styles.summaryRow}>
+                  <Text>Pago</Text>
+                  <Text>{formatCurrencyBR(selectedOrderTotals.amountPaid)}</Text>
+                </View>
+                <View style={styles.summaryRow}>
+                  <Text>Saldo</Text>
+                  <Text>{formatCurrencyBR(selectedOrderTotals.balanceDue)}</Text>
+                </View>
+              </View>
+
+              <Text style={styles.sectionTitleSmall}>Registrar pagamento</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Valor (R$)"
+                keyboardType="decimal-pad"
+                value={paymentAmount}
+                onChangeText={(text) => setPaymentAmount(text)}
+              />
+              <View style={styles.chipsRow}>
+                {paymentMethods.map((method) => (
+                  <Pressable
+                    key={method}
+                    style={[styles.chip, paymentMethod === method && styles.chipActive]}
+                    onPress={() => setPaymentMethod(method)}
+                  >
+                    <Text style={[styles.chipText, paymentMethod === method && styles.chipTextActive]}>{method}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <View style={styles.row}>
+                <Pressable style={[styles.secondaryButton, styles.halfButton]} onPress={registerPayment}>
+                  <Text style={styles.secondaryButtonText}>Registrar</Text>
+                </Pressable>
+                <Pressable style={[styles.primaryButton, styles.halfButton]} onPress={markOrderPaid}>
+                  <Text style={styles.primaryButtonText}>Marcar pago</Text>
+                </Pressable>
+              </View>
+
+              <Text style={styles.sectionTitleSmall}>Itens</Text>
+              {(selectedOrder.items || []).length === 0 ? (
+                <Text style={styles.listSubtitle}>Sem itens.</Text>
+              ) : (
+                (selectedOrder.items || []).map((orderItem) => (
+                  <View key={orderItem.id} style={styles.summaryRow}>
+                    <Text>
+                      {productMap.get(orderItem.productId)?.name ?? `Produto ${orderItem.productId}`} x {orderItem.quantity}
+                    </Text>
+                    <Text>{formatCurrencyBR(orderItem.total ?? 0)}</Text>
+                  </View>
+                ))
+              )}
+            </View>
+          ) : null}
         </ScrollView>
       )}
     </SafeAreaView>
@@ -691,6 +891,45 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6b6b6b'
   },
+  emptyHint: {
+    fontSize: 12,
+    color: '#6b6b6b',
+    marginTop: 8
+  },
+  rowBetween: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  },
+  sectionTitleSmall: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1f1f1f'
+  },
+  chipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8
+  },
+  chip: {
+    borderWidth: 1,
+    borderColor: '#d6cfc2',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#fff'
+  },
+  chipActive: {
+    backgroundColor: '#1f1f1f',
+    borderColor: '#1f1f1f'
+  },
+  chipText: {
+    color: '#1f1f1f',
+    fontSize: 12
+  },
+  chipTextActive: {
+    color: '#fff'
+  },
   selectInput: {
     borderWidth: 1,
     borderColor: '#e6e0d6',
@@ -727,5 +966,35 @@ const styles = StyleSheet.create({
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between'
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  badge: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#e6e0d6',
+    backgroundColor: '#fff'
+  },
+  badgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#1f1f1f'
+  },
+  badge_PAGO: {
+    backgroundColor: '#e7f6ed',
+    borderColor: '#bde6c8'
+  },
+  badge_PARCIAL: {
+    backgroundColor: '#fff3d6',
+    borderColor: '#f2d39a'
+  },
+  badge_PENDENTE: {
+    backgroundColor: '#ffe3e3',
+    borderColor: '#f3b1b1'
   }
 });
