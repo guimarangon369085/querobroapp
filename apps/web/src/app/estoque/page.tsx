@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   Bom,
   InventoryItem,
@@ -10,6 +10,7 @@ import type {
   ProductionRequirementWarning,
   ProductionRequirementsResponse,
 } from '@querobroapp/shared';
+import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 
 const movementTypes = ['IN', 'OUT', 'ADJUST'];
@@ -33,6 +34,10 @@ function formatQty(value: number) {
 }
 
 export default function StockPage() {
+  const searchParams = useSearchParams();
+  const bomSectionRef = useRef<HTMLDivElement | null>(null);
+  const openedBomProductIdRef = useRef<number | null>(null);
+
   const [products, setProducts] = useState<Product[]>([]);
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [movements, setMovements] = useState<InventoryMovement[]>([]);
@@ -177,6 +182,25 @@ export default function StockPage() {
     }));
     setBomItems(items);
   };
+
+  const openBomForProduct = async (productId: number) => {
+    const bom = await apiFetch<any>(`/products/${productId}/bom`);
+    startEditBom(bom);
+    bomSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  useEffect(() => {
+    const raw = searchParams.get('bomProductId') || searchParams.get('productId');
+    if (!raw) return;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    if (openedBomProductIdRef.current === parsed) return;
+    openedBomProductIdRef.current = parsed;
+
+    openBomForProduct(parsed)
+      .then(() => load())
+      .catch(console.error);
+  }, [searchParams]);
 
   const addBomItem = () => {
     setBomItems((prev) => [...prev, { itemId: '', qtyPerRecipe: '', qtyPerSaleUnit: '', qtyPerUnit: '' }]);
@@ -492,7 +516,9 @@ export default function StockPage() {
       </div>
 
       <div className="app-panel grid gap-4">
-        <h3 className="text-lg font-semibold">Fichas tecnicas (BOM)</h3>
+        <div ref={bomSectionRef}>
+          <h3 className="text-lg font-semibold">Fichas tecnicas (BOM)</h3>
+        </div>
         <div className="grid gap-3 md:grid-cols-2">
           <select
             className="app-select"

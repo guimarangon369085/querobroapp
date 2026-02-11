@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import type { Product } from '@querobroapp/shared';
 import { apiFetch } from '@/lib/api';
@@ -271,18 +272,24 @@ export default function ProductsPage() {
                     {product.category || 'Sem categoria'} • {product.unit || 'un'} • {formatCurrencyBR(product.price)}
                   </p>
                 </div>
-                <div className="flex gap-2">
-                  <button
-                    className="app-button app-button-ghost"
-                    onClick={() => startEdit(product)}
-                  >
-                    Editar
-                  </button>
-                  <button
-                    className="app-button app-button-danger"
-                    onClick={() => remove(product.id!)}
-                  >
-                    Remover
+            <div className="flex gap-2">
+              <button
+                className="app-button app-button-ghost"
+                onClick={() => startEdit(product)}
+              >
+                Editar
+              </button>
+              <Link
+                className="app-button app-button-ghost"
+                href={`/estoque?bomProductId=${product.id}`}
+              >
+                Ficha tecnica
+              </Link>
+              <button
+                className="app-button app-button-danger"
+                onClick={() => remove(product.id!)}
+              >
+                Remover
                   </button>
                 </div>
               </div>
