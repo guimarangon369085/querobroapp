@@ -108,7 +108,8 @@ export default function CustomersPage() {
       setError('Informe um nome valido.');
       return;
     }
-    if (!form.phone || normalizePhone(form.phone || '').length < 10) {
+    const normalizedPhone = normalizePhone(form.phone || '');
+    if (!normalizedPhone || normalizedPhone.length < 10) {
       setError('Informe um telefone valido (com DDD).');
       return;
     }
