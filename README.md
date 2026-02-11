@@ -18,6 +18,24 @@ Monorepo com Turborepo + pnpm:
 Convencao de dominio adotada:
 - `sabor/variedade` e representado como `Product` no catalogo (categoria `Sabores`, ex.: `T/G/S/R/D`).
 
+## Ficha tecnica (BOM)
+
+- Ao criar um produto pela API (`POST /products`), a API cria automaticamente uma ficha tecnica (BOM) vazia.
+- Endpoint para consultar/criar (backfill) a BOM padrao: `GET /products/:id/bom`.
+- No Web, a lista de produtos tem acao **Ficha tecnica** que abre `/estoque?bomProductId=<id>` e pre-seleciona a BOM.
+
+Links rapidos:
+- `http://127.0.0.1:3000/produtos`
+- `http://127.0.0.1:3000/estoque?bomProductId=<id>`
+
+## Mobile (pagamentos)
+
+O app mobile (`apps/mobile`) agora permite:
+- ver detalhe do pedido (totais + itens + financeiro),
+- registrar pagamento parcial,
+- marcar pedido como pago (cria pagamento restante via API),
+- navegar do pedido para o cliente (abre a aba Clientes com edicao).
+
 ## Onde mexer
 
 - Dados (Prisma): `apps/api/prisma/schema.prisma`, `apps/api/prisma/seed.ts`
@@ -109,6 +127,7 @@ pnpm --filter @querobroapp/api prisma:migrate:prod
 - `GET /orders`, `POST /orders`, `GET /orders/:id`, `PUT /orders/:id`, `DELETE /orders/:id`
 - `POST /orders/:id/items`, `DELETE /orders/:id/items/:itemId`, `PATCH /orders/:id/status`
 - `PATCH /orders/:id/mark-paid`
+- `GET /products/:id/bom`
 - `GET /payments`, `POST /payments`, `PATCH /payments/:id/mark-paid`
 - `GET /stock-movements`, `POST /stock-movements`
 
