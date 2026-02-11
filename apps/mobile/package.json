@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "expo start",
     "build": "expo export",
-    "lint": "eslint .",
+    "lint": "eslint . --ext .ts,.tsx,.js,.cjs,.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
