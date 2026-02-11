@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, Inject } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
 import { ProductSchema } from '@querobroapp/shared';
 import { normalizeMoney, normalizeText, normalizeTitle } from '../../common/normalize.js';
@@ -6,6 +7,26 @@ import { normalizeMoney, normalizeText, normalizeTitle } from '../../common/norm
 @Injectable()
 export class ProductsService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  private async ensureDefaultBom(
+    tx: Prisma.TransactionClient,
+    product: { id: number; name: string; unit: string | null }
+  ) {
+    const existing = await tx.bom.findFirst({
+      where: { productId: product.id },
+      orderBy: { id: 'asc' }
+    });
+    if (existing) return existing;
+
+    return tx.bom.create({
+      data: {
+        productId: product.id,
+        name: product.name,
+        saleUnitLabel: product.unit,
+        yieldUnits: null
+      }
+    });
+  }
 
   list() {
     return this.prisma.product.findMany({ orderBy: { id: 'desc' } });
@@ -17,16 +38,49 @@ export class ProductsService {
     return product;
   }
 
+  async getBom(id: number) {
+    const product = await this.get(id);
+
+    const existing = await this.prisma.bom.findFirst({
+      where: { productId: id },
+      include: { items: { include: { item: true } }, product: true },
+      orderBy: { id: 'asc' }
+    });
+    if (existing) return existing;
+
+    const created = await this.prisma.bom.create({
+      data: {
+        productId: id,
+        name: product.name,
+        saleUnitLabel: product.unit,
+        yieldUnits: null
+      },
+      include: { items: { include: { item: true } }, product: true }
+    });
+
+    return created;
+  }
+
   create(payload: unknown) {
     const data = ProductSchema.omit({ id: true, createdAt: true }).parse(payload);
-    return this.prisma.product.create({
-      data: {
-        ...data,
-        name: normalizeTitle(data.name) ?? data.name,
-        category: normalizeTitle(data.category ?? undefined),
-        unit: normalizeText(data.unit ?? undefined)?.toLowerCase() ?? data.unit ?? null,
-        price: normalizeMoney(data.price)
-      }
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.product.create({
+        data: {
+          ...data,
+          name: normalizeTitle(data.name) ?? data.name,
+          category: normalizeTitle(data.category ?? undefined),
+          unit: normalizeText(data.unit ?? undefined)?.toLowerCase() ?? data.unit ?? null,
+          price: normalizeMoney(data.price)
+        }
+      });
+
+      await this.ensureDefaultBom(tx, {
+        id: created.id,
+        name: created.name,
+        unit: created.unit ?? null
+      });
+
+      return created;
     });
   }
 

@@ -20,6 +20,11 @@ export class ProductsController {
     return this.service.get(parseWithSchema(idSchema, id));
   }
 
+  @Get(':id/bom')
+  bom(@Param('id') id: string) {
+    return this.service.getBom(parseWithSchema(idSchema, id));
+  }
+
   @Post()
   create(@Body() body: unknown) {
     const payload = ProductSchema.omit({ id: true, createdAt: true }).parse(body);
