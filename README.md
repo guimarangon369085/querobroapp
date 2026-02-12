@@ -72,6 +72,23 @@ O app mobile (`apps/mobile`) permite:
 - marcar pedido como pago (cria pagamento restante via API),
 - navegar do pedido para o cliente (abre a aba Clientes com edição).
 
+## Builder modular (modo LEGO)
+
+A pagina `http://127.0.0.1:3000/builder` permite editar o app em blocos, sem codar:
+
+- **Tema visual**: cores e fontes
+- **Inputs e selecao**: raio, padding, borda e acento de checkbox/radio
+- **Home/Landing**: textos e galeria com upload/remocao de imagens
+- **Integracoes/automacao**: dados operacionais do fluxo com Atalhos e regras editaveis de entrada automatica no estoque por cupom
+- **Blocos arrastaveis**: ordem e visibilidade das secoes em Dashboard/Produtos/Clientes/Pedidos/Estoque
+
+As mudancas aplicam preview imediato e podem ser salvas por bloco ou em lote.
+
+Detalhe tecnico:
+- configuracao persistida em `data/builder/config.json` (ignorado no git)
+- uploads da home em `data/builder/uploads/home`
+- API publica arquivos em `/uploads/builder/home/<arquivo>`
+
 ## Onde mexer
 
 - Dados (Prisma): `apps/api/prisma/schema.prisma`, `apps/api/prisma/seed.ts`
@@ -200,10 +217,19 @@ pnpm --filter @querobroapp/api prisma:migrate:prod
 - `GET /products/:id/bom`
 - `GET /payments`, `POST /payments`, `PATCH /payments/:id/mark-paid`
 - `GET /stock-movements`, `POST /stock-movements`
-- `POST /receipts/parse` (extração de cupom fiscal para linhas `;` no Numbers)
+- `POST /receipts/parse` (extracao de cupom fiscal para linhas com separador configuravel no Builder)
+- `POST /receipts/ingest` (extracao + lancamento automatico no estoque, conforme regras do Builder)
+- `POST /receipts/ingest-notification` (extracao + ingestao, resposta text/plain para notificacao no Atalhos)
 - `POST /receipts/parse-clipboard` (retorna apenas texto pronto para colar no Numbers)
   - requer `OPENAI_API_KEY` na API
   - opcional: `RECEIPTS_API_TOKEN` + header `x-receipts-token`
+  - no Atalhos, em `Codificar em Base64`, use `Quebras de Linha: Nenhuma`
+  - conferencia no web: `Estoque > Movimentacoes > Entradas automaticas por cupom`
+- `GET /builder/config`
+- `PUT /builder/config`
+- `PATCH /builder/config/:block` (`theme`, `forms`, `home`, `integrations`, `layout`)
+- `POST /builder/home-images` (multipart `file` + `alt`)
+- `DELETE /builder/home-images/:id`
 
 ## Observações
 

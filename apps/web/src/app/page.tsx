@@ -1,5 +1,6 @@
-import Image from 'next/image';
+/* eslint-disable @next/next/no-img-element */
 import Link from 'next/link';
+import { fetchBuilderConfigServer, resolveBuilderImageSrc } from '@/lib/builder';
 
 const links = [
   { href: '/dashboard', title: 'Dashboard', desc: 'KPIs e leitura de performance em tempo real.' },
@@ -7,37 +8,29 @@ const links = [
   { href: '/clientes', title: 'Clientes', desc: 'Base ativa, recorrencia e relacionamento.' },
   { href: '/pedidos', title: 'Pedidos', desc: 'Fluxo operacional com pagamentos e entregas.' },
   { href: '/estoque', title: 'Estoque', desc: 'Inventario, ficha tecnica e consumo por receita.' },
+  { href: '/builder', title: 'Builder', desc: 'Edicao modular por blocos, sem codigo.' },
 ];
 
-const gallery = [
-  { src: '/querobroa/hero-01.jpg', alt: 'Bandeja com broas e utensilios' },
-  { src: '/querobroa/hero-02.jpg', alt: 'Selecao de broas e sabores' },
-  { src: '/querobroa/hero-03.jpg', alt: 'Composicao com broas e loucas artesanais' },
-  { src: '/querobroa/hero-04.jpg', alt: 'Doce de leite artesanal' },
-];
+export default async function HomePage() {
+  const builderConfig = await fetchBuilderConfigServer();
+  const hero = builderConfig.home;
+  const gallery = hero.gallery.length ? hero.gallery : [];
 
-export default function HomePage() {
   return (
     <section className="grid gap-6">
       <div className="app-hero app-panel">
-        <span className="app-hero__kicker">Brand system aplicado</span>
-        <h2 className="text-4xl font-semibold">QUEROBROApp · UX soft-edge e sensorial</h2>
-        <p className="max-w-3xl text-[0.98rem] text-neutral-700">
-          Redesenho completo com base em tons de goiabada, crosta assada, creme e verde menta:
-          contraste premium, leitura rapida para operacao e identidade visual coerente com o
-          universo artesanal da marca.
-        </p>
+        <span className="app-hero__kicker">{hero.kicker}</span>
+        <h2 className="text-4xl font-semibold">{hero.title}</h2>
+        <p className="max-w-3xl text-[0.98rem] text-neutral-700">{hero.description}</p>
       </div>
 
       <div className="app-gallery">
-        {gallery.map((item) => (
-          <div key={item.src} className="app-gallery__item">
-            <Image
-              src={item.src}
+        {gallery.map((item, index) => (
+          <div key={item.id} className="app-gallery__item">
+            <img
+              src={resolveBuilderImageSrc(item.src)}
               alt={item.alt}
-              width={1200}
-              height={760}
-              priority={item.src.includes('01')}
+              loading={index === 0 ? 'eager' : 'lazy'}
             />
           </div>
         ))}

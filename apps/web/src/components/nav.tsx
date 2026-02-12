@@ -9,6 +9,7 @@ const links = [
   { href: '/clientes', label: 'Clientes', icon: '◍' },
   { href: '/pedidos', label: 'Pedidos', icon: '◉' },
   { href: '/estoque', label: 'Estoque', icon: '◎' },
+  { href: '/builder', label: 'Builder', icon: '◈' },
 ];
 
 function isActive(pathname: string, href: string) {

@@ -7,6 +7,7 @@ import { formatPhoneBR, normalizeAddress, normalizePhone, titleCase } from '@/li
 import { loadGoogleMaps } from '@/lib/googleMaps';
 import { FormField } from '@/components/form/FormField';
 import { useSearchParams } from 'next/navigation';
+import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
 
 const emptyCustomer: Partial<Customer> = {
   name: '',
@@ -229,7 +230,9 @@ export default function CustomersPage() {
   }, [customers, search]);
 
   return (
-    <section className="grid gap-8">
+    <BuilderLayoutProvider page="clientes">
+      <section className="grid gap-8">
+      <BuilderLayoutItemSlot id="header">
       <div className="app-section-title">
         <div>
           <span className="app-chip">Relacionamento</span>
@@ -237,7 +240,9 @@ export default function CustomersPage() {
           <p className="text-neutral-600">Cadastre e organize sua base de clientes.</p>
         </div>
       </div>
+      </BuilderLayoutItemSlot>
 
+      <BuilderLayoutItemSlot id="kpis_search">
       <div className="grid gap-3 md:grid-cols-3">
         <div className="app-kpi">
           <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Clientes</p>
@@ -253,7 +258,9 @@ export default function CustomersPage() {
           />
         </div>
       </div>
+      </BuilderLayoutItemSlot>
 
+      <BuilderLayoutItemSlot id="form">
       <form onSubmit={submit} className="app-panel grid gap-5">
         <div className="grid gap-3 md:grid-cols-2">
           <FormField label="Nome completo" error={error}>
@@ -408,7 +415,9 @@ export default function CustomersPage() {
           )}
         </div>
       </form>
+      </BuilderLayoutItemSlot>
 
+      <BuilderLayoutItemSlot id="list">
       <div className="grid gap-3">
         {filteredCustomers.map((customer) => (
           <div
@@ -443,6 +452,8 @@ export default function CustomersPage() {
           </div>
         )}
       </div>
-    </section>
+      </BuilderLayoutItemSlot>
+      </section>
+    </BuilderLayoutProvider>
   );
 }

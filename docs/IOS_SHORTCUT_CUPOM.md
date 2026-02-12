@@ -1,124 +1,105 @@
-# iOS Shortcuts - Cupom Fiscal para Numbers
+# iOS Atalhos - Cupom para Estoque (automatico)
 
 ## Objetivo
 
-Tirar foto do cupom fiscal no iPhone, enviar para a API, receber linhas no formato `;` e colar no Numbers.
+Ao aproximar o NFC:
 
-Cada item retorna uma linha:
+1. tirar foto do cupom,
+2. extrair somente itens oficiais de producao,
+3. lancar automaticamente no estoque do app,
+4. mostrar notificacao de resultado no iPhone.
 
-```txt
-YYYY-MM-DD;ITEM_OFICIAL;QUANTIDADE;VALOR_UNITARIO
-```
+Sem copiar/colar.
 
-Exemplo:
+## Endpoints
 
-```txt
-2026-02-12;FARINHA DE TRIGO;1;7,99
-2026-02-12;LEITE;2;5,49
-```
+- `POST /receipts/ingest`
+  - retorna JSON completo (`items`, `ingest.appliedCount`, `ingest.ignoredCount`).
+- `POST /receipts/ingest-notification`
+  - faz a mesma ingestao, mas retorna `text/plain` pronto para notificacao.
+  - exemplo de resposta: `Itens lancados: 3 | Ignorados: 1`
 
-## Endpoint da API
+Base URL local (exemplo):
 
-- `POST /receipts/parse`
-- `POST /receipts/parse-clipboard` (retorna somente texto pronto para clipboard)
-- URL local (exemplo): `http://SEU_MAC_IP:3001/receipts/parse`
+- `http://SEU_MAC_IP:3001/receipts`
 
-Para descobrir rapidamente o IP/URL corretos no seu Mac:
+Descobrir IP e URLs no Mac:
 
 ```bash
 ./scripts/shortcut-receipts-setup.sh
 ```
 
-Para testar localmente com uma imagem (antes do iPhone):
+## Atalho recomendado (mais simples e robusto)
 
-```bash
-./scripts/test-receipt-image.sh /caminho/para/cupom.jpg
-```
+Interface do app Atalhos em portugues:
 
-Request JSON:
+1. `Tirar Foto` (camera traseira)
+2. `Converter Imagem`
+   - Formato: `JPEG`
+3. `Codificar em Base64`
+   - **Quebras de Linha: `Nenhuma`** (obrigatorio)
+4. `Dicionario`
+   - `imageBase64`: variavel da acao Base64
+   - `mimeType`: texto fixo `image/jpeg`
+5. `Obter conteudo de URL`
+   - URL: `http://SEU_MAC_IP:3001/receipts/ingest-notification`
+   - Metodo: `POST`
+   - Pedir Corpo: `JSON`
+   - Corpo: `Dicionario`
+   - Cabecalho opcional: `x-receipts-token` (somente se definido na API)
+6. `Mostrar notificacao`
+   - Titulo: `Cupom processado`
+   - Texto: variavel **`Conteudos do URL`** (nao digitar texto manual)
 
-```json
-{
-  "imageBase64": "....",
-  "mimeType": "image/jpeg",
-  "providerHint": "Pao de Acucar"
-}
-```
+## Atalho avancado (se quiser JSON detalhado)
 
-Header opcional de seguranca:
+Troque a URL da etapa 5 para:
 
-```txt
-x-receipts-token: <RECEIPTS_API_TOKEN>
-```
+- `http://SEU_MAC_IP:3001/receipts/ingest`
 
-Se `RECEIPTS_API_TOKEN` estiver definido em `apps/api/.env`, esse header vira obrigatorio.
+Depois:
 
-Response JSON (resumo):
+1. `Obter valor do dicionario` -> chave `ingest`
+2. `Obter valor do dicionario` -> chave `appliedCount`
+3. `Mostrar notificacao` -> texto com a variavel `appliedCount`
 
-```json
-{
-  "purchaseDate": "2026-02-12",
-  "items": [
-    { "item": "FARINHA DE TRIGO", "quantity": 1, "unitPrice": 7.99 }
-  ],
-  "lineCount": 1,
-  "lines": ["2026-02-12;FARINHA DE TRIGO;1;7,99"],
-  "clipboardText": "2026-02-12;FARINHA DE TRIGO;1;7,99"
-}
-```
+Importante:
 
-## Itens oficiais aceitos
+- nao escreva `[Resultado]` como texto fixo,
+- selecione sempre a variavel azul na barra de variaveis do Atalhos.
 
-- FARINHA DE TRIGO
-- FUBÁ DE CANJICA
-- AÇÚCAR
-- MANTEIGA
-- LEITE
-- OVOS
-- GOIABADA
-- DOCE DE LEITE
-- QUEIJO DO SERRO
-- REQUEIJÃO DE CORTE
-- SACOLA
-- CAIXA DE PLÁSTICO
-- PAPEL MANTEIGA
+## Area editavel no app (mapeamento)
 
-Itens fora da lista sao ignorados.
+No Builder:
 
-## Atalho iOS recomendado (passo a passo)
+- `http://127.0.0.1:3000/builder`
+- bloco `Integracoes e automacao`
+- secao `Regras de itens de producao (editavel)`
 
-1. Acao `Take Photo` (ou `Select Photos`).
-2. Acao `Encode Media` em `Base64`.
-3. Acao `Dictionary` com:
-   - `imageBase64`: valor da acao anterior
-   - `mimeType`: `image/jpeg`
-   - `providerHint`: texto opcional (ex.: `Oba Hortifruti`)
-4. Acao `Get Contents of URL`:
-   - Method: `POST`
-   - URL: `http://SEU_MAC_IP:3001/receipts/parse`
-   - Request Body: `JSON`
-   - Body: o Dictionary acima
-   - Header: `Content-Type: application/json`
-5. Acao `Get Dictionary Value` -> chave `clipboardText`.
-6. Acao `Copy to Clipboard`.
-7. Acao `Open App` -> Numbers.
-8. Acao `Show Notification` (ex.: `Cupom processado e copiado`).
+Voce pode ajustar por item oficial:
 
-## Fluxo ainda mais simples (recomendado)
+- habilitado/desabilitado,
+- nome do item de estoque de destino,
+- multiplicador de quantidade.
 
-Use o endpoint `POST /receipts/parse-clipboard`:
+## Como verificar se entrou no estoque
 
-1. `Take Photo`
-2. `Encode Media` (Base64)
-3. `Dictionary` (`imageBase64`, `mimeType`, `providerHint`)
-4. `Get Contents of URL` -> `POST /receipts/parse-clipboard`
-5. `Copy to Clipboard` (resultado inteiro da resposta)
-6. `Open App` -> Numbers
-7. `Show Notification`
+No app web:
 
-## Observacoes importantes
+- `http://127.0.0.1:3000/estoque`
+- secao `Movimentacoes`
+- card `Entradas automaticas por cupom`
 
-- iPhone e Mac precisam estar na mesma rede local.
-- Nao use `localhost` no iPhone; use IP do Mac (ex.: `192.168.1.20`).
-- A API precisa ter `OPENAI_API_KEY` configurada em `apps/api/.env`.
-- Se usar token, configurar `RECEIPTS_API_TOKEN` e enviar `x-receipts-token` no Atalho.
+Esse card mostra total aplicado e ultimas entradas automaticas.
+
+## Erros comuns
+
+- `OPENAI_API_KEY nao configurada`:
+  - preencher em `apps/api/.env` e reiniciar API.
+- `image_parse_error`:
+  - usar `Converter Imagem -> JPEG`,
+  - em `Codificar em Base64`, usar `Quebras de Linha: Nenhuma`.
+- `localhost` no iPhone nao funciona:
+  - usar o IP local do Mac (`192.168.x.x`).
+- retorno 400 com token:
+  - conferir `x-receipts-token` igual ao `RECEIPTS_API_TOKEN`.

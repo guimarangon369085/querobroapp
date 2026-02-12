@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import type { Customer, Order, Payment, Product } from '@querobroapp/shared';
+import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
 
 type DashboardState = {
   products: number;
@@ -60,29 +61,37 @@ export default function DashboardPage() {
   ];
 
   return (
-    <section className="grid gap-8">
-      <div className="app-section-title">
-        <div>
-          <span className="app-chip">Panorama</span>
-          <h2 className="mt-3 text-3xl font-semibold">Dashboard executivo</h2>
-          <p className="text-neutral-600">Resumo premium da operacao em tempo real.</p>
-        </div>
-      </div>
-
-      {error ? (
-        <div className="app-panel">
-          <p className="text-sm text-red-700">Nao foi possivel carregar os indicadores: {error}</p>
-        </div>
-      ) : null}
-
-      <div className="grid gap-4 md:grid-cols-4">
-        {cards.map((card) => (
-          <div key={card.label} className="app-kpi">
-            <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">{card.label}</p>
-            <p className="mt-3 text-3xl font-semibold">{loading ? '...' : card.value}</p>
+    <BuilderLayoutProvider page="dashboard">
+      <section className="grid gap-8">
+        <BuilderLayoutItemSlot id="header">
+          <div className="app-section-title">
+            <div>
+              <span className="app-chip">Panorama</span>
+              <h2 className="mt-3 text-3xl font-semibold">Dashboard executivo</h2>
+              <p className="text-neutral-600">Resumo premium da operacao em tempo real.</p>
+            </div>
           </div>
-        ))}
-      </div>
-    </section>
+        </BuilderLayoutItemSlot>
+
+        <BuilderLayoutItemSlot id="error">
+          {error ? (
+            <div className="app-panel">
+              <p className="text-sm text-red-700">Nao foi possivel carregar os indicadores: {error}</p>
+            </div>
+          ) : null}
+        </BuilderLayoutItemSlot>
+
+        <BuilderLayoutItemSlot id="kpis">
+          <div className="grid gap-4 md:grid-cols-4">
+            {cards.map((card) => (
+              <div key={card.label} className="app-kpi">
+                <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">{card.label}</p>
+                <p className="mt-3 text-3xl font-semibold">{loading ? '...' : card.value}</p>
+              </div>
+            ))}
+          </div>
+        </BuilderLayoutItemSlot>
+      </section>
+    </BuilderLayoutProvider>
   );
 }

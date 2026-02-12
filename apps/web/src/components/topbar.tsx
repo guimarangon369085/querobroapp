@@ -54,6 +54,13 @@ const routeMeta: Record<string, RouteMeta> = {
     primaryAction: { href: '/estoque', label: 'Lancar movimento' },
     secondaryAction: { href: '/produtos', label: 'Ajustar catalogo' },
   },
+  '/builder': {
+    eyebrow: 'No-code studio',
+    title: 'Builder modular do app',
+    subtitle: 'Altere blocos de UX, tema, integracoes e home sem escrever codigo.',
+    primaryAction: { href: '/builder', label: 'Editar blocos' },
+    secondaryAction: { href: '/', label: 'Ver landing' },
+  },
 };
 
 function getMeta(pathname: string): RouteMeta {

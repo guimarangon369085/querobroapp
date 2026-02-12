@@ -6,6 +6,7 @@ import type { Product } from '@querobroapp/shared';
 import { apiFetch } from '@/lib/api';
 import { formatCurrencyBR, titleCase } from '@/lib/format';
 import { FormField } from '@/components/form/FormField';
+import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
 
 const emptyProduct: Partial<Product> = {
   name: '',
@@ -125,185 +126,195 @@ export default function ProductsPage() {
   }, [products, search, activeFilter]);
 
   return (
-    <section className="grid gap-8">
-      <div className="app-section-title">
-        <div>
-          <span className="app-chip">Catalogo</span>
-          <h2 className="mt-3 text-3xl font-semibold">Produtos e sabores</h2>
-          <p className="text-neutral-600">
-            Gerencie broas/produtos e variedades de sabor no mesmo cadastro.
-          </p>
-        </div>
-      </div>
-
-      <div className="app-panel">
-        <p className="text-sm text-neutral-600">
-          Convencao atual: cada sabor/variedade e cadastrado como <strong>produto</strong> na
-          categoria <strong>Sabores</strong> (ex.: T, G, S, R, D).
-        </p>
-      </div>
-
-      {loadError ? (
-        <div className="app-panel">
-          <p className="text-sm text-red-700">Nao foi possivel carregar produtos: {loadError}</p>
-        </div>
-      ) : null}
-
-      <div className="grid gap-3 md:grid-cols-3">
-        <div className="app-kpi">
-          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Produtos</p>
-          <p className="mt-2 text-3xl font-semibold">{products.length}</p>
-        </div>
-        <div className="app-panel md:col-span-2">
-          <div className="flex flex-wrap items-center gap-3">
-            <input
-              className="app-input md:w-auto"
-              placeholder="Buscar por nome ou categoria"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            <select
-              className="app-select"
-              value={activeFilter}
-              onChange={(e) => setActiveFilter(e.target.value as 'TODOS' | 'ATIVOS' | 'INATIVOS')}
-            >
-              <option value="TODOS">Todos</option>
-              <option value="ATIVOS">Ativos</option>
-              <option value="INATIVOS">Inativos</option>
-            </select>
+    <BuilderLayoutProvider page="produtos">
+      <section className="grid gap-8">
+        <BuilderLayoutItemSlot id="header">
+          <div className="app-section-title">
+            <div>
+              <span className="app-chip">Catalogo</span>
+              <h2 className="mt-3 text-3xl font-semibold">Produtos e sabores</h2>
+              <p className="text-neutral-600">
+                Gerencie broas/produtos e variedades de sabor no mesmo cadastro.
+              </p>
+            </div>
           </div>
-        </div>
-      </div>
+        </BuilderLayoutItemSlot>
 
-      <form onSubmit={submit} className="app-panel grid gap-5">
-        <div className="grid gap-3 md:grid-cols-2">
-          <FormField label="Nome" error={error}>
-            <input
-              className="app-input"
-              placeholder="Nome do produto"
-              value={form.name || ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
-              onBlur={(e) => setForm((prev) => ({ ...prev, name: titleCase(e.target.value) }))}
-            />
-          </FormField>
-          <FormField label="Categoria" hint="Ex: Bebidas, Lanches">
-            <input
-              className="app-input"
-              placeholder="Categoria (ex.: Sabores)"
-              value={form.category || ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}
-              onBlur={(e) => setForm((prev) => ({ ...prev, category: titleCase(e.target.value) }))}
-            />
-          </FormField>
-          <FormField label="Unidade" hint="Ex: un, kg, pct">
-            <input
-              className="app-input"
-              placeholder="Unidade"
-              value={form.unit || ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, unit: e.target.value }))}
-              onBlur={(e) =>
-                setForm((prev) => ({
-                  ...prev,
-                  unit: e.target.value.trim().toLowerCase() || 'un'
-                }))
-              }
-            />
-          </FormField>
-          <FormField label="Preco" hint="Use ponto para centavos">
-            <input
-              className="app-input"
-              placeholder="0.00"
-              type="number"
-              step="0.01"
-              min={0}
-              value={form.price ?? 0}
-              onChange={(e) => setForm((prev) => ({ ...prev, price: Number(e.target.value) }))}
-              onBlur={(e) =>
-                setForm((prev) => ({
-                  ...prev,
-                  price: Math.round(Number(e.target.value || 0) * 100) / 100
-                }))
-              }
-            />
-          </FormField>
-        </div>
-        <label className="flex items-center gap-2 text-sm text-neutral-700">
-          <input
-            type="checkbox"
-            checked={form.active ?? true}
-            onChange={(e) => setForm((prev) => ({ ...prev, active: e.target.checked }))}
-          />
-          Ativo
-        </label>
-        <div className="flex gap-3">
-          <button className="app-button app-button-primary" type="submit">
-            {editingId ? 'Atualizar' : 'Criar'}
-          </button>
-          {editingId && (
-            <button
-              className="app-button app-button-ghost"
-              type="button"
-              onClick={() => {
-                setEditingId(null);
-                setForm(emptyProduct);
-              }}
-            >
-              Cancelar
-            </button>
-          )}
-        </div>
-      </form>
-
-      <div className="grid gap-3">
-        {loading ? (
-          <div className="app-panel border-dashed text-sm text-neutral-500">
-            Carregando produtos...
+        <BuilderLayoutItemSlot id="note">
+          <div className="app-panel">
+            <p className="text-sm text-neutral-600">
+              Convencao atual: cada sabor/variedade e cadastrado como <strong>produto</strong> na
+              categoria <strong>Sabores</strong> (ex.: T, G, S, R, D).
+            </p>
           </div>
-        ) : (
-          <>
-            {filteredProducts.map((product) => (
-              <div
-                key={product.id}
-                className="app-panel flex flex-wrap items-center justify-between gap-4"
-              >
-                <div>
-                  <p className="text-lg font-semibold">{product.name}</p>
-                  <p className="text-sm text-neutral-500">
-                    {product.category || 'Sem categoria'} • {product.unit || 'un'} • {formatCurrencyBR(product.price)}
-                  </p>
-                </div>
-            <div className="flex gap-2">
-              <button
-                className="app-button app-button-ghost"
-                onClick={() => startEdit(product)}
-              >
-                Editar
+        </BuilderLayoutItemSlot>
+
+        <BuilderLayoutItemSlot id="load_error">
+          {loadError ? (
+            <div className="app-panel">
+              <p className="text-sm text-red-700">Nao foi possivel carregar produtos: {loadError}</p>
+            </div>
+          ) : null}
+        </BuilderLayoutItemSlot>
+
+        <BuilderLayoutItemSlot id="kpis_filters">
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="app-kpi">
+              <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Produtos</p>
+              <p className="mt-2 text-3xl font-semibold">{products.length}</p>
+            </div>
+            <div className="app-panel md:col-span-2">
+              <div className="flex flex-wrap items-center gap-3">
+                <input
+                  className="app-input md:w-auto"
+                  placeholder="Buscar por nome ou categoria"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+                <select
+                  className="app-select"
+                  value={activeFilter}
+                  onChange={(e) =>
+                    setActiveFilter(e.target.value as 'TODOS' | 'ATIVOS' | 'INATIVOS')
+                  }
+                >
+                  <option value="TODOS">Todos</option>
+                  <option value="ATIVOS">Ativos</option>
+                  <option value="INATIVOS">Inativos</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </BuilderLayoutItemSlot>
+
+        <BuilderLayoutItemSlot id="form">
+          <form onSubmit={submit} className="app-panel grid gap-5">
+            <div className="grid gap-3 md:grid-cols-2">
+              <FormField label="Nome" error={error}>
+                <input
+                  className="app-input"
+                  placeholder="Nome do produto"
+                  value={form.name || ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+                  onBlur={(e) => setForm((prev) => ({ ...prev, name: titleCase(e.target.value) }))}
+                />
+              </FormField>
+              <FormField label="Categoria" hint="Ex: Bebidas, Lanches">
+                <input
+                  className="app-input"
+                  placeholder="Categoria (ex.: Sabores)"
+                  value={form.category || ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}
+                  onBlur={(e) =>
+                    setForm((prev) => ({ ...prev, category: titleCase(e.target.value) }))
+                  }
+                />
+              </FormField>
+              <FormField label="Unidade" hint="Ex: un, kg, pct">
+                <input
+                  className="app-input"
+                  placeholder="Unidade"
+                  value={form.unit || ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, unit: e.target.value }))}
+                  onBlur={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      unit: e.target.value.trim().toLowerCase() || 'un'
+                    }))
+                  }
+                />
+              </FormField>
+              <FormField label="Preco" hint="Use ponto para centavos">
+                <input
+                  className="app-input"
+                  placeholder="0.00"
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={form.price ?? 0}
+                  onChange={(e) => setForm((prev) => ({ ...prev, price: Number(e.target.value) }))}
+                  onBlur={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      price: Math.round(Number(e.target.value || 0) * 100) / 100
+                    }))
+                  }
+                />
+              </FormField>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-neutral-700">
+              <input
+                type="checkbox"
+                checked={form.active ?? true}
+                onChange={(e) => setForm((prev) => ({ ...prev, active: e.target.checked }))}
+              />
+              Ativo
+            </label>
+            <div className="flex gap-3">
+              <button className="app-button app-button-primary" type="submit">
+                {editingId ? 'Atualizar' : 'Criar'}
               </button>
-              <Link
-                className="app-button app-button-ghost"
-                href={`/estoque?bomProductId=${product.id}`}
-              >
-                Ficha tecnica
-              </Link>
-              <button
-                className="app-button app-button-danger"
-                onClick={() => remove(product.id!)}
-              >
-                Remover
-                  </button>
-                </div>
-              </div>
-            ))}
-            {filteredProducts.length === 0 && (
+              {editingId && (
+                <button
+                  className="app-button app-button-ghost"
+                  type="button"
+                  onClick={() => {
+                    setEditingId(null);
+                    setForm(emptyProduct);
+                  }}
+                >
+                  Cancelar
+                </button>
+              )}
+            </div>
+          </form>
+        </BuilderLayoutItemSlot>
+
+        <BuilderLayoutItemSlot id="list">
+          <div className="grid gap-3">
+            {loading ? (
               <div className="app-panel border-dashed text-sm text-neutral-500">
-                {products.length === 0
-                  ? 'Sem produtos/sabores ainda — cadastre o primeiro.'
-                  : 'Nenhum produto encontrado com este filtro.'}
+                Carregando produtos...
               </div>
+            ) : (
+              <>
+                {filteredProducts.map((product) => (
+                  <div
+                    key={product.id}
+                    className="app-panel flex flex-wrap items-center justify-between gap-4"
+                  >
+                    <div>
+                      <p className="text-lg font-semibold">{product.name}</p>
+                      <p className="text-sm text-neutral-500">
+                        {product.category || 'Sem categoria'} • {product.unit || 'un'} •{' '}
+                        {formatCurrencyBR(product.price)}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button className="app-button app-button-ghost" onClick={() => startEdit(product)}>
+                        Editar
+                      </button>
+                      <Link className="app-button app-button-ghost" href={`/estoque?bomProductId=${product.id}`}>
+                        Ficha tecnica
+                      </Link>
+                      <button className="app-button app-button-danger" onClick={() => remove(product.id!)}>
+                        Remover
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {filteredProducts.length === 0 && (
+                  <div className="app-panel border-dashed text-sm text-neutral-500">
+                    {products.length === 0
+                      ? 'Sem produtos/sabores ainda — cadastre o primeiro.'
+                      : 'Nenhum produto encontrado com este filtro.'}
+                  </div>
+                )}
+              </>
             )}
-          </>
-        )}
-      </div>
-    </section>
+          </div>
+        </BuilderLayoutItemSlot>
+      </section>
+    </BuilderLayoutProvider>
   );
 }

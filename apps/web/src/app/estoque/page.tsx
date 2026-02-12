@@ -12,6 +12,7 @@ import type {
 } from '@querobroapp/shared';
 import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
 
 const movementTypes = ['IN', 'OUT', 'ADJUST'];
 
@@ -287,6 +288,14 @@ export default function StockPage() {
   }, [items]);
 
   const itemMap = useMemo(() => new Map(items.map((item) => [item.id!, item])), [items]);
+  const autoReceiptMovements = useMemo(
+    () =>
+      movements.filter((movement) =>
+        (movement.reason || '').toLowerCase().includes('entrada automatica cupom')
+      ),
+    [movements]
+  );
+  const latestAutoReceiptMovements = useMemo(() => autoReceiptMovements.slice(0, 8), [autoReceiptMovements]);
 
   const bomCosts = useMemo(() => {
     return (boms as any[]).map((bom) => {
@@ -341,7 +350,9 @@ export default function StockPage() {
   };
 
   return (
-    <section className="grid gap-8">
+    <BuilderLayoutProvider page="estoque">
+      <section className="grid gap-8">
+      <BuilderLayoutItemSlot id="header">
       <div className="app-section-title">
         <div>
           <span className="app-chip">Inventario</span>
@@ -349,7 +360,9 @@ export default function StockPage() {
           <p className="text-neutral-600">Ingredientes + embalagens com capacidade de producao.</p>
         </div>
       </div>
+      </BuilderLayoutItemSlot>
 
+      <BuilderLayoutItemSlot id="kpis">
       <div className="grid gap-3 md:grid-cols-3">
         <div className="app-kpi">
           <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Itens</p>
@@ -364,7 +377,9 @@ export default function StockPage() {
           <p className="mt-2 text-3xl font-semibold">{inventoryKpis.packaging}</p>
         </div>
       </div>
+      </BuilderLayoutItemSlot>
 
+      <BuilderLayoutItemSlot id="capacity">
       <div className="app-panel grid gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-xl font-semibold">Capacidade por produto (caixas)</h3>
@@ -393,7 +408,9 @@ export default function StockPage() {
           )}
         </div>
       </div>
+      </BuilderLayoutItemSlot>
 
+      <BuilderLayoutItemSlot id="d1">
       <div className="app-panel grid gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -470,7 +487,9 @@ export default function StockPage() {
           </div>
         )}
       </div>
+      </BuilderLayoutItemSlot>
 
+      <BuilderLayoutItemSlot id="movement">
       <div className="app-panel grid gap-4">
         <h3 className="text-lg font-semibold">Nova movimentacao de insumo</h3>
         <div className="grid gap-3 md:grid-cols-4">
@@ -514,7 +533,9 @@ export default function StockPage() {
           Registrar
         </button>
       </div>
+      </BuilderLayoutItemSlot>
 
+      <BuilderLayoutItemSlot id="bom">
       <div className="app-panel grid gap-4">
         <div ref={bomSectionRef}>
           <h3 className="text-lg font-semibold">Fichas tecnicas (BOM)</h3>
@@ -643,7 +664,9 @@ export default function StockPage() {
           ))}
         </div>
       </div>
+      </BuilderLayoutItemSlot>
 
+      <BuilderLayoutItemSlot id="packaging">
       <div className="app-panel grid gap-4">
         <h3 className="text-lg font-semibold">Custo de compra por embalagem</h3>
         <div className="grid gap-3 md:grid-cols-3">
@@ -680,7 +703,9 @@ export default function StockPage() {
           Atualizar custo
         </button>
       </div>
+      </BuilderLayoutItemSlot>
 
+      <BuilderLayoutItemSlot id="balance">
       <div className="grid gap-3">
         <h3 className="text-lg font-semibold">Saldo por item</h3>
         {items.map((item) => (
@@ -701,9 +726,31 @@ export default function StockPage() {
           </div>
         ))}
       </div>
+      </BuilderLayoutItemSlot>
 
+      <BuilderLayoutItemSlot id="movements">
       <div className="grid gap-3">
         <h3 className="text-lg font-semibold">Movimentacoes</h3>
+        <div className="app-panel">
+          <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">
+            Entradas automaticas por cupom
+          </p>
+          <p className="mt-1 text-sm text-neutral-700">
+            Itens aplicados: <strong>{autoReceiptMovements.length}</strong>
+          </p>
+          <div className="mt-2 grid gap-1 text-xs text-neutral-600">
+            {latestAutoReceiptMovements.length === 0 ? (
+              <p>Nenhuma entrada automatica registrada ainda.</p>
+            ) : (
+              latestAutoReceiptMovements.map((movement) => (
+                <p key={`auto-${movement.id}`}>
+                  {itemMap.get(movement.itemId)?.name || `Item ${movement.itemId}`} • {movement.quantity} •{' '}
+                  {movement.reason || 'Sem motivo'}
+                </p>
+              ))
+            )}
+          </div>
+        </div>
         {movements.map((movement) => (
           <div key={movement.id} className="app-panel text-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -721,6 +768,8 @@ export default function StockPage() {
           </div>
         ))}
       </div>
-    </section>
+      </BuilderLayoutItemSlot>
+      </section>
+    </BuilderLayoutProvider>
   );
 }

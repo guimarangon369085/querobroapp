@@ -6,6 +6,7 @@ import type { Customer, Order, Product, OrderItem, Payment } from '@querobroapp/
 import { apiFetch } from '@/lib/api';
 import { formatCurrencyBR, parseCurrencyBR } from '@/lib/format';
 import { FormField } from '@/components/form/FormField';
+import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
 
 const orderStatuses = ['ABERTO', 'CONFIRMADO', 'EM_PREPARACAO', 'PRONTO', 'ENTREGUE', 'CANCELADO'];
 const paymentMethods = ['pix', 'dinheiro', 'cartao', 'transferencia'];
@@ -362,7 +363,9 @@ export default function OrdersPage() {
   const selectedOrderPaymentStatus = selectedOrder ? derivePaymentStatus(selectedOrder) : 'PENDENTE';
 
   return (
-    <section className="grid gap-8">
+    <BuilderLayoutProvider page="pedidos">
+      <section className="grid gap-8">
+      <BuilderLayoutItemSlot id="header">
       <div className="app-section-title">
         <div>
           <span className="app-chip">Operacao</span>
@@ -370,13 +373,17 @@ export default function OrdersPage() {
           <p className="text-neutral-600">Acompanhe pedidos, itens e pagamentos.</p>
         </div>
       </div>
+      </BuilderLayoutItemSlot>
 
+      <BuilderLayoutItemSlot id="load_error">
       {loadError ? (
         <div className="app-panel">
           <p className="text-sm text-red-700">Nao foi possivel carregar os pedidos: {loadError}</p>
         </div>
       ) : null}
+      </BuilderLayoutItemSlot>
 
+      <BuilderLayoutItemSlot id="kpis">
       <div className="grid gap-3 md:grid-cols-3">
         <div className="app-kpi">
           <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Pedidos</p>
@@ -391,7 +398,9 @@ export default function OrdersPage() {
           <p className="mt-2 text-3xl font-semibold">{formatCurrencyBR(orderKpis.revenue)}</p>
         </div>
       </div>
+      </BuilderLayoutItemSlot>
 
+      <BuilderLayoutItemSlot id="new_order">
       <div className="app-panel grid gap-5">
         <div>
           <span className="app-chip">Criacao</span>
@@ -523,7 +532,9 @@ export default function OrdersPage() {
           </p>
         )}
       </div>
+      </BuilderLayoutItemSlot>
 
+      <BuilderLayoutItemSlot id="list">
       <div className="app-panel grid gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-xl font-semibold">Lista de pedidos</h3>
@@ -612,7 +623,9 @@ export default function OrdersPage() {
           )}
         </div>
       </div>
+      </BuilderLayoutItemSlot>
 
+      <BuilderLayoutItemSlot id="detail">
       {selectedOrder && (
         <div className="app-panel grid gap-4">
           <div className="flex flex-wrap items-center justify-between gap-4">
@@ -816,6 +829,8 @@ export default function OrdersPage() {
           </div>
         </div>
       )}
-    </section>
+      </BuilderLayoutItemSlot>
+      </section>
+    </BuilderLayoutProvider>
   );
 }

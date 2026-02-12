@@ -171,3 +171,80 @@ Objetivo da sessao:
 
 No fim, registrar nova entrada no HANDOFF_LOG.
 ```
+
+## Entrada 004
+
+### 1) Metadados
+
+- Data/hora: 2026-02-12 01:18 -03
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `main`
+- Commit base (opcional): `96f85a9`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Concluir integracao modular Builder + receipts e validar fluxo ponta a ponta com Atalhos.
+- Resultado entregue: Builder modular consolidado (tema/forms/home/integracoes/layout), receipts ligado ao bloco Integracoes, preview de layout em runtime e teste e2e validado com mock OpenAI.
+- O que ficou pendente: Executar teste OCR real com OPENAI_API_KEY valida e validar atalho iOS no aparelho em rede local.
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados:
+- ` M README.md`
+- ` M apps/api/src/app.module.ts`
+- ` M apps/api/src/main.ts`
+- ` M apps/api/src/modules/receipts/receipts.module.ts`
+- ` M apps/api/src/modules/receipts/receipts.service.ts`
+- ` M apps/web/src/app/clientes/page.tsx`
+- ` M apps/web/src/app/dashboard/page.tsx`
+- ` M apps/web/src/app/estoque/page.tsx`
+- ` M apps/web/src/app/globals.css`
+- ` M apps/web/src/app/layout.tsx`
+- ` M apps/web/src/app/page.tsx`
+- ` M apps/web/src/app/pedidos/page.tsx`
+- ` M apps/web/src/app/produtos/page.tsx`
+- ` M apps/web/src/components/nav.tsx`
+- ` M apps/web/src/components/topbar.tsx`
+- ` M docs/IOS_SHORTCUT_CUPOM.md`
+- ` M packages/shared/src/index.ts`
+- ` M scripts/dev-all.sh`
+- ` M scripts/shortcut-receipts-setup.sh`
+- `?? apps/api/src/modules/builder/`
+- `?? apps/web/src/app/builder/`
+- `?? apps/web/src/components/builder-layout.tsx`
+- `?? apps/web/src/components/builder-runtime-theme.tsx`
+- `?? apps/web/src/lib/builder-layout.ts`
+- `?? apps/web/src/lib/builder.ts`
+- Comportamento novo: API de receipts agora respeita configuracoes de Integracoes do Builder e bloqueia parse quando shortcutsEnabled=false; layout pages atualizam em tempo real por evento builder:config-updated.
+- Riscos/regressoes: Baixo risco; principal risco e variacao de OCR em cupom real e necessidade de ajuste fino do prompt.
+
+### 4) Validacao
+
+- Comandos executados: pnpm --filter @querobroapp/shared build; pnpm --filter @querobroapp/api typecheck; pnpm --filter @querobroapp/web typecheck; eslint em arquivos alterados; curl e2e com mock OpenAI em :3900 e API em :3101; scripts/stop-all.sh
+- Testes que passaram: Build/typecheck/lint passaram; e2e receipts validado (separador e prompt refletidos; bloqueio quando shortcutsEnabled=false; restore de config confirmado).
+- Testes nao executados (e motivo): Nao foi executado OCR real com API OpenAI por ausencia de OPENAI_API_KEY no ambiente atual.
+
+### 5) Contexto para retomada
+
+- Decisoes importantes: Persistencia de Builder em data/builder/config.json; receipts usa shortcutsEnabled/receiptsPrompt/receiptsSeparator do Builder; manter token opcional via RECEIPTS_API_TOKEN; mascarar token no script de setup.
+- Suposicoes feitas: Assumido que encerramento da sessao inclui parar servidores locais e registrar handoff no log do projeto.
+- Bloqueios: Sem bloqueios tecnicos locais; pendencia externa de chave OPENAI e teste no iPhone.
+- Proximo passo recomendado (1 acao objetiva): Amanha: configurar OPENAI_API_KEY no ambiente da API e rodar teste real do atalho iOS com foto de cupom, confirmando copia para Numbers.
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/NEXT_STEP_PLAN.md
+- docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```

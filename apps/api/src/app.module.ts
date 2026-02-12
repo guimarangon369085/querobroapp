@@ -11,6 +11,7 @@ import { BomModule } from './modules/bom/bom.module.js';
 import { ProductionModule } from './modules/production/production.module.js';
 import { WhatsappModule } from './modules/whatsapp/whatsapp.module.js';
 import { ReceiptsModule } from './modules/receipts/receipts.module.js';
+import { BuilderModule } from './modules/builder/builder.module.js';
 
 @Module({
   imports: [
@@ -24,7 +25,8 @@ import { ReceiptsModule } from './modules/receipts/receipts.module.js';
     BomModule,
     ProductionModule,
     WhatsappModule,
-    ReceiptsModule
+    ReceiptsModule,
+    BuilderModule
   ],
   controllers: [AppController]
 })

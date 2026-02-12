@@ -2,6 +2,7 @@ import './globals.css';
 import type { ReactNode } from 'react';
 import { Nav } from '@/components/nav';
 import { Topbar } from '@/components/topbar';
+import { BuilderRuntimeTheme } from '@/components/builder-runtime-theme';
 import { Manrope, Cormorant_Garamond } from 'next/font/google';
 
 const bodyFont = Manrope({ subsets: ['latin'], variable: '--font-body', display: 'swap' });
@@ -21,6 +22,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="pt-BR">
       <body className={`${bodyFont.variable} ${displayFont.variable}`}>
+        <BuilderRuntimeTheme />
         <div className="app-shell">
           <aside className="app-sidebar">
             <div className="app-brand">

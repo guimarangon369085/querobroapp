@@ -26,6 +26,16 @@ extract_env_value() {
   printf '%s' "$value"
 }
 
+mask_value() {
+  local value="$1"
+  local size=${#value}
+  if [ "$size" -le 5 ]; then
+    printf '***'
+    return
+  fi
+  printf '%s***%s' "${value:0:3}" "${value: -2}"
+}
+
 IP_ADDR="$(detect_ip)"
 if [ -z "$IP_ADDR" ]; then
   echo "Nao foi possivel detectar IP local automaticamente."
@@ -45,12 +55,18 @@ echo
 echo "Endpoint JSON (retorna clipboardText no JSON):"
 echo "  POST $BASE_URL/parse"
 echo
+echo "Endpoint para lancar estoque automaticamente (recomendado):"
+echo "  POST $BASE_URL/ingest"
+echo
+echo "Endpoint simples para notificacao no iPhone (text/plain):"
+echo "  POST $BASE_URL/ingest-notification"
+echo
 echo "Endpoint direto para colar (retorna text/plain):"
 echo "  POST $BASE_URL/parse-clipboard"
 echo
 if [ -n "$TOKEN_VALUE" ]; then
   echo "Header obrigatorio detectado:"
-  echo "  x-receipts-token: $TOKEN_VALUE"
+  echo "  x-receipts-token: $(mask_value "$TOKEN_VALUE")"
 else
   echo "Header opcional:"
   echo "  x-receipts-token (somente se voce definir RECEIPTS_API_TOKEN)"
@@ -67,12 +83,14 @@ echo "Payload JSON esperado:"
 cat <<'EOF'
 {
   "imageBase64": "<base64_da_foto>",
-  "mimeType": "image/jpeg",
-  "providerHint": "Pao de Acucar"
+  "mimeType": "image/jpeg"
 }
 EOF
 echo
 echo "Proximo passo:"
 echo "1) Inicie a API."
 echo "2) No iPhone, use essa URL no Atalhos."
-echo "3) Para fluxo simples, use /parse-clipboard e copie a resposta direto."
+echo "3) Para automacao de estoque sem copiar/colar, use /ingest."
+echo "4) No Atalhos, em 'Codificar em Base64', defina 'Quebras de Linha' = 'Nenhuma'."
+echo "5) Para notificacao sem erro de variavel, use /ingest-notification."
+echo "6) No 'Mostrar notificacao', use a variavel 'Conteudos do URL' (nao escreva [Resultado])."

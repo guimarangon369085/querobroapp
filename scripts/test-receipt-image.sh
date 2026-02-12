@@ -6,11 +6,12 @@ API_ENV_FILE="$ROOT_DIR/apps/api/.env"
 
 IMAGE_PATH="${1:-}"
 BASE_URL="${2:-http://127.0.0.1:3001}"
-ENDPOINT_PATH="${3:-/receipts/parse-clipboard}"
+ENDPOINT_PATH="${3:-/receipts/ingest}"
 
 if [ -z "$IMAGE_PATH" ]; then
   echo "Uso: ./scripts/test-receipt-image.sh <caminho_da_imagem> [base_url] [endpoint]"
-  echo "Exemplo: ./scripts/test-receipt-image.sh /tmp/cupom.jpg http://127.0.0.1:3001 /receipts/parse-clipboard"
+  echo "Exemplo JSON: ./scripts/test-receipt-image.sh /tmp/cupom.jpg http://127.0.0.1:3001 /receipts/ingest"
+  echo "Exemplo texto: ./scripts/test-receipt-image.sh /tmp/cupom.jpg http://127.0.0.1:3001 /receipts/ingest-notification"
   exit 1
 fi
 
@@ -40,16 +41,25 @@ EOF
 URL="${BASE_URL%/}${ENDPOINT_PATH}"
 echo "Testando endpoint: $URL"
 
+TMP_BODY="$(mktemp)"
+trap 'rm -f "$TMP_BODY"' EXIT
+
 if [ -n "$TOKEN_VALUE" ]; then
-  RESPONSE="$(curl -sS -X POST "$URL" \
+  HTTP_CODE="$(curl -sS -o "$TMP_BODY" -w '%{http_code}' -X POST "$URL" \
     -H "Content-Type: application/json" \
     -H "x-receipts-token: $TOKEN_VALUE" \
     -d "$REQUEST_JSON")"
 else
-  RESPONSE="$(curl -sS -X POST "$URL" \
+  HTTP_CODE="$(curl -sS -o "$TMP_BODY" -w '%{http_code}' -X POST "$URL" \
     -H "Content-Type: application/json" \
     -d "$REQUEST_JSON")"
 fi
 
+echo "HTTP: $HTTP_CODE"
 echo "Resposta:"
-echo "$RESPONSE"
+if command -v jq >/dev/null 2>&1 && head -c 1 "$TMP_BODY" | grep -q '{'; then
+  jq . "$TMP_BODY"
+else
+  cat "$TMP_BODY"
+fi
+echo
