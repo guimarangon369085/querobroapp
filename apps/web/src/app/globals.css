@@ -744,7 +744,7 @@ input[type='radio'] {
 
 .app-toast__action {
   justify-self: start;
-  margin-top: 6px;
+  margin-top: 0;
   border: 1px solid color-mix(in srgb, var(--tomato-500), white 56%);
   border-radius: 999px;
   padding: 4px 10px;
@@ -754,6 +754,39 @@ input[type='radio'] {
   letter-spacing: 0.07em;
   color: var(--tomato-500);
   background: color-mix(in srgb, var(--tomato-500), white 90%);
+}
+
+.app-toast__undo-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.app-toast__timer {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--ink-muted), black 8%);
+}
+
+.app-toast__countdown {
+  margin-top: 5px;
+  height: 4px;
+  width: 100%;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--tomato-500), white 85%);
+}
+
+.app-toast__countdown-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  background: linear-gradient(130deg, var(--tomato-500), var(--crust-500));
+  transition: transform 220ms linear;
 }
 
 .app-toast__close {

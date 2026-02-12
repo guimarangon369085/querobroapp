@@ -22,8 +22,11 @@ type ToastInput = {
   onAction?: () => void | Promise<void>;
 };
 
-type ToastItem = ToastInput & {
+type ToastItem = Omit<ToastInput, 'durationMs'> & {
   id: string;
+  durationMs: number;
+  createdAt: number;
+  expiresAt: number;
 };
 
 type ConfirmOptions = {
@@ -63,6 +66,7 @@ function randomId() {
 export function FeedbackProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+  const [nowTick, setNowTick] = useState(() => Date.now());
   const pendingConfirmRef = useRef<ConfirmState | null>(null);
 
   useEffect(() => {
@@ -75,6 +79,14 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (toasts.length === 0) return;
+    const intervalId = window.setInterval(() => {
+      setNowTick(Date.now());
+    }, 250);
+    return () => window.clearInterval(intervalId);
+  }, [toasts.length]);
+
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   }, []);
@@ -82,15 +94,21 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
   const notify = useCallback(
     (input: ToastInput) => {
       const id = randomId();
+      const createdAt = Date.now();
+      const durationMs = Math.max(
+        1200,
+        input.durationMs ?? (input.actionLabel && input.onAction ? 7600 : 3800)
+      );
       const nextToast: ToastItem = {
         id,
-        durationMs: input.actionLabel && input.onAction ? 7600 : 3800,
+        durationMs,
+        createdAt,
+        expiresAt: createdAt + durationMs,
         ...input
       };
       setToasts((prev) => [nextToast, ...prev].slice(0, 5));
 
-      const duration = Math.max(1200, nextToast.durationMs || 3800);
-      window.setTimeout(() => removeToast(id), duration);
+      window.setTimeout(() => removeToast(id), durationMs);
     },
     [removeToast]
   );
@@ -169,19 +187,34 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
       <div className="app-toast-stack" aria-live="polite" aria-atomic="true">
         {toasts.map((toast) => {
           const meta = toastTypeMeta[toast.type];
+          const remainingMs = Math.max(0, toast.expiresAt - nowTick);
+          const remainingSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
+          const countdownRatio =
+            toast.durationMs > 0 ? Math.max(0, Math.min(1, remainingMs / toast.durationMs)) : 0;
           return (
             <article key={toast.id} className={`app-toast ${meta.className}`} role="status">
               <div className="app-toast__content">
                 <p className="app-toast__title">{toast.title || meta.title}</p>
                 <p className="app-toast__message">{toast.message}</p>
                 {toast.actionLabel && toast.onAction ? (
-                  <button
-                    type="button"
-                    className="app-toast__action"
-                    onClick={() => runToastAction(toast)}
-                  >
-                    {toast.actionLabel}
-                  </button>
+                  <>
+                    <div className="app-toast__undo-row">
+                      <button
+                        type="button"
+                        className="app-toast__action"
+                        onClick={() => runToastAction(toast)}
+                      >
+                        {toast.actionLabel}
+                      </button>
+                      <span className="app-toast__timer">{remainingSeconds}s</span>
+                    </div>
+                    <div className="app-toast__countdown" aria-hidden="true">
+                      <span
+                        className="app-toast__countdown-fill"
+                        style={{ transform: `scaleX(${countdownRatio})` }}
+                      />
+                    </div>
+                  </>
                 ) : null}
               </div>
               <button
