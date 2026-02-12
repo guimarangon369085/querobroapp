@@ -12,7 +12,7 @@ Escopo: continuidade entre Codex Terminal/Cloud e ChatGPT Online/Mobile
 
 ## 2) Estado local confirmado nesta sessao
 
-- Usuario/sistema: `gui` em macOS.
+- Usuario/sistema: `<usuario_local>` em macOS.
 - Repo principal: `$HOME/querobroapp`.
 - Branch atual: `main`.
 - Remoto principal: `origin https://github.com/<owner>/querobroapp.git`.
