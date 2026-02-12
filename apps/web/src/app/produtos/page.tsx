@@ -30,7 +30,7 @@ export default function ProductsPage() {
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'TODOS' | 'ATIVOS' | 'INATIVOS'>('TODOS');
   const productNameInputRef = useRef<HTMLInputElement | null>(null);
-  const { confirm, notifyError, notifyInfo, notifySuccess } = useFeedback();
+  const { confirm, notifyError, notifyInfo, notifySuccess, notifyUndo } = useFeedback();
 
   const load = async () => {
     setLoading(true);
@@ -126,6 +126,7 @@ export default function ProductsPage() {
   };
 
   const remove = async (id: number) => {
+    const productToRestore = products.find((entry) => entry.id === id);
     const accepted = await confirm({
       title: 'Remover produto?',
       description: 'Essa acao remove o produto da lista. Se houver vinculos, ele pode ser arquivado.',
@@ -141,7 +142,28 @@ export default function ProductsPage() {
       if (result?.archived) {
         notifyInfo('Produto arquivado porque possui pedidos, movimentacoes ou ficha tecnica vinculados.');
       } else if (result?.deleted) {
-        notifySuccess('Produto removido com sucesso.');
+        if (editingId === id) {
+          cancelEdit();
+        }
+        if (productToRestore) {
+          notifyUndo(`Produto ${productToRestore.name} removido com sucesso.`, async () => {
+            await apiFetch('/products', {
+              method: 'POST',
+              body: JSON.stringify({
+                name: productToRestore.name,
+                category: productToRestore.category ?? '',
+                unit: productToRestore.unit ?? 'un',
+                price: productToRestore.price ?? 0,
+                active: productToRestore.active ?? true
+              })
+            });
+            await load();
+            notifySuccess('Produto restaurado com sucesso.');
+            scrollToLayoutSlot('list');
+          });
+        } else {
+          notifySuccess('Produto removido com sucesso.');
+        }
       }
       await load();
     } catch (err) {

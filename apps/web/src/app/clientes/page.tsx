@@ -41,7 +41,7 @@ export default function CustomersPage() {
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const addressInputRef = useRef<HTMLInputElement | null>(null);
   const openedCustomerIdRef = useRef<number | null>(null);
-  const { confirm, notifyError, notifySuccess } = useFeedback();
+  const { confirm, notifyError, notifySuccess, notifyUndo } = useFeedback();
 
   const load = () => apiFetch<Customer[]>('/customers').then(setCustomers);
 
@@ -229,6 +229,7 @@ export default function CustomersPage() {
   }, [searchParams, customers]);
 
   const remove = async (id: number) => {
+    const customerToRestore = customers.find((entry) => entry.id === id);
     const accepted = await confirm({
       title: 'Remover cliente?',
       description: 'Essa acao exclui o cliente permanentemente.',
@@ -239,8 +240,41 @@ export default function CustomersPage() {
     if (!accepted) return;
     try {
       await apiFetch(`/customers/${id}`, { method: 'DELETE' });
+      if (editingId === id) {
+        cancelEdit();
+      }
       await load();
-      notifySuccess('Cliente removido com sucesso.');
+      if (customerToRestore) {
+        notifyUndo(`Cliente ${customerToRestore.name} removido com sucesso.`, async () => {
+          await apiFetch('/customers', {
+            method: 'POST',
+            body: JSON.stringify({
+              name: customerToRestore.name,
+              firstName: customerToRestore.firstName ?? null,
+              lastName: customerToRestore.lastName ?? null,
+              email: customerToRestore.email ?? null,
+              phone: customerToRestore.phone ?? null,
+              address: customerToRestore.address ?? null,
+              addressLine1: customerToRestore.addressLine1 ?? null,
+              addressLine2: customerToRestore.addressLine2 ?? null,
+              neighborhood: customerToRestore.neighborhood ?? null,
+              city: customerToRestore.city ?? null,
+              state: customerToRestore.state ?? null,
+              postalCode: customerToRestore.postalCode ?? null,
+              country: customerToRestore.country ?? 'Brasil',
+              placeId: customerToRestore.placeId ?? null,
+              lat: customerToRestore.lat ?? null,
+              lng: customerToRestore.lng ?? null,
+              deliveryNotes: customerToRestore.deliveryNotes ?? null
+            })
+          });
+          await load();
+          notifySuccess('Cliente restaurado com sucesso.');
+          scrollToLayoutSlot('list');
+        });
+      } else {
+        notifySuccess('Cliente removido com sucesso.');
+      }
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Nao foi possivel remover o cliente.');
     }
