@@ -60,6 +60,8 @@ Para manter contexto entre ChatGPT Online/Mobile e Codex Terminal/Cloud:
 - prompts prontos: `docs/BOOTSTRAP_PROMPTS.md`
 - releitura rapida no terminal: `scripts/relearn-context.sh`
 - salvar handoff automaticamente: `scripts/save-handoff.sh`
+- integracao iOS de cupom fiscal: `docs/IOS_SHORTCUT_CUPOM.md`
+- setup rapido do Atalhos (IP/URL): `scripts/shortcut-receipts-setup.sh`
 
 Regra pratica: cada sessao termina com handoff preenchido e proximo passo objetivo.
 
@@ -160,6 +162,10 @@ pnpm --filter @querobroapp/api prisma:migrate:prod
 - `GET /products/:id/bom`
 - `GET /payments`, `POST /payments`, `PATCH /payments/:id/mark-paid`
 - `GET /stock-movements`, `POST /stock-movements`
+- `POST /receipts/parse` (extracao de cupom fiscal para linhas `;` no Numbers)
+- `POST /receipts/parse-clipboard` (retorna apenas texto pronto para colar no Numbers)
+  - requer `OPENAI_API_KEY` na API
+  - opcional: `RECEIPTS_API_TOKEN` + header `x-receipts-token`
 
 ## Observacoes
 

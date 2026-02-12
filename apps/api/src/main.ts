@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module.js';
 
 process.on('unhandledRejection', (reason) => {
@@ -24,7 +25,10 @@ function ensureDatabaseUrl() {
 async function bootstrap() {
   ensureDatabaseUrl();
 
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  app.useBodyParser('json', { limit: '20mb' });
+  app.useBodyParser('urlencoded', { limit: '20mb', extended: true });
+
   const allowedOrigins = new Set(['http://127.0.0.1:3000', 'http://localhost:3000']);
   app.enableCors({
     origin: (origin, callback) => {

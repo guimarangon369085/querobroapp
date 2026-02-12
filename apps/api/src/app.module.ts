@@ -10,6 +10,7 @@ import { InventoryModule } from './modules/inventory/inventory.module.js';
 import { BomModule } from './modules/bom/bom.module.js';
 import { ProductionModule } from './modules/production/production.module.js';
 import { WhatsappModule } from './modules/whatsapp/whatsapp.module.js';
+import { ReceiptsModule } from './modules/receipts/receipts.module.js';
 
 @Module({
   imports: [
@@ -22,7 +23,8 @@ import { WhatsappModule } from './modules/whatsapp/whatsapp.module.js';
     InventoryModule,
     BomModule,
     ProductionModule,
-    WhatsappModule
+    WhatsappModule,
+    ReceiptsModule
   ],
   controllers: [AppController]
 })
