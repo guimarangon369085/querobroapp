@@ -62,6 +62,7 @@ Para manter contexto entre ChatGPT Online/Mobile e Codex Terminal/Cloud:
 - salvar handoff automaticamente: `scripts/save-handoff.sh`
 - integracao iOS de cupom fiscal: `docs/IOS_SHORTCUT_CUPOM.md`
 - setup rapido do Atalhos (IP/URL): `scripts/shortcut-receipts-setup.sh`
+- teste local com imagem de cupom: `scripts/test-receipt-image.sh`
 
 Regra pratica: cada sessao termina com handoff preenchido e proximo passo objetivo.
 

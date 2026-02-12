@@ -29,6 +29,12 @@ Para descobrir rapidamente o IP/URL corretos no seu Mac:
 ./scripts/shortcut-receipts-setup.sh
 ```
 
+Para testar localmente com uma imagem (antes do iPhone):
+
+```bash
+./scripts/test-receipt-image.sh /caminho/para/cupom.jpg
+```
+
 Request JSON:
 
 ```json
