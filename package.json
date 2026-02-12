@@ -8,7 +8,8 @@
     "build": "turbo run build",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
-    "qa:smoke": "node scripts/qa-smoke.mjs"
+    "qa:smoke": "node scripts/qa-smoke.mjs",
+    "test": "pnpm -r --if-present test"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.35.0",
