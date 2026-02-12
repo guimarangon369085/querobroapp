@@ -47,6 +47,8 @@ Interface do app Atalhos em portugues:
    - Pedir Corpo: `JSON`
    - Corpo: `Dicionario`
    - Cabecalho opcional: `x-receipts-token` (somente se definido na API)
+   - Cabecalho recomendado: `idempotency-key` (use algo unico por cupom, ex.: data-hora)
+   - Se `APP_AUTH_ENABLED=true`, enviar tambem: `x-app-token`
 6. `Mostrar notificacao`
    - Titulo: `Cupom processado`
    - Texto: variavel **`Conteudos do URL`** (nao digitar texto manual)
@@ -103,3 +105,5 @@ Esse card mostra total aplicado e ultimas entradas automaticas.
   - usar o IP local do Mac (`192.168.x.x`).
 - retorno 400 com token:
   - conferir `x-receipts-token` igual ao `RECEIPTS_API_TOKEN`.
+- retorno 401 sem autenticar:
+  - se `APP_AUTH_ENABLED=true`, incluir `x-app-token` com `APP_AUTH_TOKEN` (ou um token em `APP_AUTH_TOKENS`).

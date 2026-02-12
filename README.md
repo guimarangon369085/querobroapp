@@ -114,10 +114,14 @@ Para manter contexto entre ChatGPT Online/Mobile e Codex Terminal/Cloud:
 - prompts prontos: `docs/BOOTSTRAP_PROMPTS.md`
 - releitura rápida no terminal: `scripts/relearn-context.sh`
 - salvar handoff automaticamente: `scripts/save-handoff.sh`
+- checklist de demo/go-no-go Sprint B: `docs/DEMO_CHECKLIST_GABI.md`
 - integração iOS de cupom fiscal: `docs/IOS_SHORTCUT_CUPOM.md`
 - setup rápido do Atalhos (IP/URL): `scripts/shortcut-receipts-setup.sh`
 - teste local com imagem de cupom: `scripts/test-receipt-image.sh`
+  - o script inclui automaticamente `idempotency-key` nos endpoints de ingestao
+  - se `APP_AUTH_ENABLED=true` e `APP_AUTH_TOKEN` existir no `.env`, envia `x-app-token`
 - abrir PR da branch atual: `scripts/open-pr-url.sh`
+- instalar atalhos de abrir/encerrar app no Desktop: `scripts/install-desktop-launchers.sh`
 
 Regra prática: cada sessão termina com handoff preenchido e próximo passo objetivo.
 
@@ -136,6 +140,16 @@ HANDOFF_BLOQUEIOS="Nenhum" \
 HANDOFF_PROXIMO_PASSO="Retomar do próximo item" \
 ./scripts/save-handoff.sh
 ```
+
+Atalho Desktop (sem terminal manual):
+
+```bash
+./scripts/install-desktop-launchers.sh
+```
+
+Depois, use no Desktop:
+- `@QUEROBROAPP.app` (ou `@QUEROBROAPP.command`) para iniciar.
+- `Parar QUEROBROAPP.app` (ou `Parar QUEROBROAPP.command`) para encerrar.
 
 ## Requisitos
 
@@ -225,6 +239,8 @@ pnpm --filter @querobroapp/api prisma:migrate:prod
 - `POST /receipts/parse-clipboard` (retorna apenas texto pronto para colar no Numbers)
   - requer `OPENAI_API_KEY` na API
   - opcional: `RECEIPTS_API_TOKEN` + header `x-receipts-token`
+  - recomendado: `idempotency-key` no `POST /receipts/ingest` para evitar duplicidade em retry
+  - auth global (quando ativo): `x-app-token` ou `Authorization: Bearer <token>`
   - no Atalhos, em `Codificar em Base64`, use `Quebras de Linha: Nenhuma`
   - conferencia no web: `Estoque > Movimentacoes > Entradas automaticas por cupom`
 - `GET /builder/config`
@@ -237,3 +253,7 @@ pnpm --filter @querobroapp/api prisma:migrate:prod
 
 - Em desenvolvimento, o Prisma usa SQLite (`DATABASE_URL=file:./dev.db`).
 - Em produção, use `DATABASE_URL_PROD` com Postgres e os scripts `prisma:*:prod`.
+- Auth API:
+  - `APP_AUTH_ENABLED=false` em dev por padrao.
+  - para ativar, configure `APP_AUTH_TOKEN` (admin) ou `APP_AUTH_TOKENS` (`role:token` separado por virgula).
+  - papeis disponiveis: `admin`, `operator`, `viewer` (viewer = leitura).

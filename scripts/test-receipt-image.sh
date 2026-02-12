@@ -32,6 +32,10 @@ extract_env_value() {
 MIME_TYPE="$(file --mime-type -b "$IMAGE_PATH" 2>/dev/null || echo image/jpeg)"
 IMAGE_BASE64="$(base64 < "$IMAGE_PATH" | tr -d '\n')"
 TOKEN_VALUE="${RECEIPTS_API_TOKEN:-$(extract_env_value RECEIPTS_API_TOKEN)}"
+AUTH_ENABLED_RAW="${APP_AUTH_ENABLED:-$(extract_env_value APP_AUTH_ENABLED)}"
+AUTH_ENABLED="$(printf '%s' "$AUTH_ENABLED_RAW" | tr '[:upper:]' '[:lower:]')"
+APP_TOKEN_VALUE="${APP_AUTH_TOKEN:-$(extract_env_value APP_AUTH_TOKEN)}"
+IDEMPOTENCY_KEY="${IDEMPOTENCY_KEY:-receipt-test-$(date +%s)}"
 
 REQUEST_JSON="$(cat <<EOF
 {"imageBase64":"$IMAGE_BASE64","mimeType":"$MIME_TYPE"}
@@ -45,15 +49,25 @@ TMP_BODY="$(mktemp)"
 trap 'rm -f "$TMP_BODY"' EXIT
 
 if [ -n "$TOKEN_VALUE" ]; then
-  HTTP_CODE="$(curl -sS -o "$TMP_BODY" -w '%{http_code}' -X POST "$URL" \
-    -H "Content-Type: application/json" \
-    -H "x-receipts-token: $TOKEN_VALUE" \
-    -d "$REQUEST_JSON")"
+  EXTRA_HEADERS=("-H" "x-receipts-token: $TOKEN_VALUE")
 else
-  HTTP_CODE="$(curl -sS -o "$TMP_BODY" -w '%{http_code}' -X POST "$URL" \
-    -H "Content-Type: application/json" \
-    -d "$REQUEST_JSON")"
+  EXTRA_HEADERS=()
 fi
+
+if [[ "$ENDPOINT_PATH" == "/receipts/ingest" || "$ENDPOINT_PATH" == "/receipts/ingest-notification" ]]; then
+  EXTRA_HEADERS+=("-H" "idempotency-key: $IDEMPOTENCY_KEY")
+fi
+
+if [ "$AUTH_ENABLED" = "true" ] || [ "$AUTH_ENABLED" = "1" ]; then
+  if [ -n "$APP_TOKEN_VALUE" ]; then
+    EXTRA_HEADERS+=("-H" "x-app-token: $APP_TOKEN_VALUE")
+  fi
+fi
+
+HTTP_CODE="$(curl -sS -o "$TMP_BODY" -w '%{http_code}' -X POST "$URL" \
+  -H "Content-Type: application/json" \
+  "${EXTRA_HEADERS[@]}" \
+  -d "$REQUEST_JSON")"
 
 echo "HTTP: $HTTP_CODE"
 echo "Resposta:"

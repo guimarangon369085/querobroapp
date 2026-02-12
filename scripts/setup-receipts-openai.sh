@@ -98,6 +98,37 @@ else
   unset new_key
 fi
 
+auth_enabled="$(get_env_value APP_AUTH_ENABLED)"
+auth_enabled_normalized="$(printf '%s' "$auth_enabled" | tr '[:upper:]' '[:lower:]')"
+auth_token="$(get_env_value APP_AUTH_TOKEN)"
+auth_tokens="$(get_env_value APP_AUTH_TOKENS)"
+
+if [ "$auth_enabled_normalized" = "true" ] || [ "$auth_enabled_normalized" = "1" ]; then
+  if [ -z "$auth_token" ] && [ -z "$auth_tokens" ]; then
+    echo "APP_AUTH_ENABLED=true detectado e nenhum token de app foi encontrado."
+    echo "Cole um APP_AUTH_TOKEN para liberar chamadas do Atalhos."
+    read -r -s -p "APP_AUTH_TOKEN: " new_auth_token
+    echo
+    if [ -z "${new_auth_token:-}" ] && command -v pbpaste >/dev/null 2>&1; then
+      clipboard_auth_token="$(pbpaste 2>/dev/null || true)"
+      if [ -n "$clipboard_auth_token" ]; then
+        new_auth_token="$clipboard_auth_token"
+        echo "Usando token da area de transferencia."
+      fi
+      unset clipboard_auth_token
+    fi
+    if [ -z "${new_auth_token:-}" ]; then
+      echo "Token vazio. Nao foi possivel concluir a configuracao."
+      exit 1
+    fi
+    new_auth_token="${new_auth_token//$'\r'/}"
+    new_auth_token="${new_auth_token//$'\n'/}"
+    set_env_value APP_AUTH_TOKEN "$new_auth_token"
+    echo "APP_AUTH_TOKEN salvo com sucesso: $(mask_value "$new_auth_token")"
+    unset new_auth_token
+  fi
+fi
+
 if is_port_listening "$API_PORT"; then
   echo "API ja esta rodando na porta ${API_PORT}."
 else

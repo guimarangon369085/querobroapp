@@ -12,6 +12,22 @@ function extractErrorMessage(body: unknown) {
   if (!body || typeof body !== 'object') return '';
 
   const record = body as Record<string, unknown>;
+  if (Array.isArray(record.formErrors) || (record.fieldErrors && typeof record.fieldErrors === 'object')) {
+    const formErrors = Array.isArray(record.formErrors)
+      ? record.formErrors.map((value) => String(value)).filter(Boolean)
+      : [];
+    const fieldErrors =
+      record.fieldErrors && typeof record.fieldErrors === 'object'
+        ? Object.values(record.fieldErrors as Record<string, unknown>)
+            .flatMap((value) =>
+              Array.isArray(value) ? value.map((entry) => String(entry)) : [String(value)]
+            )
+            .filter(Boolean)
+        : [];
+    const merged = [...formErrors, ...fieldErrors];
+    if (merged.length) return merged.join('; ');
+  }
+
   if (typeof record.message === 'string') return record.message;
   if (Array.isArray(record.message)) {
     return record.message.map((value) => String(value)).join('; ');

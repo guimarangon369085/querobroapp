@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { BuilderService } from './builder.service.js';
+import { Roles } from '../../security/roles.decorator.js';
 
 @Controller('builder')
 export class BuilderController {
@@ -24,16 +25,19 @@ export class BuilderController {
   }
 
   @Put('config')
+  @Roles('admin')
   updateConfig(@Body() body: unknown) {
     return this.service.updateConfig(body);
   }
 
   @Patch('config/:block')
+  @Roles('admin')
   updateBlock(@Param('block') block: string, @Body() body: unknown) {
     return this.service.updateBlock(block, body);
   }
 
   @Post('home-images')
+  @Roles('admin')
   @UseInterceptors(FileInterceptor('file'))
   uploadHomeImage(
     @UploadedFile() file: { buffer: Buffer; mimetype?: string; originalname?: string },
@@ -43,6 +47,7 @@ export class BuilderController {
   }
 
   @Delete('home-images/:id')
+  @Roles('admin')
   removeHomeImage(@Param('id') id: string) {
     return this.service.removeHomeImage(id);
   }

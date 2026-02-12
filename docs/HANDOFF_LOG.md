@@ -248,3 +248,459 @@ Objetivo da sessao:
 
 No fim, registrar nova entrada no HANDOFF_LOG.
 ```
+
+## Entrada 005
+
+### 1) Metadados
+
+- Data/hora: 2026-02-12 17:41 -03
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `main`
+- Commit base (opcional): `ca91e10`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Registrar handoff automatico no encerramento da sessao.
+- Resultado entregue: Entrada automatica registrada com estado atual do repositorio (23 itens no git status).
+- O que ficou pendente: Publicar baseline tecnico no remoto (`main`)
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados:
+- ` M .gitignore`
+- ` M README.md`
+- ` M apps/api/.env.example`
+- ` M apps/api/package.json`
+- ` M apps/api/prisma/schema.prisma`
+- ` M apps/api/prisma/schema.prod.prisma`
+- ` M apps/api/src/app.controller.ts`
+- ` M apps/api/src/app.module.ts`
+- ` M apps/api/src/main.ts`
+- ` M apps/api/src/modules/builder/builder.controller.ts`
+- ` M apps/api/src/modules/receipts/receipts.controller.ts`
+- ` M apps/api/src/modules/receipts/receipts.service.ts`
+- ` M docs/IOS_SHORTCUT_CUPOM.md`
+- ` M pnpm-lock.yaml`
+- ` M scripts/setup-receipts-openai.sh`
+- ` M scripts/shortcut-receipts-setup.sh`
+- `?? apps/api/prisma/migrations/20260212191335_add_idempotency_records/`
+- `?? apps/api/src/security/`
+- `?? docs/BENCHMARK_GAP_MAP_2026-02-12.md`
+- `?? docs/DEMO_CHECKLIST_GABI.md`
+- `?? scripts/install-desktop-launchers.sh`
+- `?? scripts/start-desktop-app.sh`
+- `?? scripts/stop-desktop-app.sh`
+- Comportamento novo: Sem alteracao funcional nesta execucao; somente atualizacao documental automatica.
+- Riscos/regressoes: baixo risco; log pode registrar pendencias genericas se o plano nao estiver atualizado.
+
+### 4) Validacao
+
+- Comandos executados: Desktop/Salvar Handoff.command; scripts/save-handoff.sh
+- Testes que passaram: nao aplicavel
+- Testes nao executados (e motivo): nao aplicavel (encerramento documental)
+
+### 5) Contexto para retomada
+
+- Decisoes importantes: Manter bootstrap por documentacao e reduzir dependencia de historico longo no chat.
+- Suposicoes feitas: Repositorio local em ~/querobroapp com docs atualizados.
+- Bloqueios: nenhum
+- Proximo passo recomendado (1 acao objetiva): Publicar baseline tecnico no remoto (`main`)
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/NEXT_STEP_PLAN.md
+- docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
+## Entrada 006
+
+### 1) Metadados
+
+- Data/hora: 2026-02-12 17:45 -03
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `main`
+- Commit base (opcional): `ca91e10`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Registrar handoff automatico no encerramento da sessao.
+- Resultado entregue: Entrada automatica registrada com estado atual do repositorio (24 itens no git status).
+- O que ficou pendente: Publicar baseline tecnico no remoto (`main`)
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados:
+- ` M .gitignore`
+- ` M README.md`
+- ` M apps/api/.env.example`
+- ` M apps/api/package.json`
+- ` M apps/api/prisma/schema.prisma`
+- ` M apps/api/prisma/schema.prod.prisma`
+- ` M apps/api/src/app.controller.ts`
+- ` M apps/api/src/app.module.ts`
+- ` M apps/api/src/main.ts`
+- ` M apps/api/src/modules/builder/builder.controller.ts`
+- ` M apps/api/src/modules/receipts/receipts.controller.ts`
+- ` M apps/api/src/modules/receipts/receipts.service.ts`
+- ` M docs/HANDOFF_LOG.md`
+- ` M docs/IOS_SHORTCUT_CUPOM.md`
+- ` M pnpm-lock.yaml`
+- ` M scripts/setup-receipts-openai.sh`
+- ` M scripts/shortcut-receipts-setup.sh`
+- `?? apps/api/prisma/migrations/20260212191335_add_idempotency_records/`
+- `?? apps/api/src/security/`
+- `?? docs/BENCHMARK_GAP_MAP_2026-02-12.md`
+- `?? docs/DEMO_CHECKLIST_GABI.md`
+- `?? scripts/install-desktop-launchers.sh`
+- `?? scripts/start-desktop-app.sh`
+- `?? scripts/stop-desktop-app.sh`
+- Comportamento novo: Sem alteracao funcional nesta execucao; somente atualizacao documental automatica.
+- Riscos/regressoes: baixo risco; log pode registrar pendencias genericas se o plano nao estiver atualizado.
+
+### 4) Validacao
+
+- Comandos executados: Desktop/Salvar Handoff.command; scripts/save-handoff.sh
+- Testes que passaram: nao aplicavel
+- Testes nao executados (e motivo): nao aplicavel (encerramento documental)
+
+### 5) Contexto para retomada
+
+- Decisoes importantes: Manter bootstrap por documentacao e reduzir dependencia de historico longo no chat.
+- Suposicoes feitas: Repositorio local em ~/querobroapp com docs atualizados.
+- Bloqueios: nenhum
+- Proximo passo recomendado (1 acao objetiva): Publicar baseline tecnico no remoto (`main`)
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/NEXT_STEP_PLAN.md
+- docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
+## Entrada 007
+
+### 1) Metadados
+
+- Data/hora: 2026-02-12 17:50 -03
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `main`
+- Commit base (opcional): `ca91e10`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Registrar handoff automatico no encerramento da sessao.
+- Resultado entregue: Entrada automatica registrada com estado atual do repositorio (24 itens no git status).
+- O que ficou pendente: Publicar baseline tecnico no remoto (`main`)
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados:
+- ` M .gitignore`
+- ` M README.md`
+- ` M apps/api/.env.example`
+- ` M apps/api/package.json`
+- ` M apps/api/prisma/schema.prisma`
+- ` M apps/api/prisma/schema.prod.prisma`
+- ` M apps/api/src/app.controller.ts`
+- ` M apps/api/src/app.module.ts`
+- ` M apps/api/src/main.ts`
+- ` M apps/api/src/modules/builder/builder.controller.ts`
+- ` M apps/api/src/modules/receipts/receipts.controller.ts`
+- ` M apps/api/src/modules/receipts/receipts.service.ts`
+- ` M docs/HANDOFF_LOG.md`
+- ` M docs/IOS_SHORTCUT_CUPOM.md`
+- ` M pnpm-lock.yaml`
+- ` M scripts/setup-receipts-openai.sh`
+- ` M scripts/shortcut-receipts-setup.sh`
+- `?? apps/api/prisma/migrations/20260212191335_add_idempotency_records/`
+- `?? apps/api/src/security/`
+- `?? docs/BENCHMARK_GAP_MAP_2026-02-12.md`
+- `?? docs/DEMO_CHECKLIST_GABI.md`
+- `?? scripts/install-desktop-launchers.sh`
+- `?? scripts/start-desktop-app.sh`
+- `?? scripts/stop-desktop-app.sh`
+- Comportamento novo: Sem alteracao funcional nesta execucao; somente atualizacao documental automatica.
+- Riscos/regressoes: baixo risco; log pode registrar pendencias genericas se o plano nao estiver atualizado.
+
+### 4) Validacao
+
+- Comandos executados: Desktop/Salvar Handoff.command; scripts/save-handoff.sh
+- Testes que passaram: nao aplicavel
+- Testes nao executados (e motivo): nao aplicavel (encerramento documental)
+
+### 5) Contexto para retomada
+
+- Decisoes importantes: Manter bootstrap por documentacao e reduzir dependencia de historico longo no chat.
+- Suposicoes feitas: Repositorio local em ~/querobroapp com docs atualizados.
+- Bloqueios: nenhum
+- Proximo passo recomendado (1 acao objetiva): Publicar baseline tecnico no remoto (`main`)
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/NEXT_STEP_PLAN.md
+- docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
+## Entrada 008
+
+### 1) Metadados
+
+- Data/hora: 2026-02-12 17:51 -03
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `main`
+- Commit base (opcional): `ca91e10`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Registrar handoff automatico no encerramento da sessao.
+- Resultado entregue: Entrada automatica registrada com estado atual do repositorio (24 itens no git status).
+- O que ficou pendente: Publicar baseline tecnico no remoto (`main`)
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados:
+- ` M .gitignore`
+- ` M README.md`
+- ` M apps/api/.env.example`
+- ` M apps/api/package.json`
+- ` M apps/api/prisma/schema.prisma`
+- ` M apps/api/prisma/schema.prod.prisma`
+- ` M apps/api/src/app.controller.ts`
+- ` M apps/api/src/app.module.ts`
+- ` M apps/api/src/main.ts`
+- ` M apps/api/src/modules/builder/builder.controller.ts`
+- ` M apps/api/src/modules/receipts/receipts.controller.ts`
+- ` M apps/api/src/modules/receipts/receipts.service.ts`
+- ` M docs/HANDOFF_LOG.md`
+- ` M docs/IOS_SHORTCUT_CUPOM.md`
+- ` M pnpm-lock.yaml`
+- ` M scripts/setup-receipts-openai.sh`
+- ` M scripts/shortcut-receipts-setup.sh`
+- `?? apps/api/prisma/migrations/20260212191335_add_idempotency_records/`
+- `?? apps/api/src/security/`
+- `?? docs/BENCHMARK_GAP_MAP_2026-02-12.md`
+- `?? docs/DEMO_CHECKLIST_GABI.md`
+- `?? scripts/install-desktop-launchers.sh`
+- `?? scripts/start-desktop-app.sh`
+- `?? scripts/stop-desktop-app.sh`
+- Comportamento novo: Sem alteracao funcional nesta execucao; somente atualizacao documental automatica.
+- Riscos/regressoes: baixo risco; log pode registrar pendencias genericas se o plano nao estiver atualizado.
+
+### 4) Validacao
+
+- Comandos executados: Desktop/Salvar Handoff.command; scripts/save-handoff.sh
+- Testes que passaram: nao aplicavel
+- Testes nao executados (e motivo): nao aplicavel (encerramento documental)
+
+### 5) Contexto para retomada
+
+- Decisoes importantes: Manter bootstrap por documentacao e reduzir dependencia de historico longo no chat.
+- Suposicoes feitas: Repositorio local em ~/querobroapp com docs atualizados.
+- Bloqueios: nenhum
+- Proximo passo recomendado (1 acao objetiva): Publicar baseline tecnico no remoto (`main`)
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/NEXT_STEP_PLAN.md
+- docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
+## Entrada 009
+
+### 1) Metadados
+
+- Data/hora: 2026-02-12 17:55 -03
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `main`
+- Commit base (opcional): `ca91e10`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Registrar handoff automatico no encerramento da sessao.
+- Resultado entregue: Entrada automatica registrada com estado atual do repositorio (24 itens no git status).
+- O que ficou pendente: Publicar baseline tecnico no remoto (`main`)
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados:
+- ` M .gitignore`
+- ` M README.md`
+- ` M apps/api/.env.example`
+- ` M apps/api/package.json`
+- ` M apps/api/prisma/schema.prisma`
+- ` M apps/api/prisma/schema.prod.prisma`
+- ` M apps/api/src/app.controller.ts`
+- ` M apps/api/src/app.module.ts`
+- ` M apps/api/src/main.ts`
+- ` M apps/api/src/modules/builder/builder.controller.ts`
+- ` M apps/api/src/modules/receipts/receipts.controller.ts`
+- ` M apps/api/src/modules/receipts/receipts.service.ts`
+- ` M docs/HANDOFF_LOG.md`
+- ` M docs/IOS_SHORTCUT_CUPOM.md`
+- ` M pnpm-lock.yaml`
+- ` M scripts/setup-receipts-openai.sh`
+- ` M scripts/shortcut-receipts-setup.sh`
+- `?? apps/api/prisma/migrations/20260212191335_add_idempotency_records/`
+- `?? apps/api/src/security/`
+- `?? docs/BENCHMARK_GAP_MAP_2026-02-12.md`
+- `?? docs/DEMO_CHECKLIST_GABI.md`
+- `?? scripts/install-desktop-launchers.sh`
+- `?? scripts/start-desktop-app.sh`
+- `?? scripts/stop-desktop-app.sh`
+- Comportamento novo: Sem alteracao funcional nesta execucao; somente atualizacao documental automatica.
+- Riscos/regressoes: baixo risco; log pode registrar pendencias genericas se o plano nao estiver atualizado.
+
+### 4) Validacao
+
+- Comandos executados: Desktop/Salvar Handoff.command; scripts/save-handoff.sh
+- Testes que passaram: nao aplicavel
+- Testes nao executados (e motivo): nao aplicavel (encerramento documental)
+
+### 5) Contexto para retomada
+
+- Decisoes importantes: Manter bootstrap por documentacao e reduzir dependencia de historico longo no chat.
+- Suposicoes feitas: Repositorio local em ~/querobroapp com docs atualizados.
+- Bloqueios: nenhum
+- Proximo passo recomendado (1 acao objetiva): Publicar baseline tecnico no remoto (`main`)
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/NEXT_STEP_PLAN.md
+- docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
+## Entrada 010
+
+### 1) Metadados
+
+- Data/hora: 2026-02-12 17:59 -03
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `main`
+- Commit base (opcional): `ca91e10`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Registrar handoff automatico no encerramento da sessao.
+- Resultado entregue: Entrada automatica registrada com estado atual do repositorio (25 itens no git status).
+- O que ficou pendente: Publicar baseline tecnico no remoto (`main`)
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados:
+- ` M .gitignore`
+- ` M README.md`
+- ` M apps/api/.env.example`
+- ` M apps/api/package.json`
+- ` M apps/api/prisma/schema.prisma`
+- ` M apps/api/prisma/schema.prod.prisma`
+- ` M apps/api/src/app.controller.ts`
+- ` M apps/api/src/app.module.ts`
+- ` M apps/api/src/main.ts`
+- ` M apps/api/src/modules/builder/builder.controller.ts`
+- ` M apps/api/src/modules/receipts/receipts.controller.ts`
+- ` M apps/api/src/modules/receipts/receipts.service.ts`
+- ` M docs/HANDOFF_LOG.md`
+- ` M docs/IOS_SHORTCUT_CUPOM.md`
+- ` M pnpm-lock.yaml`
+- ` M scripts/setup-receipts-openai.sh`
+- ` M scripts/shortcut-receipts-setup.sh`
+- `?? apps/api/prisma/migrations/20260212191335_add_idempotency_records/`
+- `?? apps/api/src/security/`
+- `?? docs/BENCHMARK_GAP_MAP_2026-02-12.md`
+- `?? docs/DEMO_CHECKLIST_GABI.md`
+- `?? scripts/install-desktop-launchers.sh`
+- `?? scripts/save-handoff-auto.sh`
+- `?? scripts/start-desktop-app.sh`
+- `?? scripts/stop-desktop-app.sh`
+- Comportamento novo: Sem alteracao funcional nesta execucao; somente atualizacao documental automatica.
+- Riscos/regressoes: baixo risco; log pode registrar pendencias genericas se o plano nao estiver atualizado.
+
+### 4) Validacao
+
+- Comandos executados: scripts/save-handoff-auto.sh; scripts/save-handoff.sh
+- Testes que passaram: nao aplicavel
+- Testes nao executados (e motivo): nao aplicavel (encerramento documental)
+
+### 5) Contexto para retomada
+
+- Decisoes importantes: Manter bootstrap por documentacao e reduzir dependencia de historico longo no chat.
+- Suposicoes feitas: Repositorio local em ~/querobroapp com docs atualizados.
+- Bloqueios: nenhum
+- Proximo passo recomendado (1 acao objetiva): Publicar baseline tecnico no remoto (`main`)
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/NEXT_STEP_PLAN.md
+- docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```

@@ -45,6 +45,9 @@ fi
 
 TOKEN_VALUE="$(extract_env_value RECEIPTS_API_TOKEN)"
 OPENAI_SET="$(extract_env_value OPENAI_API_KEY)"
+AUTH_ENABLED="$(extract_env_value APP_AUTH_ENABLED)"
+APP_AUTH_TOKEN="$(extract_env_value APP_AUTH_TOKEN)"
+AUTH_ENABLED_NORMALIZED="$(printf '%s' "$AUTH_ENABLED" | tr '[:upper:]' '[:lower:]')"
 
 BASE_URL="http://$IP_ADDR:$PORT/receipts"
 
@@ -70,6 +73,17 @@ if [ -n "$TOKEN_VALUE" ]; then
 else
   echo "Header opcional:"
   echo "  x-receipts-token (somente se voce definir RECEIPTS_API_TOKEN)"
+fi
+echo "Header recomendado para retries seguros:"
+echo "  idempotency-key: <chave_unica_por_cupom>"
+if [ "$AUTH_ENABLED_NORMALIZED" = "true" ] || [ "$AUTH_ENABLED_NORMALIZED" = "1" ]; then
+  if [ -n "$APP_AUTH_TOKEN" ]; then
+    echo "Header obrigatorio (Auth global ativo):"
+    echo "  x-app-token: $(mask_value "$APP_AUTH_TOKEN")"
+  else
+    echo "Auth global ativo, mas APP_AUTH_TOKEN nao encontrado em apps/api/.env."
+    echo "Defina APP_AUTH_TOKEN para liberar chamadas no Atalhos."
+  fi
 fi
 echo
 if [ -n "$OPENAI_SET" ]; then
