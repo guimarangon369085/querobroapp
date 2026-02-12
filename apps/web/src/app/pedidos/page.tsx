@@ -9,7 +9,11 @@ import { formatCurrencyBR, parseCurrencyBR } from '@/lib/format';
 import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
 import { useFeedback } from '@/components/feedback-provider';
 import { FormField } from '@/components/form/FormField';
-import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
+import {
+  BuilderLayoutCustomCards,
+  BuilderLayoutItemSlot,
+  BuilderLayoutProvider
+} from '@/components/builder-layout';
 
 const orderStatuses = ['ABERTO', 'CONFIRMADO', 'EM_PREPARACAO', 'PRONTO', 'ENTREGUE', 'CANCELADO'];
 const paymentMethods = ['pix', 'dinheiro', 'cartao', 'transferencia'];
@@ -964,6 +968,8 @@ export default function OrdersPage() {
         </div>
       )}
       </BuilderLayoutItemSlot>
+
+      <BuilderLayoutCustomCards />
       </section>
     </BuilderLayoutProvider>
   );

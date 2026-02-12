@@ -111,6 +111,9 @@ export const InventoryMovementSchema = z.object({
   type: StockMovementTypeEnum,
   quantity: z.number().nonnegative(),
   reason: z.string().optional().nullable(),
+  source: z.string().min(1).max(40).optional().nullable(),
+  sourceLabel: z.string().min(1).max(140).optional().nullable(),
+  unitCost: z.number().nonnegative().optional().nullable(),
   createdAt: z.string().optional().nullable()
 });
 
@@ -192,6 +195,8 @@ export const ReceiptOfficialItemEnum = z.enum([
   'PAPEL MANTEIGA'
 ]);
 
+export const BuilderReceiptQuantityModeEnum = z.enum(['PURCHASE_PACK', 'BASE_UNIT']);
+
 const HexColorSchema = z.string().regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
 
 export const BuilderThemeSchema = z.object({
@@ -258,7 +263,23 @@ export const BuilderReceiptStockRuleSchema = z.object({
   officialItem: ReceiptOfficialItemEnum,
   inventoryItemName: z.string().min(1).max(120),
   enabled: z.boolean().default(true),
-  quantityMultiplier: z.number().positive().max(100).default(1)
+  quantityMultiplier: z.number().positive().max(100).default(1),
+  quantityMode: BuilderReceiptQuantityModeEnum.default('PURCHASE_PACK'),
+  purchasePackCostMultiplier: z.number().positive().max(100).default(1),
+  applyPriceToInventoryCost: z.boolean().default(true),
+  sourceLabel: z.string().trim().max(120).default('')
+});
+
+export const BuilderSupplierPriceSourceSchema = z.object({
+  id: z.string().min(1).max(64),
+  officialItem: ReceiptOfficialItemEnum,
+  inventoryItemName: z.string().min(1).max(120),
+  supplierName: z.string().trim().min(1).max(120),
+  url: z.string().url().max(500),
+  priceXPath: z.string().trim().max(400).default(''),
+  enabled: z.boolean().default(true),
+  fallbackPrice: z.number().positive().optional().nullable(),
+  applyToInventoryCost: z.boolean().default(true)
 });
 
 export const BuilderIntegrationsSchema = z.object({
@@ -268,56 +289,325 @@ export const BuilderIntegrationsSchema = z.object({
   receiptsPrompt: z.string().max(3000).default(''),
   receiptsSeparator: z.string().min(1).max(4).default(';'),
   receiptsAutoIngestEnabled: z.boolean().default(true),
+  supplierPricesEnabled: z.boolean().default(true),
   receiptStockRules: z.array(BuilderReceiptStockRuleSchema).max(30).default([
     {
       officialItem: 'FARINHA DE TRIGO',
       inventoryItemName: 'FARINHA DE TRIGO',
       enabled: true,
-      quantityMultiplier: 1
+      quantityMultiplier: 1,
+      quantityMode: 'PURCHASE_PACK',
+      purchasePackCostMultiplier: 1,
+      applyPriceToInventoryCost: true,
+      sourceLabel: 'Cupom fornecedor'
     },
     {
       officialItem: 'FUBÁ DE CANJICA',
       inventoryItemName: 'FUBÁ DE CANJICA',
       enabled: true,
-      quantityMultiplier: 1
+      quantityMultiplier: 1,
+      quantityMode: 'PURCHASE_PACK',
+      purchasePackCostMultiplier: 1,
+      applyPriceToInventoryCost: true,
+      sourceLabel: 'Cupom fornecedor'
     },
-    { officialItem: 'AÇÚCAR', inventoryItemName: 'AÇÚCAR', enabled: true, quantityMultiplier: 1 },
-    { officialItem: 'MANTEIGA', inventoryItemName: 'MANTEIGA', enabled: true, quantityMultiplier: 1 },
-    { officialItem: 'LEITE', inventoryItemName: 'LEITE', enabled: true, quantityMultiplier: 1 },
-    { officialItem: 'OVOS', inventoryItemName: 'OVOS', enabled: true, quantityMultiplier: 1 },
-    { officialItem: 'GOIABADA', inventoryItemName: 'GOIABADA', enabled: true, quantityMultiplier: 1 },
+    {
+      officialItem: 'AÇÚCAR',
+      inventoryItemName: 'AÇÚCAR',
+      enabled: true,
+      quantityMultiplier: 1,
+      quantityMode: 'PURCHASE_PACK',
+      purchasePackCostMultiplier: 1,
+      applyPriceToInventoryCost: true,
+      sourceLabel: 'Cupom fornecedor'
+    },
+    {
+      officialItem: 'MANTEIGA',
+      inventoryItemName: 'MANTEIGA',
+      enabled: true,
+      quantityMultiplier: 1,
+      quantityMode: 'PURCHASE_PACK',
+      purchasePackCostMultiplier: 1,
+      applyPriceToInventoryCost: true,
+      sourceLabel: 'Cupom fornecedor'
+    },
+    {
+      officialItem: 'LEITE',
+      inventoryItemName: 'LEITE',
+      enabled: true,
+      quantityMultiplier: 1,
+      quantityMode: 'PURCHASE_PACK',
+      purchasePackCostMultiplier: 1,
+      applyPriceToInventoryCost: true,
+      sourceLabel: 'Cupom fornecedor'
+    },
+    {
+      officialItem: 'OVOS',
+      inventoryItemName: 'OVOS',
+      enabled: true,
+      quantityMultiplier: 1,
+      quantityMode: 'PURCHASE_PACK',
+      purchasePackCostMultiplier: 1,
+      applyPriceToInventoryCost: true,
+      sourceLabel: 'Cupom fornecedor'
+    },
+    {
+      officialItem: 'GOIABADA',
+      inventoryItemName: 'GOIABADA',
+      enabled: true,
+      quantityMultiplier: 1,
+      quantityMode: 'PURCHASE_PACK',
+      purchasePackCostMultiplier: 1,
+      applyPriceToInventoryCost: true,
+      sourceLabel: 'Cupom fornecedor'
+    },
     {
       officialItem: 'DOCE DE LEITE',
       inventoryItemName: 'DOCE DE LEITE',
       enabled: true,
-      quantityMultiplier: 1
+      quantityMultiplier: 1,
+      quantityMode: 'PURCHASE_PACK',
+      purchasePackCostMultiplier: 1,
+      applyPriceToInventoryCost: true,
+      sourceLabel: 'Cupom fornecedor'
     },
     {
       officialItem: 'QUEIJO DO SERRO',
       inventoryItemName: 'QUEIJO DO SERRO',
       enabled: true,
-      quantityMultiplier: 1
+      quantityMultiplier: 1,
+      quantityMode: 'PURCHASE_PACK',
+      purchasePackCostMultiplier: 1,
+      applyPriceToInventoryCost: true,
+      sourceLabel: 'Cupom fornecedor'
     },
     {
       officialItem: 'REQUEIJÃO DE CORTE',
       inventoryItemName: 'REQUEIJÃO DE CORTE',
       enabled: true,
-      quantityMultiplier: 1
+      quantityMultiplier: 1,
+      quantityMode: 'PURCHASE_PACK',
+      purchasePackCostMultiplier: 1,
+      applyPriceToInventoryCost: true,
+      sourceLabel: 'Cupom fornecedor'
     },
-    { officialItem: 'SACOLA', inventoryItemName: 'SACOLA', enabled: false, quantityMultiplier: 1 },
+    {
+      officialItem: 'SACOLA',
+      inventoryItemName: 'SACOLA',
+      enabled: true,
+      quantityMultiplier: 1,
+      quantityMode: 'PURCHASE_PACK',
+      purchasePackCostMultiplier: 1,
+      applyPriceToInventoryCost: true,
+      sourceLabel: 'Cupom fornecedor'
+    },
     {
       officialItem: 'CAIXA DE PLÁSTICO',
       inventoryItemName: 'CAIXA DE PLÁSTICO',
-      enabled: false,
-      quantityMultiplier: 1
+      enabled: true,
+      quantityMultiplier: 1,
+      quantityMode: 'PURCHASE_PACK',
+      purchasePackCostMultiplier: 1,
+      applyPriceToInventoryCost: true,
+      sourceLabel: 'Cupom fornecedor'
     },
     {
       officialItem: 'PAPEL MANTEIGA',
       inventoryItemName: 'PAPEL MANTEIGA',
-      enabled: false,
-      quantityMultiplier: 1
+      enabled: true,
+      quantityMultiplier: 1,
+      quantityMode: 'PURCHASE_PACK',
+      purchasePackCostMultiplier: 1,
+      applyPriceToInventoryCost: true,
+      sourceLabel: 'Cupom fornecedor'
     }
-  ])
+  ]),
+  supplierPriceSources: z.array(BuilderSupplierPriceSourceSchema).max(40).default([
+    {
+      id: 'src-trigo-pao',
+      officialItem: 'FARINHA DE TRIGO',
+      inventoryItemName: 'FARINHA DE TRIGO',
+      supplierName: 'Pao de Acucar',
+      url: 'https://www.paodeacucar.com/produto/23692/farinha-de-trigo-tipo-1-tradicional-qualita-pacote-1kg',
+      priceXPath:
+        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p',
+      enabled: true,
+      fallbackPrice: 6.49,
+      applyToInventoryCost: true
+    },
+    {
+      id: 'src-canjica-superab',
+      officialItem: 'FUBÁ DE CANJICA',
+      inventoryItemName: 'FUBÁ DE CANJICA',
+      supplierName: 'SuperAB',
+      url: 'https://superabconline.com.br/p/d/2593871/fuba-canjica-rocinha-1kg',
+      priceXPath:
+        '/html/body/app-root/app-layout/app-layout-default/div/app-detalhes-produto-page/div/app-detalhes-produto/div/app-detalhes-produto-pagina-desktop-default/div/div/div[2]/div[3]/div[1]',
+      enabled: true,
+      fallbackPrice: 6,
+      applyToInventoryCost: true
+    },
+    {
+      id: 'src-acucar-pao',
+      officialItem: 'AÇÚCAR',
+      inventoryItemName: 'AÇÚCAR',
+      supplierName: 'Pao de Acucar',
+      url: 'https://www.paodeacucar.com/produto/74215/acucar-refinado-uniao-pacote-1kg',
+      priceXPath:
+        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p',
+      enabled: true,
+      fallbackPrice: 5.69,
+      applyToInventoryCost: true
+    },
+    {
+      id: 'src-manteiga-pao',
+      officialItem: 'MANTEIGA',
+      inventoryItemName: 'MANTEIGA',
+      supplierName: 'Pao de Acucar',
+      url: 'https://www.paodeacucar.com/produto/53023/manteiga-com-sal-batavo-200g',
+      priceXPath:
+        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p',
+      enabled: true,
+      fallbackPrice: 12.79,
+      applyToInventoryCost: true
+    },
+    {
+      id: 'src-leite-pao',
+      officialItem: 'LEITE',
+      inventoryItemName: 'LEITE',
+      supplierName: 'Pao de Acucar',
+      url: 'https://www.paodeacucar.com/produto/164887/leite-uht-integral-qualita-caixa-com-tampa-1l',
+      priceXPath:
+        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p[1]',
+      enabled: true,
+      fallbackPrice: 4.19,
+      applyToInventoryCost: true
+    },
+    {
+      id: 'src-ovos-pao',
+      officialItem: 'OVOS',
+      inventoryItemName: 'OVOS',
+      supplierName: 'Pao de Acucar',
+      url: 'https://www.paodeacucar.com/produto/1636359/ovos-vermelhos-qualita-livre-de-gaiola-bandeja-20-unidades',
+      priceXPath:
+        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p[1]',
+      enabled: true,
+      fallbackPrice: 23.9,
+      applyToInventoryCost: true
+    },
+    {
+      id: 'src-goiabada-pao',
+      officialItem: 'GOIABADA',
+      inventoryItemName: 'GOIABADA',
+      supplierName: 'Pao de Acucar',
+      url: 'https://www.paodeacucar.com/produto/93418/goiabada-corte-qualita-pacote-300g',
+      priceXPath:
+        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p',
+      enabled: true,
+      fallbackPrice: 5.99,
+      applyToInventoryCost: true
+    },
+    {
+      id: 'src-doce-pao',
+      officialItem: 'DOCE DE LEITE',
+      inventoryItemName: 'DOCE DE LEITE',
+      supplierName: 'Pao de Acucar',
+      url: 'https://www.paodeacucar.com/produto/354500/doce-de-leite-tradicional-portao-do-cambui-pacote-200g',
+      priceXPath:
+        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p',
+      enabled: true,
+      fallbackPrice: 20.99,
+      applyToInventoryCost: true
+    },
+    {
+      id: 'src-queijo-pao',
+      officialItem: 'QUEIJO DO SERRO',
+      inventoryItemName: 'QUEIJO DO SERRO',
+      supplierName: 'Pao de Acucar',
+      url: 'https://www.paodeacucar.com/produto/443109/queijo-minas-meia-cura-do-serro-500g',
+      priceXPath:
+        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div/p',
+      enabled: true,
+      fallbackPrice: 46.95,
+      applyToInventoryCost: true
+    },
+    {
+      id: 'src-requeijao-trela',
+      officialItem: 'REQUEIJÃO DE CORTE',
+      inventoryItemName: 'REQUEIJÃO DE CORTE',
+      supplierName: 'Trela',
+      url: 'https://trela.com.br/produto/requeijao-com-raspas-de-queijo-240g-5844',
+      priceXPath: '/html/body/div[1]/main/div/div[3]/div[1]/p',
+      enabled: true,
+      fallbackPrice: 30.9,
+      applyToInventoryCost: true
+    },
+    {
+      id: 'src-sacola-fornecedor',
+      officialItem: 'SACOLA',
+      inventoryItemName: 'SACOLA',
+      supplierName: 'Fornecedor.net',
+      url: 'https://www.fornecedornet.com.br/papel-e-papelao/papel/sacolas-de-papel/sacola-kraft-natural-23-5x17x28cm-pacote-com-10-unidades',
+      priceXPath: '/html/body/div[2]/div[2]/div/div[4]/div[2]/ul[2]/li[1]/h2/span',
+      enabled: true,
+      fallbackPrice: 17.88,
+      applyToInventoryCost: true
+    },
+    {
+      id: 'src-caixa-fornecedor',
+      officialItem: 'CAIXA DE PLÁSTICO',
+      inventoryItemName: 'CAIXA DE PLÁSTICO',
+      supplierName: 'Fornecedor.net',
+      url: 'https://www.fornecedornet.com.br/ga-20-rocambole-alto-galvanotek-caixa-100-unidades',
+      priceXPath: '/html/body/div[2]/div[2]/div/div[4]/div[2]/ul[2]/li[1]/h2/span',
+      enabled: true,
+      fallbackPrice: 86.65,
+      applyToInventoryCost: true
+    },
+    {
+      id: 'src-papel-pao',
+      officialItem: 'PAPEL MANTEIGA',
+      inventoryItemName: 'PAPEL MANTEIGA',
+      supplierName: 'Pao de Acucar',
+      url: 'https://www.paodeacucar.com/produto/108699/papel-manteiga-qualita-30cm-x-7,5m',
+      priceXPath:
+        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p[1]',
+      enabled: true,
+      fallbackPrice: 10.29,
+      applyToInventoryCost: true
+    }
+  ]),
+  salePrices: z
+    .object({
+      completa: z
+        .object({
+          T: z.number().nonnegative().default(40),
+          G: z.number().nonnegative().default(50),
+          Q: z.number().nonnegative().default(52),
+          R: z.number().nonnegative().default(52),
+          D: z.number().nonnegative().default(52)
+        })
+        .default({}),
+      mista: z
+        .object({
+          T: z.number().nonnegative().default(0),
+          G: z.number().nonnegative().default(45),
+          Q: z.number().nonnegative().default(47),
+          R: z.number().nonnegative().default(47),
+          D: z.number().nonnegative().default(47)
+        })
+        .default({}),
+      sabores: z
+        .object({
+          T: z.number().nonnegative().default(52),
+          G: z.number().nonnegative().default(52),
+          Q: z.number().nonnegative().default(52),
+          R: z.number().nonnegative().default(52),
+          D: z.number().nonnegative().default(52)
+        })
+        .default({})
+    })
+    .default({})
 });
 
 export const BuilderLayoutPageKeyEnum = z.enum([
@@ -331,50 +621,55 @@ export const BuilderLayoutPageKeyEnum = z.enum([
 export const BuilderLayoutItemSchema = z.object({
   id: z.string().min(1).max(80),
   label: z.string().min(1).max(120),
+  kind: z.enum(['slot', 'custom']).default('slot'),
+  description: z.string().trim().max(240).default(''),
+  actionLabel: z.string().trim().max(50).default(''),
+  actionHref: z.string().trim().max(260).default(''),
+  actionFocusSlot: z.string().trim().max(80).default(''),
   visible: z.boolean().default(true),
   order: z.number().int().min(0).max(99).default(0)
 });
 
-export const BuilderPageLayoutSchema = z.array(BuilderLayoutItemSchema).max(20);
+export const BuilderPageLayoutSchema = z.array(BuilderLayoutItemSchema).max(40);
 
 export const BuilderLayoutsSchema = z.object({
   dashboard: BuilderPageLayoutSchema.default([
-    { id: 'header', label: 'Cabecalho da pagina', visible: true, order: 0 },
-    { id: 'error', label: 'Avisos e erros', visible: true, order: 1 },
-    { id: 'kpis', label: 'Cards de KPI', visible: true, order: 2 }
+    { id: 'header', label: 'Cabecalho da pagina', kind: 'slot', visible: true, order: 0 },
+    { id: 'error', label: 'Avisos e erros', kind: 'slot', visible: true, order: 1 },
+    { id: 'kpis', label: 'Cards de KPI', kind: 'slot', visible: true, order: 2 }
   ]),
   produtos: BuilderPageLayoutSchema.default([
-    { id: 'header', label: 'Cabecalho da pagina', visible: true, order: 0 },
-    { id: 'note', label: 'Painel de convencao', visible: true, order: 1 },
-    { id: 'load_error', label: 'Aviso de carga', visible: true, order: 2 },
-    { id: 'kpis_filters', label: 'KPI e filtros', visible: true, order: 3 },
-    { id: 'form', label: 'Formulario do produto', visible: true, order: 4 },
-    { id: 'list', label: 'Lista de produtos', visible: true, order: 5 }
+    { id: 'header', label: 'Cabecalho da pagina', kind: 'slot', visible: true, order: 0 },
+    { id: 'note', label: 'Painel de convencao', kind: 'slot', visible: false, order: 1 },
+    { id: 'load_error', label: 'Aviso de carga', kind: 'slot', visible: true, order: 2 },
+    { id: 'kpis_filters', label: 'KPI e filtros', kind: 'slot', visible: true, order: 3 },
+    { id: 'form', label: 'Formulario do produto', kind: 'slot', visible: true, order: 4 },
+    { id: 'list', label: 'Lista de produtos', kind: 'slot', visible: true, order: 5 }
   ]),
   clientes: BuilderPageLayoutSchema.default([
-    { id: 'header', label: 'Cabecalho da pagina', visible: true, order: 0 },
-    { id: 'kpis_search', label: 'KPI e busca', visible: true, order: 1 },
-    { id: 'form', label: 'Formulario de cliente', visible: true, order: 2 },
-    { id: 'list', label: 'Lista de clientes', visible: true, order: 3 }
+    { id: 'header', label: 'Cabecalho da pagina', kind: 'slot', visible: true, order: 0 },
+    { id: 'kpis_search', label: 'KPI e busca', kind: 'slot', visible: true, order: 1 },
+    { id: 'form', label: 'Formulario de cliente', kind: 'slot', visible: true, order: 2 },
+    { id: 'list', label: 'Lista de clientes', kind: 'slot', visible: true, order: 3 }
   ]),
   pedidos: BuilderPageLayoutSchema.default([
-    { id: 'header', label: 'Cabecalho da pagina', visible: true, order: 0 },
-    { id: 'load_error', label: 'Aviso de carga', visible: true, order: 1 },
-    { id: 'kpis', label: 'KPIs de pedidos', visible: true, order: 2 },
-    { id: 'new_order', label: 'Criacao de pedido', visible: true, order: 3 },
-    { id: 'list', label: 'Lista de pedidos', visible: true, order: 4 },
-    { id: 'detail', label: 'Detalhe do pedido', visible: true, order: 5 }
+    { id: 'header', label: 'Cabecalho da pagina', kind: 'slot', visible: true, order: 0 },
+    { id: 'load_error', label: 'Aviso de carga', kind: 'slot', visible: true, order: 1 },
+    { id: 'kpis', label: 'KPIs de pedidos', kind: 'slot', visible: true, order: 2 },
+    { id: 'new_order', label: 'Criacao de pedido', kind: 'slot', visible: true, order: 3 },
+    { id: 'list', label: 'Lista de pedidos', kind: 'slot', visible: true, order: 4 },
+    { id: 'detail', label: 'Detalhe do pedido', kind: 'slot', visible: true, order: 5 }
   ]),
   estoque: BuilderPageLayoutSchema.default([
-    { id: 'header', label: 'Cabecalho da pagina', visible: true, order: 0 },
-    { id: 'kpis', label: 'KPIs de estoque', visible: true, order: 1 },
-    { id: 'capacity', label: 'Capacidade por produto', visible: true, order: 2 },
-    { id: 'd1', label: 'Quadro D+1', visible: true, order: 3 },
-    { id: 'movement', label: 'Nova movimentacao', visible: true, order: 4 },
-    { id: 'bom', label: 'Fichas tecnicas (BOM)', visible: true, order: 5 },
-    { id: 'packaging', label: 'Custo de embalagem', visible: true, order: 6 },
-    { id: 'balance', label: 'Saldo por item', visible: true, order: 7 },
-    { id: 'movements', label: 'Historico de movimentacoes', visible: true, order: 8 }
+    { id: 'header', label: 'Cabecalho da pagina', kind: 'slot', visible: true, order: 0 },
+    { id: 'kpis', label: 'KPIs de estoque', kind: 'slot', visible: true, order: 1 },
+    { id: 'capacity', label: 'Capacidade por produto', kind: 'slot', visible: true, order: 2 },
+    { id: 'd1', label: 'Quadro D+1', kind: 'slot', visible: true, order: 3 },
+    { id: 'movement', label: 'Nova movimentacao', kind: 'slot', visible: true, order: 4 },
+    { id: 'bom', label: 'Fichas tecnicas (BOM)', kind: 'slot', visible: true, order: 5 },
+    { id: 'packaging', label: 'Custo de embalagem', kind: 'slot', visible: true, order: 6 },
+    { id: 'balance', label: 'Saldo por item', kind: 'slot', visible: true, order: 7 },
+    { id: 'movements', label: 'Historico de movimentacoes', kind: 'slot', visible: true, order: 8 }
   ])
 });
 
@@ -438,7 +733,9 @@ export type BuilderTheme = z.infer<typeof BuilderThemeSchema>;
 export type BuilderForms = z.infer<typeof BuilderFormsSchema>;
 export type BuilderHomeImage = z.infer<typeof BuilderHomeImageSchema>;
 export type BuilderHome = z.infer<typeof BuilderHomeSchema>;
+export type BuilderReceiptQuantityMode = z.infer<typeof BuilderReceiptQuantityModeEnum>;
 export type BuilderReceiptStockRule = z.infer<typeof BuilderReceiptStockRuleSchema>;
+export type BuilderSupplierPriceSource = z.infer<typeof BuilderSupplierPriceSourceSchema>;
 export type BuilderIntegrations = z.infer<typeof BuilderIntegrationsSchema>;
 export type BuilderLayoutPageKey = z.infer<typeof BuilderLayoutPageKeyEnum>;
 export type BuilderLayoutItem = z.infer<typeof BuilderLayoutItemSchema>;

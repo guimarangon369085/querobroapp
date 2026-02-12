@@ -4,12 +4,12 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 const links = [
-  { href: '/dashboard', label: 'Dashboard', icon: '◌' },
-  { href: '/produtos', label: 'Produtos', icon: '◒' },
-  { href: '/clientes', label: 'Clientes', icon: '◍' },
-  { href: '/pedidos', label: 'Pedidos', icon: '◉' },
-  { href: '/estoque', label: 'Estoque', icon: '◎' },
-  { href: '/builder', label: 'Builder', icon: '◈' },
+  { href: '/dashboard', label: 'Dashboard' },
+  { href: '/produtos', label: 'Produtos' },
+  { href: '/clientes', label: 'Clientes' },
+  { href: '/pedidos', label: 'Pedidos' },
+  { href: '/estoque', label: 'Estoque' },
+  { href: '/builder', label: 'Builder' },
 ];
 
 function isActive(pathname: string, href: string) {
@@ -30,9 +30,6 @@ export function Nav() {
             aria-current={active ? 'page' : undefined}
             className={`app-nav__link ${active ? 'app-nav__link--active' : ''}`}
           >
-            <span aria-hidden className="app-nav__icon">
-              {link.icon}
-            </span>
             {link.label}
           </Link>
         );

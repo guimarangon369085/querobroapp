@@ -1,15 +1,20 @@
 'use client';
 
+import Link from 'next/link';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { BuilderConfig, BuilderLayoutItem, BuilderLayoutPageKey } from '@querobroapp/shared';
+import { usePathname } from 'next/navigation';
 import { fetchBuilderConfigClient, getDefaultBuilderConfig } from '@/lib/builder';
 import { normalizePageLayout } from '@/lib/builder-layout';
+import { scrollToLayoutSlot } from '@/lib/layout-scroll';
 
 type LayoutContextValue = {
+  items: BuilderLayoutItem[];
   itemsById: Map<string, BuilderLayoutItem>;
 };
 
 const BuilderLayoutContext = createContext<LayoutContextValue>({
+  items: [],
   itemsById: new Map<string, BuilderLayoutItem>(),
 });
 
@@ -52,7 +57,7 @@ export function BuilderLayoutProvider({ page, children }: BuilderLayoutProviderP
 
   const value = useMemo<LayoutContextValue>(() => {
     const itemsById = new Map(layoutItems.map((item) => [item.id, item]));
-    return { itemsById };
+    return { items: layoutItems, itemsById };
   }, [layoutItems]);
 
   return <BuilderLayoutContext.Provider value={value}>{children}</BuilderLayoutContext.Provider>;
@@ -72,6 +77,51 @@ export function BuilderLayoutItemSlot({ id, children }: BuilderLayoutItemProps) 
   return (
     <div id={`slot-${id}`} data-layout-slot-id={id} style={{ order: item?.order ?? 0 }}>
       {children}
+    </div>
+  );
+}
+
+export function BuilderLayoutCustomCards() {
+  const pathname = usePathname();
+  const { items } = useContext(BuilderLayoutContext);
+  const cards = items
+    .filter((item) => item.kind === 'custom' && item.visible)
+    .sort((a, b) => a.order - b.order);
+
+  if (cards.length === 0) return null;
+
+  return (
+    <div className="grid gap-3">
+      {cards.map((card) => {
+        const hasAction = Boolean(card.actionLabel && (card.actionHref || card.actionFocusSlot));
+        const href = (card.actionHref || '').trim();
+        const actionPath = href.split('?')[0];
+        const isSamePageFocus = Boolean(card.actionFocusSlot) && (!href || actionPath === pathname);
+
+        return (
+          <div key={card.id} className="app-panel" style={{ order: card.order }}>
+            <p className="font-semibold text-neutral-900">{card.label}</p>
+            {card.description ? <p className="mt-1 text-sm text-neutral-600">{card.description}</p> : null}
+            {hasAction ? (
+              <div className="mt-3">
+                {isSamePageFocus && card.actionFocusSlot ? (
+                  <button
+                    type="button"
+                    className="app-button app-button-ghost"
+                    onClick={() => scrollToLayoutSlot(card.actionFocusSlot!, { focus: true })}
+                  >
+                    {card.actionLabel}
+                  </button>
+                ) : (
+                  <Link href={href || '#'} className="app-button app-button-ghost">
+                    {card.actionLabel}
+                  </Link>
+                )}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }

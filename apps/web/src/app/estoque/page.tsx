@@ -13,10 +13,23 @@ import type {
 import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
+import { parseLocaleNumber } from '@/lib/format';
 import { useFeedback } from '@/components/feedback-provider';
-import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
+import {
+  BuilderLayoutCustomCards,
+  BuilderLayoutItemSlot,
+  BuilderLayoutProvider
+} from '@/components/builder-layout';
 
-const movementTypes = ['IN', 'OUT', 'ADJUST'];
+const movementTypeOptions: Array<{ value: 'IN' | 'OUT' | 'ADJUST'; label: string }> = [
+  { value: 'IN', label: 'Entrada' },
+  { value: 'OUT', label: 'Saida' },
+  { value: 'ADJUST', label: 'Ajuste de saldo' }
+];
+
+function movementTypeLabel(value: string) {
+  return movementTypeOptions.find((entry) => entry.value === value)?.label || value;
+}
 
 type BomItemInput = {
   itemId: number | '';
@@ -36,6 +49,13 @@ function formatQty(value: number) {
   return Number(value).toLocaleString('pt-BR', { maximumFractionDigits: 4 });
 }
 
+function inventoryCategoryLabel(category: string) {
+  if (category === 'INGREDIENTE') return 'Ingrediente';
+  if (category === 'EMBALAGEM_INTERNA') return 'Embalagem interna';
+  if (category === 'EMBALAGEM_EXTERNA') return 'Embalagem externa';
+  return category;
+}
+
 export default function StockPage() {
   const searchParams = useSearchParams();
   const bomSectionRef = useRef<HTMLDivElement | null>(null);
@@ -46,7 +66,7 @@ export default function StockPage() {
   const [movements, setMovements] = useState<InventoryMovement[]>([]);
   const [boms, setBoms] = useState<Bom[]>([]);
   const [itemId, setItemId] = useState<number | ''>('');
-  const [quantity, setQuantity] = useState<number>(1);
+  const [quantity, setQuantity] = useState<string>('1');
   const [type, setType] = useState<string>('IN');
   const [reason, setReason] = useState<string>('');
   const [editingItemId, setEditingItemId] = useState<number | ''>('');
@@ -65,6 +85,9 @@ export default function StockPage() {
   const [d1Basis, setD1Basis] = useState<'deliveryDate' | 'createdAtPlus1'>('createdAtPlus1');
   const [d1Loading, setD1Loading] = useState(false);
   const [d1Error, setD1Error] = useState<string | null>(null);
+  const [flavorCombos, setFlavorCombos] = useState<Array<{ code: string; composition: string }>>([]);
+  const [flavorComboTotal, setFlavorComboTotal] = useState<number>(0);
+  const [flavorComboLoading, setFlavorComboLoading] = useState(false);
   const { confirm, notifyError, notifySuccess, notifyUndo } = useFeedback();
 
   const load = async () => {
@@ -130,26 +153,102 @@ export default function StockPage() {
     loadD1(d1Date).catch(console.error);
   }, [d1Date]);
 
+  const applyBroaPreset = async () => {
+    try {
+      await apiFetch('/boms/bootstrap/broa', { method: 'POST' });
+      await load();
+      notifySuccess('Padrao Broa aplicado: insumos, custos e fichas tecnicas atualizados.');
+      scrollToLayoutSlot('bom');
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel aplicar o padrao Broa.');
+    }
+  };
+
+  const loadFlavorCombinations = useCallback(async () => {
+    setFlavorComboLoading(true);
+    try {
+      const data = await apiFetch<{
+        totalCombinations: number;
+        combinations: Array<{ code: string; composition: string }>;
+      }>('/boms/flavor-combinations?units=7');
+      setFlavorComboTotal(data.totalCombinations || 0);
+      setFlavorCombos((data.combinations || []).slice(0, 80));
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel carregar combinacoes.');
+    } finally {
+      setFlavorComboLoading(false);
+    }
+  }, [notifyError]);
+
+  useEffect(() => {
+    loadFlavorCombinations().catch(console.error);
+  }, [loadFlavorCombinations]);
+
+  const syncSupplierCosts = async () => {
+    try {
+      await apiFetch('/receipts/supplier-prices/sync', { method: 'POST' });
+      await load();
+      notifySuccess('Custos sincronizados com as fontes de fornecedor.');
+      scrollToLayoutSlot('packaging');
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel sincronizar custos.');
+    }
+  };
+
   const parseSaleUnits = (label?: string | null) => {
     if (!label) return 1;
     const match = label.match(/(\d+)/);
     return match ? Number(match[1]) : 1;
   };
 
+  const parseRequiredNumber = (raw: string | number | null | undefined, fieldLabel: string) => {
+    const parsed = parseLocaleNumber(raw);
+    if (parsed === null || parsed < 0) {
+      notifyError(`${fieldLabel} invalido. Use numero (ex.: 10,99 ou 10.99).`);
+      return null;
+    }
+    return parsed;
+  };
+
+  const parseOptionalNumber = (
+    raw: string | number | null | undefined,
+    fieldLabel: string,
+    line?: number
+  ) => {
+    if (raw == null) return null;
+    const value = typeof raw === 'string' ? raw.trim() : String(raw);
+    if (!value) return null;
+
+    const parsed = parseLocaleNumber(value);
+    if (parsed === null || parsed < 0) {
+      const prefix = line ? `Linha ${line}: ` : '';
+      notifyError(`${prefix}${fieldLabel} invalido. Use numero (ex.: 10,99 ou 10.99).`);
+      return undefined;
+    }
+    return parsed;
+  };
+
   const createMovement = async () => {
     if (!itemId) return;
+    const parsedQty = parseRequiredNumber(quantity, 'Quantidade');
+    if (parsedQty === null) return;
+    if (parsedQty <= 0) {
+      notifyError('Quantidade deve ser maior que zero.');
+      return;
+    }
+
     try {
       await apiFetch('/inventory-movements', {
         method: 'POST',
         body: JSON.stringify({
           itemId: Number(itemId),
-          quantity: Number(quantity),
+          quantity: parsedQty,
           type,
           reason
         })
       });
       setItemId('');
-      setQuantity(1);
+      setQuantity('1');
       setType('IN');
       setReason('');
       await load();
@@ -207,12 +306,22 @@ export default function StockPage() {
 
   const updateItem = async () => {
     if (!editingItemId) return;
+    const parsedPackSize = parseRequiredNumber(packSize, 'Tamanho da embalagem');
+    if (parsedPackSize === null) return;
+    if (parsedPackSize <= 0) {
+      notifyError('Tamanho da embalagem deve ser maior que zero.');
+      return;
+    }
+
+    const parsedPackCost = parseRequiredNumber(packCost, 'Custo da embalagem');
+    if (parsedPackCost === null) return;
+
     try {
       await apiFetch(`/inventory-items/${editingItemId}`, {
         method: 'PUT',
         body: JSON.stringify({
-          purchasePackSize: Number(packSize || 0),
-          purchasePackCost: Number(packCost || 0)
+          purchasePackSize: parsedPackSize,
+          purchasePackCost: parsedPackCost
         })
       });
       setEditingItemId('');
@@ -316,19 +425,36 @@ export default function StockPage() {
       return;
     }
 
+    const parsedYieldUnits = parseOptionalNumber(bomYieldUnits, 'Rendimento em unidades');
+    if (parsedYieldUnits === undefined) return;
+
+    const parsedItems = [];
+    for (const [index, item] of bomItems.entries()) {
+      if (!item.itemId) continue;
+
+      const qtyPerRecipe = parseOptionalNumber(item.qtyPerRecipe, 'Qtd por receita', index + 1);
+      if (qtyPerRecipe === undefined) return;
+
+      const qtyPerSaleUnit = parseOptionalNumber(item.qtyPerSaleUnit, 'Qtd por caixa', index + 1);
+      if (qtyPerSaleUnit === undefined) return;
+
+      const qtyPerUnit = parseOptionalNumber(item.qtyPerUnit, 'Qtd por unidade', index + 1);
+      if (qtyPerUnit === undefined) return;
+
+      parsedItems.push({
+        itemId: Number(item.itemId),
+        qtyPerRecipe,
+        qtyPerSaleUnit,
+        qtyPerUnit
+      });
+    }
+
     const payload = {
       productId: Number(bomProductId),
       name: bomName,
       saleUnitLabel: bomSaleUnitLabel || null,
-      yieldUnits: bomYieldUnits ? Number(bomYieldUnits) : null,
-      items: bomItems
-        .filter((item) => item.itemId)
-        .map((item) => ({
-          itemId: Number(item.itemId),
-          qtyPerRecipe: item.qtyPerRecipe === '' ? null : Number(item.qtyPerRecipe),
-          qtyPerSaleUnit: item.qtyPerSaleUnit === '' ? null : Number(item.qtyPerSaleUnit),
-          qtyPerUnit: item.qtyPerUnit === '' ? null : Number(item.qtyPerUnit)
-        }))
+      yieldUnits: parsedYieldUnits,
+      items: parsedItems
     };
 
     try {
@@ -394,8 +520,10 @@ export default function StockPage() {
   const itemMap = useMemo(() => new Map(items.map((item) => [item.id!, item])), [items]);
   const autoReceiptMovements = useMemo(
     () =>
-      movements.filter((movement) =>
-        (movement.reason || '').toLowerCase().includes('entrada automatica cupom')
+      movements.filter(
+        (movement) =>
+          movement.source === 'CUPOM' ||
+          (movement.reason || '').toLowerCase().includes('entrada automatica por cupom')
       ),
     [movements]
   );
@@ -459,9 +587,9 @@ export default function StockPage() {
       <BuilderLayoutItemSlot id="header">
       <div className="app-section-title">
         <div>
-          <span className="app-chip">Inventario</span>
-          <h2 className="mt-3 text-3xl font-semibold">Estoque detalhado</h2>
-          <p className="text-neutral-600">Ingredientes + embalagens com capacidade de producao.</p>
+          <span className="app-chip">Estoque</span>
+          <h2 className="mt-3 text-3xl font-semibold">Estoque e compras</h2>
+          <p className="text-neutral-600">Acompanhe saldo real, custo atualizado e capacidade de producao.</p>
         </div>
       </div>
       </BuilderLayoutItemSlot>
@@ -486,8 +614,8 @@ export default function StockPage() {
       <BuilderLayoutItemSlot id="capacity">
       <div className="app-panel grid gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-xl font-semibold">Capacidade por produto (caixas)</h3>
-          <p className="text-sm text-neutral-500">Custo por caixa calculado por BOM</p>
+          <h3 className="text-xl font-semibold">Capacidade por produto</h3>
+          <p className="text-sm text-neutral-500">Estimativa de caixas e custo atual por ficha tecnica</p>
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           {capacity.map((entry) => (
@@ -518,9 +646,10 @@ export default function StockPage() {
       <div className="app-panel grid gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="text-xl font-semibold">Quadro D+1 (producao e compras)</h3>
+            <h3 className="text-xl font-semibold">Planejamento de amanha (D+1)</h3>
             <p className="text-sm text-neutral-500">
-              Necessidade por insumo para a data alvo. Base atual: {d1Basis === 'deliveryDate' ? 'deliveryDate' : 'createdAt + 1 dia'}.
+              Necessidade por insumo para a data selecionada. Base usada:{' '}
+              {d1Basis === 'deliveryDate' ? 'data de entrega' : 'pedido + 1 dia'}.
             </p>
           </div>
           <div className="flex flex-wrap items-end gap-2">
@@ -534,7 +663,7 @@ export default function StockPage() {
               />
             </label>
             <button className="app-button app-button-ghost" onClick={() => loadD1(d1Date)}>
-              Recalcular
+              Atualizar
             </button>
           </div>
         </div>
@@ -595,14 +724,14 @@ export default function StockPage() {
 
       <BuilderLayoutItemSlot id="movement">
       <div className="app-panel grid gap-4">
-        <h3 className="text-lg font-semibold">Nova movimentacao de insumo</h3>
+        <h3 className="text-lg font-semibold">Nova movimentacao</h3>
         <div className="grid gap-3 md:grid-cols-4">
           <select
             className="app-select"
             value={itemId}
-            onChange={(e) => setItemId(Number(e.target.value))}
+            onChange={(e) => setItemId(e.target.value ? Number(e.target.value) : '')}
           >
-            <option value="">Item</option>
+            <option value="">Selecione o item</option>
             {items.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.name}
@@ -614,9 +743,9 @@ export default function StockPage() {
             value={type}
             onChange={(e) => setType(e.target.value)}
           >
-            {movementTypes.map((movement) => (
-              <option key={movement} value={movement}>
-                {movement}
+            {movementTypeOptions.map((movement) => (
+              <option key={movement.value} value={movement.value}>
+                {movement.label}
               </option>
             ))}
           </select>
@@ -624,18 +753,20 @@ export default function StockPage() {
             className="app-input"
             type="number"
             value={quantity}
-            onChange={(e) => setQuantity(Number(e.target.value))}
+            onChange={(e) => setQuantity(e.target.value)}
+            inputMode="decimal"
+            placeholder="Quantidade"
           />
           <input
             className="app-input"
-            placeholder="Motivo"
+            placeholder="Observacao (opcional)"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
           />
         </div>
         <div className="app-form-actions app-form-actions--mobile-sticky">
           <button className="app-button app-button-primary" onClick={createMovement}>
-            Registrar
+            Salvar movimentacao
           </button>
         </div>
       </div>
@@ -643,14 +774,22 @@ export default function StockPage() {
 
       <BuilderLayoutItemSlot id="bom">
       <div className="app-panel grid gap-4">
-        <div ref={bomSectionRef}>
-          <h3 className="text-lg font-semibold">Fichas tecnicas (BOM)</h3>
+        <div ref={bomSectionRef} className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold">Fichas tecnicas</h3>
+          <div className="flex flex-wrap gap-2">
+            <button className="app-button app-button-ghost" onClick={loadFlavorCombinations}>
+              {flavorComboLoading ? 'Atualizando...' : 'Atualizar combinacoes'}
+            </button>
+            <button className="app-button app-button-primary" onClick={applyBroaPreset}>
+              Aplicar padrao Broa
+            </button>
+          </div>
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           <select
             className="app-select"
             value={bomProductId}
-            onChange={(e) => setBomProductId(Number(e.target.value))}
+            onChange={(e) => setBomProductId(e.target.value ? Number(e.target.value) : '')}
           >
             <option value="">Produto</option>
             {products.map((product) => (
@@ -684,7 +823,9 @@ export default function StockPage() {
               <select
                 className="app-select"
                 value={item.itemId}
-                onChange={(e) => updateBomItem(index, { itemId: Number(e.target.value) })}
+                onChange={(e) =>
+                  updateBomItem(index, { itemId: e.target.value ? Number(e.target.value) : '' })
+                }
               >
                 <option value="">Item</option>
                 {items.map((invItem) => (
@@ -769,6 +910,26 @@ export default function StockPage() {
             </div>
           ))}
         </div>
+
+        <div className="app-panel">
+          <p className="font-semibold text-neutral-900">
+            Combinacoes de sabores (7 broas): {flavorComboTotal}
+          </p>
+          <p className="mt-1 text-sm text-neutral-600">
+            Mostrando as primeiras {flavorCombos.length} combinacoes para consulta rapida.
+          </p>
+          <div className="mt-3 grid gap-2 text-sm text-neutral-700">
+            {flavorCombos.length === 0 ? (
+              <p>Nenhuma combinacao carregada.</p>
+            ) : (
+              flavorCombos.map((combo, index) => (
+                <p key={`${combo.code}-${index}`}>
+                  <strong>{combo.code}</strong> • {combo.composition}
+                </p>
+              ))
+            )}
+          </div>
+        </div>
       </div>
       </BuilderLayoutItemSlot>
 
@@ -780,7 +941,11 @@ export default function StockPage() {
             className="app-select"
             value={editingItemId}
             onChange={(e) => {
-              const id = Number(e.target.value);
+              const id = e.target.value ? Number(e.target.value) : '';
+              if (id === '') {
+                setEditingItemId('');
+                return;
+              }
               const item = items.find((entry) => entry.id === id);
               if (item) startEditItem(item);
             }}
@@ -806,6 +971,9 @@ export default function StockPage() {
           />
         </div>
         <div className="app-form-actions app-form-actions--mobile-sticky">
+          <button className="app-button app-button-ghost" onClick={syncSupplierCosts}>
+            Sincronizar custos
+          </button>
           <button className="app-button app-button-primary" onClick={updateItem}>
             Atualizar custo
           </button>
@@ -828,7 +996,7 @@ export default function StockPage() {
               </button>
             </div>
             <p className="text-sm text-neutral-500">
-              {item.category} • {balances.get(item.id!) ?? 0} {item.unit} • custo unitario R${' '}
+              {inventoryCategoryLabel(item.category)} • {balances.get(item.id!) ?? 0} {item.unit} • custo unitario R${' '}
               {(unitCostMap.get(item.id!) ?? 0).toFixed(4)}
             </p>
           </div>
@@ -838,7 +1006,7 @@ export default function StockPage() {
 
       <BuilderLayoutItemSlot id="movements">
       <div className="grid gap-3">
-        <h3 className="text-lg font-semibold">Movimentacoes</h3>
+        <h3 className="text-lg font-semibold">Historico de movimentacoes</h3>
         <div className="app-panel">
           <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">
             Entradas automaticas por cupom
@@ -852,8 +1020,10 @@ export default function StockPage() {
             ) : (
               latestAutoReceiptMovements.map((movement) => (
                 <p key={`auto-${movement.id}`}>
-                  {itemMap.get(movement.itemId)?.name || `Item ${movement.itemId}`} • {movement.quantity} •{' '}
-                  {movement.reason || 'Sem motivo'}
+                  {itemMap.get(movement.itemId)?.name || `Item ${movement.itemId}`} •{' '}
+                  {formatQty(movement.quantity)} {itemMap.get(movement.itemId)?.unit || 'un'} •{' '}
+                  origem: {movement.sourceLabel || 'Cupom fiscal'} •{' '}
+                  custo unitario: R$ {(movement.unitCost || 0).toFixed(4)}
                 </p>
               ))
             )}
@@ -863,8 +1033,9 @@ export default function StockPage() {
           <div key={movement.id} className="app-panel text-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                {itemMap.get(movement.itemId)?.name || `Item ${movement.itemId}`} • {movement.type} •{' '}
-                {movement.quantity} • {movement.reason || 'Sem motivo'}
+                {itemMap.get(movement.itemId)?.name || `Item ${movement.itemId}`} •{' '}
+                {movementTypeLabel(movement.type)} • {formatQty(movement.quantity)}{' '}
+                {itemMap.get(movement.itemId)?.unit || 'un'} • {movement.reason || 'Sem observacao'}
               </div>
               <button
                 className="app-button app-button-danger"
@@ -877,6 +1048,8 @@ export default function StockPage() {
         ))}
       </div>
       </BuilderLayoutItemSlot>
+
+      <BuilderLayoutCustomCards />
       </section>
     </BuilderLayoutProvider>
   );

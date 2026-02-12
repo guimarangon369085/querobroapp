@@ -3,7 +3,11 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import type { Customer, Order, Payment, Product } from '@querobroapp/shared';
-import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
+import {
+  BuilderLayoutCustomCards,
+  BuilderLayoutItemSlot,
+  BuilderLayoutProvider
+} from '@/components/builder-layout';
 
 type DashboardState = {
   products: number;
@@ -91,6 +95,8 @@ export default function DashboardPage() {
             ))}
           </div>
         </BuilderLayoutItemSlot>
+
+        <BuilderLayoutCustomCards />
       </section>
     </BuilderLayoutProvider>
   );

@@ -6,11 +6,14 @@ import type {
   BuilderBlockKey,
   BuilderConfig,
   BuilderConfigPatch,
+  BuilderLayoutItem,
   BuilderLayoutPageKey,
   BuilderReceiptStockRule,
+  BuilderSupplierPriceSource
 } from '@querobroapp/shared';
 import {
   fetchBuilderConfigClient,
+  getApiBaseUrl,
   getDefaultBuilderConfig,
   removeBuilderHomeImageClient,
   resolveBuilderImageSrc,
@@ -31,27 +34,27 @@ const blocks: BlockItem[] = [
   {
     key: 'theme',
     label: 'Tema visual',
-    subtitle: 'Cores e tipografia global do app',
+    subtitle: 'Cores e tipografia do aplicativo',
   },
   {
     key: 'forms',
     label: 'Inputs e selecao',
-    subtitle: 'Raio, borda, espacamento e checkbox',
+    subtitle: 'Bordas, espacamento e seletores',
   },
   {
     key: 'home',
     label: 'Home e landing',
-    subtitle: 'Hero, textos e galeria de fotos',
+    subtitle: 'Texto principal e galeria de fotos',
   },
   {
     key: 'integrations',
     label: 'Integracoes e automacao',
-    subtitle: 'Atalhos iOS, OCR e entrada automatica no estoque',
+    subtitle: 'Cupom, fornecedores e atualizacao automatica',
   },
   {
     key: 'layout',
-    label: 'Blocos arrastaveis',
-    subtitle: 'Ordem e visibilidade das secoes por pagina',
+    label: 'Cards e secoes',
+    subtitle: 'Ordem, visibilidade e cards personalizados',
   },
 ];
 
@@ -74,6 +77,10 @@ function numberFromInput(value: string, fallback: number) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function newCustomCardId() {
+  return `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
 function normalizeConfigLayouts(next: BuilderConfig) {
   return {
     ...next,
@@ -91,6 +98,7 @@ export default function BuilderPage() {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [activeLayoutPage, setActiveLayoutPage] = useState<BuilderLayoutPageKey>('dashboard');
   const [draggingLayoutId, setDraggingLayoutId] = useState<string | null>(null);
+  const [syncingSupplierPrices, setSyncingSupplierPrices] = useState(false);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const navRef = useRef<HTMLElement | null>(null);
 
@@ -301,6 +309,94 @@ export default function BuilderPage() {
         receiptStockRules: nextRules,
       },
     });
+  }
+
+  function updateSupplierSource(index: number, patch: Partial<BuilderSupplierPriceSource>) {
+    if (!config) return;
+    const nextSources = config.integrations.supplierPriceSources.map((source, currentIndex) =>
+      currentIndex === index ? { ...source, ...patch } : source
+    );
+    updateDraft({
+      ...config,
+      integrations: {
+        ...config.integrations,
+        supplierPriceSources: nextSources,
+      },
+    });
+  }
+
+  function addCustomLayoutCard() {
+    if (!config) return;
+    if (activeLayoutItems.length >= 40) {
+      setMessage('Limite de 40 blocos atingido para esta pagina.');
+      return;
+    }
+
+    const nextItems = [
+      ...activeLayoutItems,
+      {
+        id: newCustomCardId(),
+        label: 'Novo card',
+        kind: 'custom',
+        description: 'Descreva aqui o objetivo deste card.',
+        actionLabel: '',
+        actionHref: '',
+        actionFocusSlot: '',
+        visible: true,
+        order: activeLayoutItems.length,
+      } as BuilderLayoutItem,
+    ].map((item, index) => ({ ...item, order: index }));
+
+    updateLayoutForActivePage(nextItems);
+  }
+
+  function removeCustomLayoutCard(id: string) {
+    const target = activeLayoutItems.find((item) => item.id === id);
+    if (!target || target.kind !== 'custom') return;
+    const nextItems = activeLayoutItems
+      .filter((item) => item.id !== id)
+      .map((item, index) => ({ ...item, order: index }));
+    updateLayoutForActivePage(nextItems);
+  }
+
+  function updateLayoutItem(id: string, patch: Partial<BuilderLayoutItem>) {
+    const nextItems = activeLayoutItems.map((item) => (item.id === id ? { ...item, ...patch } : item));
+    updateLayoutForActivePage(nextItems);
+  }
+
+  async function syncSupplierPricesNow() {
+    setSyncingSupplierPrices(true);
+    setMessage('Sincronizando precos de fornecedor...');
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/receipts/supplier-prices/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const raw = await response.text();
+      if (!response.ok) {
+        throw new Error(raw || `HTTP ${response.status}`);
+      }
+
+      let body: {
+        appliedCount?: number;
+        attemptedCount?: number;
+        skippedCount?: number;
+      } = {};
+      try {
+        body = JSON.parse(raw) as typeof body;
+      } catch {
+        body = {};
+      }
+
+      setMessage(
+        `Sincronizacao concluida: ${body.appliedCount || 0} aplicados, ${body.skippedCount || 0} ignorados em ${body.attemptedCount || 0} fontes.`
+      );
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'erro desconhecido';
+      setMessage(`Falha ao sincronizar precos: ${reason}`);
+    } finally {
+      setSyncingSupplierPrices(false);
+    }
   }
 
   if (!config) {
@@ -710,6 +806,34 @@ export default function BuilderPage() {
               </label>
 
               <label className="builder-field builder-field--wide">
+                <span>Atualizar custos por fornecedores</span>
+                <input
+                  type="checkbox"
+                  checked={config.integrations.supplierPricesEnabled}
+                  onChange={(event) =>
+                    updateDraft({
+                      ...config,
+                      integrations: {
+                        ...config.integrations,
+                        supplierPricesEnabled: event.target.checked,
+                      },
+                    })
+                  }
+                />
+              </label>
+
+              <div className="builder-field builder-field--wide">
+                <span>Sincronizacao imediata de preco</span>
+                <button
+                  className="app-button app-button-ghost"
+                  onClick={syncSupplierPricesNow}
+                  disabled={syncingSupplierPrices}
+                >
+                  {syncingSupplierPrices ? 'Sincronizando...' : 'Sincronizar agora'}
+                </button>
+              </div>
+
+              <label className="builder-field builder-field--wide">
                 Webhook/Endpoint do Atalho
                 <input
                   className="app-input"
@@ -784,8 +908,7 @@ export default function BuilderPage() {
               <div className="builder-field builder-field--wide">
                 <span>Regras de itens de producao (editavel)</span>
                 <p className="text-xs text-neutral-500">
-                  So itens com regra habilitada entram automaticamente no estoque como movimentacao
-                  <code> IN </code> na categoria <code>INGREDIENTE</code>.
+                  Cada item pode entrar automaticamente com quantidade real por embalagem e custo real de compra.
                 </p>
                 <div className="builder-stock-rules">
                   {config.integrations.receiptStockRules.map((rule, index) => (
@@ -835,34 +958,186 @@ export default function BuilderPage() {
                             }
                           />
                         </label>
+                        <label className="builder-field">
+                          Modo de quantidade
+                          <select
+                            className="app-select"
+                            value={rule.quantityMode}
+                            onChange={(event) =>
+                              updateIntegrationRule(index, {
+                                quantityMode: event.target.value as BuilderReceiptStockRule['quantityMode'],
+                              })
+                            }
+                          >
+                            <option value="PURCHASE_PACK">Multiplicar pelo tamanho da embalagem</option>
+                            <option value="BASE_UNIT">Usar quantidade como unidade base</option>
+                          </select>
+                        </label>
+                        <label className="builder-field">
+                          Multiplicador do custo da embalagem
+                          <input
+                            className="app-input"
+                            type="number"
+                            min={0.001}
+                            max={100}
+                            step={0.001}
+                            value={rule.purchasePackCostMultiplier}
+                            onChange={(event) =>
+                              updateIntegrationRule(index, {
+                                purchasePackCostMultiplier: numberFromInput(
+                                  event.target.value,
+                                  rule.purchasePackCostMultiplier
+                                ),
+                              })
+                            }
+                          />
+                        </label>
+                        <label className="builder-field">
+                          Rotulo amigavel da origem
+                          <input
+                            className="app-input"
+                            value={rule.sourceLabel || ''}
+                            onChange={(event) =>
+                              updateIntegrationRule(index, { sourceLabel: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label className="builder-field">
+                          Atualizar custo do estoque
+                          <input
+                            type="checkbox"
+                            checked={rule.applyPriceToInventoryCost}
+                            onChange={(event) =>
+                              updateIntegrationRule(index, {
+                                applyPriceToInventoryCost: event.target.checked,
+                              })
+                            }
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="builder-field builder-field--wide">
+                <span>Fontes de preco por fornecedor</span>
+                <div className="builder-stock-rules">
+                  {config.integrations.supplierPriceSources.map((source, index) => (
+                    <div key={source.id} className="builder-stock-rule-item">
+                      <div className="builder-stock-rule-item__header">
+                        <p className="builder-stock-rule-item__title">{source.officialItem}</p>
+                        <label className="builder-layout-item__toggle">
+                          <input
+                            type="checkbox"
+                            checked={source.enabled}
+                            onChange={(event) =>
+                              updateSupplierSource(index, { enabled: event.target.checked })
+                            }
+                          />
+                          Ativa
+                        </label>
+                      </div>
+                      <div className="builder-stock-rule-item__grid">
+                        <label className="builder-field">
+                          Nome do fornecedor
+                          <input
+                            className="app-input"
+                            value={source.supplierName}
+                            onChange={(event) =>
+                              updateSupplierSource(index, { supplierName: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label className="builder-field">
+                          Item no estoque
+                          <input
+                            className="app-input"
+                            value={source.inventoryItemName}
+                            onChange={(event) =>
+                              updateSupplierSource(index, { inventoryItemName: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label className="builder-field builder-field--wide">
+                          URL do produto
+                          <input
+                            className="app-input"
+                            value={source.url}
+                            onChange={(event) => updateSupplierSource(index, { url: event.target.value })}
+                          />
+                        </label>
+                        <label className="builder-field builder-field--wide">
+                          XPath de referencia (opcional)
+                          <input
+                            className="app-input"
+                            value={source.priceXPath || ''}
+                            onChange={(event) =>
+                              updateSupplierSource(index, { priceXPath: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label className="builder-field">
+                          Preco fallback
+                          <input
+                            className="app-input"
+                            type="number"
+                            min={0}
+                            step={0.01}
+                            value={source.fallbackPrice ?? ''}
+                            onChange={(event) =>
+                              updateSupplierSource(index, {
+                                fallbackPrice: event.target.value
+                                  ? numberFromInput(event.target.value, source.fallbackPrice || 0)
+                                  : null,
+                              })
+                            }
+                          />
+                        </label>
+                        <label className="builder-field">
+                          Aplicar no custo do estoque
+                          <input
+                            type="checkbox"
+                            checked={source.applyToInventoryCost}
+                            onChange={(event) =>
+                              updateSupplierSource(index, {
+                                applyToInventoryCost: event.target.checked,
+                              })
+                            }
+                          />
+                        </label>
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
               <p className="text-xs text-neutral-500">
-                Essas configuracoes sao usadas pela API em <code>/receipts/parse</code>,{' '}
-                <code>/receipts/parse-clipboard</code> e <code>/receipts/ingest</code>.
+                Essas configuracoes sao usadas pelos fluxos de cupom e sincronizacao de preco.
               </p>
             </div>
           ) : null}
 
           {activeBlock === 'layout' ? (
             <div className="grid gap-4">
-              <label className="builder-field builder-field--wide">
-                Pagina
-                <select
-                  className="app-select"
-                  value={activeLayoutPage}
-                  onChange={(event) => setActiveLayoutPage(event.target.value as BuilderLayoutPageKey)}
-                >
-                  {layoutPageOptions.map((option) => (
-                    <option key={option.key} value={option.key}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+                <label className="builder-field builder-field--wide">
+                  Pagina
+                  <select
+                    className="app-select"
+                    value={activeLayoutPage}
+                    onChange={(event) => setActiveLayoutPage(event.target.value as BuilderLayoutPageKey)}
+                  >
+                    {layoutPageOptions.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button className="app-button app-button-primary self-end" onClick={addCustomLayoutCard}>
+                  Adicionar card
+                </button>
+              </div>
 
               <div className="builder-layout-list">
                 {activeLayoutItems.map((item) => (
@@ -876,7 +1151,7 @@ export default function BuilderPage() {
                   >
                     <div className="builder-layout-item__main">
                       <div>
-                        <p className="builder-layout-item__title">{item.label}</p>
+                        <p className="builder-layout-item__title">{item.kind === 'custom' ? 'Card personalizado' : 'Secao da pagina'}</p>
                         <p className="builder-layout-item__id">{item.id}</p>
                       </div>
                       <label className="builder-layout-item__toggle">
@@ -888,6 +1163,61 @@ export default function BuilderPage() {
                         Visivel
                       </label>
                     </div>
+                    <label className="builder-field">
+                      Nome do card
+                      <input
+                        className="app-input"
+                        value={item.label}
+                        onChange={(event) => updateLayoutItem(item.id, { label: event.target.value })}
+                      />
+                    </label>
+                    {item.kind === 'custom' ? (
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <label className="builder-field md:col-span-2">
+                          Descricao
+                          <textarea
+                            className="app-textarea"
+                            rows={2}
+                            value={item.description || ''}
+                            onChange={(event) =>
+                              updateLayoutItem(item.id, { description: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label className="builder-field">
+                          Texto do botao
+                          <input
+                            className="app-input"
+                            value={item.actionLabel || ''}
+                            onChange={(event) =>
+                              updateLayoutItem(item.id, { actionLabel: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label className="builder-field">
+                          Link de acao (opcional)
+                          <input
+                            className="app-input"
+                            placeholder="/estoque?focus=movement"
+                            value={item.actionHref || ''}
+                            onChange={(event) =>
+                              updateLayoutItem(item.id, { actionHref: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label className="builder-field md:col-span-2">
+                          Foco interno (opcional)
+                          <input
+                            className="app-input"
+                            placeholder="movement"
+                            value={item.actionFocusSlot || ''}
+                            onChange={(event) =>
+                              updateLayoutItem(item.id, { actionFocusSlot: event.target.value })
+                            }
+                          />
+                        </label>
+                      </div>
+                    ) : null}
                     <div className="builder-layout-item__actions">
                       <button
                         className="app-button app-button-ghost"
@@ -903,13 +1233,21 @@ export default function BuilderPage() {
                       >
                         Descer
                       </button>
+                      {item.kind === 'custom' ? (
+                        <button
+                          className="app-button app-button-danger"
+                          onClick={() => removeCustomLayoutCard(item.id)}
+                          disabled={busy}
+                        >
+                          Excluir
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 ))}
               </div>
               <p className="text-xs text-neutral-500">
-                Arraste os blocos para reordenar. O app aplica a ordem em Dashboard, Produtos,
-                Clientes, Pedidos e Estoque.
+                Arraste para reordenar. Cards personalizados aparecem automaticamente no fim de cada pagina.
               </p>
             </div>
           ) : null}

@@ -137,6 +137,9 @@ model InventoryMovement {
   type      String
   quantity  Float
   reason    String?
+  source    String?
+  sourceLabel String?
+  unitCost  Float?
   createdAt DateTime @default(now())
   item      InventoryItem @relation(fields: [itemId], references: [id])
   order     Order?        @relation(fields: [orderId], references: [id])
@@ -189,4 +192,17 @@ model OutboxMessage {
   @@index([channel, status])
   @@index([createdAt])
   @@index([orderId])
+}
+
+model IdempotencyRecord {
+  id           Int      @id @default(autoincrement())
+  scope        String
+  idemKey      String
+  requestHash  String
+  responseJson String
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+
+  @@unique([scope, idemKey])
+  @@index([expiresAt])
 }

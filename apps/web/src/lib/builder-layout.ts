@@ -12,24 +12,56 @@ function sanitizeOrder(value: number, fallback: number) {
 export function normalizeLayoutItems(
   currentItems: BuilderLayoutItem[] | undefined,
   defaultItems: BuilderLayoutItem[]
-) {
-  const byId = new Map((currentItems || []).map((item) => [item.id, item]));
+): BuilderLayoutItem[] {
+  const list = currentItems || [];
+  const byId = new Map(list.map((item) => [item.id, item]));
+  const defaultIds = new Set(defaultItems.map((item) => item.id));
 
-  return defaultItems
+  const normalizedDefaults = defaultItems
     .map((base, index) => {
       const current = byId.get(base.id);
       if (!current) {
-        return { ...base, order: sanitizeOrder(base.order, index) };
+        return {
+          ...base,
+          kind: 'slot' as const,
+          description: base.description || '',
+          actionLabel: base.actionLabel || '',
+          actionHref: base.actionHref || '',
+          actionFocusSlot: base.actionFocusSlot || '',
+          order: sanitizeOrder(base.order, index),
+        } as BuilderLayoutItem;
       }
 
       return {
         id: base.id,
         label: current.label || base.label,
+        kind: 'slot' as const,
+        description: current.description || '',
+        actionLabel: current.actionLabel || '',
+        actionHref: current.actionHref || '',
+        actionFocusSlot: current.actionFocusSlot || '',
         visible: current.visible,
         order: sanitizeOrder(current.order, index),
-      };
+      } as BuilderLayoutItem;
     })
     .sort((a, b) => a.order - b.order);
+
+  const normalizedCustom = list
+    .filter((item) => !defaultIds.has(item.id))
+    .map((item, index) => ({
+      id: item.id,
+      label: item.label || `Card ${index + 1}`,
+      kind: item.kind === 'custom' ? 'custom' : 'custom',
+      description: item.description || '',
+      actionLabel: item.actionLabel || '',
+      actionHref: item.actionHref || '',
+      actionFocusSlot: item.actionFocusSlot || '',
+      visible: item.visible,
+      order: sanitizeOrder(item.order, normalizedDefaults.length + index),
+    }) as BuilderLayoutItem)
+    .sort((a, b) => a.order - b.order);
+
+  return [...normalizedDefaults, ...normalizedCustom].sort((a, b) => a.order - b.order);
 }
 
 export function normalizeLayouts(config: BuilderConfig, fallback: BuilderConfig): BuilderLayouts {

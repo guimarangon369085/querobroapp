@@ -9,7 +9,11 @@ import { loadGoogleMaps } from '@/lib/googleMaps';
 import { useFeedback } from '@/components/feedback-provider';
 import { FormField } from '@/components/form/FormField';
 import { useSearchParams } from 'next/navigation';
-import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
+import {
+  BuilderLayoutCustomCards,
+  BuilderLayoutItemSlot,
+  BuilderLayoutProvider
+} from '@/components/builder-layout';
 
 const emptyCustomer: Partial<Customer> = {
   name: '',
@@ -522,6 +526,8 @@ export default function CustomersPage() {
         )}
       </div>
       </BuilderLayoutItemSlot>
+
+      <BuilderLayoutCustomCards />
       </section>
     </BuilderLayoutProvider>
   );

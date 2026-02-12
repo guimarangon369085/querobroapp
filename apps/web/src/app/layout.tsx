@@ -30,17 +30,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               <div className="app-brand">
                 <p className="app-brand__eyebrow">ERP artesanal</p>
                 <h1 className="app-brand__name">QUEROBROApp</h1>
-                <p className="app-brand__tag">Operacao premium, sensorial e orientada por dados.</p>
+                <p className="app-brand__tag">Operacao simples, clara e eficiente.</p>
               </div>
               <Nav />
-              <div className="app-sidecard">
-                <p className="app-sidecard__title">Direcao visual</p>
-                <p className="app-sidecard__value">Soft-edge high-end</p>
-                <p className="app-sidecard__hint">
-                  Interface redesenhada para priorizar legibilidade, foco operacional e conforto
-                  visual.
-                </p>
-              </div>
             </aside>
             <div className="app-main">
               <Topbar />

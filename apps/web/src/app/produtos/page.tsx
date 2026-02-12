@@ -9,7 +9,11 @@ import { formatCurrencyBR, titleCase } from '@/lib/format';
 import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
 import { useFeedback } from '@/components/feedback-provider';
 import { FormField } from '@/components/form/FormField';
-import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
+import {
+  BuilderLayoutCustomCards,
+  BuilderLayoutItemSlot,
+  BuilderLayoutProvider
+} from '@/components/builder-layout';
 
 const emptyProduct: Partial<Product> = {
   name: '',
@@ -202,10 +206,7 @@ export default function ProductsPage() {
 
         <BuilderLayoutItemSlot id="note">
           <div className="app-panel">
-            <p className="text-sm text-neutral-600">
-              Convencao atual: cada sabor/variedade e cadastrado como <strong>produto</strong> na
-              categoria <strong>Sabores</strong> (ex.: T, G, S, R, D).
-            </p>
+            <p className="text-sm text-neutral-600">Use a categoria &quot;Sabores&quot; para separar os recheios.</p>
           </div>
         </BuilderLayoutItemSlot>
 
@@ -372,6 +373,8 @@ export default function ProductsPage() {
             )}
           </div>
         </BuilderLayoutItemSlot>
+
+        <BuilderLayoutCustomCards />
       </section>
     </BuilderLayoutProvider>
   );

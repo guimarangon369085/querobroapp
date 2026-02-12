@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Delete, Inject } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Delete, Inject, Query } from '@nestjs/common';
 import { BomService } from './bom.service.js';
 import { parseWithSchema } from '../../common/validation.js';
 import { z } from 'zod';
@@ -14,14 +14,25 @@ export class BomController {
     return this.service.list();
   }
 
-  @Get(':id')
-  get(@Param('id') id: string) {
-    return this.service.get(parseWithSchema(idSchema, id));
-  }
-
   @Post()
   create(@Body() body: unknown) {
     return this.service.create(body);
+  }
+
+  @Post('bootstrap/broa')
+  bootstrapBroa() {
+    return this.service.bootstrapBroaPreset();
+  }
+
+  @Get('flavor-combinations')
+  flavorCombinations(@Query('units') units?: string) {
+    const parsedUnits = units ? Number(units) : 7;
+    return this.service.listFlavorCombinations(parsedUnits);
+  }
+
+  @Get(':id')
+  get(@Param('id') id: string) {
+    return this.service.get(parseWithSchema(idSchema, id));
   }
 
   @Put(':id')
