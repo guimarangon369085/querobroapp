@@ -110,12 +110,14 @@ Para manter contexto entre ChatGPT Online/Mobile e Codex Terminal/Cloud:
 - handoff de sessão: `docs/HANDOFF_TEMPLATE.md`
 - histórico de handoffs: `docs/HANDOFF_LOG.md`
 - memória consolidada: `docs/MEMORY_VAULT.md`
+- fluxo simples entre IAs: `docs/AI_WORKFLOW.md`
 - prompts prontos: `docs/BOOTSTRAP_PROMPTS.md`
 - releitura rápida no terminal: `scripts/relearn-context.sh`
 - salvar handoff automaticamente: `scripts/save-handoff.sh`
 - integração iOS de cupom fiscal: `docs/IOS_SHORTCUT_CUPOM.md`
 - setup rápido do Atalhos (IP/URL): `scripts/shortcut-receipts-setup.sh`
 - teste local com imagem de cupom: `scripts/test-receipt-image.sh`
+- abrir PR da branch atual: `scripts/open-pr-url.sh`
 
 Regra prática: cada sessão termina com handoff preenchido e próximo passo objetivo.
 
