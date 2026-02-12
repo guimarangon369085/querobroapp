@@ -93,6 +93,10 @@ Use exatamente esta sequencia:
 7. Executar trabalho
 8. Encerrar com nova entrada no `docs/HANDOFF_LOG.md`
 
+Encerramento recomendado:
+
+- Rodar `./scripts/save-handoff.sh` (ou o atalho Desktop `Salvar Handoff.command`) antes de fechar a sessao.
+
 ## 10) Prompt de bootstrap (curto)
 
 ```txt
@@ -122,6 +126,7 @@ Antes de encerrar:
    - `docs/HANDOFF_LOG.md`
 5. Atualizado `README.md` com secao de continuidade.
 6. Aplicado icone customizado ao atalho do Codex no Desktop.
+7. Criado `scripts/save-handoff.sh` para registrar handoff automaticamente.
 
 ## 12) Politica operacional de memoria
 

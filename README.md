@@ -59,8 +59,25 @@ Para manter contexto entre ChatGPT Online/Mobile e Codex Terminal/Cloud:
 - memoria consolidada: `docs/MEMORY_VAULT.md`
 - prompts prontos: `docs/BOOTSTRAP_PROMPTS.md`
 - releitura rapida no terminal: `scripts/relearn-context.sh`
+- salvar handoff automaticamente: `scripts/save-handoff.sh`
 
 Regra pratica: cada sessao termina com handoff preenchido e proximo passo objetivo.
+
+Uso rapido:
+
+```bash
+# modo interativo (recomendado)
+./scripts/save-handoff.sh
+
+# modo nao interativo (exemplo)
+HANDOFF_OBJETIVO="Encerramento da sessao" \
+HANDOFF_RESULTADO="Handoff registrado" \
+HANDOFF_PENDENTE="Nenhum" \
+HANDOFF_DECISOES="Manter fluxo de handoff" \
+HANDOFF_BLOQUEIOS="Nenhum" \
+HANDOFF_PROXIMO_PASSO="Retomar do proximo item" \
+./scripts/save-handoff.sh
+```
 
 ## Requisitos
 

@@ -114,3 +114,60 @@ Objetivo da sessao:
 
 No fim, registrar nova entrada no HANDOFF_LOG.
 ```
+
+## Entrada 003
+
+### 1) Metadados
+
+- Data/hora: 2026-02-11 23:25 -03
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `$HOME/querobroapp`
+- Branch: `main`
+- Commit base (opcional): `6a7f49a`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: automatizar salvamento de handoff antes de fechar sessao.
+- Resultado entregue: criado `scripts/save-handoff.sh` e atalho `Desktop/Salvar Handoff.command`.
+- O que ficou pendente: revisar e commitar as mudancas se desejar publicar no remoto.
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados:
+- ` M README.md`
+- ` M scripts/dev-all.sh`
+- `?? scripts/install-autostart.sh`
+- `?? scripts/save-handoff.sh`
+- `?? scripts/uninstall-autostart.sh`
+- Comportamento novo: geracao automatica de nova entrada no `HANDOFF_LOG` via script.
+- Riscos/regressoes: baixo risco (somente automacao de documentacao).
+
+### 4) Validacao
+
+- Comandos executados: criacao do script, criacao do atalho de Desktop e teste de execucao.
+- Testes que passaram: `zsh -n scripts/save-handoff.sh` e execucao real com criacao da Entrada 003.
+- Testes nao executados (e motivo): testes de API/Web/Mobile nao aplicaveis.
+
+### 5) Contexto para retomada
+
+- Decisoes importantes: usar `Salvar Handoff.command` ao encerrar sessoes para registrar memoria operacional.
+- Suposicoes feitas: o encerramento manual por atalho antes de fechar a sessao e aceitavel no fluxo.
+- Bloqueios: nenhum bloqueio tecnico imediato.
+- Proximo passo recomendado (1 acao objetiva): executar `Desktop/Salvar Handoff.command` no fim da proxima sessao.
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/NEXT_STEP_PLAN.md
+- docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
