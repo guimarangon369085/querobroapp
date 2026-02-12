@@ -7,6 +7,7 @@ import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { formatCurrencyBR, parseCurrencyBR } from '@/lib/format';
 import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
+import { useFeedback } from '@/components/feedback-provider';
 import { FormField } from '@/components/form/FormField';
 import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
 
@@ -95,6 +96,7 @@ export default function OrdersPage() {
   const [paymentFeedback, setPaymentFeedback] = useState<string | null>(null);
   const [markingPaid, setMarkingPaid] = useState(false);
   const selectedOrderId = selectedOrder?.id ?? null;
+  const { confirm, notifyError, notifySuccess } = useFeedback();
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -171,69 +173,102 @@ export default function OrdersPage() {
       return;
     }
     setOrderError(null);
-    const createdOrder = await apiFetch<OrderView>('/orders', {
-      method: 'POST',
-      body: JSON.stringify({
-        customerId: Number(newOrderCustomerId),
-        items: newOrderItems,
-        discount: parseCurrencyBR(newOrderDiscount),
-        notes: newOrderNotes || undefined,
-      }),
-    });
-    setNewOrderCustomerId('');
-    setCustomerSearch('');
-    setNewOrderItems([]);
-    setNewOrderDiscount('0');
-    setNewOrderNotes('');
-    const refreshedOrders = await loadAll();
-    const freshCreated = refreshedOrders.find((entry) => entry.id === createdOrder.id);
-    if (freshCreated) {
-      openOrderDetail(freshCreated);
-    } else {
-      scrollToLayoutSlot('list');
+    try {
+      const createdOrder = await apiFetch<OrderView>('/orders', {
+        method: 'POST',
+        body: JSON.stringify({
+          customerId: Number(newOrderCustomerId),
+          items: newOrderItems,
+          discount: parseCurrencyBR(newOrderDiscount),
+          notes: newOrderNotes || undefined,
+        }),
+      });
+      setNewOrderCustomerId('');
+      setCustomerSearch('');
+      setNewOrderItems([]);
+      setNewOrderDiscount('0');
+      setNewOrderNotes('');
+      const refreshedOrders = await loadAll();
+      const freshCreated = refreshedOrders.find((entry) => entry.id === createdOrder.id);
+      notifySuccess('Pedido criado com sucesso.');
+      if (freshCreated) {
+        openOrderDetail(freshCreated);
+      } else {
+        scrollToLayoutSlot('list');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Nao foi possivel criar o pedido.';
+      setOrderError(message);
+      notifyError(message);
     }
   };
 
   const addItem = async (orderId: number) => {
     if (!addItemProductId || addItemQty <= 0) return;
-    await apiFetch(`/orders/${orderId}/items`, {
-      method: 'POST',
-      body: JSON.stringify({ productId: Number(addItemProductId), quantity: addItemQty }),
-    });
-    setAddItemProductId('');
-    setAddItemProductSearch('');
-    setAddItemQty(1);
-    await loadAll();
+    try {
+      await apiFetch(`/orders/${orderId}/items`, {
+        method: 'POST',
+        body: JSON.stringify({ productId: Number(addItemProductId), quantity: addItemQty }),
+      });
+      setAddItemProductId('');
+      setAddItemProductSearch('');
+      setAddItemQty(1);
+      await loadAll();
+      notifySuccess('Item adicionado ao pedido.');
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel adicionar o item.');
+    }
   };
 
   const removeItem = async (orderId: number, itemId: number) => {
-    if (!confirm('Remover este item do pedido?')) return;
+    const accepted = await confirm({
+      title: 'Remover item do pedido?',
+      description: 'A quantidade sera estornada no estoque deste pedido.',
+      confirmLabel: 'Remover',
+      cancelLabel: 'Cancelar',
+      danger: true
+    });
+    if (!accepted) return;
     try {
       await apiFetch(`/orders/${orderId}/items/${itemId}`, { method: 'DELETE' });
       await loadAll();
+      notifySuccess('Item removido do pedido.');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Nao foi possivel remover o item.');
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel remover o item.');
     }
   };
 
   const removeOrder = async (orderId: number) => {
-    if (!confirm('Excluir este pedido?')) return;
+    const accepted = await confirm({
+      title: 'Excluir pedido?',
+      description: 'Essa acao remove o pedido e estorna o consumo de estoque quando aplicavel.',
+      confirmLabel: 'Excluir',
+      cancelLabel: 'Cancelar',
+      danger: true
+    });
+    if (!accepted) return;
     try {
       await apiFetch(`/orders/${orderId}`, { method: 'DELETE' });
       setSelectedOrder(null);
       await loadAll();
+      notifySuccess('Pedido excluido com sucesso.');
       scrollToLayoutSlot('list');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Nao foi possivel excluir o pedido.');
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel excluir o pedido.');
     }
   };
 
   const updateStatus = async (orderId: number, status: string) => {
-    await apiFetch(`/orders/${orderId}/status`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status }),
-    });
-    await loadAll();
+    try {
+      await apiFetch(`/orders/${orderId}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      });
+      await loadAll();
+      notifySuccess(`Status atualizado para ${status}.`);
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel atualizar o status.');
+    }
   };
 
   const registerPayment = async () => {
@@ -271,8 +306,10 @@ export default function OrdersPage() {
       setPaymentAmount('');
       setPaymentFeedback('Pagamento registrado com sucesso.');
       await loadAll();
+      notifySuccess('Pagamento registrado com sucesso.');
     } catch (err) {
       setPaymentError(err instanceof Error ? err.message : 'Nao foi possivel registrar pagamento.');
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel registrar pagamento.');
     }
   };
 
@@ -283,9 +320,12 @@ export default function OrdersPage() {
       return;
     }
 
-    const confirmed = confirm(
-      `Marcar o pedido #${selectedOrder.id} como pago no valor de ${formatCurrencyBR(selectedOrderBalance)}?`
-    );
+    const confirmed = await confirm({
+      title: 'Marcar pedido como pago?',
+      description: `Pedido #${selectedOrder.id} sera quitado em ${formatCurrencyBR(selectedOrderBalance)}.`,
+      confirmLabel: 'Marcar como pago',
+      cancelLabel: 'Cancelar'
+    });
     if (!confirmed) return;
 
     setMarkingPaid(true);
@@ -306,20 +346,30 @@ export default function OrdersPage() {
       });
       setPaymentFeedback('Pedido marcado como pago com sucesso.');
       await loadAll();
+      notifySuccess('Pedido marcado como pago.');
     } catch (err) {
       setPaymentError(err instanceof Error ? err.message : 'Nao foi possivel marcar o pedido como pago.');
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel marcar o pedido como pago.');
     } finally {
       setMarkingPaid(false);
     }
   };
 
   const removePayment = async (paymentId: number) => {
-    if (!confirm('Remover este pagamento?')) return;
+    const accepted = await confirm({
+      title: 'Remover pagamento?',
+      description: 'Essa acao remove o registro de pagamento do pedido.',
+      confirmLabel: 'Remover',
+      cancelLabel: 'Cancelar',
+      danger: true
+    });
+    if (!accepted) return;
     try {
       await apiFetch(`/payments/${paymentId}`, { method: 'DELETE' });
       await loadAll();
+      notifySuccess('Pagamento removido com sucesso.');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Nao foi possivel remover o pagamento.');
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel remover o pagamento.');
     }
   };
 

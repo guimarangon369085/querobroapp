@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { formatPhoneBR, normalizeAddress, normalizePhone, titleCase } from '@/lib/format';
 import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
 import { loadGoogleMaps } from '@/lib/googleMaps';
+import { useFeedback } from '@/components/feedback-provider';
 import { FormField } from '@/components/form/FormField';
 import { useSearchParams } from 'next/navigation';
 import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
@@ -40,6 +41,7 @@ export default function CustomersPage() {
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const addressInputRef = useRef<HTMLInputElement | null>(null);
   const openedCustomerIdRef = useRef<number | null>(null);
+  const { confirm, notifyError, notifySuccess } = useFeedback();
 
   const load = () => apiFetch<Customer[]>('/customers').then(setCustomers);
 
@@ -161,22 +163,27 @@ export default function CustomersPage() {
       deliveryNotes: form.deliveryNotes?.trim() || undefined
     };
 
-    if (editingId) {
-      await apiFetch(`/customers/${editingId}`, {
-        method: 'PUT',
-        body: JSON.stringify(payload)
-      });
-    } else {
-      await apiFetch('/customers', {
-        method: 'POST',
-        body: JSON.stringify(payload)
-      });
-    }
+    try {
+      if (editingId) {
+        await apiFetch(`/customers/${editingId}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload)
+        });
+      } else {
+        await apiFetch('/customers', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+      }
 
-    setForm(emptyCustomer);
-    setEditingId(null);
-    await load();
-    scrollToLayoutSlot('list');
+      setForm(emptyCustomer);
+      setEditingId(null);
+      await load();
+      notifySuccess(editingId ? 'Cliente atualizado com sucesso.' : 'Cliente criado com sucesso.');
+      scrollToLayoutSlot('list');
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel salvar o cliente.');
+    }
   };
 
   const startEdit = (customer: Customer) => {
@@ -217,12 +224,20 @@ export default function CustomersPage() {
   }, [searchParams, customers]);
 
   const remove = async (id: number) => {
-    if (!confirm('Remover este cliente?')) return;
+    const accepted = await confirm({
+      title: 'Remover cliente?',
+      description: 'Essa acao exclui o cliente permanentemente.',
+      confirmLabel: 'Remover',
+      cancelLabel: 'Cancelar',
+      danger: true
+    });
+    if (!accepted) return;
     try {
       await apiFetch(`/customers/${id}`, { method: 'DELETE' });
       await load();
+      notifySuccess('Cliente removido com sucesso.');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Nao foi possivel remover o cliente.');
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel remover o cliente.');
     }
   };
 

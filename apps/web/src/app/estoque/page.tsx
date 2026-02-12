@@ -13,6 +13,7 @@ import type {
 import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
+import { useFeedback } from '@/components/feedback-provider';
 import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
 
 const movementTypes = ['IN', 'OUT', 'ADJUST'];
@@ -64,6 +65,7 @@ export default function StockPage() {
   const [d1Basis, setD1Basis] = useState<'deliveryDate' | 'createdAtPlus1'>('createdAtPlus1');
   const [d1Loading, setD1Loading] = useState(false);
   const [d1Error, setD1Error] = useState<string | null>(null);
+  const { confirm, notifyError, notifySuccess } = useFeedback();
 
   const load = async () => {
     const [productsData, itemsData, movementsData, bomsData] = await Promise.all([
@@ -150,16 +152,25 @@ export default function StockPage() {
     setType('IN');
     setReason('');
     await load();
+    notifySuccess('Movimentacao registrada com sucesso.');
     scrollToLayoutSlot('movements');
   };
 
   const removeMovement = async (id: number) => {
-    if (!confirm('Remover esta movimentacao?')) return;
+    const accepted = await confirm({
+      title: 'Remover movimentacao?',
+      description: 'Essa acao exclui o registro selecionado.',
+      confirmLabel: 'Remover',
+      cancelLabel: 'Cancelar',
+      danger: true
+    });
+    if (!accepted) return;
     try {
       await apiFetch(`/inventory-movements/${id}`, { method: 'DELETE' });
       await load();
+      notifySuccess('Movimentacao removida com sucesso.');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Nao foi possivel remover a movimentacao.');
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel remover a movimentacao.');
     }
   };
 
@@ -182,15 +193,24 @@ export default function StockPage() {
     setPackSize('0');
     setPackCost('0');
     await load();
+    notifySuccess('Custo de compra atualizado.');
   };
 
   const removeItem = async (id: number) => {
-    if (!confirm('Remover este item do estoque?')) return;
+    const accepted = await confirm({
+      title: 'Remover item do estoque?',
+      description: 'Essa acao exclui o item e seus vinculos podem impedir a remocao.',
+      confirmLabel: 'Remover',
+      cancelLabel: 'Cancelar',
+      danger: true
+    });
+    if (!accepted) return;
     try {
       await apiFetch(`/inventory-items/${id}`, { method: 'DELETE' });
       await load();
+      notifySuccess('Item removido do estoque.');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Nao foi possivel remover o item.');
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel remover o item.');
     }
   };
 
@@ -245,12 +265,14 @@ export default function StockPage() {
 
   const saveBom = async () => {
     if (!bomProductId || Number(bomProductId) <= 0) {
-      alert('Selecione um produto para a ficha tecnica.');
+      notifyError('Selecione um produto para a ficha tecnica.');
+      scrollToLayoutSlot('bom', { focus: true, focusSelector: 'select, input, button' });
       return;
     }
 
     if (!bomName.trim()) {
-      alert('Informe o nome da ficha tecnica.');
+      notifyError('Informe o nome da ficha tecnica.');
+      scrollToLayoutSlot('bom', { focus: true, focusSelector: 'input, select, button' });
       return;
     }
 
@@ -279,15 +301,25 @@ export default function StockPage() {
     setBomName('');
     setBomItems([]);
     await load();
+    notifySuccess(editingBomId ? 'Ficha tecnica atualizada com sucesso.' : 'Ficha tecnica criada com sucesso.');
+    scrollToLayoutSlot('bom');
   };
 
   const removeBom = async (id: number) => {
-    if (!confirm('Remover esta ficha tecnica?')) return;
+    const accepted = await confirm({
+      title: 'Remover ficha tecnica?',
+      description: 'Essa acao exclui a BOM selecionada.',
+      confirmLabel: 'Remover',
+      cancelLabel: 'Cancelar',
+      danger: true
+    });
+    if (!accepted) return;
     try {
       await apiFetch(`/boms/${id}`, { method: 'DELETE' });
       await load();
+      notifySuccess('Ficha tecnica removida com sucesso.');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Nao foi possivel remover a ficha tecnica.');
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel remover a ficha tecnica.');
     }
   };
 

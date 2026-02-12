@@ -7,6 +7,7 @@ import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { formatCurrencyBR, titleCase } from '@/lib/format';
 import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
+import { useFeedback } from '@/components/feedback-provider';
 import { FormField } from '@/components/form/FormField';
 import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
 
@@ -29,6 +30,7 @@ export default function ProductsPage() {
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'TODOS' | 'ATIVOS' | 'INATIVOS'>('TODOS');
   const productNameInputRef = useRef<HTMLInputElement | null>(null);
+  const { confirm, notifyError, notifyInfo, notifySuccess } = useFeedback();
 
   const load = async () => {
     setLoading(true);
@@ -83,22 +85,27 @@ export default function ProductsPage() {
       price: Number.isFinite(form.price) ? Math.round((form.price ?? 0) * 100) / 100 : 0
     };
 
-    if (editingId) {
-      await apiFetch(`/products/${editingId}`, {
-        method: 'PUT',
-        body: JSON.stringify(payload)
-      });
-    } else {
-      await apiFetch('/products', {
-        method: 'POST',
-        body: JSON.stringify(payload)
-      });
-    }
+    try {
+      if (editingId) {
+        await apiFetch(`/products/${editingId}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload)
+        });
+      } else {
+        await apiFetch('/products', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+      }
 
-    setForm(emptyProduct);
-    setEditingId(null);
-    await load();
-    scrollToLayoutSlot('list');
+      setForm(emptyProduct);
+      setEditingId(null);
+      await load();
+      notifySuccess(editingId ? 'Produto atualizado com sucesso.' : 'Produto criado com sucesso.');
+      scrollToLayoutSlot('list');
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel salvar o produto.');
+    }
   };
 
   const startEdit = (product: Product) => {
@@ -114,19 +121,26 @@ export default function ProductsPage() {
   };
 
   const remove = async (id: number) => {
-    if (!confirm('Remover este produto?')) return;
+    const accepted = await confirm({
+      title: 'Remover produto?',
+      description: 'Essa acao remove o produto da lista. Se houver vinculos, ele pode ser arquivado.',
+      confirmLabel: 'Remover',
+      cancelLabel: 'Cancelar',
+      danger: true
+    });
+    if (!accepted) return;
     try {
       const result = await apiFetch<{ archived?: boolean; deleted?: boolean }>(`/products/${id}`, {
         method: 'DELETE'
       });
       if (result?.archived) {
-        alert('Produto arquivado porque possui pedidos, movimentacoes ou ficha tecnica vinculados.');
+        notifyInfo('Produto arquivado porque possui pedidos, movimentacoes ou ficha tecnica vinculados.');
       } else if (result?.deleted) {
-        alert('Produto removido.');
+        notifySuccess('Produto removido com sucesso.');
       }
       await load();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Nao foi possivel remover o produto.');
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel remover o produto.');
     }
   };
 
