@@ -1,10 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Customer, Order, Product, OrderItem, Payment } from '@querobroapp/shared';
+import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { formatCurrencyBR, parseCurrencyBR } from '@/lib/format';
+import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
 import { FormField } from '@/components/form/FormField';
 import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
 
@@ -63,6 +65,7 @@ function paymentRecordBadgeClass(status: string) {
 }
 
 export default function OrdersPage() {
+  const searchParams = useSearchParams();
   const [orders, setOrders] = useState<OrderView[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -91,8 +94,9 @@ export default function OrdersPage() {
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [paymentFeedback, setPaymentFeedback] = useState<string | null>(null);
   const [markingPaid, setMarkingPaid] = useState(false);
+  const selectedOrderId = selectedOrder?.id ?? null;
 
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
@@ -104,23 +108,42 @@ export default function OrdersPage() {
       setOrders(ordersData);
       setCustomers(customersData);
       setProducts(productsData);
-      if (selectedOrder) {
-        const fresh = ordersData.find((o) => o.id === selectedOrder.id) || null;
+      if (selectedOrderId) {
+        const fresh = ordersData.find((o) => o.id === selectedOrderId) || null;
         setSelectedOrder(fresh);
       }
+      return ordersData;
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Falha ao carregar dados de pedidos.');
       throw err;
     } finally {
       setLoading(false);
     }
+  }, [selectedOrderId]);
+
+  const openOrderDetail = (order: OrderView) => {
+    setSelectedOrder(order);
+    scrollToLayoutSlot('detail', { focus: true, focusSelector: 'select, button, input, h3' });
   };
 
   useEffect(() => {
     loadAll().catch(() => {
       // erro tratado em loadError
     });
-  }, []);
+  }, [loadAll]);
+
+  useEffect(() => {
+    const focus = consumeFocusQueryParam(searchParams);
+    if (!focus) return;
+
+    const allowed = new Set(['header', 'load_error', 'kpis', 'new_order', 'list', 'detail']);
+    if (!allowed.has(focus)) return;
+
+    scrollToLayoutSlot(focus, {
+      focus: focus === 'new_order' || focus === 'detail',
+      focusSelector: 'input, select, textarea, button'
+    });
+  }, [searchParams]);
 
   useEffect(() => {
     setPaymentError(null);
@@ -148,7 +171,7 @@ export default function OrdersPage() {
       return;
     }
     setOrderError(null);
-    await apiFetch('/orders', {
+    const createdOrder = await apiFetch<OrderView>('/orders', {
       method: 'POST',
       body: JSON.stringify({
         customerId: Number(newOrderCustomerId),
@@ -162,7 +185,13 @@ export default function OrdersPage() {
     setNewOrderItems([]);
     setNewOrderDiscount('0');
     setNewOrderNotes('');
-    await loadAll();
+    const refreshedOrders = await loadAll();
+    const freshCreated = refreshedOrders.find((entry) => entry.id === createdOrder.id);
+    if (freshCreated) {
+      openOrderDetail(freshCreated);
+    } else {
+      scrollToLayoutSlot('list');
+    }
   };
 
   const addItem = async (orderId: number) => {
@@ -193,6 +222,7 @@ export default function OrdersPage() {
       await apiFetch(`/orders/${orderId}`, { method: 'DELETE' });
       setSelectedOrder(null);
       await loadAll();
+      scrollToLayoutSlot('list');
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Nao foi possivel excluir o pedido.');
     }
@@ -585,7 +615,7 @@ export default function OrdersPage() {
                   <button
                     key={order.id}
                     className={`app-panel text-left ${selectedOrder?.id === order.id ? 'ring-2 ring-orange-200' : ''}`}
-                    onClick={() => setSelectedOrder(order)}
+                    onClick={() => openOrderDetail(order)}
                   >
                     <p className="text-lg font-semibold">Pedido #{order.id}</p>
                     <p className="text-sm text-neutral-500">

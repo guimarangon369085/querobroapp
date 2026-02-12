@@ -69,5 +69,9 @@ export function BuilderLayoutItemSlot({ id, children }: BuilderLayoutItemProps) 
 
   if (item && !item.visible) return null;
 
-  return <div style={{ order: item?.order ?? 0 }}>{children}</div>;
+  return (
+    <div id={`slot-${id}`} data-layout-slot-id={id} style={{ order: item?.order ?? 0 }}>
+      {children}
+    </div>
+  );
 }

@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable @next/next/no-img-element */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   BuilderBlockKey,
   BuilderConfig,
@@ -17,6 +17,8 @@ import {
   updateBuilderConfigClient,
   uploadBuilderHomeImageClient,
 } from '@/lib/builder';
+import { useSearchParams } from 'next/navigation';
+import { consumeFocusQueryParam } from '@/lib/layout-scroll';
 import { normalizeLayouts, reorderLayoutItems, shiftLayoutItem } from '@/lib/builder-layout';
 
 type BlockItem = {
@@ -80,6 +82,7 @@ function normalizeConfigLayouts(next: BuilderConfig) {
 }
 
 export default function BuilderPage() {
+  const searchParams = useSearchParams();
   const [config, setConfig] = useState<BuilderConfig | null>(null);
   const [activeBlock, setActiveBlock] = useState<BuilderBlockKey>('theme');
   const [busy, setBusy] = useState(false);
@@ -88,6 +91,8 @@ export default function BuilderPage() {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [activeLayoutPage, setActiveLayoutPage] = useState<BuilderLayoutPageKey>('dashboard');
   const [draggingLayoutId, setDraggingLayoutId] = useState<string | null>(null);
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const navRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -115,6 +120,25 @@ export default function BuilderPage() {
     if (!config) return;
     notifyRuntime(config);
   }, [config]);
+
+  useEffect(() => {
+    const focus = consumeFocusQueryParam(searchParams);
+    if (!focus) return;
+
+    if (focus === 'editor') {
+      editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      window.setTimeout(() => {
+        editorRef.current
+          ?.querySelector<HTMLElement>('input, select, textarea, button, [tabindex]:not([tabindex="-1"])')
+          ?.focus({ preventScroll: true });
+      }, 120);
+      return;
+    }
+
+    if (focus === 'nav') {
+      navRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [searchParams]);
 
   const activeMeta = useMemo(() => blocks.find((entry) => entry.key === activeBlock), [activeBlock]);
   const activeLayoutItems = useMemo(() => {
@@ -308,14 +332,17 @@ export default function BuilderPage() {
       </div>
 
       <div className="builder-grid">
-        <aside className="app-panel builder-nav" aria-label="Blocos do Builder">
+        <aside ref={navRef} className="app-panel builder-nav" aria-label="Blocos do Builder">
           {blocks.map((block) => {
             const active = activeBlock === block.key;
             return (
               <button
                 key={block.key}
                 className={`builder-nav__item ${active ? 'builder-nav__item--active' : ''}`}
-                onClick={() => setActiveBlock(block.key)}
+                onClick={() => {
+                  setActiveBlock(block.key);
+                  editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
                 disabled={busy}
               >
                 <span className="builder-nav__label">{block.label}</span>
@@ -325,7 +352,7 @@ export default function BuilderPage() {
           })}
         </aside>
 
-        <div className="app-panel builder-editor">
+        <div id="builder-editor" ref={editorRef} className="app-panel builder-editor">
           <div className="builder-editor__header">
             <div>
               <p className="text-xs uppercase tracking-[0.22em] text-neutral-500">Bloco ativo</p>

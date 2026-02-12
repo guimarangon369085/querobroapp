@@ -1,10 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Product } from '@querobroapp/shared';
+import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { formatCurrencyBR, titleCase } from '@/lib/format';
+import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
 import { FormField } from '@/components/form/FormField';
 import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
 
@@ -17,6 +19,7 @@ const emptyProduct: Partial<Product> = {
 };
 
 export default function ProductsPage() {
+  const searchParams = useSearchParams();
   const [products, setProducts] = useState<Product[]>([]);
   const [form, setForm] = useState<Partial<Product>>(emptyProduct);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -25,6 +28,7 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'TODOS' | 'ATIVOS' | 'INATIVOS'>('TODOS');
+  const productNameInputRef = useRef<HTMLInputElement | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -45,6 +49,19 @@ export default function ProductsPage() {
       // erro tratado via loadError
     });
   }, []);
+
+  useEffect(() => {
+    const focus = consumeFocusQueryParam(searchParams);
+    if (!focus) return;
+
+    const allowed = new Set(['header', 'note', 'load_error', 'kpis_filters', 'form', 'list']);
+    if (!allowed.has(focus)) return;
+
+    scrollToLayoutSlot(focus, {
+      focus: focus === 'form',
+      focusSelector: focus === 'form' ? 'input, select, textarea' : undefined
+    });
+  }, [searchParams]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -81,6 +98,7 @@ export default function ProductsPage() {
     setForm(emptyProduct);
     setEditingId(null);
     await load();
+    scrollToLayoutSlot('list');
   };
 
   const startEdit = (product: Product) => {
@@ -92,6 +110,7 @@ export default function ProductsPage() {
       price: product.price,
       active: product.active
     });
+    scrollToLayoutSlot('form', { focus: true, focusSelector: 'input, select, textarea' });
   };
 
   const remove = async (id: number) => {
@@ -194,6 +213,7 @@ export default function ProductsPage() {
                 <input
                   className="app-input"
                   placeholder="Nome do produto"
+                  ref={productNameInputRef}
                   value={form.name || ''}
                   onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
                   onBlur={(e) => setForm((prev) => ({ ...prev, name: titleCase(e.target.value) }))}

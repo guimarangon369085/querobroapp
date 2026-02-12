@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Customer } from '@querobroapp/shared';
 import { apiFetch } from '@/lib/api';
 import { formatPhoneBR, normalizeAddress, normalizePhone, titleCase } from '@/lib/format';
+import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
 import { loadGoogleMaps } from '@/lib/googleMaps';
 import { FormField } from '@/components/form/FormField';
 import { useSearchParams } from 'next/navigation';
@@ -36,6 +37,7 @@ export default function CustomersPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
   const addressInputRef = useRef<HTMLInputElement | null>(null);
   const openedCustomerIdRef = useRef<number | null>(null);
 
@@ -44,6 +46,19 @@ export default function CustomersPage() {
   useEffect(() => {
     load().catch(console.error);
   }, []);
+
+  useEffect(() => {
+    const focus = consumeFocusQueryParam(searchParams);
+    if (!focus) return;
+
+    const allowed = new Set(['header', 'kpis_search', 'form', 'list']);
+    if (!allowed.has(focus)) return;
+
+    scrollToLayoutSlot(focus, {
+      focus: focus === 'form',
+      focusSelector: focus === 'form' ? 'input, select, textarea' : undefined
+    });
+  }, [searchParams]);
 
   useEffect(() => {
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -161,6 +176,7 @@ export default function CustomersPage() {
     setForm(emptyCustomer);
     setEditingId(null);
     await load();
+    scrollToLayoutSlot('list');
   };
 
   const startEdit = (customer: Customer) => {
@@ -184,6 +200,7 @@ export default function CustomersPage() {
       lng: customer.lng ?? undefined,
       deliveryNotes: customer.deliveryNotes ?? ''
     });
+    scrollToLayoutSlot('form', { focus: true, focusSelector: 'input, select, textarea' });
   };
 
   useEffect(() => {
@@ -267,6 +284,7 @@ export default function CustomersPage() {
             <input
               className="app-input"
               placeholder="Nome completo"
+              ref={nameInputRef}
               value={form.name || ''}
               onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
               onBlur={(e) => setForm((prev) => ({ ...prev, name: titleCase(e.target.value) }))}

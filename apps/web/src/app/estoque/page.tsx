@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   Bom,
   InventoryItem,
@@ -12,6 +12,7 @@ import type {
 } from '@querobroapp/shared';
 import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
 import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
 
 const movementTypes = ['IN', 'OUT', 'ADJUST'];
@@ -81,6 +82,29 @@ export default function StockPage() {
     load().catch(console.error);
   }, []);
 
+  useEffect(() => {
+    const focus = consumeFocusQueryParam(searchParams);
+    if (!focus) return;
+
+    const allowed = new Set([
+      'header',
+      'kpis',
+      'capacity',
+      'd1',
+      'movement',
+      'bom',
+      'packaging',
+      'balance',
+      'movements'
+    ]);
+    if (!allowed.has(focus)) return;
+
+    scrollToLayoutSlot(focus, {
+      focus: focus === 'movement' || focus === 'bom' || focus === 'packaging',
+      focusSelector: 'input, select, textarea, button'
+    });
+  }, [searchParams]);
+
   const loadD1 = async (targetDate: string) => {
     setD1Loading(true);
     setD1Error(null);
@@ -126,6 +150,7 @@ export default function StockPage() {
     setType('IN');
     setReason('');
     await load();
+    scrollToLayoutSlot('movements');
   };
 
   const removeMovement = async (id: number) => {
@@ -169,7 +194,7 @@ export default function StockPage() {
     }
   };
 
-  const startEditBom = (bom: any) => {
+  const startEditBom = useCallback((bom: any, shouldScroll = true) => {
     setEditingBomId(bom.id);
     setBomProductId(bom.productId);
     setBomName(bom.name || '');
@@ -182,13 +207,16 @@ export default function StockPage() {
       qtyPerUnit: item.qtyPerUnit == null ? '' : String(item.qtyPerUnit)
     }));
     setBomItems(items);
-  };
+    if (shouldScroll) {
+      scrollToLayoutSlot('bom', { focus: true, focusSelector: 'input, select, textarea, button' });
+      bomSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, []);
 
-  const openBomForProduct = async (productId: number) => {
+  const openBomForProduct = useCallback(async (productId: number) => {
     const bom = await apiFetch<any>(`/products/${productId}/bom`);
-    startEditBom(bom);
-    bomSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
+    startEditBom(bom, true);
+  }, [startEditBom]);
 
   useEffect(() => {
     const raw = searchParams.get('bomProductId') || searchParams.get('productId');
@@ -201,7 +229,7 @@ export default function StockPage() {
     openBomForProduct(parsed)
       .then(() => load())
       .catch(console.error);
-  }, [searchParams]);
+  }, [searchParams, openBomForProduct]);
 
   const addBomItem = () => {
     setBomItems((prev) => [...prev, { itemId: '', qtyPerRecipe: '', qtyPerSaleUnit: '', qtyPerUnit: '' }]);
