@@ -49,6 +49,19 @@ O app mobile (`apps/mobile`) agora permite:
   - Pedidos e pagamentos: `apps/web/src/app/pedidos/page.tsx`
   - Estoque e quadro D+1: `apps/web/src/app/estoque/page.tsx`
 
+## Continuidade entre ChatGPT/Codex
+
+Para manter contexto entre ChatGPT Online/Mobile e Codex Terminal/Cloud:
+
+- contexto vivo: `docs/querobroapp-context.md`
+- handoff de sessao: `docs/HANDOFF_TEMPLATE.md`
+- historico de handoffs: `docs/HANDOFF_LOG.md`
+- memoria consolidada: `docs/MEMORY_VAULT.md`
+- prompts prontos: `docs/BOOTSTRAP_PROMPTS.md`
+- releitura rapida no terminal: `scripts/relearn-context.sh`
+
+Regra pratica: cada sessao termina com handoff preenchido e proximo passo objetivo.
+
 ## Requisitos
 
 - Node.js 20+
