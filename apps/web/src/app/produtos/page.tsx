@@ -120,6 +120,11 @@ export default function ProductsPage() {
     scrollToLayoutSlot('form', { focus: true, focusSelector: 'input, select, textarea' });
   };
 
+  const cancelEdit = () => {
+    setEditingId(null);
+    setForm(emptyProduct);
+  };
+
   const remove = async (id: number) => {
     const accepted = await confirm({
       title: 'Remover produto?',
@@ -284,7 +289,7 @@ export default function ProductsPage() {
               />
               Ativo
             </label>
-            <div className="flex gap-3">
+            <div className="app-form-actions app-form-actions--mobile-sticky">
               <button className="app-button app-button-primary" type="submit">
                 {editingId ? 'Atualizar' : 'Criar'}
               </button>
@@ -292,10 +297,7 @@ export default function ProductsPage() {
                 <button
                   className="app-button app-button-ghost"
                   type="button"
-                  onClick={() => {
-                    setEditingId(null);
-                    setForm(emptyProduct);
-                  }}
+                  onClick={cancelEdit}
                 >
                   Cancelar
                 </button>

@@ -210,6 +210,11 @@ export default function CustomersPage() {
     scrollToLayoutSlot('form', { focus: true, focusSelector: 'input, select, textarea' });
   };
 
+  const cancelEdit = () => {
+    setEditingId(null);
+    setForm(emptyCustomer);
+  };
+
   useEffect(() => {
     const raw = searchParams.get('editCustomerId');
     if (!raw) return;
@@ -430,7 +435,7 @@ export default function CustomersPage() {
             <input className="app-input" value={form.lng ?? ''} readOnly />
           </FormField>
         </div>
-        <div className="flex gap-3">
+        <div className="app-form-actions app-form-actions--mobile-sticky">
           <button className="app-button app-button-primary" type="submit">
             {editingId ? 'Atualizar' : 'Criar'}
           </button>
@@ -438,10 +443,7 @@ export default function CustomersPage() {
             <button
               className="app-button app-button-ghost"
               type="button"
-              onClick={() => {
-                setEditingId(null);
-                setForm(emptyCustomer);
-              }}
+              onClick={cancelEdit}
             >
               Cancelar
             </button>

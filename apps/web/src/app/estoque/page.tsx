@@ -65,7 +65,7 @@ export default function StockPage() {
   const [d1Basis, setD1Basis] = useState<'deliveryDate' | 'createdAtPlus1'>('createdAtPlus1');
   const [d1Loading, setD1Loading] = useState(false);
   const [d1Error, setD1Error] = useState<string | null>(null);
-  const { confirm, notifyError, notifySuccess } = useFeedback();
+  const { confirm, notifyError, notifySuccess, notifyUndo } = useFeedback();
 
   const load = async () => {
     const [productsData, itemsData, movementsData, bomsData] = await Promise.all([
@@ -138,25 +138,30 @@ export default function StockPage() {
 
   const createMovement = async () => {
     if (!itemId) return;
-    await apiFetch('/inventory-movements', {
-      method: 'POST',
-      body: JSON.stringify({
-        itemId: Number(itemId),
-        quantity: Number(quantity),
-        type,
-        reason
-      })
-    });
-    setItemId('');
-    setQuantity(1);
-    setType('IN');
-    setReason('');
-    await load();
-    notifySuccess('Movimentacao registrada com sucesso.');
-    scrollToLayoutSlot('movements');
+    try {
+      await apiFetch('/inventory-movements', {
+        method: 'POST',
+        body: JSON.stringify({
+          itemId: Number(itemId),
+          quantity: Number(quantity),
+          type,
+          reason
+        })
+      });
+      setItemId('');
+      setQuantity(1);
+      setType('IN');
+      setReason('');
+      await load();
+      notifySuccess('Movimentacao registrada com sucesso.');
+      scrollToLayoutSlot('movements');
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel registrar a movimentacao.');
+    }
   };
 
   const removeMovement = async (id: number) => {
+    const movementToRestore = movements.find((entry) => entry.id === id);
     const accepted = await confirm({
       title: 'Remover movimentacao?',
       description: 'Essa acao exclui o registro selecionado.',
@@ -168,7 +173,27 @@ export default function StockPage() {
     try {
       await apiFetch(`/inventory-movements/${id}`, { method: 'DELETE' });
       await load();
-      notifySuccess('Movimentacao removida com sucesso.');
+      if (movementToRestore) {
+        const itemName =
+          itemMap.get(movementToRestore.itemId)?.name || `Item ${movementToRestore.itemId}`;
+        notifyUndo(`Movimentacao removida: ${itemName}.`, async () => {
+          await apiFetch('/inventory-movements', {
+            method: 'POST',
+            body: JSON.stringify({
+              itemId: movementToRestore.itemId,
+              quantity: movementToRestore.quantity,
+              type: movementToRestore.type,
+              reason: movementToRestore.reason || undefined,
+              orderId: movementToRestore.orderId || undefined
+            })
+          });
+          await load();
+          notifySuccess('Movimentacao restaurada com sucesso.');
+          scrollToLayoutSlot('movements');
+        });
+      } else {
+        notifySuccess('Movimentacao removida com sucesso.');
+      }
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Nao foi possivel remover a movimentacao.');
     }
@@ -182,18 +207,22 @@ export default function StockPage() {
 
   const updateItem = async () => {
     if (!editingItemId) return;
-    await apiFetch(`/inventory-items/${editingItemId}`, {
-      method: 'PUT',
-      body: JSON.stringify({
-        purchasePackSize: Number(packSize || 0),
-        purchasePackCost: Number(packCost || 0)
-      })
-    });
-    setEditingItemId('');
-    setPackSize('0');
-    setPackCost('0');
-    await load();
-    notifySuccess('Custo de compra atualizado.');
+    try {
+      await apiFetch(`/inventory-items/${editingItemId}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          purchasePackSize: Number(packSize || 0),
+          purchasePackCost: Number(packCost || 0)
+        })
+      });
+      setEditingItemId('');
+      setPackSize('0');
+      setPackCost('0');
+      await load();
+      notifySuccess('Custo de compra atualizado.');
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel atualizar o custo.');
+    }
   };
 
   const removeItem = async (id: number) => {
@@ -260,7 +289,18 @@ export default function StockPage() {
   };
 
   const removeBomItem = (index: number) => {
+    const removed = bomItems[index];
+    if (!removed) return;
     setBomItems((prev) => prev.filter((_, i) => i !== index));
+    const itemName = removed.itemId ? itemMap.get(Number(removed.itemId))?.name || `Item ${removed.itemId}` : 'Insumo';
+    notifyUndo(`${itemName} removido da ficha tecnica em edicao.`, () => {
+      setBomItems((prev) => {
+        const safeIndex = Math.min(index, prev.length);
+        const next = [...prev];
+        next.splice(safeIndex, 0, removed);
+        return next;
+      });
+    });
   };
 
   const saveBom = async () => {
@@ -291,18 +331,22 @@ export default function StockPage() {
         }))
     };
 
-    if (editingBomId) {
-      await apiFetch(`/boms/${editingBomId}`, { method: 'PUT', body: JSON.stringify(payload) });
-    } else {
-      await apiFetch('/boms', { method: 'POST', body: JSON.stringify(payload) });
+    try {
+      if (editingBomId) {
+        await apiFetch(`/boms/${editingBomId}`, { method: 'PUT', body: JSON.stringify(payload) });
+      } else {
+        await apiFetch('/boms', { method: 'POST', body: JSON.stringify(payload) });
+      }
+      setEditingBomId(null);
+      setBomProductId('');
+      setBomName('');
+      setBomItems([]);
+      await load();
+      notifySuccess(editingBomId ? 'Ficha tecnica atualizada com sucesso.' : 'Ficha tecnica criada com sucesso.');
+      scrollToLayoutSlot('bom');
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel salvar a ficha tecnica.');
     }
-    setEditingBomId(null);
-    setBomProductId('');
-    setBomName('');
-    setBomItems([]);
-    await load();
-    notifySuccess(editingBomId ? 'Ficha tecnica atualizada com sucesso.' : 'Ficha tecnica criada com sucesso.');
-    scrollToLayoutSlot('bom');
   };
 
   const removeBom = async (id: number) => {
@@ -589,9 +633,11 @@ export default function StockPage() {
             onChange={(e) => setReason(e.target.value)}
           />
         </div>
-        <button className="app-button app-button-primary" onClick={createMovement}>
-          Registrar
-        </button>
+        <div className="app-form-actions app-form-actions--mobile-sticky">
+          <button className="app-button app-button-primary" onClick={createMovement}>
+            Registrar
+          </button>
+        </div>
       </div>
       </BuilderLayoutItemSlot>
 
@@ -674,7 +720,7 @@ export default function StockPage() {
             </div>
           ))}
         </div>
-        <div className="flex flex-wrap gap-3">
+        <div className="app-form-actions app-form-actions--mobile-sticky">
           <button className="app-button app-button-ghost" onClick={addBomItem}>
             Adicionar item
           </button>
@@ -759,9 +805,11 @@ export default function StockPage() {
             onChange={(e) => setPackCost(e.target.value)}
           />
         </div>
-        <button className="app-button app-button-primary" onClick={updateItem}>
-          Atualizar custo
-        </button>
+        <div className="app-form-actions app-form-actions--mobile-sticky">
+          <button className="app-button app-button-primary" onClick={updateItem}>
+            Atualizar custo
+          </button>
+        </div>
       </div>
       </BuilderLayoutItemSlot>
 

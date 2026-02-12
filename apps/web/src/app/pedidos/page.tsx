@@ -96,7 +96,7 @@ export default function OrdersPage() {
   const [paymentFeedback, setPaymentFeedback] = useState<string | null>(null);
   const [markingPaid, setMarkingPaid] = useState(false);
   const selectedOrderId = selectedOrder?.id ?? null;
-  const { confirm, notifyError, notifySuccess } = useFeedback();
+  const { confirm, notifyError, notifySuccess, notifyUndo } = useFeedback();
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -163,6 +163,21 @@ export default function OrdersPage() {
     setDraftQty(1);
   };
 
+  const removeDraftItem = (index: number) => {
+    const removed = newOrderItems[index];
+    if (!removed) return;
+    setNewOrderItems((prev) => prev.filter((_, i) => i !== index));
+    const productName = productMap.get(removed.productId)?.name ?? `Produto ${removed.productId}`;
+    notifyUndo(`${productName} removido do rascunho do pedido.`, () => {
+      setNewOrderItems((prev) => {
+        const safeIndex = Math.min(index, prev.length);
+        const next = [...prev];
+        next.splice(safeIndex, 0, removed);
+        return next;
+      });
+    });
+  };
+
   const createOrder = async () => {
     if (!newOrderCustomerId || newOrderItems.length === 0) {
       setOrderError('Selecione cliente e pelo menos um item.');
@@ -221,6 +236,8 @@ export default function OrdersPage() {
   };
 
   const removeItem = async (orderId: number, itemId: number) => {
+    const orderScope = selectedOrder?.id === orderId ? selectedOrder : orders.find((entry) => entry.id === orderId);
+    const itemToRestore = orderScope?.items?.find((item) => item.id === itemId);
     const accepted = await confirm({
       title: 'Remover item do pedido?',
       description: 'A quantidade sera estornada no estoque deste pedido.',
@@ -232,7 +249,23 @@ export default function OrdersPage() {
     try {
       await apiFetch(`/orders/${orderId}/items/${itemId}`, { method: 'DELETE' });
       await loadAll();
-      notifySuccess('Item removido do pedido.');
+      if (itemToRestore) {
+        const productName = productMap.get(itemToRestore.productId)?.name ?? `Produto ${itemToRestore.productId}`;
+        notifyUndo(`${productName} removido do pedido.`, async () => {
+          await apiFetch(`/orders/${orderId}/items`, {
+            method: 'POST',
+            body: JSON.stringify({
+              productId: itemToRestore.productId,
+              quantity: itemToRestore.quantity
+            })
+          });
+          await loadAll();
+          notifySuccess('Item restaurado no pedido.');
+          scrollToLayoutSlot('detail');
+        });
+      } else {
+        notifySuccess('Item removido do pedido.');
+      }
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Nao foi possivel remover o item.');
     }
@@ -356,6 +389,7 @@ export default function OrdersPage() {
   };
 
   const removePayment = async (paymentId: number) => {
+    const paymentToRestore = selectedPayments.find((entry) => entry.id === paymentId);
     const accepted = await confirm({
       title: 'Remover pagamento?',
       description: 'Essa acao remove o registro de pagamento do pedido.',
@@ -367,7 +401,27 @@ export default function OrdersPage() {
     try {
       await apiFetch(`/payments/${paymentId}`, { method: 'DELETE' });
       await loadAll();
-      notifySuccess('Pagamento removido com sucesso.');
+      if (paymentToRestore) {
+        notifyUndo('Pagamento removido com sucesso.', async () => {
+          await apiFetch('/payments', {
+            method: 'POST',
+            body: JSON.stringify({
+              orderId: paymentToRestore.orderId,
+              amount: paymentToRestore.amount,
+              method: paymentToRestore.method,
+              status: paymentToRestore.status || 'PAGO',
+              paidAt: paymentToRestore.paidAt || undefined,
+              dueDate: paymentToRestore.dueDate || undefined,
+              providerRef: paymentToRestore.providerRef || undefined
+            })
+          });
+          await loadAll();
+          notifySuccess('Pagamento restaurado com sucesso.');
+          scrollToLayoutSlot('detail');
+        });
+      } else {
+        notifySuccess('Pagamento removido com sucesso.');
+      }
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Nao foi possivel remover o pagamento.');
     }
@@ -554,7 +608,7 @@ export default function OrdersPage() {
             />
           </FormField>
         </div>
-        <div className="flex flex-wrap gap-3">
+        <div className="app-form-actions app-form-actions--mobile-sticky">
           <button className="app-button app-button-ghost" onClick={addItemDraft}>
             Adicionar item
           </button>
@@ -584,7 +638,7 @@ export default function OrdersPage() {
                   </div>
                   <button
                     className="app-button app-button-danger"
-                    onClick={() => setNewOrderItems((prev) => prev.filter((_, i) => i !== index))}
+                    onClick={() => removeDraftItem(index)}
                   >
                     Remover
                   </button>
@@ -815,7 +869,7 @@ export default function OrdersPage() {
                 onChange={(e) => setAddItemQty(Number(e.target.value))}
               />
             </FormField>
-            <div className="flex items-end">
+            <div className="app-form-actions app-form-actions--mobile-sticky">
               <button className="app-button app-button-ghost w-full" onClick={() => addItem(selectedOrder.id!)}>
                 Adicionar item
               </button>
@@ -861,14 +915,14 @@ export default function OrdersPage() {
                   onChange={(e) => setPaymentDate(e.target.value)}
                 />
               </FormField>
-              <div className="flex items-end gap-2">
+              <div className="app-form-actions app-form-actions--mobile-sticky">
                 <button className="app-button app-button-primary w-full" onClick={registerPayment}>
                   Registrar pagamento
                 </button>
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="app-form-actions">
               <button
                 className="app-button app-button-ghost disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={markOrderPaid}

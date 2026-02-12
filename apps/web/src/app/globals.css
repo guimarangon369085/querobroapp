@@ -344,6 +344,12 @@ input[type='radio'] {
   box-shadow: 0 12px 24px rgba(152, 29, 43, 0.25);
 }
 
+.app-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .app-chip {
   border-radius: 999px;
   padding: 4px 11px;
@@ -736,6 +742,20 @@ input[type='radio'] {
   color: var(--ink-muted);
 }
 
+.app-toast__action {
+  justify-self: start;
+  margin-top: 6px;
+  border: 1px solid color-mix(in srgb, var(--tomato-500), white 56%);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--tomato-500);
+  background: color-mix(in srgb, var(--tomato-500), white 90%);
+}
+
 .app-toast__close {
   border: 1px solid var(--line-soft);
   width: 24px;
@@ -837,6 +857,24 @@ input[type='radio'] {
 
   .app-topbar__actions .app-primary,
   .app-topbar__actions .app-ghost {
+    flex: 1;
+    text-align: center;
+  }
+
+  .app-form-actions--mobile-sticky {
+    position: sticky;
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    z-index: 20;
+    margin-top: 2px;
+    padding: 10px;
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--surface-strong), white 8%);
+    border: 1px solid var(--line-soft);
+    box-shadow: var(--shadow-soft);
+    backdrop-filter: blur(10px);
+  }
+
+  .app-form-actions--mobile-sticky .app-button {
     flex: 1;
     text-align: center;
   }

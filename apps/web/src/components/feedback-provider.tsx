@@ -18,6 +18,8 @@ type ToastInput = {
   title?: string;
   message: string;
   durationMs?: number;
+  actionLabel?: string;
+  onAction?: () => void | Promise<void>;
 };
 
 type ToastItem = ToastInput & {
@@ -42,6 +44,7 @@ type FeedbackContextValue = {
   notifySuccess: (message: string, title?: string) => void;
   notifyError: (message: string, title?: string) => void;
   notifyInfo: (message: string, title?: string) => void;
+  notifyUndo: (message: string, onUndo: () => void | Promise<void>, title?: string) => void;
   confirm: (options: ConfirmOptions) => Promise<boolean>;
 };
 
@@ -81,7 +84,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
       const id = randomId();
       const nextToast: ToastItem = {
         id,
-        durationMs: 3800,
+        durationMs: input.actionLabel && input.onAction ? 7600 : 3800,
         ...input
       };
       setToasts((prev) => [nextToast, ...prev].slice(0, 5));
@@ -104,6 +107,17 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
     (message: string, title?: string) => notify({ type: 'info', message, title }),
     [notify]
   );
+  const notifyUndo = useCallback(
+    (message: string, onUndo: () => void | Promise<void>, title?: string) =>
+      notify({
+        type: 'info',
+        title: title || 'Acao removida',
+        message,
+        actionLabel: 'Desfazer',
+        onAction: onUndo
+      }),
+    [notify]
+  );
 
   const confirm = useCallback((options: ConfirmOptions) => {
     return new Promise<boolean>((resolve) => {
@@ -119,15 +133,33 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const runToastAction = useCallback(
+    async (toast: ToastItem) => {
+      if (!toast.onAction) return;
+      removeToast(toast.id);
+      try {
+        await toast.onAction();
+      } catch (err) {
+        notify({
+          type: 'error',
+          title: 'Falha ao desfazer',
+          message: err instanceof Error ? err.message : 'Nao foi possivel desfazer a acao.'
+        });
+      }
+    },
+    [notify, removeToast]
+  );
+
   const contextValue = useMemo<FeedbackContextValue>(
     () => ({
       notify,
       notifySuccess,
       notifyError,
       notifyInfo,
+      notifyUndo,
       confirm
     }),
-    [notify, notifySuccess, notifyError, notifyInfo, confirm]
+    [notify, notifySuccess, notifyError, notifyInfo, notifyUndo, confirm]
   );
 
   return (
@@ -142,6 +174,15 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
               <div className="app-toast__content">
                 <p className="app-toast__title">{toast.title || meta.title}</p>
                 <p className="app-toast__message">{toast.message}</p>
+                {toast.actionLabel && toast.onAction ? (
+                  <button
+                    type="button"
+                    className="app-toast__action"
+                    onClick={() => runToastAction(toast)}
+                  >
+                    {toast.actionLabel}
+                  </button>
+                ) : null}
               </div>
               <button
                 type="button"
