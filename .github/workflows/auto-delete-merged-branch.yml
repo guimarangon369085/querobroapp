@@ -1,0 +1,52 @@
+name: Auto Delete Merged Branch
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+jobs:
+  delete-branch:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip protected/default branches
+        id: guard
+        env:
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [ "$BRANCH_NAME" = "$DEFAULT_BRANCH" ] || [ "$BRANCH_NAME" = "main" ] || [ "$BRANCH_NAME" = "master" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Delete merged branch ref
+        if: steps.guard.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          BRANCH_ENCODED="${BRANCH_NAME//\//%2F}"
+          API_URL="https://api.github.com/repos/${REPO}/git/refs/heads/${BRANCH_ENCODED}"
+          HTTP_CODE="$(curl -sS -o /tmp/delete-branch-response.json -w '%{http_code}' -X DELETE \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "$API_URL")"
+          if [ "$HTTP_CODE" = "204" ]; then
+            echo "Branch deleted: ${BRANCH_NAME}"
+            exit 0
+          fi
+          if [ "$HTTP_CODE" = "422" ]; then
+            echo "Branch already deleted or unavailable: ${BRANCH_NAME}"
+            exit 0
+          fi
+          echo "Failed to delete branch. HTTP ${HTTP_CODE}"
+          cat /tmp/delete-branch-response.json
+          exit 1
