@@ -3,19 +3,39 @@ name: Auto Delete Merged Branch
 on:
   pull_request:
     types: [closed]
+  workflow_dispatch:
+    inputs:
+      branch_name:
+        description: "Branch para deletar (ex.: wip/minha-branch)"
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
   delete-branch:
-    if: github.event.pull_request.merged == true
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve branch name
+        id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+          INPUT_BRANCH_NAME: ${{ inputs.branch_name }}
+        run: |
+          set -euo pipefail
+          BRANCH_NAME="$PR_BRANCH_NAME"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            BRANCH_NAME="$INPUT_BRANCH_NAME"
+          fi
+          echo "branch_name=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
+
       - name: Skip protected/default branches
         id: guard
         env:
-          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+          BRANCH_NAME: ${{ steps.resolve.outputs.branch_name }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
@@ -29,7 +49,7 @@ jobs:
         if: steps.guard.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
-          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+          BRANCH_NAME: ${{ steps.resolve.outputs.branch_name }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
