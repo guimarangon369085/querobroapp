@@ -41,3 +41,10 @@ O Codex aplica no repositorio real e confirma com testes.
 Peça exatamente:
 
 `Mapeie o git e execute o fluxo seguro sem perder nada.`
+
+## Limpeza automatica de branches
+
+No GitHub, a limpeza esta automatizada:
+
+- PR mergeado: branch apagada automaticamente.
+- Push em `main`: workflow faz poda de branches totalmente mergeadas (`wip/*`, `feat/*`, `fix/*`, etc.).

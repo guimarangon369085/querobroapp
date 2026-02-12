@@ -1,0 +1,74 @@
+name: Auto Prune Merged Branches
+
+on:
+  push:
+    branches: [main, master]
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch all branch refs
+        run: |
+          set -euo pipefail
+          git fetch origin "+refs/heads/*:refs/remotes/origin/*" --prune
+
+      - name: Delete fully merged work branches
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+
+          BASE_REF="refs/remotes/origin/${DEFAULT_BRANCH}"
+          if ! git show-ref --verify --quiet "$BASE_REF"; then
+            echo "Base branch not found: $BASE_REF"
+            exit 1
+          fi
+
+          DELETED=0
+          while IFS= read -r remote_ref; do
+            branch="${remote_ref#origin/}"
+            [ -z "$branch" ] && continue
+            [ "$branch" = "HEAD" ] && continue
+
+            case "$branch" in
+              "$DEFAULT_BRANCH"|main|master)
+                continue
+                ;;
+            esac
+
+            case "$branch" in
+              wip/*|feat/*|fix/*|chore/*|docs/*|refactor/*|codex/*)
+                ;;
+              *)
+                continue
+                ;;
+            esac
+
+            BRANCH_REF="refs/remotes/origin/${branch}"
+            if ! git show-ref --verify --quiet "$BRANCH_REF"; then
+              continue
+            fi
+
+            if git merge-base --is-ancestor "$BRANCH_REF" "$BASE_REF"; then
+              echo "Deleting merged branch: $branch"
+              if git push origin --delete "$branch"; then
+                DELETED=$((DELETED + 1))
+              else
+                echo "Skip (could not delete): $branch"
+              fi
+            fi
+          done < <(git for-each-ref --format='%(refname:short)' refs/remotes/origin | sort)
+
+          echo "Deleted branches: $DELETED"
