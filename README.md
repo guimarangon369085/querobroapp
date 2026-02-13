@@ -1,8 +1,7 @@
-# Quero Bro App
+# QUEROBROApp
 
 Aplicativo para gestão da **produção e venda de broas**, sincronizado com TypeScript.
 
-> Observação de contexto: "Bro" no nome do projeto é abreviação/brincadeira de **Broa + App**.
 
 Monorepo com Turborepo + pnpm:
 
