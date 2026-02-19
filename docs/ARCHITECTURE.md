@@ -1,113 +1,65 @@
 # ARCHITECTURE
 
-## TOC
-- [1. Componentes](#1-componentes)
-- [2. Fluxo De Dados](#2-fluxo-de-dados)
-- [3. Fluxos Criticos](#3-fluxos-criticos)
-- [4. Pontos De Depuracao Rapida](#4-pontos-de-depuracao-rapida)
-
-## 1. Componentes
+## Visao simples
 
 ```text
-+--------------------+          +---------------------+
-| apps/web (Next.js) |<-------->| apps/api (NestJS)   |
-| App Router ERP     |  HTTP    | Controllers/Services |
-+--------------------+          +----------+----------+
-            ^                              |
-            |                              | Prisma Client
-            |                              v
-+----------------------+          +---------------------+
-| apps/mobile (Expo)   |--------->| SQLite dev /        |
-| Mobile ERP basico    |   HTTP   | Postgres prod       |
-+----------------------+          +---------------------+
+Web (Next.js)  ----\
+                  ---> API (NestJS) ---> Prisma ---> Banco
+Mobile (Expo) ---/
 
-+-----------------------+
-| packages/shared (Zod) |
-| Contratos de dominio  |
-+-----------+-----------+
-            |
-            +--> consumido por web/api/mobile
+Builder (config) --------> API/arquivo local
+Shared contracts (Zod) --> Web + API + Mobile
 ```
 
-Referencias:
-- API composition: [`apps/api/src/app.module.ts`](../apps/api/src/app.module.ts)
-- Web shell: [`apps/web/src/app/layout.tsx`](../apps/web/src/app/layout.tsx)
-- Shared contracts: [`packages/shared/src/index.ts`](../packages/shared/src/index.ts)
+## Camadas
 
-## 2. Fluxo De Dados
+- Interface: `apps/web` e `apps/mobile`.
+- Regras de negocio: `apps/api/src/modules`.
+- Contratos de entrada/saida: `packages/shared/src/index.ts`.
+- Persistencia: `apps/api/prisma/schema.prisma`.
 
-```text
-[Web/Mobile Form]
-      |
-      v
-[apiFetch (web/mobile)]
-      |
-      v
-[Nest Controller] --> [Zod parse] --> [Service]
-                                      |
-                                      v
-                                   [Prisma]
-                                      |
-                                      v
-                                    [DB]
-                                      |
-                                      v
-                            [JSON response -> UI]
-```
+## Modulos da API
 
-Clientes HTTP:
-- Web: [`apps/web/src/lib/api.ts`](../apps/web/src/lib/api.ts)
-- Mobile: [`apps/mobile/src/lib/api.ts`](../apps/mobile/src/lib/api.ts)
+- `products`, `customers`, `orders`, `payments`
+- `inventory`, `stock`, `bom`, `production`
+- `receipts`, `builder`, `whatsapp`
 
-## 3. Fluxos Criticos
+Arquivo de composicao:
+- `apps/api/src/app.module.ts`
 
-### 3.1 Criar pedido com consumo de estoque
+## Fluxos principais
 
-```text
-POST /orders
-  -> OrdersService.create
-     -> valida cliente + itens
-     -> calcula subtotal/discount/total
-     -> cria Order + OrderItem
-     -> applyInventoryMovements(direction=OUT)
-         -> consulta BOM por produto
-         -> gera InventoryMovement por item de insumo
-```
+### 1) Pedido e financeiro
 
-Referencia:
-- [`apps/api/src/modules/orders/orders.service.ts`](../apps/api/src/modules/orders/orders.service.ts)
+1. Web cria pedido com cliente + itens.
+2. API calcula subtotal, desconto e total.
+3. API aplica consumo de estoque por BOM.
+4. Pagamentos atualizam `amountPaid`, `balanceDue`, `paymentStatus`.
 
-### 3.2 Cancelar pedido com estorno de estoque
+### 2) D+1 (producao)
 
-```text
-PATCH /orders/:id/status (CANCELADO)
-  -> valida transicao ABERTO/CONFIRMADO/EM_PREPARACAO/PRONTO -> CANCELADO
-  -> applyInventoryMovements(direction=IN)
-  -> atualiza status do pedido
-```
+1. API le pedidos e BOM.
+2. Calcula necessidade por insumo para data alvo.
+3. Compara necessidade com saldo de inventario.
+4. Web mostra falta por item no quadro D+1.
 
-### 3.3 Estoque detalhado no web
+### 3) Cupom para estoque
 
-```text
-GET /inventory-items
-GET /inventory-movements
-GET /boms
-  -> pagina /estoque calcula:
-     saldo por item
-     custo por caixa (BOM)
-     capacidade estimada
-```
+1. iOS envia imagem para `/receipts/ingest`.
+2. API extrai itens e aplica regras do Builder.
+3. API grava movimentos de entrada no inventario.
+4. Web mostra entradas automaticas.
 
-Referencia:
-- [`apps/web/src/app/estoque/page.tsx`](../apps/web/src/app/estoque/page.tsx)
+## Decisoes tecnicas importantes
 
-## 4. Pontos De Depuracao Rapida
+- Em dev, banco padrao e SQLite.
+- Em producao, usar Postgres (`schema.prod.prisma`).
+- Auth em producao e obrigatoria por padrao.
+- Throttling e helmet ja ativos na API.
 
-- Health API: [`apps/api/src/app.controller.ts`](../apps/api/src/app.controller.ts)
-- Bootstrap/env/Swagger: [`apps/api/src/main.ts`](../apps/api/src/main.ts)
-- Logs dev scripts: `/tmp/querobroapp-api.log`, `/tmp/querobroapp-web.log`
-- Smoke script: [`scripts/qa-smoke.mjs`](../scripts/qa-smoke.mjs)
+## Riscos atuais
 
-Risco estrutural atual:
-- drift entre schema dev/prod e lock de migracoes em sqlite.
-- referencias: [`apps/api/prisma/schema.prisma`](../apps/api/prisma/schema.prisma), [`apps/api/prisma/schema.prod.prisma`](../apps/api/prisma/schema.prod.prisma), [`apps/api/prisma/migrations/migration_lock.toml`](../apps/api/prisma/migrations/migration_lock.toml)
+- Drift entre schema dev e prod ainda precisa monitoramento continuo.
+- Cobertura de testes de negocio ainda e parcial.
+- Envio real de WhatsApp ainda nao esta implementado (somente outbox).
+

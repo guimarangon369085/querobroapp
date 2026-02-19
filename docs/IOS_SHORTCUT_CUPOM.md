@@ -1,109 +1,44 @@
-# iOS Atalhos - Cupom para Estoque (automatico)
+# IOS_SHORTCUT_CUPOM
 
 ## Objetivo
 
-Ao aproximar o NFC:
+Com um toque no iPhone:
 
-1. tirar foto do cupom,
-2. extrair somente itens oficiais de producao,
-3. lancar automaticamente no estoque do app,
-4. mostrar notificacao de resultado no iPhone.
+1. tirar foto do cupom
+2. enviar para API
+3. atualizar estoque automaticamente
+4. receber notificacao com resultado
 
-Sem copiar/colar.
+## Endpoint recomendado
 
-## Endpoints
-
-- `POST /receipts/ingest`
-  - retorna JSON completo (`items`, `ingest.appliedCount`, `ingest.ignoredCount`).
 - `POST /receipts/ingest-notification`
-  - faz a mesma ingestao, mas retorna `text/plain` pronto para notificacao.
-  - exemplo de resposta: `Itens lancados: 3 | Ignorados: 1`
+- Resposta: texto pronto para notificacao (`Itens lancados: X | Ignorados: Y`)
 
-Base URL local (exemplo):
+## Passo a passo no Atalhos (iOS)
 
-- `http://SEU_MAC_IP:3001/receipts`
-
-Descobrir IP e URLs no Mac:
-
-```bash
-./scripts/shortcut-receipts-setup.sh
-```
-
-## Atalho recomendado (mais simples e robusto)
-
-Interface do app Atalhos em portugues:
-
-1. `Tirar Foto` (camera traseira)
-2. `Converter Imagem`
-   - Formato: `JPEG`
-3. `Codificar em Base64`
-   - **Quebras de Linha: `Nenhuma`** (obrigatorio)
-4. `Dicionario`
-   - `imageBase64`: variavel da acao Base64
-   - `mimeType`: texto fixo `image/jpeg`
-5. `Obter conteudo de URL`
+1. `Tirar Foto`
+2. `Converter Imagem` -> `JPEG`
+3. `Codificar em Base64` -> `Quebras de Linha: Nenhuma`
+4. `Dicionario`:
+   - `imageBase64`: valor da imagem em base64
+   - `mimeType`: `image/jpeg`
+5. `Obter conteudo de URL`:
    - URL: `http://SEU_MAC_IP:3001/receipts/ingest-notification`
    - Metodo: `POST`
-   - Pedir Corpo: `JSON`
-   - Corpo: `Dicionario`
-   - Cabecalho opcional: `x-receipts-token` (somente se definido na API)
-   - Cabecalho recomendado: `idempotency-key` (use algo unico por cupom, ex.: data-hora)
-   - Se `APP_AUTH_ENABLED=true`, enviar tambem: `x-app-token`
-6. `Mostrar notificacao`
-   - Titulo: `Cupom processado`
-   - Texto: variavel **`Conteudos do URL`** (nao digitar texto manual)
+   - Corpo: `JSON` com o dicionario
+   - Header recomendado: `idempotency-key` unico por cupom
+   - Se auth ativa: adicionar `x-app-token`
+6. `Mostrar notificacao` com o retorno da URL
 
-## Atalho avancado (se quiser JSON detalhado)
+## Como conferir no web
 
-Troque a URL da etapa 5 para:
-
-- `http://SEU_MAC_IP:3001/receipts/ingest`
-
-Depois:
-
-1. `Obter valor do dicionario` -> chave `ingest`
-2. `Obter valor do dicionario` -> chave `appliedCount`
-3. `Mostrar notificacao` -> texto com a variavel `appliedCount`
-
-Importante:
-
-- nao escreva `[Resultado]` como texto fixo,
-- selecione sempre a variavel azul na barra de variaveis do Atalhos.
-
-## Area editavel no app (mapeamento)
-
-No Builder:
-
-- `http://127.0.0.1:3000/builder`
-- bloco `Integracoes e automacao`
-- secao `Regras de itens de producao (editavel)`
-
-Voce pode ajustar por item oficial:
-
-- habilitado/desabilitado,
-- nome do item de estoque de destino,
-- multiplicador de quantidade.
-
-## Como verificar se entrou no estoque
-
-No app web:
-
-- `http://127.0.0.1:3000/estoque`
-- secao `Movimentacoes`
-- card `Entradas automaticas por cupom`
-
-Esse card mostra total aplicado e ultimas entradas automaticas.
+- Abrir `http://127.0.0.1:3000/estoque`
+- Ver secao de movimentacoes
+- Confirmar entrada automatica aplicada
 
 ## Erros comuns
 
-- `OPENAI_API_KEY nao configurada`:
-  - preencher em `apps/api/.env` e reiniciar API.
-- `image_parse_error`:
-  - usar `Converter Imagem -> JPEG`,
-  - em `Codificar em Base64`, usar `Quebras de Linha: Nenhuma`.
-- `localhost` no iPhone nao funciona:
-  - usar o IP local do Mac (`192.168.x.x`).
-- retorno 400 com token:
-  - conferir `x-receipts-token` igual ao `RECEIPTS_API_TOKEN`.
-- retorno 401 sem autenticar:
-  - se `APP_AUTH_ENABLED=true`, incluir `x-app-token` com `APP_AUTH_TOKEN` (ou um token em `APP_AUTH_TOKENS`).
+- `localhost` no iPhone nao funciona -> use IP do Mac.
+- Falha de parse -> confirme JPEG + base64 sem quebra de linha.
+- Duplicidade -> verifique se `idempotency-key` esta variando por cupom.
+

@@ -1,56 +1,33 @@
-# BOOTSTRAP PROMPTS
+# BOOTSTRAP_PROMPTS
 
-Copie e cole um destes prompts ao iniciar nova sessao.
-
-## 1) ChatGPT Online/Mobile
+## Prompt base para nova sessao
 
 ```txt
-Quero continuar o projeto querobroapp sem depender de memoria anterior.
-Leia primeiro estes arquivos do repositorio:
-- docs/MEMORY_VAULT.md
-- docs/querobroapp-context.md
+Projeto: QUEROBROAPP.
+Antes de qualquer alteracao, leia:
+- README.md
+- docs/PROJECT_SNAPSHOT.md
 - docs/NEXT_STEP_PLAN.md
-- docs/HANDOFF_LOG.md
+- docs/HANDOFF_LOG.md (ultimas entradas)
 
 Depois:
-1) resuma o estado atual em 10 linhas,
-2) confirme riscos/pendencias,
-3) execute este objetivo: [descreva em 1 linha].
+1) resuma o estado atual em 10 bullets,
+2) liste riscos ativos,
+3) execute este objetivo: [1 linha].
 
-No final, gere um handoff no formato de docs/HANDOFF_TEMPLATE.md.
+No final:
+- validar com comandos,
+- registrar handoff em docs/HANDOFF_LOG.md.
 ```
 
-## 2) Codex Terminal
+## Prompt curto para foco em UX
 
 ```txt
-Antes de alterar qualquer arquivo:
-- leia docs/MEMORY_VAULT.md
-- leia docs/querobroapp-context.md
-- leia docs/HANDOFF_LOG.md
-
-Objetivo da sessao:
-[descreva em 1 linha]
-
+Objetivo: simplificar UX para usuario leigo com minimo de cliques.
 Regras:
-- manter alteracoes objetivas,
-- validar comandos principais,
-- finalizar com nova entrada no docs/HANDOFF_LOG.md.
+- esconder campos avancados por padrao,
+- manter regra complexa no backend,
+- validar em desktop e mobile width,
+- entregar checklist de friccao corrigida.
 ```
 
-## 3) Codex Cloud/Online
-
-```txt
-Continuar querobroapp com base em contexto versionado no repo.
-Arquivos obrigatorios:
-- docs/MEMORY_VAULT.md
-- docs/querobroapp-context.md
-- docs/NEXT_STEP_PLAN.md
-- docs/HANDOFF_LOG.md
-
-Meta:
-[descreva em 1 linha]
-
-Entregavel:
-- diff aplicavel localmente
-- resumo tecnico + riscos + proximo passo
-```

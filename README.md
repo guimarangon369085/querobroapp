@@ -1,179 +1,47 @@
-# QUEROBROApp
+# QUEROBROAPP
 
-Aplicativo para gestão da **produção e venda de broas**, sincronizado com TypeScript.
+QUEROBROAPP e um sistema para organizar vendas, producao e estoque de broas.
+A regra do produto e simples: complexidade no backend, tela clara para operacao do dia a dia.
 
+## O que ja funciona
 
-Monorepo com Turborepo + pnpm:
+- Cadastro de produtos e sabores.
+- Cadastro de clientes com telefone e endereco.
+- Criacao de pedidos com itens, desconto e status.
+- Pagamento parcial ou total com saldo automatico.
+- Controle de estoque com movimentos manuais e consumo por ficha tecnica (BOM).
+- Quadro D+1 para planejar faltas de insumos no proximo dia.
+- Outbox de WhatsApp (fundacao pronta, envio real em etapa futura).
+- Builder visual para ajustar layout, tema e regras sem alterar codigo.
 
-- `apps/api`: NestJS + Prisma (SQLite em dev, Postgres em prod)
-- `apps/web`: Next.js + Tailwind + shadcn/ui
-- `apps/mobile`: Expo React Native
-- `packages/shared`: schemas e types com zod
-- `packages/ui`: componentes compartilhados para web
+## Fluxo diario (simples)
 
-## Instalação e uso
+1. `Produtos`: cadastre o que voce vende.
+2. `Clientes`: salve contato e endereco.
+3. `Pedidos`: monte o pedido e avance status.
+4. `Estoque`: veja D+1, lance movimentos e confira saldo.
 
-1. Clone o repositório:
+## Arquitetura do projeto
 
-```bash
-git clone https://github.com/guimarangon369085/querobroapp.git
-cd querobroapp
-```
+- `apps/api`: NestJS + Prisma (API principal).
+- `apps/web`: Next.js (ERP web).
+- `apps/mobile`: Expo (app mobile).
+- `packages/shared`: contratos Zod/TypeScript usados por web, api e mobile.
+- `packages/ui`: componentes compartilhados.
 
-2. Instale dependências:
+## Subir localmente
 
-```bash
-pnpm install
-```
-
-3. Inicie o app:
-
-```bash
-pnpm dev
-```
-
-## Tecnologias usadas
-
-- TypeScript
-- Node.js
-- NestJS
-- Next.js
-- Expo React Native
-- Prisma
-- Turborepo
-- pnpm
-
-## Fluxo operacional (MVP)
-
-1. Cadastre **produtos/sabores** em `/produtos`.
-2. Crie pedido em `/pedidos` com cliente + itens.
-3. Abra o detalhe do pedido, ajuste status e registre pagamento.
-4. Use o botão **Marcar pedido como pago** para quitar o saldo restante.
-
-Convenção de domínio adotada:
-- `sabor/variedade` é representado como `Product` no catálogo (categoria `Sabores`, ex.: `T/G/S/R/D`).
-
-## Ficha técnica (BOM)
-
-- Ao criar um produto pela API (`POST /products`), a API cria automaticamente uma ficha técnica (BOM) vazia.
-- Endpoint para consultar/criar (backfill) a BOM padrão: `GET /products/:id/bom`.
-- No Web, a lista de produtos tem ação **Ficha técnica** que abre `/estoque?bomProductId=<id>` e pré-seleciona a BOM.
-
-Links rápidos:
-- `http://127.0.0.1:3000/produtos`
-- `http://127.0.0.1:3000/estoque?bomProductId=<id>`
-
-## Mobile (pagamentos)
-
-O app mobile (`apps/mobile`) permite:
-- ver detalhe do pedido (totais + itens + financeiro),
-- registrar pagamento parcial,
-- marcar pedido como pago (cria pagamento restante via API),
-- navegar do pedido para o cliente (abre a aba Clientes com edição).
-
-## Builder modular (modo LEGO)
-
-A pagina `http://127.0.0.1:3000/builder` permite editar o app em blocos, sem codar:
-
-- **Tema visual**: cores e fontes
-- **Inputs e selecao**: raio, padding, borda e acento de checkbox/radio
-- **Home/Landing**: textos e galeria com upload/remocao de imagens
-- **Integracoes/automacao**: dados operacionais do fluxo com Atalhos e regras editaveis de entrada automatica no estoque por cupom
-- **Blocos arrastaveis**: ordem e visibilidade das secoes em Dashboard/Produtos/Clientes/Pedidos/Estoque
-
-As mudancas aplicam preview imediato e podem ser salvas por bloco ou em lote.
-
-Detalhe tecnico:
-- configuracao persistida em `data/builder/config.json` (ignorado no git)
-- uploads da home em `data/builder/uploads/home`
-- API publica arquivos em `/uploads/builder/home/<arquivo>`
-
-## Onde mexer
-
-- Dados (Prisma): `apps/api/prisma/schema.prisma`, `apps/api/prisma/seed.ts`
-- Backend (Nest):
-  - Produtos: `apps/api/src/modules/products`
-  - Pedidos/itens/status: `apps/api/src/modules/orders`
-  - Pagamentos: `apps/api/src/modules/payments`
-  - Estoque/BOM/D+1: `apps/api/src/modules/inventory`, `apps/api/src/modules/bom`, `apps/api/src/modules/production`
-- UI (Next):
-  - Produtos/sabores: `apps/web/src/app/produtos/page.tsx`
-  - Pedidos e pagamentos: `apps/web/src/app/pedidos/page.tsx`
-  - Estoque e quadro D+1: `apps/web/src/app/estoque/page.tsx`
-
-## Continuidade entre ChatGPT/Codex
-
-Para manter contexto entre ChatGPT Online/Mobile e Codex Terminal/Cloud:
-
-- contexto vivo: `docs/querobroapp-context.md`
-- handoff de sessão: `docs/HANDOFF_TEMPLATE.md`
-- histórico de handoffs: `docs/HANDOFF_LOG.md`
-- memória consolidada: `docs/MEMORY_VAULT.md`
-- fluxo simples entre IAs: `docs/AI_WORKFLOW.md`
-- prompts prontos: `docs/BOOTSTRAP_PROMPTS.md`
-- releitura rápida no terminal: `scripts/relearn-context.sh`
-- salvar handoff automaticamente: `scripts/save-handoff.sh`
-- checklist de demo/go-no-go Sprint B: `docs/DEMO_CHECKLIST_GABI.md`
-- integração iOS de cupom fiscal: `docs/IOS_SHORTCUT_CUPOM.md`
-- setup rápido do Atalhos (IP/URL): `scripts/shortcut-receipts-setup.sh`
-- teste local com imagem de cupom: `scripts/test-receipt-image.sh`
-  - o script inclui automaticamente `idempotency-key` nos endpoints de ingestao
-  - se `APP_AUTH_ENABLED=true` e `APP_AUTH_TOKEN` existir no `.env`, envia `x-app-token`
-- abrir PR da branch atual: `scripts/open-pr-url.sh`
-- instalar atalhos de abrir/encerrar app no Desktop: `scripts/install-desktop-launchers.sh`
-
-Regra prática: cada sessão termina com handoff preenchido e próximo passo objetivo.
-
-Uso rápido:
-
-```bash
-# modo interativo (recomendado)
-./scripts/save-handoff.sh
-
-# modo não interativo (exemplo)
-HANDOFF_OBJETIVO="Encerramento da sessão" \
-HANDOFF_RESULTADO="Handoff registrado" \
-HANDOFF_PENDENTE="Nenhum" \
-HANDOFF_DECISOES="Manter fluxo de handoff" \
-HANDOFF_BLOQUEIOS="Nenhum" \
-HANDOFF_PROXIMO_PASSO="Retomar do próximo item" \
-./scripts/save-handoff.sh
-```
-
-Atalho Desktop (sem terminal manual):
-
-```bash
-./scripts/install-desktop-launchers.sh
-```
-
-Depois, use no Desktop:
-- `@QUEROBROAPP.app` (ou `@QUEROBROAPP.command`) para iniciar.
-- `Parar QUEROBROAPP.app` (ou `Parar QUEROBROAPP.command`) para encerrar.
-
-## Requisitos
-
-- Node.js 20+
-- pnpm 9+
-- Docker (opcional, apenas para Postgres local)
-
-## Setup local (SQLite)
-
-1. Instale dependências:
+### 1) Instalar
 
 ```bash
 pnpm install
-```
-
-2. Copie os envs:
-
-```bash
 cp .env.example .env
 cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.example apps/web/.env
 cp apps/mobile/.env.example apps/mobile/.env
 ```
 
-3. Gere o client do Prisma, rode migração e seed:
+### 2) Preparar banco dev (SQLite)
 
 ```bash
 pnpm --filter @querobroapp/api prisma:generate:dev
@@ -181,78 +49,65 @@ pnpm --filter @querobroapp/api prisma:migrate:dev
 pnpm --filter @querobroapp/api prisma:seed
 ```
 
-O seed é idempotente e cria dados de exemplo:
-- produtos e sabores de broa,
-- clientes,
-- pedidos com cenários `PENDENTE`, `PARCIAL` e `PAGO`.
-
-4. Rode tudo:
+### 3) Rodar
 
 ```bash
 pnpm dev
 ```
 
-## Setup local (Postgres)
+## URLs locais
 
-1. Suba o Postgres:
+- Web: `http://127.0.0.1:3000`
+- API Health: `http://127.0.0.1:3001/health`
+- Swagger (quando habilitado): `http://127.0.0.1:3001/docs`
+- Builder: `http://127.0.0.1:3000/builder`
+
+## Seguranca (resumo)
+
+- Em dev, auth pode ficar desativada por padrao.
+- Em producao, a API exige auth ativa (`APP_AUTH_ENABLED=true`) por padrao.
+- Swagger em producao fica bloqueado por padrao.
+- Existem scripts para scan de segredos, policy gate e hardening local/GitHub.
+
+## Scripts principais
 
 ```bash
-docker compose up -d
+pnpm dev
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm check:prisma-drift
+pnpm security:secrets
+pnpm security:policy:diff
+pnpm qa:smoke
 ```
 
-2. Ajuste `DATABASE_URL_PROD` em `apps/api/.env` e rode:
+## Endpoints principais da API
 
-```bash
-pnpm --filter @querobroapp/api prisma:generate:prod
-pnpm --filter @querobroapp/api prisma:migrate:prod
-```
+- `products`: CRUD + `GET /products/:id/bom`
+- `customers`: CRUD
+- `orders`: CRUD + itens + status + `mark-paid`
+- `payments`: list/create/delete + `mark-paid`
+- `inventory-items` e `inventory-movements`
+- `boms` + bootstrap + combinacoes de sabores
+- `production/requirements` (D+1)
+- `receipts/*` (parse, ingest, notificacao, sync de custo)
+- `builder/*` (config e imagens)
+- `whatsapp/outbox`
 
-## Scripts
+## Mapa rapido para devs
 
-- `pnpm dev`: roda tudo em paralelo
-- `pnpm build`: build de todos os pacotes
-- `pnpm lint`: lint de todos os pacotes
-- `pnpm typecheck`: typecheck de todos os pacotes
-- `pnpm test`: roda os testes existentes nos workspaces
+- API bootstrap/env/security: `apps/api/src/main.ts`
+- Modulos API: `apps/api/src/modules`
+- Schema Prisma: `apps/api/prisma/schema.prisma`
+- Telas web: `apps/web/src/app`
+- Contratos compartilhados: `packages/shared/src/index.ts`
 
-## URLs
+## Documentacao recomendada
 
-- API Nest: `http://localhost:3001/health`
-- Swagger: `http://localhost:3001/docs`
-- Web: `http://localhost:3000`
-- Expo: `http://localhost:8081` (default)
-
-## API (resumo)
-
-- `GET /products`, `POST /products`, `GET /products/:id`, `PUT /products/:id`, `DELETE /products/:id`
-- `GET /customers`, `POST /customers`, `GET /customers/:id`, `PUT /customers/:id`, `DELETE /customers/:id`
-- `GET /orders`, `POST /orders`, `GET /orders/:id`, `PUT /orders/:id`, `DELETE /orders/:id`
-- `POST /orders/:id/items`, `DELETE /orders/:id/items/:itemId`, `PATCH /orders/:id/status`
-- `PATCH /orders/:id/mark-paid`
-- `GET /products/:id/bom`
-- `GET /payments`, `POST /payments`, `PATCH /payments/:id/mark-paid`
-- `GET /stock-movements`, `POST /stock-movements`
-- `POST /receipts/parse` (extracao de cupom fiscal para linhas com separador configuravel no Builder)
-- `POST /receipts/ingest` (extracao + lancamento automatico no estoque, conforme regras do Builder)
-- `POST /receipts/ingest-notification` (extracao + ingestao, resposta text/plain para notificacao no Atalhos)
-- `POST /receipts/parse-clipboard` (retorna apenas texto pronto para colar no Numbers)
-  - requer `OPENAI_API_KEY` na API
-  - opcional: `RECEIPTS_API_TOKEN` + header `x-receipts-token`
-  - recomendado: `idempotency-key` no `POST /receipts/ingest` para evitar duplicidade em retry
-  - auth global (quando ativo): `x-app-token` ou `Authorization: Bearer <token>`
-  - no Atalhos, em `Codificar em Base64`, use `Quebras de Linha: Nenhuma`
-  - conferencia no web: `Estoque > Movimentacoes > Entradas automaticas por cupom`
-- `GET /builder/config`
-- `PUT /builder/config`
-- `PATCH /builder/config/:block` (`theme`, `forms`, `home`, `integrations`, `layout`)
-- `POST /builder/home-images` (multipart `file` + `alt`)
-- `DELETE /builder/home-images/:id`
-
-## Observações
-
-- Em desenvolvimento, o Prisma usa SQLite (`DATABASE_URL=file:./dev.db`).
-- Em produção, use `DATABASE_URL_PROD` com Postgres e os scripts `prisma:*:prod`.
-- Auth API:
-  - `APP_AUTH_ENABLED=false` em dev por padrao.
-  - para ativar, configure `APP_AUTH_TOKEN` (admin) ou `APP_AUTH_TOKENS` (`role:token` separado por virgula).
-  - papeis disponiveis: `admin`, `operator`, `viewer` (viewer = leitura).
+- Visao tecnica: `docs/PROJECT_SNAPSHOT.md`
+- Arquitetura: `docs/ARCHITECTURE.md`
+- Proximos passos: `docs/NEXT_STEP_PLAN.md`
+- Backlog: `docs/DELIVERY_BACKLOG.md`
+- Seguranca de segredos: `docs/SECRETS_SECURITY_PROCEDURE.md`
+- Atalho iOS de cupom: `docs/IOS_SHORTCUT_CUPOM.md`

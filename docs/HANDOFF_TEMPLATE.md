@@ -1,49 +1,25 @@
-# HANDOFF TEMPLATE
+# HANDOFF_TEMPLATE
 
-Preencha este modelo ao terminar uma sessao e cole no proximo canal.
+Use este modelo no fim de cada sessao.
 
 ## 1) Metadados
 
 - Data/hora:
-- Canal origem:
-- Canal destino:
-- Repo path:
 - Branch:
-- Commit base (opcional):
+- Objetivo da sessao:
 
-## 2) Objetivo da sessao encerrada
+## 2) O que foi entregue
 
-- Objetivo:
-- Resultado entregue:
-- O que ficou pendente:
-
-## 3) Mudancas tecnicas
-
+- Resultado principal:
 - Arquivos alterados:
-- Comportamento novo:
-- Riscos/regressoes:
+- Comandos de validacao executados:
 
-## 4) Validacao
+## 3) Estado tecnico
 
-- Comandos executados:
-- Testes que passaram:
-- Testes nao executados (e motivo):
+- O que esta estavel:
+- Riscos ou pendencias abertas:
 
-## 5) Contexto para retomada
+## 4) Proximo passo
 
-- Decisoes importantes:
-- Suposicoes feitas:
-- Bloqueios:
-- Proximo passo recomendado (1 acao objetiva):
+- Proxima acao objetiva (1 linha):
 
-## 6) Prompt pronto para proximo canal
-
-```txt
-Continuar o projeto querobroapp com base neste handoff.
-Leia primeiro:
-- docs/querobroapp-context.md
-- docs/NEXT_STEP_PLAN.md
-
-Resumo da ultima sessao:
-[cole aqui as secoes 2 a 5 preenchidas]
-```

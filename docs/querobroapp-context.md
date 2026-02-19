@@ -1,79 +1,28 @@
-# QUEROBROAPP CONTEXTO VIVO
+# QUEROBROAPP_CONTEXT
 
-Ultima atualizacao: 2026-02-12
-Fonte de verdade: este arquivo + codigo no repositorio
+Ultima atualizacao: 2026-02-19
 
-## Objetivo
+## Missao do produto
 
-Manter continuidade entre:
-- Codex Terminal
-- Codex Online/Cloud
-- ChatGPT Online
-- ChatGPT Mobile
+Facilitar operacao diaria de vendas e producao com interface simples e backend robusto.
 
-Sem depender de historico automatico entre produtos.
+## Estado atual
 
-## Estado atual (resumo rapido)
+- Web operacional com foco em usabilidade.
+- API com regras de pedido, financeiro, estoque e D+1.
+- Builder ativo para ajustar interface sem codigo.
 
-- Repo principal: `$HOME/querobroapp`
-- Branch de referencia: `main`
-- Stack: NestJS (API) + Next.js (Web) + Expo (Mobile) + Prisma
-- Documentacao tecnica base:
-  - `docs/PROJECT_SNAPSHOT.md`
-  - `docs/NEXT_STEP_PLAN.md`
-  - `docs/DELIVERY_BACKLOG.md`
-  - `docs/ARCHITECTURE.md`
+## Prioridades vigentes
 
-## Decisoes em vigor
+1. UX cada vez mais simples para operador leigo.
+2. Menos cliques no fluxo de pedidos.
+3. Mais testes de dominio para evitar regressao.
+4. Evolucao de integracoes externas (WhatsApp) em cima do outbox.
 
-- Repositorio git e a fonte canonica de codigo.
-- Este arquivo e a fonte canonica de contexto de conversa.
-- Toda sessao deve terminar com handoff preenchido (usar `docs/HANDOFF_TEMPLATE.md`).
-- Nao confiar em memoria de conversa entre canais; sempre reenviar contexto minimo.
+## Como retomar rapido
 
-## Prioridades correntes
+1. Ler `docs/PROJECT_SNAPSHOT.md`.
+2. Ler `docs/NEXT_STEP_PLAN.md`.
+3. Ler ultimas entradas de `docs/HANDOFF_LOG.md`.
+4. Definir objetivo da sessao em 1 linha.
 
-1. Consolidar fluxo `Pedido + Itens + Calculo + Estados`.
-2. Fechar regras de `Financeiro` (saldo, parcial, quitacao).
-3. Evoluir `D+1` operacional com base em pedidos + BOM.
-4. Manter docs e codigo sincronizados no `main`.
-
-## Bloqueios/atencao
-
-- Pode haver divergencia entre schema Prisma dev e prod.
-- Worktree local pode ficar suja durante iteracoes; nao apagar mudancas sem validacao.
-
-## Prompt curto de retomada (ChatGPT Online/Mobile)
-
-Use este prompt ao abrir conversa em outro canal:
-
-```txt
-Projeto: querobroapp.
-Leia e use como contexto principal:
-- docs/querobroapp-context.md
-- docs/PROJECT_SNAPSHOT.md
-- docs/NEXT_STEP_PLAN.md
-
-Objetivo desta sessao: [descreva em 1 linha].
-Estado atual: [branch/commit ou mudancas locais].
-Entregavel esperado: [resultado concreto].
-```
-
-## Prompt curto de retomada (Codex Terminal/Cloud)
-
-```txt
-Antes de qualquer mudanca, leia:
-- docs/querobroapp-context.md
-- docs/HANDOFF_TEMPLATE.md
-- docs/NEXT_STEP_PLAN.md
-
-Depois continue a partir deste objetivo:
-[descreva em 1 linha]
-```
-
-## Checklist de encerramento de sessao
-
-- Atualizei este arquivo se houve mudanca de prioridade/decisao.
-- Registrei handoff com contexto minimo (template padrao).
-- Informei branch e arquivos alterados.
-- Listei proximo passo objetivo para a proxima sessao.
