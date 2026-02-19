@@ -8,57 +8,73 @@ type RouteMeta = {
   title: string;
   eyebrow: string;
   subtitle: string;
+  helper: string;
   primaryAction?: { href: string; label: string; focusSlot?: string };
   secondaryAction?: { href: string; label: string; focusSlot?: string };
 };
 
 const routeMeta: Record<string, RouteMeta> = {
   '/': {
-    eyebrow: 'Visao geral',
+    eyebrow: 'Comeco rapido',
     title: 'Painel principal',
-    subtitle: 'Acesse rapidamente vendas, clientes, estoque e configuracoes.',
-    primaryAction: { href: '/dashboard', label: 'Abrir dashboard' },
-    secondaryAction: { href: '/pedidos', label: 'Ver pedidos' },
+    subtitle: 'Tudo organizado para operar sem complicacao.',
+    helper: 'Siga os passos 1, 2, 3 e 4 no menu lateral.',
+    primaryAction: { href: '/dashboard', label: 'Abrir resumo' },
+    secondaryAction: { href: '/pedidos', label: 'Ir para pedidos' },
   },
   '/dashboard': {
-    eyebrow: 'Dashboard',
+    eyebrow: 'Painel rapido',
     title: 'Resumo da operacao',
-    subtitle: 'Indicadores para acompanhar o dia em poucos segundos.',
-    primaryAction: { href: '/pedidos?focus=new_order', label: 'Novo pedido' },
-    secondaryAction: { href: '/estoque?focus=movement', label: 'Lancar movimento' },
+    subtitle: 'Entenda o dia em poucos segundos.',
+    helper: 'Se estiver tudo certo, avance para Pedidos.',
+    primaryAction: { href: '/pedidos?focus=new_order', label: 'Criar pedido' },
+    secondaryAction: { href: '/estoque?focus=d1', label: 'Ver D+1' },
+  },
+  '/jornada': {
+    eyebrow: 'Fluxo unico',
+    title: 'Jornada da broa',
+    subtitle: 'Toque no no e continue.',
+    helper: 'Um passo por vez.',
+    primaryAction: { href: '/jornada', label: 'Abrir mapa' },
+    secondaryAction: { href: '/pedidos?focus=new_order', label: 'Criar pedido' }
   },
   '/produtos': {
-    eyebrow: 'Produtos',
-    title: 'Gestao de produtos',
-    subtitle: 'Cadastre sabores, ajuste preco e organize seu catalogo.',
-    primaryAction: { href: '/produtos', label: 'Cadastrar produto', focusSlot: 'form' },
-    secondaryAction: { href: '/estoque?focus=movement', label: 'Ver custo de insumos' },
+    eyebrow: 'Passo 1',
+    title: 'Produtos e sabores',
+    subtitle: 'Cadastre rapido: nome, preco e pronto.',
+    helper: 'Use os atalhos de preenchimento para reduzir cliques.',
+    primaryAction: { href: '/produtos', label: 'Novo produto', focusSlot: 'form' },
+    secondaryAction: { href: '/estoque?focus=bom', label: 'Abrir ficha tecnica' },
   },
   '/clientes': {
-    eyebrow: 'Clientes',
-    title: 'Gestao de clientes',
-    subtitle: 'Mantenha contatos, endereco e historico sempre organizados.',
-    primaryAction: { href: '/clientes', label: 'Cadastrar cliente', focusSlot: 'form' },
+    eyebrow: 'Passo 2',
+    title: 'Clientes',
+    subtitle: 'Nome, telefone e endereco em fluxo simples.',
+    helper: 'Campos avancados ficam escondidos ate voce precisar.',
+    primaryAction: { href: '/clientes', label: 'Novo cliente', focusSlot: 'form' },
     secondaryAction: { href: '/pedidos?focus=new_order', label: 'Criar pedido' },
   },
   '/pedidos': {
-    eyebrow: 'Pedidos',
-    title: 'Fluxo de pedidos',
-    subtitle: 'Controle status, pagamentos e entregas em um fluxo unico.',
-    primaryAction: { href: '/pedidos', label: 'Abrir novo pedido', focusSlot: 'new_order' },
-    secondaryAction: { href: '/dashboard', label: 'Ver KPIs' },
+    eyebrow: 'Passo 3',
+    title: 'Pedidos e pagamentos',
+    subtitle: 'Fluxo guiado para montar, acompanhar e receber.',
+    helper: 'Primeiro cliente, depois itens, por fim pagamento.',
+    primaryAction: { href: '/pedidos', label: 'Novo pedido', focusSlot: 'new_order' },
+    secondaryAction: { href: '/dashboard', label: 'Voltar ao resumo' },
   },
   '/estoque': {
-    eyebrow: 'Estoque',
-    title: 'Controle de estoque',
-    subtitle: 'Saldo, custo e fichas tecnicas com atualizacao automatica.',
+    eyebrow: 'Passo 4',
+    title: 'Estoque e D+1',
+    subtitle: 'Saldo atual, necessidades e custos num so lugar.',
+    helper: 'Priorize o quadro D+1 antes de abrir a producao.',
     primaryAction: { href: '/estoque', label: 'Lancar movimento', focusSlot: 'movement' },
-    secondaryAction: { href: '/produtos?focus=form', label: 'Ajustar catalogo' },
+    secondaryAction: { href: '/estoque', label: 'Ver D+1', focusSlot: 'd1' },
   },
   '/builder': {
-    eyebrow: 'Builder',
+    eyebrow: 'Configuracao',
     title: 'Editor modular',
-    subtitle: 'Edite blocos da interface sem precisar programar.',
+    subtitle: 'Ajuste blocos da interface sem programar.',
+    helper: 'Mantenha na tela apenas o que o operador realmente usa.',
     primaryAction: { href: '/builder?focus=editor', label: 'Editar blocos' },
     secondaryAction: { href: '/', label: 'Ver landing' },
   },
@@ -104,6 +120,7 @@ export function Topbar() {
         <p className="app-topbar__eyebrow">{meta.eyebrow}</p>
         <h2 className="app-topbar__title">{meta.title}</h2>
         <p className="app-topbar__subtitle">{meta.subtitle}</p>
+        <p className="app-topbar__helper">{meta.helper}</p>
       </div>
       <div className="app-topbar__actions">
         {meta.secondaryAction ? (
