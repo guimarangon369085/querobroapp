@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { Customer } from '@querobroapp/shared';
 import { apiFetch } from '@/lib/api';
 import { formatPhoneBR, normalizeAddress, normalizePhone, titleCase } from '@/lib/format';
@@ -35,17 +35,25 @@ const emptyCustomer: Partial<Customer> = {
   deliveryNotes: ''
 };
 
-export default function CustomersPage() {
+function CustomersPageContent() {
   const searchParams = useSearchParams();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [form, setForm] = useState<Partial<Customer>>(emptyCustomer);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [useAddressAutocomplete, setUseAddressAutocomplete] = useState(false);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const addressInputRef = useRef<HTMLInputElement | null>(null);
   const openedCustomerIdRef = useRef<number | null>(null);
   const { confirm, notifyError, notifySuccess, notifyUndo } = useFeedback();
+
+  const hideAddressSuggestions = () => {
+    if (typeof document === 'undefined') return;
+    document.querySelectorAll<HTMLElement>('.pac-container').forEach((container) => {
+      container.style.display = 'none';
+    });
+  };
 
   const load = () => apiFetch<Customer[]>('/customers').then(setCustomers);
 
@@ -68,7 +76,10 @@ export default function CustomersPage() {
 
   useEffect(() => {
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-    if (!apiKey || !addressInputRef.current) return;
+    if (!useAddressAutocomplete || !apiKey || !addressInputRef.current) {
+      hideAddressSuggestions();
+      return;
+    }
 
     let autocomplete: google.maps.places.Autocomplete | null = null;
     loadGoogleMaps(apiKey)
@@ -122,7 +133,7 @@ export default function CustomersPage() {
         google.maps.event.clearInstanceListeners(autocomplete);
       }
     };
-  }, []);
+  }, [useAddressAutocomplete]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -337,6 +348,9 @@ export default function CustomersPage() {
 
       <BuilderLayoutItemSlot id="form">
       <form onSubmit={submit} className="app-panel grid gap-5">
+        <div className="app-kid-hint">
+          Cadastro rapido: preencha nome, telefone e endereco. O resto fica em campos avancados.
+        </div>
         <div className="grid gap-3 md:grid-cols-2">
           <FormField label="Nome completo" error={error}>
             <input
@@ -358,35 +372,14 @@ export default function CustomersPage() {
               onChange={(e) => setForm((prev) => ({ ...prev, phone: formatPhoneBR(e.target.value) }))}
             />
           </FormField>
-          <FormField label="Primeiro nome" hint="Obrigatorio para Uber Direct">
-            <input
-              className="app-input"
-              placeholder="Primeiro nome"
-              value={form.firstName || ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, firstName: e.target.value }))}
-            />
-          </FormField>
-          <FormField label="Sobrenome" hint="Obrigatorio para Uber Direct">
-            <input
-              className="app-input"
-              placeholder="Sobrenome"
-              value={form.lastName || ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, lastName: e.target.value }))}
-            />
-          </FormField>
-          <FormField label="Email" hint="Opcional">
-            <input
-              className="app-input"
-              placeholder="email@exemplo.com"
-              value={form.email || ''}
-              inputMode="email"
-              autoComplete="email"
-              onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
-            />
-          </FormField>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <FormField label="Endereco completo" hint="Autocomplete do Google">
+          <FormField
+            label="Endereco completo"
+            hint={
+              useAddressAutocomplete
+                ? 'Sugestoes ativas. Se precisar, desligue para digitar manualmente.'
+                : 'Digite manualmente ou ative sugestoes.'
+            }
+          >
             <input
               className="app-input"
               placeholder="Rua, numero, bairro, cidade"
@@ -394,67 +387,27 @@ export default function CustomersPage() {
               value={form.address || ''}
               autoComplete="street-address"
               onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))}
-              onBlur={(e) => setForm((prev) => ({ ...prev, address: normalizeAddress(e.target.value) || '' }))}
+              onBlur={(e) => {
+                hideAddressSuggestions();
+                setForm((prev) => ({ ...prev, address: normalizeAddress(e.target.value) || '' }));
+              }}
             />
+            <div className="app-inline-actions">
+              <button
+                type="button"
+                className="app-button app-button-ghost"
+                onClick={() => {
+                  setUseAddressAutocomplete((previous) => {
+                    const next = !previous;
+                    if (!next) hideAddressSuggestions();
+                    return next;
+                  });
+                }}
+              >
+                {useAddressAutocomplete ? 'Desligar sugestoes' : 'Ativar sugestoes'}
+              </button>
+            </div>
           </FormField>
-          <FormField label="Rua e numero" hint="Linha 1">
-            <input
-              className="app-input"
-              placeholder="Ex: Rua X, 123"
-              value={form.addressLine1 || ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, addressLine1: e.target.value }))}
-            />
-          </FormField>
-          <FormField label="Complemento" hint="Apartamento, bloco, etc">
-            <input
-              className="app-input"
-              placeholder="Apto, bloco, andar..."
-              value={form.addressLine2 || ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, addressLine2: e.target.value }))}
-            />
-          </FormField>
-          <FormField label="Bairro">
-            <input
-              className="app-input"
-              placeholder="Bairro"
-              value={form.neighborhood || ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, neighborhood: e.target.value }))}
-            />
-          </FormField>
-          <FormField label="Cidade">
-            <input
-              className="app-input"
-              placeholder="Cidade"
-              value={form.city || ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, city: e.target.value }))}
-            />
-          </FormField>
-          <FormField label="Estado (UF)">
-            <input
-              className="app-input"
-              placeholder="SP"
-              value={form.state || ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, state: e.target.value }))}
-            />
-          </FormField>
-          <FormField label="CEP">
-            <input
-              className="app-input"
-              placeholder="00000-000"
-              value={form.postalCode || ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, postalCode: e.target.value }))}
-            />
-          </FormField>
-          <FormField label="Pais">
-            <input
-              className="app-input"
-              placeholder="Brasil"
-              value={form.country || ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, country: e.target.value }))}
-            />
-          </FormField>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
           <FormField label="Instrucoes de entrega" hint="Portao, referencia, interfone">
             <input
               className="app-input"
@@ -463,16 +416,104 @@ export default function CustomersPage() {
               onChange={(e) => setForm((prev) => ({ ...prev, deliveryNotes: e.target.value }))}
             />
           </FormField>
-          <FormField label="Uber Direct (Place ID)">
-            <input className="app-input" value={form.placeId || ''} readOnly />
-          </FormField>
-          <FormField label="Latitude">
-            <input className="app-input" value={form.lat ?? ''} readOnly />
-          </FormField>
-          <FormField label="Longitude">
-            <input className="app-input" value={form.lng ?? ''} readOnly />
-          </FormField>
         </div>
+
+        <details className="app-details">
+          <summary>Campos avancados (Uber Direct, endereco detalhado e dados extras)</summary>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <FormField label="Primeiro nome" hint="Opcional (preenchido automaticamente)">
+              <input
+                className="app-input"
+                placeholder="Primeiro nome"
+                value={form.firstName || ''}
+                onChange={(e) => setForm((prev) => ({ ...prev, firstName: e.target.value }))}
+              />
+            </FormField>
+            <FormField label="Sobrenome" hint="Opcional (preenchido automaticamente)">
+              <input
+                className="app-input"
+                placeholder="Sobrenome"
+                value={form.lastName || ''}
+                onChange={(e) => setForm((prev) => ({ ...prev, lastName: e.target.value }))}
+              />
+            </FormField>
+            <FormField label="Email" hint="Opcional">
+              <input
+                className="app-input"
+                placeholder="email@exemplo.com"
+                value={form.email || ''}
+                inputMode="email"
+                autoComplete="email"
+                onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
+              />
+            </FormField>
+            <FormField label="Rua e numero" hint="Linha 1">
+              <input
+                className="app-input"
+                placeholder="Ex: Rua X, 123"
+                value={form.addressLine1 || ''}
+                onChange={(e) => setForm((prev) => ({ ...prev, addressLine1: e.target.value }))}
+              />
+            </FormField>
+            <FormField label="Complemento" hint="Apartamento, bloco, etc">
+              <input
+                className="app-input"
+                placeholder="Apto, bloco, andar..."
+                value={form.addressLine2 || ''}
+                onChange={(e) => setForm((prev) => ({ ...prev, addressLine2: e.target.value }))}
+              />
+            </FormField>
+            <FormField label="Bairro">
+              <input
+                className="app-input"
+                placeholder="Bairro"
+                value={form.neighborhood || ''}
+                onChange={(e) => setForm((prev) => ({ ...prev, neighborhood: e.target.value }))}
+              />
+            </FormField>
+            <FormField label="Cidade">
+              <input
+                className="app-input"
+                placeholder="Cidade"
+                value={form.city || ''}
+                onChange={(e) => setForm((prev) => ({ ...prev, city: e.target.value }))}
+              />
+            </FormField>
+            <FormField label="Estado (UF)">
+              <input
+                className="app-input"
+                placeholder="SP"
+                value={form.state || ''}
+                onChange={(e) => setForm((prev) => ({ ...prev, state: e.target.value }))}
+              />
+            </FormField>
+            <FormField label="CEP">
+              <input
+                className="app-input"
+                placeholder="00000-000"
+                value={form.postalCode || ''}
+                onChange={(e) => setForm((prev) => ({ ...prev, postalCode: e.target.value }))}
+              />
+            </FormField>
+            <FormField label="Pais">
+              <input
+                className="app-input"
+                placeholder="Brasil"
+                value={form.country || ''}
+                onChange={(e) => setForm((prev) => ({ ...prev, country: e.target.value }))}
+              />
+            </FormField>
+            <FormField label="Uber Direct (Place ID)">
+              <input className="app-input" value={form.placeId || ''} readOnly />
+            </FormField>
+            <FormField label="Latitude">
+              <input className="app-input" value={form.lat ?? ''} readOnly />
+            </FormField>
+            <FormField label="Longitude">
+              <input className="app-input" value={form.lng ?? ''} readOnly />
+            </FormField>
+          </div>
+        </details>
         <div className="app-form-actions app-form-actions--mobile-sticky">
           <button className="app-button app-button-primary" type="submit">
             {editingId ? 'Atualizar' : 'Criar'}
@@ -530,5 +571,13 @@ export default function CustomersPage() {
       <BuilderLayoutCustomCards />
       </section>
     </BuilderLayoutProvider>
+  );
+}
+
+export default function CustomersPage() {
+  return (
+    <Suspense fallback={null}>
+      <CustomersPageContent />
+    </Suspense>
   );
 }
