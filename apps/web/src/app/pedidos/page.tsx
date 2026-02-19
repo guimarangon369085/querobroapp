@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import type { Customer, Order, Product, OrderItem, Payment } from '@querobroapp/shared';
 import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
@@ -17,6 +17,15 @@ import {
 
 const orderStatuses = ['ABERTO', 'CONFIRMADO', 'EM_PREPARACAO', 'PRONTO', 'ENTREGUE', 'CANCELADO'];
 const paymentMethods = ['pix', 'dinheiro', 'cartao', 'transferencia'];
+
+const nextStatusByCurrent: Record<string, string | null> = {
+  ABERTO: 'CONFIRMADO',
+  CONFIRMADO: 'EM_PREPARACAO',
+  EM_PREPARACAO: 'PRONTO',
+  PRONTO: 'ENTREGUE',
+  ENTREGUE: null,
+  CANCELADO: null
+};
 
 type OrderView = Order & {
   items?: OrderItem[];
@@ -42,6 +51,13 @@ function paidAmountFromPayments(order: OrderView | null) {
 }
 
 function derivePaymentStatus(order: OrderView) {
+  if (
+    order.paymentStatus === 'PENDENTE' ||
+    order.paymentStatus === 'PARCIAL' ||
+    order.paymentStatus === 'PAGO'
+  ) {
+    return order.paymentStatus;
+  }
   const total = toMoney(order.total ?? 0);
   const amountPaid = toMoney(order.amountPaid ?? paidAmountFromPayments(order));
   if (amountPaid <= 0) return 'PENDENTE';
@@ -69,7 +85,7 @@ function paymentRecordBadgeClass(status: string) {
   return 'bg-amber-100 text-amber-800 border-amber-200';
 }
 
-export default function OrdersPage() {
+function OrdersPageContent() {
   const searchParams = useSearchParams();
   const [orders, setOrders] = useState<OrderView[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -165,6 +181,18 @@ export default function OrdersPage() {
     setDraftProductId('');
     setDraftProductSearch('');
     setDraftQty(1);
+  };
+
+  const clearDraft = () => {
+    setNewOrderCustomerId('');
+    setCustomerSearch('');
+    setNewOrderItems([]);
+    setNewOrderDiscount('0');
+    setNewOrderNotes('');
+    setDraftProductId('');
+    setDraftProductSearch('');
+    setDraftQty(1);
+    setOrderError(null);
   };
 
   const removeDraftItem = (index: number) => {
@@ -308,8 +336,19 @@ export default function OrdersPage() {
     }
   };
 
+  const advanceStatus = async () => {
+    if (!selectedOrder?.id) return;
+    const nextStatus = nextStatusByCurrent[selectedOrder.status || ''];
+    if (!nextStatus) return;
+    await updateStatus(selectedOrder.id, nextStatus);
+  };
+
   const registerPayment = async () => {
     if (!selectedOrder?.id) return;
+    if (selectedOrder.status === 'CANCELADO') {
+      setPaymentError('Nao e possivel registrar pagamento para pedido cancelado.');
+      return;
+    }
 
     const amount = parseCurrencyBR(paymentAmount);
     if (amount <= 0) {
@@ -352,6 +391,10 @@ export default function OrdersPage() {
 
   const markOrderPaid = async () => {
     if (!selectedOrder?.id) return;
+    if (selectedOrder.status === 'CANCELADO') {
+      setPaymentError('Nao e possivel quitar um pedido cancelado.');
+      return;
+    }
     if (selectedOrderBalance <= 0) {
       setPaymentError('Este pedido ja esta totalmente pago.');
       return;
@@ -449,9 +492,30 @@ export default function OrdersPage() {
     [products]
   );
 
-  const parseIdFromLabel = (value: string) => {
-    const match = value.match(/#(\d+)\)?$/);
-    return match ? Number(match[1]) : NaN;
+  const parseIdFromLabel = (
+    value: string,
+    options: Array<{
+      id: number;
+      label: string;
+    }>
+  ) => {
+    const raw = value.trim();
+    if (!raw) return NaN;
+
+    const byHash = raw.match(/#(\d+)\)?$/);
+    if (byHash) return Number(byHash[1]);
+
+    if (/^\d+$/.test(raw)) return Number(raw);
+
+    const normalized = raw.toLowerCase();
+    const matches = options.filter((option) => {
+      const full = option.label.toLowerCase();
+      const withoutId = option.label.replace(/\s*\(#\d+\)\s*$/, '').trim().toLowerCase();
+      return full === normalized || withoutId === normalized;
+    });
+    if (matches.length === 1) return matches[0].id;
+
+    return NaN;
   };
 
   const customerMap = useMemo(() => new Map(customers.map((c) => [c.id!, c])), [customers]);
@@ -490,6 +554,8 @@ export default function OrdersPage() {
   const draftDiscount = useMemo(() => Math.max(parseCurrencyBR(newOrderDiscount), 0), [newOrderDiscount]);
   const draftTotal = Math.max(draftSubtotal - draftDiscount, 0);
   const canCreateOrder = Boolean(newOrderCustomerId) && newOrderItems.length > 0;
+  const draftHasCustomer = Boolean(newOrderCustomerId);
+  const draftHasItems = newOrderItems.length > 0;
 
   const selectedOrderTotal = toMoney(selectedOrder?.total ?? 0);
   const selectedOrderAmountPaid = toMoney(
@@ -499,6 +565,10 @@ export default function OrdersPage() {
     selectedOrder?.balanceDue ?? Math.max(selectedOrderTotal - selectedOrderAmountPaid, 0)
   );
   const selectedOrderPaymentStatus = selectedOrder ? derivePaymentStatus(selectedOrder) : 'PENDENTE';
+  const selectedOrderIsCancelled = selectedOrder?.status === 'CANCELADO';
+  const selectedOrderNextStatus = selectedOrder
+    ? nextStatusByCurrent[selectedOrder.status || '']
+    : null;
 
   return (
     <BuilderLayoutProvider page="pedidos">
@@ -508,7 +578,21 @@ export default function OrdersPage() {
         <div>
           <span className="app-chip">Operacao</span>
           <h2 className="mt-3 text-3xl font-semibold">Pedidos</h2>
-          <p className="text-neutral-600">Acompanhe pedidos, itens e pagamentos.</p>
+          <p className="text-neutral-600">Fluxo guiado: cliente, itens e pagamento.</p>
+        </div>
+      </div>
+      <div className="app-quickflow app-quickflow--columns mt-4">
+        <div className={`app-quickflow__step ${draftHasCustomer ? 'app-quickflow__step--done' : ''}`}>
+          <p className="app-quickflow__step-title">1. Escolher cliente</p>
+          <p className="app-quickflow__step-subtitle">Busque pelo nome e selecione.</p>
+        </div>
+        <div className={`app-quickflow__step ${draftHasItems ? 'app-quickflow__step--done' : ''}`}>
+          <p className="app-quickflow__step-title">2. Adicionar itens</p>
+          <p className="app-quickflow__step-subtitle">Escolha produto e quantidade.</p>
+        </div>
+        <div className={`app-quickflow__step ${canCreateOrder ? 'app-quickflow__step--done' : ''}`}>
+          <p className="app-quickflow__step-title">3. Criar pedido</p>
+          <p className="app-quickflow__step-subtitle">Total e desconto sao calculados automatico.</p>
         </div>
       </div>
       </BuilderLayoutItemSlot>
@@ -543,6 +627,14 @@ export default function OrdersPage() {
         <div>
           <span className="app-chip">Criacao</span>
           <h3 className="mt-3 text-xl font-semibold">Novo pedido</h3>
+          <p className="mt-2 text-sm text-neutral-600">
+            Selecione cliente, adicione os itens e clique em criar. O total e o saldo sao calculados automaticamente.
+          </p>
+        </div>
+        <div className="app-inline-actions">
+          <button className="app-button app-button-ghost" onClick={clearDraft}>
+            Limpar rascunho
+          </button>
         </div>
         <div className="grid gap-3 md:grid-cols-3">
           <FormField label="Cliente" hint="Digite para buscar e selecione">
@@ -554,7 +646,7 @@ export default function OrdersPage() {
               onChange={(e) => {
                 const value = e.target.value;
                 setCustomerSearch(value);
-                const parsedId = parseIdFromLabel(value);
+                const parsedId = parseIdFromLabel(value, customerOptions);
                 setNewOrderCustomerId(Number.isFinite(parsedId) ? parsedId : '');
               }}
             />
@@ -573,7 +665,7 @@ export default function OrdersPage() {
               onChange={(e) => {
                 const value = e.target.value;
                 setDraftProductSearch(value);
-                const parsedId = parseIdFromLabel(value);
+                const parsedId = parseIdFromLabel(value, productOptions);
                 setDraftProductId(Number.isFinite(parsedId) ? parsedId : '');
               }}
             />
@@ -785,6 +877,15 @@ export default function OrdersPage() {
               >
                 Ver cliente
               </Link>
+              {selectedOrderNextStatus ? (
+                <button
+                  className="app-button app-button-primary disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={advanceStatus}
+                  disabled={selectedOrderIsCancelled}
+                >
+                  Avancar para {selectedOrderNextStatus}
+                </button>
+              ) : null}
               <select
                 className="app-select"
                 value={selectedOrder.status}
@@ -857,12 +958,12 @@ export default function OrdersPage() {
                 placeholder="Buscar produto..."
                 value={addItemProductSearch}
                 onChange={(e) => {
-                  const value = e.target.value;
-                  setAddItemProductSearch(value);
-                  const parsedId = parseIdFromLabel(value);
-                  setAddItemProductId(Number.isFinite(parsedId) ? parsedId : '');
-                }}
-              />
+                const value = e.target.value;
+                setAddItemProductSearch(value);
+                const parsedId = parseIdFromLabel(value, productOptions);
+                setAddItemProductId(Number.isFinite(parsedId) ? parsedId : '');
+              }}
+            />
             </FormField>
             <FormField label="Quantidade">
               <input
@@ -896,13 +997,25 @@ export default function OrdersPage() {
                   inputMode="decimal"
                   value={paymentAmount}
                   onChange={(e) => setPaymentAmount(e.target.value)}
+                  disabled={selectedOrderIsCancelled}
                 />
+                <div className="app-inline-actions">
+                  <button
+                    type="button"
+                    className="app-button app-button-ghost"
+                    onClick={() => setPaymentAmount(selectedOrderBalance.toFixed(2))}
+                    disabled={selectedOrderIsCancelled || selectedOrderBalance <= 0}
+                  >
+                    Usar saldo restante
+                  </button>
+                </div>
               </FormField>
               <FormField label="Metodo">
                 <select
                   className="app-select"
                   value={paymentMethod}
                   onChange={(e) => setPaymentMethod(e.target.value)}
+                  disabled={selectedOrderIsCancelled}
                 >
                   {paymentMethods.map((method) => (
                     <option key={method} value={method}>
@@ -917,10 +1030,15 @@ export default function OrdersPage() {
                   type="date"
                   value={paymentDate}
                   onChange={(e) => setPaymentDate(e.target.value)}
+                  disabled={selectedOrderIsCancelled}
                 />
               </FormField>
               <div className="app-form-actions app-form-actions--mobile-sticky">
-                <button className="app-button app-button-primary w-full" onClick={registerPayment}>
+                <button
+                  className="app-button app-button-primary w-full disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={registerPayment}
+                  disabled={selectedOrderIsCancelled}
+                >
                   Registrar pagamento
                 </button>
               </div>
@@ -930,12 +1048,17 @@ export default function OrdersPage() {
               <button
                 className="app-button app-button-ghost disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={markOrderPaid}
-                disabled={markingPaid || selectedOrderBalance <= 0}
+                disabled={markingPaid || selectedOrderBalance <= 0 || selectedOrderIsCancelled}
               >
                 {markingPaid ? 'Marcando...' : `Marcar pedido como pago (${formatCurrencyBR(selectedOrderBalance)})`}
               </button>
             </div>
 
+            {selectedOrderIsCancelled ? (
+              <p className="text-xs text-neutral-500">
+                Pagamentos estao bloqueados para pedidos cancelados.
+              </p>
+            ) : null}
             {paymentError ? <p className="text-xs text-red-600">{paymentError}</p> : null}
             {paymentFeedback ? <p className="text-xs text-emerald-700">{paymentFeedback}</p> : null}
 
@@ -972,5 +1095,13 @@ export default function OrdersPage() {
       <BuilderLayoutCustomCards />
       </section>
     </BuilderLayoutProvider>
+  );
+}
+
+export default function OrdersPage() {
+  return (
+    <Suspense fallback={null}>
+      <OrdersPageContent />
+    </Suspense>
   );
 }
