@@ -555,6 +555,120 @@ section {
     );
 }
 
+.stock-alert-card {
+  margin-top: 10px;
+  border-radius: 20px;
+  border: 1px solid rgba(173, 47, 68, 0.25);
+  background:
+    radial-gradient(
+      240px 180px at 100% 0%,
+      color-mix(in srgb, var(--tomato-500), white 88%) 0%,
+      transparent 75%
+    ),
+    linear-gradient(145deg, rgba(255, 247, 246, 0.92), rgba(255, 255, 255, 0.76));
+  box-shadow: 0 14px 28px rgba(143, 47, 43, 0.14);
+  padding: 12px 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.stock-alert-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.stock-alert-card__eyebrow {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--ink-muted), black 4%);
+}
+
+.stock-alert-card__title {
+  margin: 2px 0 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #832032;
+}
+
+.stock-alert-card__subtitle {
+  margin: 4px 0 0;
+  font-size: 0.9rem;
+  color: color-mix(in srgb, var(--ink-strong), black 4%);
+}
+
+.stock-alert-card__kpi {
+  flex-shrink: 0;
+  min-width: 120px;
+  border-radius: 14px;
+  border: 1px solid rgba(173, 47, 68, 0.3);
+  background: rgba(255, 255, 255, 0.76);
+  padding: 8px 10px;
+  text-align: center;
+}
+
+.stock-alert-card__kpi span {
+  display: block;
+  font-size: 1.35rem;
+  line-height: 1.2;
+  font-weight: 700;
+  color: #9a2234;
+}
+
+.stock-alert-card__kpi small {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--ink-muted), black 8%);
+}
+
+.stock-alert-card__list {
+  display: grid;
+  gap: 8px;
+}
+
+.stock-alert-card__item {
+  border-radius: 12px;
+  border: 1px solid rgba(173, 47, 68, 0.2);
+  background: rgba(255, 255, 255, 0.78);
+  padding: 8px 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.stock-alert-card__item-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--ink-strong), black 4%);
+}
+
+.stock-alert-card__item-qty {
+  font-size: 0.88rem;
+  color: #9a2234;
+}
+
+.stock-alert-card__more {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--ink-muted), black 6%);
+}
+
+.stock-alert-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .stock-kpi--alert {
   border-color: rgba(164, 34, 56, 0.28);
   background:
@@ -1260,6 +1374,11 @@ input[type='radio'] {
     grid-template-columns: 1fr;
   }
 
+  .stock-alert-card__head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
   .app-gallery__item:nth-child(1),
   .app-gallery__item:nth-child(2),
   .app-gallery__item:nth-child(3),
@@ -1318,6 +1437,25 @@ input[type='radio'] {
   .stock-flag {
     font-size: 0.78rem;
     padding: 9px 10px;
+  }
+
+  .stock-alert-card {
+    border-radius: 18px;
+    padding: 10px;
+    gap: 8px;
+  }
+
+  .stock-alert-card__title {
+    font-size: 0.98rem;
+  }
+
+  .stock-alert-card__subtitle {
+    font-size: 0.84rem;
+  }
+
+  .stock-alert-card__actions .app-button {
+    flex: 1;
+    text-align: center;
   }
 
   .app-form-actions--mobile-sticky {
