@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   Bom,
   InventoryItem,
   InventoryMovement,
+  Order,
   Product,
   ProductionRequirementRow,
   ProductionRequirementWarning,
@@ -56,12 +57,76 @@ function inventoryCategoryLabel(category: string) {
   return category;
 }
 
-export default function StockPage() {
+function orderProductionDateFromCreatedAt(createdAt?: string | null) {
+  if (!createdAt) return '';
+  const base = new Date(createdAt);
+  if (Number.isNaN(base.getTime())) return '';
+  const productionDate = new Date(
+    Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate() + 1)
+  );
+  return productionDate.toISOString().slice(0, 10);
+}
+
+function parseTimeToMinutes(value: string) {
+  const match = value.match(/^(\d{2}):(\d{2})$/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return hour * 60 + minute;
+}
+
+function formatMinutesAsDuration(totalMinutes: number) {
+  if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) return '0 min';
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0 && minutes > 0) return `${hours}h ${minutes}min`;
+  if (hours > 0) return `${hours}h`;
+  return `${minutes}min`;
+}
+
+function formatMinutesAsClock(totalMinutes: number) {
+  if (!Number.isFinite(totalMinutes)) return '--:--';
+  const normalized = ((Math.trunc(totalMinutes) % 1440) + 1440) % 1440;
+  const hour = Math.floor(normalized / 60);
+  const minute = normalized % 60;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function parseSaleUnitCount(label?: string | null) {
+  if (!label) return 1;
+  const match = label.match(/(\d+)/);
+  return match ? Number(match[1]) : 1;
+}
+
+function resolveBomItemQtyPerSale(
+  bom: { saleUnitLabel?: string | null; yieldUnits?: number | null },
+  item: {
+    qtyPerSaleUnit?: number | null;
+    qtyPerUnit?: number | null;
+    qtyPerRecipe?: number | null;
+  }
+) {
+  if (item.qtyPerSaleUnit != null && item.qtyPerSaleUnit > 0) return item.qtyPerSaleUnit;
+
+  const unitsPerSale = parseSaleUnitCount(bom.saleUnitLabel);
+  if (item.qtyPerUnit != null && item.qtyPerUnit > 0) {
+    return item.qtyPerUnit * unitsPerSale;
+  }
+  if (item.qtyPerRecipe != null && item.qtyPerRecipe > 0 && bom.yieldUnits && bom.yieldUnits > 0) {
+    return item.qtyPerRecipe / bom.yieldUnits;
+  }
+  return null;
+}
+
+function StockPageContent() {
   const searchParams = useSearchParams();
   const bomSectionRef = useRef<HTMLDivElement | null>(null);
   const openedBomProductIdRef = useRef<number | null>(null);
 
   const [products, setProducts] = useState<Product[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [movements, setMovements] = useState<InventoryMovement[]>([]);
   const [boms, setBoms] = useState<Bom[]>([]);
@@ -88,16 +153,29 @@ export default function StockPage() {
   const [flavorCombos, setFlavorCombos] = useState<Array<{ code: string; composition: string }>>([]);
   const [flavorComboTotal, setFlavorComboTotal] = useState<number>(0);
   const [flavorComboLoading, setFlavorComboLoading] = useState(false);
+  const [plannerExtraBroas, setPlannerExtraBroas] = useState<string>('0');
+  const [plannerDeadline, setPlannerDeadline] = useState<string>('15:00');
+  const [isCompactViewport, setIsCompactViewport] = useState(false);
+  const [viewMode, setViewMode] = useState<'operation' | 'full'>('full');
+  const compactViewportRef = useRef<boolean | null>(null);
   const { confirm, notifyError, notifySuccess, notifyUndo } = useFeedback();
 
+  const advancedSlots = useMemo(
+    () => new Set(['capacity', 'bom', 'packaging', 'movements']),
+    []
+  );
+  const isOperationMode = isCompactViewport && viewMode === 'operation';
+
   const load = async () => {
-    const [productsData, itemsData, movementsData, bomsData] = await Promise.all([
+    const [productsData, ordersData, itemsData, movementsData, bomsData] = await Promise.all([
       apiFetch<Product[]>('/products'),
+      apiFetch<Order[]>('/orders'),
       apiFetch<InventoryItem[]>('/inventory-items'),
       apiFetch<InventoryMovement[]>('/inventory-movements'),
       apiFetch<any[]>('/boms')
     ]);
     setProducts(productsData);
+    setOrders(ordersData);
     setItems(itemsData);
     setMovements(movementsData);
     setBoms(bomsData as Bom[]);
@@ -108,12 +186,34 @@ export default function StockPage() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const syncViewportMode = () => {
+      const compact = window.innerWidth <= 1024;
+      setIsCompactViewport(compact);
+
+      if (compactViewportRef.current === null) {
+        setViewMode(compact ? 'operation' : 'full');
+      } else if (compactViewportRef.current !== compact) {
+        setViewMode(compact ? 'operation' : 'full');
+      }
+
+      compactViewportRef.current = compact;
+    };
+
+    syncViewportMode();
+    window.addEventListener('resize', syncViewportMode);
+    return () => window.removeEventListener('resize', syncViewportMode);
+  }, []);
+
+  useEffect(() => {
     const focus = consumeFocusQueryParam(searchParams);
     if (!focus) return;
 
     const allowed = new Set([
       'header',
       'kpis',
+      'ops',
       'capacity',
       'd1',
       'movement',
@@ -124,11 +224,21 @@ export default function StockPage() {
     ]);
     if (!allowed.has(focus)) return;
 
+    if (isOperationMode && advancedSlots.has(focus)) {
+      setViewMode('full');
+      scrollToLayoutSlot(focus, {
+        delayMs: 140,
+        focus: focus === 'movement' || focus === 'bom' || focus === 'packaging',
+        focusSelector: 'input, select, textarea, button'
+      });
+      return;
+    }
+
     scrollToLayoutSlot(focus, {
-      focus: focus === 'movement' || focus === 'bom' || focus === 'packaging',
+      focus: focus === 'movement' || focus === 'bom' || focus === 'packaging' || focus === 'ops',
       focusSelector: 'input, select, textarea, button'
     });
-  }, [searchParams]);
+  }, [advancedSlots, isOperationMode, searchParams]);
 
   const loadD1 = async (targetDate: string) => {
     setD1Loading(true);
@@ -193,12 +303,6 @@ export default function StockPage() {
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Nao foi possivel sincronizar custos.');
     }
-  };
-
-  const parseSaleUnits = (label?: string | null) => {
-    if (!label) return 1;
-    const match = label.match(/(\d+)/);
-    return match ? Number(match[1]) : 1;
   };
 
   const parseRequiredNumber = (raw: string | number | null | undefined, fieldLabel: string) => {
@@ -531,16 +635,9 @@ export default function StockPage() {
 
   const bomCosts = useMemo(() => {
     return (boms as any[]).map((bom) => {
-      const unitsPerSale = parseSaleUnits(bom.saleUnitLabel);
       let cost = 0;
       for (const item of bom.items || []) {
-        let perSale = item.qtyPerSaleUnit ?? null;
-        if (perSale === null && item.qtyPerUnit != null) {
-          perSale = item.qtyPerUnit * unitsPerSale;
-        }
-        if (perSale === null && item.qtyPerRecipe != null && bom.yieldUnits) {
-          perSale = item.qtyPerRecipe / bom.yieldUnits;
-        }
+        const perSale = resolveBomItemQtyPerSale(bom, item);
         if (perSale === null) continue;
         cost += perSale * (unitCostMap.get(item.itemId) || 0);
       }
@@ -550,25 +647,170 @@ export default function StockPage() {
 
   const capacity = useMemo(() => {
     return boms.map((bom: any) => {
-      const items = bom.items || [];
-      const perSale = items.filter((item: any) => item.qtyPerSaleUnit && item.qtyPerSaleUnit > 0);
+      const perSaleItems = (bom.items || [])
+        .map((item: any) => {
+          const perSaleQty = resolveBomItemQtyPerSale(bom, item);
+          return perSaleQty && perSaleQty > 0 ? { ...item, perSaleQty } : null;
+        })
+        .filter(Boolean) as Array<any>;
+
       let maxUnits = Infinity;
-      for (const item of perSale) {
+      let limitingItemName = '';
+      let hasNegativeInput = false;
+
+      for (const item of perSaleItems) {
         const balance = balances.get(item.itemId) || 0;
-        const capacity = balance / item.qtyPerSaleUnit;
-        if (capacity < maxUnits) maxUnits = capacity;
+        if (balance < 0) hasNegativeInput = true;
+        const currentCapacity = balance / item.perSaleQty;
+        if (currentCapacity < maxUnits) {
+          maxUnits = currentCapacity;
+          limitingItemName = item.item?.name || `Item ${item.itemId}`;
+        }
       }
       if (!Number.isFinite(maxUnits)) maxUnits = 0;
-      return { bom, maxUnits: Math.floor(maxUnits) };
+
+      return {
+        bom,
+        maxUnits: Math.max(0, Math.floor(maxUnits)),
+        hasNegativeInput,
+        missingQtyDefinitions: perSaleItems.length === 0,
+        limitingItemName
+      };
     });
   }, [boms, balances]);
+
+  const totalCapacityBoxes = useMemo(
+    () => capacity.reduce((sum, entry) => sum + Math.max(0, entry.maxUnits), 0),
+    [capacity]
+  );
+
+  const bomByProductId = useMemo(() => {
+    const map = new Map<number, any>();
+    for (const bom of boms as any[]) {
+      if (!map.has(bom.productId)) {
+        map.set(bom.productId, bom);
+      }
+    }
+    return map;
+  }, [boms]);
+
+  const plannedOrders = useMemo(
+    () =>
+      orders.filter(
+        (order) =>
+          order.status !== 'CANCELADO' &&
+          order.status !== 'ENTREGUE' &&
+          orderProductionDateFromCreatedAt(order.createdAt) === d1Date
+      ),
+    [orders, d1Date]
+  );
+
+  const plannedDemand = useMemo(() => {
+    let saleUnits = 0;
+    let broas = 0;
+    let itemsWithoutBom = 0;
+
+    for (const order of plannedOrders) {
+      for (const entry of order.items || []) {
+        const qty = Number(entry.quantity) || 0;
+        if (qty <= 0) continue;
+        saleUnits += qty;
+        const bom = bomByProductId.get(entry.productId);
+        if (!bom) {
+          itemsWithoutBom += 1;
+          continue;
+        }
+        broas += qty * parseSaleUnitCount(bom.saleUnitLabel);
+      }
+    }
+
+    return {
+      saleUnits,
+      broas,
+      itemsWithoutBom
+    };
+  }, [plannedOrders, bomByProductId]);
+
+  const d1Shortages = useMemo(() => d1Rows.filter((row) => row.shortageQty > 0), [d1Rows]);
+
+  const d1ShortagesByCategory = useMemo(() => {
+    const categoryOrder = new Map<string, number>([
+      ['INGREDIENTE', 0],
+      ['EMBALAGEM_INTERNA', 1],
+      ['EMBALAGEM_EXTERNA', 2]
+    ]);
+
+    return d1Shortages
+      .map((row) => ({
+        ...row,
+        category: itemMap.get(row.ingredientId)?.category || 'INGREDIENTE'
+      }))
+      .sort((a, b) => {
+        const categoryA = categoryOrder.get(a.category) ?? 99;
+        const categoryB = categoryOrder.get(b.category) ?? 99;
+        if (categoryA !== categoryB) return categoryA - categoryB;
+        if (b.shortageQty !== a.shortageQty) return b.shortageQty - a.shortageQty;
+        return a.name.localeCompare(b.name, 'pt-BR');
+      });
+  }, [d1Shortages, itemMap]);
+
+  const d1ShortageSummary = useMemo(() => {
+    const ingredients = d1ShortagesByCategory.filter((row) => row.category === 'INGREDIENTE').length;
+    const internalPackaging = d1ShortagesByCategory.filter(
+      (row) => row.category === 'EMBALAGEM_INTERNA'
+    ).length;
+    const externalPackaging = d1ShortagesByCategory.filter(
+      (row) => row.category === 'EMBALAGEM_EXTERNA'
+    ).length;
+    return { ingredients, internalPackaging, externalPackaging };
+  }, [d1ShortagesByCategory]);
+
+  const plannerExtra = useMemo(() => {
+    const parsed = parseLocaleNumber(plannerExtraBroas);
+    if (parsed === null || parsed < 0) return 0;
+    return parsed;
+  }, [plannerExtraBroas]);
+
+  const plannerTargetBroas = Math.max(0, Math.ceil(plannedDemand.broas + plannerExtra));
+  const plannerFornadas = plannerTargetBroas > 0 ? Math.ceil(plannerTargetBroas / 14) : 0;
+  const plannerOvenMinutes = plannerFornadas * 50;
+  const plannerDeadlineMinutes = parseTimeToMinutes(plannerDeadline);
+  const plannerStartMinutes =
+    plannerDeadlineMinutes == null ? null : plannerDeadlineMinutes - plannerOvenMinutes;
+  const plannerNeedsPreviousDay = plannerStartMinutes != null && plannerStartMinutes < 0;
+  const negativeBalanceItems = useMemo(
+    () =>
+      items.filter((item) => {
+        const current = balances.get(item.id!) || 0;
+        return current < 0;
+      }),
+    [balances, items]
+  );
 
   const inventoryKpis = useMemo(() => {
     const totalItems = items.length;
     const ingredients = items.filter((i) => i.category === 'INGREDIENTE').length;
     const packaging = items.filter((i) => i.category !== 'INGREDIENTE').length;
-    return { totalItems, ingredients, packaging };
-  }, [items]);
+    return {
+      totalItems,
+      ingredients,
+      packaging,
+      d1Shortages: d1Shortages.length,
+      plannedOrders: plannedOrders.length,
+      plannedBroas: plannerTargetBroas,
+      plannedFornadas: plannerFornadas,
+      capacityBoxes: totalCapacityBoxes,
+      negativeBalanceItems: negativeBalanceItems.length
+    };
+  }, [
+    d1Shortages.length,
+    items,
+    negativeBalanceItems.length,
+    plannedOrders.length,
+    plannerFornadas,
+    plannerTargetBroas,
+    totalCapacityBoxes
+  ]);
 
   const d1BreakdownSummary = (row: ProductionRequirementRow) => {
     const grouped = new Map<string, number>();
@@ -588,29 +830,241 @@ export default function StockPage() {
       <div className="app-section-title">
         <div>
           <span className="app-chip">Estoque</span>
-          <h2 className="mt-3 text-3xl font-semibold">Estoque e compras</h2>
-          <p className="text-neutral-600">Acompanhe saldo real, custo atualizado e capacidade de producao.</p>
+          <h2 className="mt-3 text-3xl font-semibold">Operacao diaria: estoque e producao</h2>
+          <p className="text-neutral-600">
+            Primeiro planeje faltas, depois rode fornadas, e por fim confira saldo e historico.
+          </p>
         </div>
+        <div className="stock-view-toggle" role="group" aria-label="Modo de visualizacao do estoque">
+          <button
+            type="button"
+            className={`stock-view-toggle__button ${viewMode === 'operation' ? 'stock-view-toggle__button--active' : ''}`}
+            onClick={() => setViewMode('operation')}
+            disabled={!isCompactViewport && viewMode === 'operation'}
+            title={isCompactViewport ? 'Modo foco operacional' : 'Disponivel apenas no viewport compacto'}
+          >
+            foco do dia
+          </button>
+          <button
+            type="button"
+            className={`stock-view-toggle__button ${viewMode === 'full' ? 'stock-view-toggle__button--active' : ''}`}
+            onClick={() => setViewMode('full')}
+          >
+            completo
+          </button>
+        </div>
+      </div>
+      {isOperationMode ? (
+        <div className="stock-flag stock-flag--focus">
+          Modo foco ativo: blocos tecnicos ficam ocultos para reduzir carga cognitiva.
+        </div>
+      ) : null}
+      {inventoryKpis.negativeBalanceItems > 0 ? (
+        <div className="stock-flag stock-flag--warning">
+          {inventoryKpis.negativeBalanceItems} item(ns) com saldo negativo precisam de ajuste.
+        </div>
+      ) : null}
+      <div className="app-quickflow app-quickflow--columns mt-4">
+        <button
+          type="button"
+          className="app-quickflow__step text-left"
+          onClick={() => scrollToLayoutSlot('ops', { focus: true })}
+        >
+          <p className="app-quickflow__step-title">1. Organizar o dia</p>
+          <p className="app-quickflow__step-subtitle">Fila de pedidos, fornadas e hora de inicio.</p>
+        </button>
+        <button
+          type="button"
+          className="app-quickflow__step text-left"
+          onClick={() => scrollToLayoutSlot('d1', { focus: true })}
+        >
+          <p className="app-quickflow__step-title">2. Planejar compras</p>
+          <p className="app-quickflow__step-subtitle">Veja faltas por ingrediente e embalagem.</p>
+        </button>
+        <button
+          type="button"
+          className="app-quickflow__step text-left"
+          onClick={() => scrollToLayoutSlot('movement', { focus: true })}
+        >
+          <p className="app-quickflow__step-title">3. Registrar compras/consumo</p>
+          <p className="app-quickflow__step-subtitle">Entradas e saidas em poucos toques.</p>
+        </button>
+        <button
+          type="button"
+          className="app-quickflow__step text-left"
+          onClick={() => scrollToLayoutSlot('balance', { focus: true })}
+        >
+          <p className="app-quickflow__step-title">4. Fechar conferencia</p>
+          <p className="app-quickflow__step-subtitle">Valide saldo por item e historico.</p>
+        </button>
       </div>
       </BuilderLayoutItemSlot>
 
       <BuilderLayoutItemSlot id="kpis">
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <div className="app-kpi">
-          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Itens</p>
-          <p className="mt-2 text-3xl font-semibold">{inventoryKpis.totalItems}</p>
+          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Fila D+1</p>
+          <p className="mt-2 text-3xl font-semibold">{inventoryKpis.plannedOrders}</p>
+          <p className="mt-1 text-xs text-neutral-500">pedidos nao entregues para {d1Date}</p>
         </div>
         <div className="app-kpi">
-          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Ingredientes</p>
-          <p className="mt-2 text-3xl font-semibold">{inventoryKpis.ingredients}</p>
+          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Broas alvo</p>
+          <p className="mt-2 text-3xl font-semibold">{inventoryKpis.plannedBroas}</p>
+          <p className="mt-1 text-xs text-neutral-500">
+            {plannedDemand.saleUnits} caixas na base + {formatQty(plannerExtra)} extra
+          </p>
         </div>
         <div className="app-kpi">
-          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Embalagens</p>
-          <p className="mt-2 text-3xl font-semibold">{inventoryKpis.packaging}</p>
+          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Fornadas</p>
+          <p className="mt-2 text-3xl font-semibold">{inventoryKpis.plannedFornadas}</p>
+          <p className="mt-1 text-xs text-neutral-500">{formatMinutesAsDuration(plannerOvenMinutes)} de forno</p>
+        </div>
+        <div className="app-kpi">
+          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Faltas D+1</p>
+          <p className="mt-2 text-3xl font-semibold">{inventoryKpis.d1Shortages}</p>
+          <p className="mt-1 text-xs text-neutral-500">itens com compra necessaria</p>
+        </div>
+        <div
+          className={`app-kpi ${inventoryKpis.negativeBalanceItems > 0 ? 'stock-kpi--alert' : ''}`}
+        >
+          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Capacidade</p>
+          <p className="mt-2 text-3xl font-semibold">{inventoryKpis.capacityBoxes}</p>
+          <p className="mt-1 text-xs text-neutral-500">
+            caixas possiveis com saldo atual
+            {inventoryKpis.negativeBalanceItems > 0 ? ' • revisar saldos negativos' : ''}
+          </p>
         </div>
       </div>
       </BuilderLayoutItemSlot>
 
+      <BuilderLayoutItemSlot id="ops">
+      <div className="stock-ops-grid">
+        <div className="app-panel stock-ops-panel stock-ops-panel--production grid gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-xl font-semibold">Ritmo de fornadas para {d1Date}</h3>
+              <p className="text-sm text-neutral-500">
+                Regra atual: 14 broas por fornada e ciclo de 50min (35 + 15).
+              </p>
+            </div>
+            {plannedDemand.itemsWithoutBom > 0 ? (
+              <p className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-900">
+                {plannedDemand.itemsWithoutBom} item(ns) sem BOM
+              </p>
+            ) : null}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-white/60 bg-white/70 px-3 py-3">
+              <p className="text-xs uppercase tracking-[0.15em] text-neutral-500">Caixas na fila</p>
+              <p className="mt-1 text-2xl font-semibold">{plannedDemand.saleUnits}</p>
+            </div>
+            <div className="rounded-xl border border-white/60 bg-white/70 px-3 py-3">
+              <p className="text-xs uppercase tracking-[0.15em] text-neutral-500">Broas base</p>
+              <p className="mt-1 text-2xl font-semibold">{formatQty(plannedDemand.broas)}</p>
+            </div>
+            <div className="rounded-xl border border-white/60 bg-white/70 px-3 py-3">
+              <p className="text-xs uppercase tracking-[0.15em] text-neutral-500">Broas alvo</p>
+              <p className="mt-1 text-2xl font-semibold">{plannerTargetBroas}</p>
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-[1fr_1fr_1.2fr]">
+            <label className="text-sm text-neutral-600">
+              Margem extra (broas)
+              <input
+                className="app-input mt-1"
+                type="number"
+                value={plannerExtraBroas}
+                onChange={(event) => setPlannerExtraBroas(event.target.value)}
+                inputMode="numeric"
+                min="0"
+                step="1"
+              />
+            </label>
+            <label className="text-sm text-neutral-600">
+              Hora limite de entrega
+              <input
+                className="app-input mt-1"
+                type="time"
+                value={plannerDeadline}
+                onChange={(event) => setPlannerDeadline(event.target.value)}
+              />
+            </label>
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-3 text-sm text-emerald-900">
+              <p className="text-xs uppercase tracking-[0.14em] text-emerald-700">Plano rapido</p>
+              <p className="mt-1">
+                {plannerFornadas} fornadas ({formatMinutesAsDuration(plannerOvenMinutes)} de forno)
+              </p>
+              <p className="mt-1">
+                Inicio sugerido:{' '}
+                {plannerStartMinutes == null
+                  ? '--:--'
+                  : plannerNeedsPreviousDay
+                  ? `dia anterior, ${formatMinutesAsClock(plannerStartMinutes)}`
+                  : formatMinutesAsClock(plannerStartMinutes)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="app-panel stock-ops-panel stock-ops-panel--shopping grid gap-3">
+          <div>
+            <h3 className="text-xl font-semibold">Lista rapida de compras</h3>
+            <p className="text-sm text-neutral-500">Gerada automaticamente pelas faltas do D+1.</p>
+          </div>
+
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
+              Ingredientes: {d1ShortageSummary.ingredients}
+            </span>
+            <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
+              Emb. interna: {d1ShortageSummary.internalPackaging}
+            </span>
+            <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
+              Emb. externa: {d1ShortageSummary.externalPackaging}
+            </span>
+          </div>
+
+          <div className="grid max-h-[340px] gap-2 overflow-auto pr-1">
+            {d1ShortagesByCategory.length === 0 ? (
+              <p className="text-sm text-emerald-700">Sem faltas para a data selecionada.</p>
+            ) : (
+              d1ShortagesByCategory.map((row) => (
+                <div key={`short-${row.ingredientId}`} className="rounded-xl border border-white/70 bg-white/70 px-3 py-2">
+                  <p className="text-sm font-semibold text-neutral-900">{row.name}</p>
+                  <p className="text-xs text-neutral-600">
+                    {inventoryCategoryLabel(row.category)} • falta {formatQty(row.shortageQty)} {row.unit}
+                  </p>
+                  <p className="text-xs text-neutral-500">
+                    disponivel {formatQty(row.availableQty)} • necessario {formatQty(row.requiredQty)}
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="app-form-actions">
+            <button
+              type="button"
+              className="app-button app-button-primary"
+              onClick={() => scrollToLayoutSlot('movement', { focus: true })}
+            >
+              Registrar compra/agora
+            </button>
+            <button
+              type="button"
+              className="app-button app-button-ghost"
+              onClick={() => scrollToLayoutSlot('d1')}
+            >
+              Abrir quadro D+1
+            </button>
+          </div>
+        </div>
+      </div>
+      </BuilderLayoutItemSlot>
+
+      {!isOperationMode ? (
       <BuilderLayoutItemSlot id="capacity">
       <div className="app-panel grid gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -619,7 +1073,10 @@ export default function StockPage() {
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           {capacity.map((entry) => (
-            <div key={entry.bom.id} className="app-panel">
+            <div
+              key={entry.bom.id}
+              className={`app-panel ${entry.hasNegativeInput || entry.missingQtyDefinitions ? 'stock-capacity-card--warning' : ''}`}
+            >
               <p className="font-semibold">{entry.bom.name}</p>
               <p className="text-sm text-neutral-500">
                 Produto: {entry.bom.product?.name || 'Produto'}
@@ -627,6 +1084,15 @@ export default function StockPage() {
               <p className="text-sm text-neutral-500">
                 Capacidade: {entry.maxUnits} caixas
               </p>
+              {entry.limitingItemName ? (
+                <p className="text-xs text-neutral-500">Gargalo: {entry.limitingItemName}</p>
+              ) : null}
+              {entry.hasNegativeInput ? (
+                <p className="text-xs font-semibold text-rose-700">Saldo negativo impactando a capacidade.</p>
+              ) : null}
+              {entry.missingQtyDefinitions ? (
+                <p className="text-xs font-semibold text-amber-700">BOM sem quantidades suficientes para calcular capacidade.</p>
+              ) : null}
               <p className="text-sm text-neutral-500">
                 Custo por caixa: R${' '}
                 {(bomCosts.find((cost) => cost.bomId === entry.bom.id)?.cost ?? 0).toFixed(2)}
@@ -641,6 +1107,7 @@ export default function StockPage() {
         </div>
       </div>
       </BuilderLayoutItemSlot>
+      ) : null}
 
       <BuilderLayoutItemSlot id="d1">
       <div className="app-panel grid gap-4">
@@ -670,6 +1137,18 @@ export default function StockPage() {
 
         {d1Error ? <p className="text-sm text-red-700">{d1Error}</p> : null}
         {d1Loading ? <p className="text-sm text-neutral-500">Calculando D+1...</p> : null}
+
+        <div className="flex flex-wrap gap-2 text-xs">
+          <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
+            Itens em falta: {d1Shortages.length}
+          </span>
+          <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
+            Ingredientes: {d1ShortageSummary.ingredients}
+          </span>
+          <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
+            Embalagens: {d1ShortageSummary.internalPackaging + d1ShortageSummary.externalPackaging}
+          </span>
+        </div>
 
         <div className="overflow-x-auto rounded-lg border border-white/60 bg-white/70">
           <table className="min-w-full text-sm">
@@ -772,6 +1251,7 @@ export default function StockPage() {
       </div>
       </BuilderLayoutItemSlot>
 
+      {!isOperationMode ? (
       <BuilderLayoutItemSlot id="bom">
       <div className="app-panel grid gap-4">
         <div ref={bomSectionRef} className="flex flex-wrap items-center justify-between gap-3">
@@ -932,7 +1412,9 @@ export default function StockPage() {
         </div>
       </div>
       </BuilderLayoutItemSlot>
+      ) : null}
 
+      {!isOperationMode ? (
       <BuilderLayoutItemSlot id="packaging">
       <div className="app-panel grid gap-4">
         <h3 className="text-lg font-semibold">Custo de compra por embalagem</h3>
@@ -980,6 +1462,7 @@ export default function StockPage() {
         </div>
       </div>
       </BuilderLayoutItemSlot>
+      ) : null}
 
       <BuilderLayoutItemSlot id="balance">
       <div className="grid gap-3">
@@ -1004,6 +1487,7 @@ export default function StockPage() {
       </div>
       </BuilderLayoutItemSlot>
 
+      {!isOperationMode ? (
       <BuilderLayoutItemSlot id="movements">
       <div className="grid gap-3">
         <h3 className="text-lg font-semibold">Historico de movimentacoes</h3>
@@ -1048,9 +1532,18 @@ export default function StockPage() {
         ))}
       </div>
       </BuilderLayoutItemSlot>
+      ) : null}
 
-      <BuilderLayoutCustomCards />
+      {!isOperationMode ? <BuilderLayoutCustomCards /> : null}
       </section>
     </BuilderLayoutProvider>
+  );
+}
+
+export default function StockPage() {
+  return (
+    <Suspense fallback={null}>
+      <StockPageContent />
+    </Suspense>
   );
 }
