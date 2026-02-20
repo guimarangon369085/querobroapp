@@ -669,6 +669,84 @@ section {
   gap: 10px;
 }
 
+.stock-alert-card__online {
+  border-radius: 14px;
+  border: 1px solid rgba(173, 47, 68, 0.2);
+  background: rgba(255, 255, 255, 0.72);
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.stock-alert-card__online-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.stock-alert-card__online-title {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: color-mix(in srgb, var(--ink-muted), black 8%);
+}
+
+.stock-alert-card__refresh {
+  min-height: 34px;
+  padding: 6px 12px;
+  font-size: 0.72rem;
+}
+
+.stock-alert-card__online-error {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #a81f32;
+}
+
+.stock-alert-card__offers {
+  display: grid;
+  gap: 8px;
+}
+
+.stock-alert-card__offer {
+  border-radius: 12px;
+  border: 1px solid rgba(173, 47, 68, 0.16);
+  background: rgba(255, 255, 255, 0.74);
+  padding: 8px 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.stock-alert-card__offer-name {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--ink-strong), black 4%);
+}
+
+.stock-alert-card__offer-line {
+  margin: 0;
+  font-size: 0.84rem;
+  color: color-mix(in srgb, var(--ink-strong), black 4%);
+}
+
+.stock-alert-card__offer-meta {
+  margin: 0;
+  font-size: 0.8rem;
+  color: color-mix(in srgb, var(--ink-muted), black 8%);
+}
+
+.stock-alert-card__offer-link {
+  width: fit-content;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #92253a;
+  text-decoration: underline;
+}
+
 .stock-kpi--alert {
   border-color: rgba(164, 34, 56, 0.28);
   background:
@@ -1379,6 +1457,11 @@ input[type='radio'] {
     align-items: flex-start;
   }
 
+  .stock-alert-card__online-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
   .app-gallery__item:nth-child(1),
   .app-gallery__item:nth-child(2),
   .app-gallery__item:nth-child(3),
@@ -1456,6 +1539,23 @@ input[type='radio'] {
   .stock-alert-card__actions .app-button {
     flex: 1;
     text-align: center;
+  }
+
+  .stock-alert-card__refresh {
+    width: 100%;
+  }
+
+  .stock-alert-card__offer-link {
+    width: 100%;
+    text-align: center;
+    border: 1px solid var(--line-soft);
+    border-radius: 999px;
+    min-height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    background: rgba(255, 255, 255, 0.76);
   }
 
   .app-form-actions--mobile-sticky {

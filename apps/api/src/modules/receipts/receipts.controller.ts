@@ -8,8 +8,21 @@ export class ReceiptsController {
 
   @Post('parse')
   @Throttle({ default: { limit: 18, ttl: 60_000 } })
-  parse(@Body() body: unknown, @Headers('x-receipts-token') token?: string) {
-    return this.service.parse(body, token);
+  parse(
+    @Body() body: unknown,
+    @Headers('x-receipts-token') token?: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
+    @Headers('x-receipts-preview') previewOnly?: string
+  ) {
+    const normalizedPreview = String(previewOnly || '')
+      .trim()
+      .toLowerCase();
+    if (normalizedPreview === '1' || normalizedPreview === 'true') {
+      return this.service.parse(body, token);
+    }
+    // Backward-compatible behavior for old iOS shortcuts that still hit /receipts/parse
+    // expecting stock automation.
+    return this.service.ingest(body, token, idempotencyKey);
   }
 
   @Post('ingest')
@@ -46,5 +59,14 @@ export class ReceiptsController {
   @Throttle({ default: { limit: 4, ttl: 60_000 } })
   syncSupplierPrices(@Headers('x-receipts-token') token?: string) {
     return this.service.syncSupplierPrices(token);
+  }
+
+  @Post('supplier-prices/recommend-online')
+  @Throttle({ default: { limit: 6, ttl: 60_000 } })
+  recommendOnlineSupplierPrices(
+    @Body() body: unknown,
+    @Headers('x-receipts-token') token?: string
+  ) {
+    return this.service.recommendOnlineSupplierPrices(body, token);
   }
 }

@@ -39,6 +39,42 @@ type BomItemInput = {
   qtyPerUnit?: string;
 };
 
+type OnlinePriceOffer = {
+  supplierName: string;
+  url: string;
+  title: string;
+  price: number;
+  estimatedTotal: number;
+  neededPacks: number;
+  packSize: number;
+  sourceType: 'CURATED' | 'SEARCH';
+  detail: string;
+};
+
+type OnlinePriceRecommendationItem = {
+  ingredientId: number;
+  inventoryItemId: number | null;
+  name: string;
+  unit: string;
+  shortageQty: number;
+  requiredQty: number | null;
+  availableQty: number | null;
+  packSize: number;
+  neededPacks: number;
+  query: string;
+  recommendedOffer: OnlinePriceOffer | null;
+  offers: OnlinePriceOffer[];
+  status: 'ok' | 'no-offers' | 'item-not-found';
+  detail: string;
+};
+
+type OnlinePriceRecommendationResponse = {
+  generatedAt: string;
+  date: string;
+  itemCount: number;
+  items: OnlinePriceRecommendationItem[];
+};
+
 function defaultTomorrowDate() {
   const now = new Date();
   const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
@@ -48,6 +84,11 @@ function defaultTomorrowDate() {
 function formatQty(value: number) {
   if (!Number.isFinite(value)) return '0';
   return Number(value).toLocaleString('pt-BR', { maximumFractionDigits: 4 });
+}
+
+function formatCurrencyBR(value: number) {
+  if (!Number.isFinite(value)) return 'R$ 0,00';
+  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
 function inventoryCategoryLabel(category: string) {
@@ -157,7 +198,12 @@ function StockPageContent() {
   const [plannerDeadline, setPlannerDeadline] = useState<string>('15:00');
   const [isCompactViewport, setIsCompactViewport] = useState(false);
   const [viewMode, setViewMode] = useState<'operation' | 'full'>('full');
+  const [onlinePriceLoading, setOnlinePriceLoading] = useState(false);
+  const [onlinePriceError, setOnlinePriceError] = useState<string | null>(null);
+  const [onlinePriceRecommendations, setOnlinePriceRecommendations] =
+    useState<OnlinePriceRecommendationResponse | null>(null);
   const compactViewportRef = useRef<boolean | null>(null);
+  const onlinePriceSignatureRef = useRef<string>('');
   const { confirm, notifyError, notifySuccess, notifyUndo } = useFeedback();
 
   const advancedSlots = useMemo(
@@ -772,6 +818,73 @@ function StockPageContent() {
   const purchaseAlertItems = useMemo(() => ingredientShortages.slice(0, 3), [ingredientShortages]);
   const purchaseAlertHiddenCount = Math.max(ingredientShortages.length - purchaseAlertItems.length, 0);
   const hasImmediatePurchaseAlert = ingredientShortages.length > 0;
+  const ingredientShortageSignature = useMemo(
+    () =>
+      [d1Date, ...ingredientShortages.map((row) => `${row.ingredientId}:${Number(row.shortageQty).toFixed(3)}`)].join(
+        '|'
+      ),
+    [d1Date, ingredientShortages]
+  );
+
+  const onlineRecommendationsByIngredientId = useMemo(() => {
+    const map = new Map<number, OnlinePriceRecommendationItem>();
+    for (const item of onlinePriceRecommendations?.items || []) {
+      map.set(item.ingredientId, item);
+    }
+    return map;
+  }, [onlinePriceRecommendations]);
+
+  const fetchOnlinePriceRecommendations = useCallback(
+    async (force = false) => {
+      if (!ingredientShortages.length) {
+        setOnlinePriceRecommendations(null);
+        setOnlinePriceError(null);
+        onlinePriceSignatureRef.current = '';
+        return;
+      }
+
+      if (!force && onlinePriceSignatureRef.current === ingredientShortageSignature) {
+        return;
+      }
+
+      setOnlinePriceLoading(true);
+      setOnlinePriceError(null);
+      try {
+        const response = await apiFetch<OnlinePriceRecommendationResponse>(
+          '/receipts/supplier-prices/recommend-online',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              date: d1Date,
+              shortages: ingredientShortages.map((row) => ({
+                ingredientId: row.ingredientId,
+                name: row.name,
+                unit: row.unit,
+                shortageQty: row.shortageQty,
+                requiredQty: row.requiredQty,
+                availableQty: row.availableQty
+              })),
+              maxSourcesPerItem: 3,
+              maxSearchResultsPerItem: 6
+            })
+          }
+        );
+        setOnlinePriceRecommendations(response);
+        onlinePriceSignatureRef.current = ingredientShortageSignature;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Nao foi possivel buscar precos online.';
+        setOnlinePriceError(message);
+      } finally {
+        setOnlinePriceLoading(false);
+      }
+    },
+    [d1Date, ingredientShortageSignature, ingredientShortages]
+  );
+
+  useEffect(() => {
+    if (!hasImmediatePurchaseAlert) return;
+    fetchOnlinePriceRecommendations(false).catch(console.error);
+  }, [fetchOnlinePriceRecommendations, hasImmediatePurchaseAlert]);
 
   const d1ShortageSummary = useMemo(() => {
     const ingredients = d1ShortagesByCategory.filter((row) => row.category === 'INGREDIENTE').length;
@@ -902,6 +1015,58 @@ function StockPageContent() {
                 +{purchaseAlertHiddenCount} item(ns) no quadro completo.
               </p>
             ) : null}
+          </div>
+          <div className="stock-alert-card__online">
+            <div className="stock-alert-card__online-head">
+              <p className="stock-alert-card__online-title">Comparador online automatico</p>
+              <button
+                type="button"
+                className="app-button app-button-ghost stock-alert-card__refresh"
+                onClick={() => fetchOnlinePriceRecommendations(true)}
+                disabled={onlinePriceLoading}
+              >
+                {onlinePriceLoading ? 'Buscando...' : 'Atualizar precos'}
+              </button>
+            </div>
+            {onlinePriceError ? (
+              <p className="stock-alert-card__online-error">{onlinePriceError}</p>
+            ) : null}
+            <div className="stock-alert-card__offers">
+              {purchaseAlertItems.map((row) => {
+                const recommendation = onlineRecommendationsByIngredientId.get(row.ingredientId);
+                const bestOffer = recommendation?.recommendedOffer;
+                return (
+                  <div key={`offer-${row.ingredientId}`} className="stock-alert-card__offer">
+                    <p className="stock-alert-card__offer-name">{row.name}</p>
+                    {bestOffer ? (
+                      <>
+                        <p className="stock-alert-card__offer-line">
+                          Recomendado: <strong>{bestOffer.supplierName}</strong> • {formatCurrencyBR(bestOffer.price)} / pacote
+                        </p>
+                        <p className="stock-alert-card__offer-meta">
+                          {bestOffer.neededPacks} pacote(s) para cobrir falta • total estimado{' '}
+                          {formatCurrencyBR(bestOffer.estimatedTotal)}
+                        </p>
+                        <a
+                          className="stock-alert-card__offer-link"
+                          href={bestOffer.url}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                        >
+                          Abrir oferta
+                        </a>
+                      </>
+                    ) : (
+                      <p className="stock-alert-card__offer-meta">
+                        {onlinePriceLoading
+                          ? 'Buscando ofertas online para este item...'
+                          : 'Sem oferta online confiavel por enquanto.'}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
           <div className="stock-alert-card__actions">
             <button

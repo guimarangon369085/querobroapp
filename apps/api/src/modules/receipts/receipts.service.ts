@@ -33,6 +33,25 @@ const parseReceiptInputSchema = z
     message: 'Informe imageBase64 ou imageUrl para analisar o cupom fiscal.'
   });
 
+const recommendOnlineSupplierPricesSchema = z.object({
+  date: z.string().trim().max(32).optional(),
+  shortages: z
+    .array(
+      z.object({
+        ingredientId: z.coerce.number().int().positive(),
+        shortageQty: z.coerce.number().positive(),
+        requiredQty: z.coerce.number().nonnegative().optional(),
+        availableQty: z.coerce.number().nonnegative().optional(),
+        name: z.string().trim().max(140).optional(),
+        unit: z.string().trim().max(20).optional()
+      })
+    )
+    .min(1)
+    .max(40),
+  maxSourcesPerItem: z.coerce.number().int().min(1).max(5).default(3),
+  maxSearchResultsPerItem: z.coerce.number().int().min(3).max(10).default(6)
+});
+
 const parsedReceiptSchema = z.object({
   purchaseDate: z.string().trim().default(''),
   items: z
@@ -47,6 +66,7 @@ const parsedReceiptSchema = z.object({
 });
 
 type ParseReceiptInput = z.output<typeof parseReceiptInputSchema>;
+type RecommendOnlineSupplierPricesInput = z.output<typeof recommendOnlineSupplierPricesSchema>;
 type ParsedReceipt = z.output<typeof parsedReceiptSchema>;
 
 type ChatCompletionMessage = {
@@ -157,6 +177,48 @@ type SupplierPriceSyncResult = {
   results: SupplierPriceSyncItem[];
 };
 
+type OnlinePriceOffer = {
+  supplierName: string;
+  url: string;
+  title: string;
+  price: number;
+  estimatedTotal: number;
+  neededPacks: number;
+  packSize: number;
+  sourceType: 'CURATED' | 'SEARCH';
+  detail: string;
+};
+
+type OnlinePriceRecommendationItem = {
+  ingredientId: number;
+  inventoryItemId: number | null;
+  name: string;
+  unit: string;
+  shortageQty: number;
+  requiredQty: number | null;
+  availableQty: number | null;
+  packSize: number;
+  neededPacks: number;
+  query: string;
+  recommendedOffer: OnlinePriceOffer | null;
+  offers: OnlinePriceOffer[];
+  status: 'ok' | 'no-offers' | 'item-not-found';
+  detail: string;
+};
+
+type OnlinePriceRecommendationResponse = {
+  generatedAt: string;
+  date: string;
+  itemCount: number;
+  items: OnlinePriceRecommendationItem[];
+};
+
+type SearchCandidate = {
+  title: string;
+  url: string;
+  supplierName: string;
+};
+
 @Injectable()
 export class ReceiptsService {
   private readonly model = process.env.OPENAI_RECEIPTS_MODEL || 'gpt-4o-mini';
@@ -168,6 +230,24 @@ export class ReceiptsService {
   private readonly defaultSeparator = ';';
   private readonly idempotencyScope = 'receipts-ingest-v1';
   private readonly idempotencyTtlHours = this.resolveIdempotencyTtlHours();
+  private readonly onlineSearchTtlMs = 20 * 60 * 1000;
+  private readonly onlinePriceTtlMs = 120 * 60 * 1000;
+  private readonly onlineSearchCache = new Map<string, { expiresAt: number; results: SearchCandidate[] }>();
+  private readonly onlinePriceCache = new Map<string, { expiresAt: number; price: number | null }>();
+  private readonly blockedSearchDomains = [
+    'duckduckgo.com',
+    'google.com',
+    'youtube.com',
+    'youtu.be',
+    'facebook.com',
+    'instagram.com',
+    'x.com',
+    'twitter.com',
+    'tiktok.com',
+    'wikipedia.org',
+    'linkedin.com',
+    'pinterest.com'
+  ];
 
   constructor(
     @Inject(BuilderService) private readonly builderService: BuilderService,
@@ -302,6 +382,154 @@ export class ReceiptsService {
       attemptedCount: enabledSources.length,
       skippedCount,
       results
+    };
+  }
+
+  async recommendOnlineSupplierPrices(
+    payload: unknown,
+    token?: string
+  ): Promise<OnlinePriceRecommendationResponse> {
+    this.ensureReceiptsToken(token);
+    const input = parseWithSchema(recommendOnlineSupplierPricesSchema, payload) as RecommendOnlineSupplierPricesInput;
+    const runtimeConfig = await this.getRuntimeConfig();
+    const inventoryItems = (await this.inventoryService.listItems()) as InventoryLookupItem[];
+
+    const inventoryById = new Map<number, InventoryLookupItem>();
+    const inventoryByLookup = new Map<string, InventoryLookupItem[]>();
+    for (const item of inventoryItems) {
+      inventoryById.set(item.id, item);
+      const key = this.normalizeLookup(item.name || '');
+      if (!key) continue;
+      const list = inventoryByLookup.get(key) || [];
+      list.push(item);
+      inventoryByLookup.set(key, list);
+    }
+
+    const enabledSources = runtimeConfig.supplierPriceSources.filter((source) => source.enabled);
+    const items: OnlinePriceRecommendationItem[] = [];
+
+    for (const shortage of input.shortages) {
+      const fallbackName = (shortage.name || '').trim();
+      const inventoryFromId = inventoryById.get(shortage.ingredientId);
+      const inventoryFromName = fallbackName
+        ? (inventoryByLookup.get(this.normalizeLookup(fallbackName)) || [])[0]
+        : undefined;
+      const inventoryItem = inventoryFromId || inventoryFromName;
+
+      const name = (fallbackName || inventoryItem?.name || `Item ${shortage.ingredientId}`).trim();
+      const unit = (shortage.unit || inventoryItem?.unit || '').trim();
+      const shortageQty = this.normalizeQuantity(shortage.shortageQty);
+      const requiredQty =
+        shortage.requiredQty == null ? null : this.normalizeQuantity(Math.max(0, shortage.requiredQty));
+      const availableQty =
+        shortage.availableQty == null ? null : this.normalizeQuantity(Math.max(0, shortage.availableQty));
+      const packSize = Math.max(0.001, this.normalizeQuantity(inventoryItem?.purchasePackSize || 1));
+      const neededPacks = Math.max(1, Math.ceil(shortageQty / packSize));
+      const query = this.buildOnlineSearchQuery(name, unit);
+
+      const offers: OnlinePriceOffer[] = [];
+      const seenUrlKeys = new Set<string>();
+      const lookupSet = new Set<string>(
+        [this.normalizeLookup(name), this.normalizeLookup(inventoryItem?.name || '')].filter(Boolean)
+      );
+
+      for (const source of enabledSources) {
+        const sourceLookup = this.normalizeLookup(source.inventoryItemName);
+        if (!lookupSet.has(sourceLookup)) continue;
+
+        const extractedPrice = await this.extractSupplierPrice(source);
+        const fallbackPrice =
+          source.fallbackPrice == null || !Number.isFinite(source.fallbackPrice) || source.fallbackPrice <= 0
+            ? null
+            : this.normalizeMoney(source.fallbackPrice);
+        const selectedPrice = extractedPrice ?? fallbackPrice;
+        if (selectedPrice == null || selectedPrice <= 0) continue;
+
+        const urlKey = this.normalizeUrlForCache(source.url);
+        if (seenUrlKeys.has(urlKey)) continue;
+        seenUrlKeys.add(urlKey);
+
+        offers.push({
+          supplierName: source.supplierName,
+          url: source.url,
+          title: source.inventoryItemName,
+          price: this.normalizeMoney(selectedPrice),
+          estimatedTotal: this.normalizeMoney(selectedPrice * neededPacks),
+          neededPacks,
+          packSize,
+          sourceType: 'CURATED',
+          detail:
+            extractedPrice == null
+              ? 'preco fallback da fonte cadastrada'
+              : 'preco extraido de fonte cadastrada'
+        });
+      }
+
+      const candidates = await this.searchOnlineProductCandidates(query, input.maxSearchResultsPerItem);
+      for (const candidate of candidates) {
+        const urlKey = this.normalizeUrlForCache(candidate.url);
+        if (seenUrlKeys.has(urlKey)) continue;
+        const price = await this.extractPriceFromUrl(candidate.url);
+        if (price == null || price <= 0) continue;
+        seenUrlKeys.add(urlKey);
+
+        offers.push({
+          supplierName: candidate.supplierName,
+          url: candidate.url,
+          title: candidate.title,
+          price: this.normalizeMoney(price),
+          estimatedTotal: this.normalizeMoney(price * neededPacks),
+          neededPacks,
+          packSize,
+          sourceType: 'SEARCH',
+          detail: 'preco extraido de busca online'
+        });
+      }
+
+      offers.sort((a, b) => {
+        if (a.estimatedTotal !== b.estimatedTotal) return a.estimatedTotal - b.estimatedTotal;
+        if (a.price !== b.price) return a.price - b.price;
+        return a.supplierName.localeCompare(b.supplierName, 'pt-BR');
+      });
+
+      const topOffers = offers.slice(0, input.maxSourcesPerItem);
+      const recommendedOffer = topOffers[0] || null;
+      const status: OnlinePriceRecommendationItem['status'] = !inventoryItem
+        ? 'item-not-found'
+        : topOffers.length > 0
+        ? 'ok'
+        : 'no-offers';
+
+      const detail =
+        status === 'ok'
+          ? 'ofertas online encontradas'
+          : status === 'item-not-found'
+          ? 'item nao encontrado no cadastro de estoque; busca feita por nome informado'
+          : 'nao foi possivel extrair preco online confiavel para este item';
+
+      items.push({
+        ingredientId: shortage.ingredientId,
+        inventoryItemId: inventoryItem?.id ?? null,
+        name,
+        unit,
+        shortageQty,
+        requiredQty,
+        availableQty,
+        packSize,
+        neededPacks,
+        query,
+        recommendedOffer,
+        offers: topOffers,
+        status,
+        detail
+      });
+    }
+
+    return {
+      generatedAt: new Date().toISOString(),
+      date: (input.date || '').trim(),
+      itemCount: items.length,
+      items
     };
   }
 
@@ -668,10 +896,176 @@ export class ReceiptsService {
       .toUpperCase();
   }
 
-  private async extractSupplierPrice(source: BuilderSupplierPriceSource) {
-    let html = '';
+  private buildOnlineSearchQuery(itemName: string, unit: string) {
+    const unitHint = unit ? `${unit}` : '';
+    return [itemName, unitHint, 'comprar online brasil preco']
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  private normalizeUrlForCache(url: string) {
     try {
-      const response = await fetch(source.url, {
+      const parsed = new URL(url);
+      parsed.hash = '';
+      for (const key of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content']) {
+        parsed.searchParams.delete(key);
+      }
+      return parsed.toString();
+    } catch {
+      return url.trim();
+    }
+  }
+
+  private async searchOnlineProductCandidates(query: string, limit: number): Promise<SearchCandidate[]> {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return [];
+
+    const now = Date.now();
+    const cached = this.onlineSearchCache.get(normalizedQuery);
+    if (cached && cached.expiresAt > now) {
+      return cached.results.slice(0, limit);
+    }
+
+    this.cleanupOnlineCaches(now);
+
+    const searchUrl = `https://duckduckgo.com/html/?kl=br-pt&q=${encodeURIComponent(query)}`;
+    const html = await this.fetchPageHtml(searchUrl, 9000);
+    if (!html) {
+      this.onlineSearchCache.set(normalizedQuery, {
+        expiresAt: now + this.onlineSearchTtlMs,
+        results: []
+      });
+      return [];
+    }
+
+    const candidates: SearchCandidate[] = [];
+    const seen = new Set<string>();
+    const linkRegex = /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="(?<href>[^"]+)"[^>]*>(?<title>[\s\S]*?)<\/a>/gi;
+
+    for (const match of html.matchAll(linkRegex)) {
+      if (candidates.length >= limit) break;
+      const rawHref = this.decodeHtmlEntities(match.groups?.href || '');
+      const resolved = this.resolveSearchResultUrl(rawHref);
+      if (!resolved || !/^https?:\/\//i.test(resolved)) continue;
+      if (this.isBlockedSearchDomain(resolved)) continue;
+
+      const normalizedUrl = this.normalizeUrlForCache(resolved);
+      if (!normalizedUrl || seen.has(normalizedUrl)) continue;
+      seen.add(normalizedUrl);
+
+      const rawTitle = match.groups?.title || '';
+      const title = this.decodeHtmlEntities(this.stripHtml(rawTitle)).slice(0, 200);
+      candidates.push({
+        title: title || this.supplierNameFromUrl(resolved),
+        url: resolved,
+        supplierName: this.supplierNameFromUrl(resolved)
+      });
+    }
+
+    this.onlineSearchCache.set(normalizedQuery, {
+      expiresAt: now + this.onlineSearchTtlMs,
+      results: candidates
+    });
+
+    return candidates.slice(0, limit);
+  }
+
+  private resolveSearchResultUrl(href: string) {
+    const raw = href.trim();
+    if (!raw) return '';
+    if (/^https?:\/\//i.test(raw)) return raw;
+    if (raw.startsWith('//')) return `https:${raw}`;
+
+    if (raw.startsWith('/l/?')) {
+      try {
+        const url = new URL(raw, 'https://duckduckgo.com');
+        const encoded = url.searchParams.get('uddg') || '';
+        if (!encoded) return '';
+        return decodeURIComponent(encoded);
+      } catch {
+        return '';
+      }
+    }
+
+    return '';
+  }
+
+  private isBlockedSearchDomain(url: string) {
+    try {
+      const hostname = new URL(url).hostname.toLowerCase();
+      return this.blockedSearchDomains.some((blocked) => hostname === blocked || hostname.endsWith(`.${blocked}`));
+    } catch {
+      return true;
+    }
+  }
+
+  private supplierNameFromUrl(url: string) {
+    try {
+      const hostname = new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+      const parts = hostname.split('.').filter(Boolean);
+      if (parts.length === 0) return 'Loja online';
+      let base = parts[parts.length - 2] || parts[0];
+      if (parts.length >= 3 && parts[parts.length - 2] === 'com') {
+        base = parts[parts.length - 3] || base;
+      }
+      return base.charAt(0).toUpperCase() + base.slice(1);
+    } catch {
+      return 'Loja online';
+    }
+  }
+
+  private stripHtml(value: string) {
+    return value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  private decodeHtmlEntities(value: string) {
+    const base = value
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&nbsp;/g, ' ');
+
+    return base
+      .replace(/&#(\d+);/g, (_match, code) => String.fromCharCode(Number(code)))
+      .replace(/&#x([0-9a-f]+);/gi, (_match, code) => String.fromCharCode(parseInt(code, 16)));
+  }
+
+  private cleanupOnlineCaches(now = Date.now()) {
+    for (const [key, entry] of this.onlineSearchCache.entries()) {
+      if (entry.expiresAt <= now) this.onlineSearchCache.delete(key);
+    }
+    for (const [key, entry] of this.onlinePriceCache.entries()) {
+      if (entry.expiresAt <= now) this.onlinePriceCache.delete(key);
+    }
+  }
+
+  private async extractPriceFromUrl(url: string) {
+    const now = Date.now();
+    const cacheKey = this.normalizeUrlForCache(url);
+    const cached = this.onlinePriceCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      return cached.price;
+    }
+
+    this.cleanupOnlineCaches(now);
+    const html = await this.fetchPageHtml(url, 9000);
+    const price = html ? this.extractPriceFromHtml(html) : null;
+    this.onlinePriceCache.set(cacheKey, {
+      expiresAt: now + this.onlinePriceTtlMs,
+      price
+    });
+    return price;
+  }
+
+  private async fetchPageHtml(url: string, timeoutMs = 9000) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
         headers: {
           'User-Agent':
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
@@ -679,12 +1073,18 @@ export class ReceiptsService {
           'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.7'
         }
       });
-      if (!response.ok) return null;
-      html = await response.text();
+      if (!response.ok) return '';
+      return await response.text();
     } catch {
-      return null;
+      return '';
+    } finally {
+      clearTimeout(timeout);
     }
+  }
 
+  private async extractSupplierPrice(source: BuilderSupplierPriceSource) {
+    const html = await this.fetchPageHtml(source.url, 9000);
+    if (!html) return null;
     return this.extractPriceFromHtml(html);
   }
 
