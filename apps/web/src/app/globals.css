@@ -261,6 +261,21 @@ section {
   font-weight: 600;
 }
 
+.app-topbar__subtitle {
+  margin-top: 6px;
+  max-width: 64ch;
+  font-size: 0.94rem;
+  color: var(--ink-muted);
+}
+
+.app-topbar__helper {
+  margin-top: 3px;
+  max-width: 64ch;
+  font-size: 0.78rem;
+  letter-spacing: 0.01em;
+  color: color-mix(in srgb, var(--ink-muted), var(--mint-700) 22%);
+}
+
 .app-topbar__actions {
   display: flex;
   gap: 10px;

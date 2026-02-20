@@ -39,6 +39,8 @@ type BomItemInput = {
   qtyPerUnit?: string;
 };
 
+type ProductionBasis = 'deliveryDate' | 'createdAtPlus1';
+
 function defaultTomorrowDate() {
   const now = new Date();
   const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
@@ -65,6 +67,29 @@ function orderProductionDateFromCreatedAt(createdAt?: string | null) {
     Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate() + 1)
   );
   return productionDate.toISOString().slice(0, 10);
+}
+
+function normalizeDateOnly(value?: string | null) {
+  if (!value) return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()))
+    .toISOString()
+    .slice(0, 10);
+}
+
+function orderDateForProductionBasis(order: Order, basis: ProductionBasis) {
+  if (basis === 'deliveryDate') {
+    const deliveryDate = (order as Order & { deliveryDate?: string | null }).deliveryDate;
+    const normalizedDeliveryDate = normalizeDateOnly(deliveryDate);
+    if (normalizedDeliveryDate) return normalizedDeliveryDate;
+  }
+
+  return orderProductionDateFromCreatedAt(order.createdAt);
 }
 
 function parseTimeToMinutes(value: string) {
@@ -147,7 +172,7 @@ function StockPageContent() {
   const [d1Date, setD1Date] = useState<string>(defaultTomorrowDate());
   const [d1Rows, setD1Rows] = useState<ProductionRequirementRow[]>([]);
   const [d1Warnings, setD1Warnings] = useState<ProductionRequirementWarning[]>([]);
-  const [d1Basis, setD1Basis] = useState<'deliveryDate' | 'createdAtPlus1'>('createdAtPlus1');
+  const [d1Basis, setD1Basis] = useState<ProductionBasis>('createdAtPlus1');
   const [d1Loading, setD1Loading] = useState(false);
   const [d1Error, setD1Error] = useState<string | null>(null);
   const [flavorCombos, setFlavorCombos] = useState<Array<{ code: string; composition: string }>>([]);
@@ -700,9 +725,9 @@ function StockPageContent() {
         (order) =>
           order.status !== 'CANCELADO' &&
           order.status !== 'ENTREGUE' &&
-          orderProductionDateFromCreatedAt(order.createdAt) === d1Date
+          orderDateForProductionBasis(order, d1Basis) === d1Date
       ),
-    [orders, d1Date]
+    [orders, d1Basis, d1Date]
   );
 
   const plannedDemand = useMemo(() => {
@@ -905,7 +930,9 @@ function StockPageContent() {
         <div className="app-kpi">
           <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Fila D+1</p>
           <p className="mt-2 text-3xl font-semibold">{inventoryKpis.plannedOrders}</p>
-          <p className="mt-1 text-xs text-neutral-500">pedidos nao entregues para {d1Date}</p>
+          <p className="mt-1 text-xs text-neutral-500">
+            pedidos nao entregues para {d1Date} ({d1Basis === 'deliveryDate' ? 'entrega' : 'pedido + 1 dia'})
+          </p>
         </div>
         <div className="app-kpi">
           <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Broas alvo</p>
