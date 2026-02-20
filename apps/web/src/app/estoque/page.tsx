@@ -40,6 +40,16 @@ type BomItemInput = {
 };
 
 type ProductionBasis = 'deliveryDate' | 'createdAtPlus1';
+type StockExecutionStepId = 'organize' | 'buy' | 'bake' | 'deliver';
+
+type StockExecutionStep = {
+  id: StockExecutionStepId;
+  title: string;
+  summary: string;
+  detail: string;
+  actionLabel: string;
+  focusSlot: 'ops' | 'd1' | 'movement' | 'balance';
+};
 
 function defaultTomorrowDate() {
   const now = new Date();
@@ -180,16 +190,14 @@ function StockPageContent() {
   const [flavorComboLoading, setFlavorComboLoading] = useState(false);
   const [plannerExtraBroas, setPlannerExtraBroas] = useState<string>('0');
   const [plannerDeadline, setPlannerDeadline] = useState<string>('15:00');
-  const [isCompactViewport, setIsCompactViewport] = useState(false);
   const [viewMode, setViewMode] = useState<'operation' | 'full'>('full');
-  const compactViewportRef = useRef<boolean | null>(null);
   const { confirm, notifyError, notifySuccess, notifyUndo } = useFeedback();
 
   const advancedSlots = useMemo(
     () => new Set(['capacity', 'bom', 'packaging', 'movements']),
     []
   );
-  const isOperationMode = isCompactViewport && viewMode === 'operation';
+  const isOperationMode = viewMode === 'operation';
 
   const load = async () => {
     const [productsData, ordersData, itemsData, movementsData, bomsData] = await Promise.all([
@@ -212,23 +220,9 @@ function StockPageContent() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-
-    const syncViewportMode = () => {
-      const compact = window.innerWidth <= 1024;
-      setIsCompactViewport(compact);
-
-      if (compactViewportRef.current === null) {
-        setViewMode(compact ? 'operation' : 'full');
-      } else if (compactViewportRef.current !== compact) {
-        setViewMode(compact ? 'operation' : 'full');
-      }
-
-      compactViewportRef.current = compact;
-    };
-
-    syncViewportMode();
-    window.addEventListener('resize', syncViewportMode);
-    return () => window.removeEventListener('resize', syncViewportMode);
+    if (window.innerWidth <= 1024) {
+      setViewMode('operation');
+    }
   }, []);
 
   useEffect(() => {
@@ -837,6 +831,147 @@ function StockPageContent() {
     totalCapacityBoxes
   ]);
 
+  const readyToDeliverCount = useMemo(
+    () => plannedOrders.filter((order) => order.status === 'PRONTO').length,
+    [plannedOrders]
+  );
+
+  const nextExecutionStepId = useMemo<StockExecutionStepId>(() => {
+    if (plannedOrders.length === 0) return 'organize';
+    if (d1Shortages.length > 0 || negativeBalanceItems.length > 0) return 'buy';
+    if (plannerFornadas > 0) return 'bake';
+    return 'deliver';
+  }, [d1Shortages.length, negativeBalanceItems.length, plannedOrders.length, plannerFornadas]);
+
+  const executionSteps = useMemo<StockExecutionStep[]>(
+    () => [
+      {
+        id: 'organize',
+        title: 'Organizar o dia',
+        summary: `${plannedOrders.length} pedidos para ${d1Date}`,
+        detail:
+          plannedOrders.length > 0
+            ? `Fila montada: ${plannedOrders.length} pedidos nao entregues e inicio sugerido ${plannerStartMinutes == null ? '--:--' : plannerNeedsPreviousDay ? `dia anterior, ${formatMinutesAsClock(plannerStartMinutes)}` : formatMinutesAsClock(plannerStartMinutes)}.`
+            : 'Sem pedidos na fila D+1. Revise horario limite e use margem extra apenas se necessario.',
+        actionLabel: 'Abrir ritmo de fornadas',
+        focusSlot: 'ops'
+      },
+      {
+        id: 'buy',
+        title: 'Comprar faltas',
+        summary: `${d1Shortages.length} item(ns) em falta`,
+        detail:
+          d1Shortages.length > 0
+            ? `Prioridade: ${d1ShortagesByCategory
+                .slice(0, 2)
+                .map((row) => `${row.name} (${formatQty(row.shortageQty)} ${row.unit})`)
+                .join(' • ')}.`
+            : 'Sem faltas no quadro D+1. Se houver saldo negativo, ajuste antes de assar.',
+        actionLabel: 'Abrir compras D+1',
+        focusSlot: 'd1'
+      },
+      {
+        id: 'bake',
+        title: 'Rodar fornadas',
+        summary: `${plannerFornadas} fornada(s) • ${formatMinutesAsDuration(plannerOvenMinutes)}`,
+        detail:
+          plannerFornadas > 0
+            ? `Plano sugerido: ${plannerTargetBroas} broas alvo com ciclos de 35 + 15 minutos por fornada.`
+            : 'Sem fornada necessaria para a fila atual. Siga para conferencia e entrega.',
+        actionLabel: 'Abrir plano de producao',
+        focusSlot: 'ops'
+      },
+      {
+        id: 'deliver',
+        title: 'Fechar e entregar',
+        summary: `${readyToDeliverCount} pedido(s) pronto(s)`,
+        detail:
+          readyToDeliverCount > 0
+            ? 'Pedidos prontos para despacho. Confira saldo final e lance ajustes antes do Uber.'
+            : 'Sem pedidos prontos agora. Continue acompanhando preparo e pagamentos.',
+        actionLabel: 'Conferir saldo final',
+        focusSlot: 'balance'
+      }
+    ],
+    [
+      d1Date,
+      d1Shortages.length,
+      d1ShortagesByCategory,
+      plannedOrders.length,
+      plannerFornadas,
+      plannerNeedsPreviousDay,
+      plannerOvenMinutes,
+      plannerStartMinutes,
+      plannerTargetBroas,
+      readyToDeliverCount
+    ]
+  );
+
+  const nextExecutionIndex = Math.max(
+    0,
+    executionSteps.findIndex((step) => step.id === nextExecutionStepId)
+  );
+
+  const executionProgressPercent = Math.round((nextExecutionIndex / executionSteps.length) * 100);
+
+  const [operationStep, setOperationStep] = useState<StockExecutionStepId | null>(null);
+  const [operationSelectionMode, setOperationSelectionMode] = useState<'auto' | 'manual'>('auto');
+
+  useEffect(() => {
+    if (!isOperationMode) {
+      if (operationStep !== null) setOperationStep(null);
+      if (operationSelectionMode !== 'auto') setOperationSelectionMode('auto');
+      return;
+    }
+    if (
+      operationSelectionMode === 'auto' ||
+      !operationStep ||
+      !executionSteps.some((step) => step.id === operationStep)
+    ) {
+      setOperationStep(nextExecutionStepId);
+    }
+  }, [
+    executionSteps,
+    isOperationMode,
+    nextExecutionStepId,
+    operationSelectionMode,
+    operationStep
+  ]);
+
+  const activeOperationStepId = isOperationMode ? operationStep || nextExecutionStepId : null;
+  const activeExecutionStep =
+    executionSteps.find((step) => step.id === activeOperationStepId) || executionSteps[0];
+  const activeExecutionIndex = executionSteps.findIndex((step) => step.id === activeExecutionStep.id);
+
+  const jumpToExecutionStep = useCallback(
+    (stepId: StockExecutionStepId, mode: 'auto' | 'manual' = 'manual') => {
+      const target = executionSteps.find((step) => step.id === stepId);
+      if (!target) return;
+      if (isOperationMode) {
+        setOperationSelectionMode(mode);
+        setOperationStep(stepId);
+      }
+      scrollToLayoutSlot(target.focusSlot, {
+        delayMs: isOperationMode ? 80 : 0,
+        focus: true,
+        focusSelector: 'input, select, textarea, button'
+      });
+    },
+    [executionSteps, isOperationMode]
+  );
+
+  const jumpToNextExecutionStep = useCallback(() => {
+    const next = executionSteps[Math.min(activeExecutionIndex + 1, executionSteps.length - 1)];
+    if (!next) return;
+    jumpToExecutionStep(next.id);
+  }, [activeExecutionIndex, executionSteps, jumpToExecutionStep]);
+
+  const showOpsSlot =
+    !isOperationMode || activeOperationStepId === 'organize' || activeOperationStepId === 'bake';
+  const showD1Slot = !isOperationMode || activeOperationStepId === 'buy';
+  const showMovementSlot = !isOperationMode || activeOperationStepId === 'buy';
+  const showBalanceSlot = !isOperationMode || activeOperationStepId === 'deliver';
+
   const d1BreakdownSummary = (row: ProductionRequirementRow) => {
     const grouped = new Map<string, number>();
     for (const entry of row.breakdown || []) {
@@ -865,10 +1000,8 @@ function StockPageContent() {
             type="button"
             className={`stock-view-toggle__button ${viewMode === 'operation' ? 'stock-view-toggle__button--active' : ''}`}
             onClick={() => setViewMode('operation')}
-            disabled={!isCompactViewport && viewMode === 'operation'}
-            title={isCompactViewport ? 'Modo foco operacional' : 'Disponivel apenas no viewport compacto'}
           >
-            foco do dia
+            execucao
           </button>
           <button
             type="button"
@@ -889,42 +1022,136 @@ function StockPageContent() {
           {inventoryKpis.negativeBalanceItems} item(ns) com saldo negativo precisam de ajuste.
         </div>
       ) : null}
-      <div className="app-quickflow app-quickflow--columns mt-4">
-        <button
-          type="button"
-          className="app-quickflow__step text-left"
-          onClick={() => scrollToLayoutSlot('ops', { focus: true })}
-        >
-          <p className="app-quickflow__step-title">1. Organizar o dia</p>
-          <p className="app-quickflow__step-subtitle">Fila de pedidos, fornadas e hora de inicio.</p>
-        </button>
-        <button
-          type="button"
-          className="app-quickflow__step text-left"
-          onClick={() => scrollToLayoutSlot('d1', { focus: true })}
-        >
-          <p className="app-quickflow__step-title">2. Planejar compras</p>
-          <p className="app-quickflow__step-subtitle">Veja faltas por ingrediente e embalagem.</p>
-        </button>
-        <button
-          type="button"
-          className="app-quickflow__step text-left"
-          onClick={() => scrollToLayoutSlot('movement', { focus: true })}
-        >
-          <p className="app-quickflow__step-title">3. Registrar compras/consumo</p>
-          <p className="app-quickflow__step-subtitle">Entradas e saidas em poucos toques.</p>
-        </button>
-        <button
-          type="button"
-          className="app-quickflow__step text-left"
-          onClick={() => scrollToLayoutSlot('balance', { focus: true })}
-        >
-          <p className="app-quickflow__step-title">4. Fechar conferencia</p>
-          <p className="app-quickflow__step-subtitle">Valide saldo por item e historico.</p>
-        </button>
-      </div>
+      {isOperationMode ? (
+        <section className="stock-exec" aria-label="Modo execucao">
+          <div className="stock-exec__top">
+            <div>
+              <p className="stock-exec__eyebrow">Modo execucao fast-lane</p>
+              <h3 className="stock-exec__title">Uma decisao por vez</h3>
+              <p className="stock-exec__subtitle">
+                Gargalo atual: <strong>{executionSteps[nextExecutionIndex]?.title || 'Organizar o dia'}</strong>
+              </p>
+            </div>
+            <div className="stock-exec__chips">
+              <span className="stock-exec__chip">fila: {plannedOrders.length}</span>
+              <span className="stock-exec__chip">faltas: {d1Shortages.length}</span>
+              <span className="stock-exec__chip">fornadas: {plannerFornadas}</span>
+              <span className="stock-exec__chip">prontos: {readyToDeliverCount}</span>
+            </div>
+          </div>
+
+          <div className="stock-exec__progress" aria-hidden>
+            <span
+              className="stock-exec__progress-fill"
+              style={{ width: `${executionProgressPercent}%` }}
+            />
+          </div>
+
+          <div className="stock-exec__steps">
+            {executionSteps.map((step, index) => {
+              const isActive = step.id === activeExecutionStep.id;
+              const isNext = step.id === nextExecutionStepId;
+              const isDone = index < nextExecutionIndex;
+              return (
+                <button
+                  key={step.id}
+                  type="button"
+                  className={[
+                    'stock-exec__step',
+                    isActive ? 'stock-exec__step--active' : '',
+                    isNext ? 'stock-exec__step--next' : '',
+                    isDone ? 'stock-exec__step--done' : ''
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  onClick={() => jumpToExecutionStep(step.id)}
+                >
+                  <span className="stock-exec__step-index">{index + 1}</span>
+                  <span className="stock-exec__step-name">{step.title}</span>
+                  <span className="stock-exec__step-metric">{step.summary}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="stock-exec__focus">
+            <p className="stock-exec__focus-kicker">
+              Etapa ativa {activeExecutionIndex + 1}/4
+              {activeExecutionStep.id === nextExecutionStepId
+                ? ' • gargalo atual'
+                : operationSelectionMode === 'manual'
+                ? ' • selecao manual'
+                : ''}
+            </p>
+            <p className="stock-exec__focus-title">{activeExecutionStep.title}</p>
+            <p className="stock-exec__focus-detail">{activeExecutionStep.detail}</p>
+            <div className="stock-exec__actions">
+              <button
+                type="button"
+                className="app-button app-button-primary"
+                onClick={() => jumpToExecutionStep(activeExecutionStep.id)}
+              >
+                {activeExecutionStep.actionLabel}
+              </button>
+              {activeExecutionStep.id !== nextExecutionStepId ? (
+                <button
+                  type="button"
+                  className="app-button app-button-ghost"
+                  onClick={() => jumpToExecutionStep(nextExecutionStepId, 'auto')}
+                >
+                  Voltar ao gargalo
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="app-button app-button-ghost"
+                onClick={jumpToNextExecutionStep}
+                disabled={activeExecutionIndex >= executionSteps.length - 1}
+              >
+                Proxima etapa
+              </button>
+            </div>
+          </div>
+        </section>
+      ) : (
+        <div className="app-quickflow app-quickflow--columns mt-4">
+          <button
+            type="button"
+            className="app-quickflow__step text-left"
+            onClick={() => scrollToLayoutSlot('ops', { focus: true })}
+          >
+            <p className="app-quickflow__step-title">1. Organizar o dia</p>
+            <p className="app-quickflow__step-subtitle">Fila de pedidos, fornadas e hora de inicio.</p>
+          </button>
+          <button
+            type="button"
+            className="app-quickflow__step text-left"
+            onClick={() => scrollToLayoutSlot('d1', { focus: true })}
+          >
+            <p className="app-quickflow__step-title">2. Planejar compras</p>
+            <p className="app-quickflow__step-subtitle">Veja faltas por ingrediente e embalagem.</p>
+          </button>
+          <button
+            type="button"
+            className="app-quickflow__step text-left"
+            onClick={() => scrollToLayoutSlot('movement', { focus: true })}
+          >
+            <p className="app-quickflow__step-title">3. Registrar compras/consumo</p>
+            <p className="app-quickflow__step-subtitle">Entradas e saidas em poucos toques.</p>
+          </button>
+          <button
+            type="button"
+            className="app-quickflow__step text-left"
+            onClick={() => scrollToLayoutSlot('balance', { focus: true })}
+          >
+            <p className="app-quickflow__step-title">4. Fechar conferencia</p>
+            <p className="app-quickflow__step-subtitle">Valide saldo por item e historico.</p>
+          </button>
+        </div>
+      )}
       </BuilderLayoutItemSlot>
 
+      {!isOperationMode ? (
       <BuilderLayoutItemSlot id="kpis">
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <div className="app-kpi">
@@ -963,7 +1190,9 @@ function StockPageContent() {
         </div>
       </div>
       </BuilderLayoutItemSlot>
+      ) : null}
 
+      {showOpsSlot ? (
       <BuilderLayoutItemSlot id="ops">
       <div className="stock-ops-grid">
         <div className="app-panel stock-ops-panel stock-ops-panel--production grid gap-4">
@@ -1090,6 +1319,7 @@ function StockPageContent() {
         </div>
       </div>
       </BuilderLayoutItemSlot>
+      ) : null}
 
       {!isOperationMode ? (
       <BuilderLayoutItemSlot id="capacity">
@@ -1136,6 +1366,7 @@ function StockPageContent() {
       </BuilderLayoutItemSlot>
       ) : null}
 
+      {showD1Slot ? (
       <BuilderLayoutItemSlot id="d1">
       <div className="app-panel grid gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1227,7 +1458,9 @@ function StockPageContent() {
         )}
       </div>
       </BuilderLayoutItemSlot>
+      ) : null}
 
+      {showMovementSlot ? (
       <BuilderLayoutItemSlot id="movement">
       <div className="app-panel grid gap-4">
         <h3 className="text-lg font-semibold">Nova movimentacao</h3>
@@ -1277,6 +1510,7 @@ function StockPageContent() {
         </div>
       </div>
       </BuilderLayoutItemSlot>
+      ) : null}
 
       {!isOperationMode ? (
       <BuilderLayoutItemSlot id="bom">
@@ -1491,6 +1725,7 @@ function StockPageContent() {
       </BuilderLayoutItemSlot>
       ) : null}
 
+      {showBalanceSlot ? (
       <BuilderLayoutItemSlot id="balance">
       <div className="grid gap-3">
         <h3 className="text-lg font-semibold">Saldo por item</h3>
@@ -1513,6 +1748,7 @@ function StockPageContent() {
         ))}
       </div>
       </BuilderLayoutItemSlot>
+      ) : null}
 
       {!isOperationMode ? (
       <BuilderLayoutItemSlot id="movements">
