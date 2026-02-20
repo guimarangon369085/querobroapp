@@ -51,6 +51,10 @@ type StockExecutionStep = {
   focusSlot: 'ops' | 'd1' | 'movement' | 'balance';
 };
 
+type ShortageRowWithCategory = ProductionRequirementRow & { category: string };
+
+const quickPurchaseSourceOptions = ['Pao de Acucar', 'Oba', 'Esquina', 'Online'] as const;
+
 function defaultTomorrowDate() {
   const now = new Date();
   const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
@@ -191,6 +195,11 @@ function StockPageContent() {
   const [plannerExtraBroas, setPlannerExtraBroas] = useState<string>('0');
   const [plannerDeadline, setPlannerDeadline] = useState<string>('15:00');
   const [viewMode, setViewMode] = useState<'operation' | 'full'>('full');
+  const [quickPurchaseSource, setQuickPurchaseSource] = useState<(typeof quickPurchaseSourceOptions)[number]>(
+    'Pao de Acucar'
+  );
+  const [quickPurchaseLoading, setQuickPurchaseLoading] = useState(false);
+  const [shoppingChecklist, setShoppingChecklist] = useState<number[]>([]);
   const { confirm, notifyError, notifySuccess, notifyUndo } = useFeedback();
 
   const advancedSlots = useMemo(
@@ -351,6 +360,22 @@ function StockPageContent() {
     return parsed;
   };
 
+  const createMovementEntry = useCallback(
+    async (payload: {
+      itemId: number;
+      quantity: number;
+      type: 'IN' | 'OUT' | 'ADJUST';
+      reason?: string;
+      orderId?: number;
+    }) => {
+      await apiFetch('/inventory-movements', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+    },
+    []
+  );
+
   const createMovement = async () => {
     if (!itemId) return;
     const parsedQty = parseRequiredNumber(quantity, 'Quantidade');
@@ -361,14 +386,11 @@ function StockPageContent() {
     }
 
     try {
-      await apiFetch('/inventory-movements', {
-        method: 'POST',
-        body: JSON.stringify({
-          itemId: Number(itemId),
-          quantity: parsedQty,
-          type,
-          reason
-        })
+      await createMovementEntry({
+        itemId: Number(itemId),
+        quantity: parsedQty,
+        type: type as 'IN' | 'OUT' | 'ADJUST',
+        reason
       });
       setItemId('');
       setQuantity('1');
@@ -752,7 +774,7 @@ function StockPageContent() {
 
   const d1Shortages = useMemo(() => d1Rows.filter((row) => row.shortageQty > 0), [d1Rows]);
 
-  const d1ShortagesByCategory = useMemo(() => {
+  const d1ShortagesByCategory = useMemo<ShortageRowWithCategory[]>(() => {
     const categoryOrder = new Map<string, number>([
       ['INGREDIENTE', 0],
       ['EMBALAGEM_INTERNA', 1],
@@ -772,6 +794,64 @@ function StockPageContent() {
         return a.name.localeCompare(b.name, 'pt-BR');
       });
   }, [d1Shortages, itemMap]);
+
+  useEffect(() => {
+    const validIds = new Set(d1ShortagesByCategory.map((row) => row.ingredientId));
+    setShoppingChecklist((prev) => prev.filter((id) => validIds.has(id)));
+  }, [d1ShortagesByCategory]);
+
+  const shoppingChecklistSet = useMemo(() => new Set(shoppingChecklist), [shoppingChecklist]);
+  const selectedShortages = useMemo(
+    () => d1ShortagesByCategory.filter((row) => shoppingChecklistSet.has(row.ingredientId)),
+    [d1ShortagesByCategory, shoppingChecklistSet]
+  );
+  const selectedShortageQty = useMemo(
+    () => selectedShortages.reduce((sum, row) => sum + row.shortageQty, 0),
+    [selectedShortages]
+  );
+
+  const toggleShoppingItem = useCallback((ingredientId: number) => {
+    setShoppingChecklist((prev) =>
+      prev.includes(ingredientId) ? prev.filter((id) => id !== ingredientId) : [...prev, ingredientId]
+    );
+  }, []);
+
+  const selectAllShortages = useCallback(() => {
+    setShoppingChecklist(d1ShortagesByCategory.map((row) => row.ingredientId));
+  }, [d1ShortagesByCategory]);
+
+  const clearShoppingChecklist = useCallback(() => {
+    setShoppingChecklist([]);
+  }, []);
+
+  const applyQuickPurchaseRows = async (rows: ShortageRowWithCategory[]) => {
+    const validRows = rows.filter((row) => row.shortageQty > 0);
+    if (validRows.length === 0) {
+      notifyError('Nenhum item com falta para lancar.');
+      return;
+    }
+
+    setQuickPurchaseLoading(true);
+    try {
+      for (const row of validRows) {
+        await createMovementEntry({
+          itemId: row.ingredientId,
+          quantity: row.shortageQty,
+          type: 'IN',
+          reason: `Compra D+1 ${d1Date} • ${quickPurchaseSource}`
+        });
+      }
+      await load();
+      await loadD1(d1Date);
+      notifySuccess(`${validRows.length} item(ns) de compra lancado(s) no estoque.`);
+      clearShoppingChecklist();
+      scrollToLayoutSlot('movement');
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel lancar compras.');
+    } finally {
+      setQuickPurchaseLoading(false);
+    }
+  };
 
   const d1ShortageSummary = useMemo(() => {
     const ingredients = d1ShortagesByCategory.filter((row) => row.category === 'INGREDIENTE').length;
@@ -967,7 +1047,10 @@ function StockPageContent() {
   }, [activeExecutionIndex, executionSteps, jumpToExecutionStep]);
 
   const showOpsSlot =
-    !isOperationMode || activeOperationStepId === 'organize' || activeOperationStepId === 'bake';
+    !isOperationMode ||
+    activeOperationStepId === 'organize' ||
+    activeOperationStepId === 'buy' ||
+    activeOperationStepId === 'bake';
   const showD1Slot = !isOperationMode || activeOperationStepId === 'buy';
   const showMovementSlot = !isOperationMode || activeOperationStepId === 'buy';
   const showBalanceSlot = !isOperationMode || activeOperationStepId === 'deliver';
@@ -1282,19 +1365,88 @@ function StockPageContent() {
             </span>
           </div>
 
+          <div className="rounded-xl border border-white/70 bg-white/70 px-3 py-3">
+            <p className="text-xs uppercase tracking-[0.15em] text-neutral-500">Checklist de mercado</p>
+            <div className="mt-2 grid gap-2">
+              <label className="text-xs font-semibold text-neutral-600">
+                Fonte de compra
+                <select
+                  className="app-select mt-1"
+                  value={quickPurchaseSource}
+                  onChange={(event) =>
+                    setQuickPurchaseSource(
+                      event.target.value as (typeof quickPurchaseSourceOptions)[number]
+                    )
+                  }
+                >
+                  {quickPurchaseSourceOptions.map((source) => (
+                    <option key={source} value={source}>
+                      {source}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="app-button app-button-ghost"
+                  onClick={selectAllShortages}
+                  disabled={d1ShortagesByCategory.length === 0}
+                >
+                  Selecionar faltas
+                </button>
+                <button
+                  type="button"
+                  className="app-button app-button-ghost"
+                  onClick={clearShoppingChecklist}
+                  disabled={shoppingChecklist.length === 0}
+                >
+                  Limpar
+                </button>
+              </div>
+
+              <p className="text-xs text-neutral-600">
+                {selectedShortages.length} item(ns) marcados • total {formatQty(selectedShortageQty)} un base
+              </p>
+            </div>
+          </div>
+
           <div className="grid max-h-[340px] gap-2 overflow-auto pr-1">
             {d1ShortagesByCategory.length === 0 ? (
               <p className="text-sm text-emerald-700">Sem faltas para a data selecionada.</p>
             ) : (
               d1ShortagesByCategory.map((row) => (
                 <div key={`short-${row.ingredientId}`} className="rounded-xl border border-white/70 bg-white/70 px-3 py-2">
-                  <p className="text-sm font-semibold text-neutral-900">{row.name}</p>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold text-neutral-900">{row.name}</p>
+                      <p className="text-xs text-neutral-600">
+                        {inventoryCategoryLabel(row.category)} • falta {formatQty(row.shortageQty)} {row.unit}
+                      </p>
+                    </div>
+                    <label className="inline-flex items-center gap-1 text-xs font-semibold text-neutral-600">
+                      <input
+                        type="checkbox"
+                        checked={shoppingChecklistSet.has(row.ingredientId)}
+                        onChange={() => toggleShoppingItem(row.ingredientId)}
+                      />
+                      marcar
+                    </label>
+                  </div>
                   <p className="text-xs text-neutral-600">
-                    {inventoryCategoryLabel(row.category)} • falta {formatQty(row.shortageQty)} {row.unit}
-                  </p>
-                  <p className="text-xs text-neutral-500">
                     disponivel {formatQty(row.availableQty)} • necessario {formatQty(row.requiredQty)}
                   </p>
+                  <div className="mt-2">
+                    <button
+                      type="button"
+                      className="app-button app-button-ghost"
+                      onClick={() => applyQuickPurchaseRows([row])}
+                      disabled={quickPurchaseLoading || row.shortageQty <= 0}
+                    >
+                      {quickPurchaseLoading ? 'Lancando...' : 'Baixar compra deste item'}
+                    </button>
+                  </div>
                 </div>
               ))
             )}
@@ -1304,9 +1456,19 @@ function StockPageContent() {
             <button
               type="button"
               className="app-button app-button-primary"
+              onClick={() => applyQuickPurchaseRows(selectedShortages)}
+              disabled={quickPurchaseLoading || selectedShortages.length === 0}
+            >
+              {quickPurchaseLoading
+                ? 'Lancando compras...'
+                : `Baixar selecionados (${selectedShortages.length})`}
+            </button>
+            <button
+              type="button"
+              className="app-button app-button-ghost"
               onClick={() => scrollToLayoutSlot('movement', { focus: true })}
             >
-              Registrar compra/agora
+              Lancar manualmente
             </button>
             <button
               type="button"
