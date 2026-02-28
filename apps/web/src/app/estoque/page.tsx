@@ -18,12 +18,7 @@ import { formatDecimalInputBR, formatMoneyInputBR, parseLocaleNumber } from '@/l
 import { useSurfaceMode } from '@/hooks/use-surface-mode';
 import { useTutorialSpotlight } from '@/hooks/use-tutorial-spotlight';
 import { useFeedback } from '@/components/feedback-provider';
-import { OnboardingTourCard } from '@/components/onboarding-tour-card';
-import {
-  BuilderLayoutCustomCards,
-  BuilderLayoutItemSlot,
-  BuilderLayoutProvider
-} from '@/components/builder-layout';
+import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
 
 const movementTypeOptions: Array<{ value: 'IN' | 'OUT' | 'ADJUST'; label: string }> = [
   { value: 'IN', label: 'Entrada' },
@@ -180,7 +175,7 @@ function resolveBomItemQtyPerSale(
 
 function StockPageContent() {
   const searchParams = useSearchParams();
-  const { tutorialMode, isSpotlightSlot } = useTutorialSpotlight(searchParams, TUTORIAL_QUERY_VALUE);
+  const { isSpotlightSlot } = useTutorialSpotlight(searchParams, TUTORIAL_QUERY_VALUE);
   const bomSectionRef = useRef<HTMLDivElement | null>(null);
   const openedBomProductIdRef = useRef<number | null>(null);
 
@@ -941,36 +936,6 @@ function StockPageContent() {
         id="header"
         className={isSpotlightSlot('header') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
       >
-      <div className="app-section-title">
-        <div>
-          <span className="app-chip">Estoque</span>
-          <h2 className="mt-3 text-3xl font-semibold">Estoque e producao</h2>
-          <p className="text-neutral-600">Planejar D+1, movimentar e conferir.</p>
-        </div>
-      </div>
-      {tutorialMode ? (
-        <OnboardingTourCard
-          stepLabel="Tutorial 1a vez · passo 2 de 5"
-          title="Confirme a ficha tecnica antes do primeiro pedido"
-          description="Aqui o sistema aprende o consumo da broa. Se a ficha nao estiver certa, o estoque nao acompanha a venda."
-          points={[
-            { label: 'Agora', value: 'Revise a BOM do produto e deixe os insumos base conectados.' },
-            { label: 'Depois', value: 'Siga para Clientes e prepare o cadastro de entrega.' }
-          ]}
-          actions={[
-            {
-              label: 'Ir para clientes',
-              href: '/clientes?focus=form&tutorial=primeira_vez',
-              variant: 'primary'
-            },
-            {
-              label: 'Voltar para produtos',
-              href: '/produtos?focus=form&tutorial=primeira_vez',
-              variant: 'ghost'
-            }
-          ]}
-        />
-      ) : null}
       {hasImmediatePurchaseAlert ? (
         <div className="stock-alert-card" role="alert" aria-live="polite">
           <div className="stock-alert-card__head">
@@ -1076,116 +1041,30 @@ function StockPageContent() {
           {inventoryKpis.negativeBalanceItems} item(ns) com saldo negativo precisam de ajuste.
         </div>
       ) : null}
-      {isOperationMode ? (
-        <div className="app-quickflow app-quickflow--columns mt-4">
-          <button
-            type="button"
-            className="app-quickflow__step text-left"
-            onClick={() => scrollToLayoutSlot('ops', { focus: true })}
-          >
-            <p className="app-quickflow__step-title">1. Planejar dia</p>
-            <p className="app-quickflow__step-subtitle">Fila e ritmo.</p>
-          </button>
-          <button
-            type="button"
-            className="app-quickflow__step text-left"
-            onClick={() => scrollToLayoutSlot('d1', { focus: true })}
-          >
-            <p className="app-quickflow__step-title">2. Faltas D+1</p>
-            <p className="app-quickflow__step-subtitle">O que comprar.</p>
-          </button>
-          <button
-            type="button"
-            className="app-quickflow__step text-left"
-            onClick={() => scrollToLayoutSlot('movement', { focus: true })}
-          >
-            <p className="app-quickflow__step-title">3. Movimentar</p>
-            <p className="app-quickflow__step-subtitle">Entrada e saida.</p>
-          </button>
-          <button
-            type="button"
-            className="app-quickflow__step text-left"
-            onClick={() => scrollToLayoutSlot('balance', { focus: true })}
-          >
-            <p className="app-quickflow__step-title">4. Conferir saldo</p>
-            <p className="app-quickflow__step-subtitle">Fechamento do dia.</p>
-          </button>
-        </div>
-      ) : (
-        <div className="app-quickflow app-quickflow--columns mt-4">
-          <button
-            type="button"
-            className="app-quickflow__step text-left"
-            onClick={() => scrollToLayoutSlot('capacity', { focus: true })}
-          >
-            <p className="app-quickflow__step-title">1. Capacidade</p>
-            <p className="app-quickflow__step-subtitle">Gargalos de insumo.</p>
-          </button>
-          <button
-            type="button"
-            className="app-quickflow__step text-left"
-            onClick={() => scrollToLayoutSlot('bom', { focus: true })}
-          >
-            <p className="app-quickflow__step-title">2. Fichas</p>
-            <p className="app-quickflow__step-subtitle">Receitas e rendimento.</p>
-          </button>
-          <button
-            type="button"
-            className="app-quickflow__step text-left"
-            onClick={() => scrollToLayoutSlot('packaging', { focus: true })}
-          >
-            <p className="app-quickflow__step-title">3. Custos</p>
-            <p className="app-quickflow__step-subtitle">Preco por embalagem.</p>
-          </button>
-          <button
-            type="button"
-            className="app-quickflow__step text-left"
-            onClick={() => scrollToLayoutSlot('movements', { focus: true })}
-          >
-            <p className="app-quickflow__step-title">4. Historico</p>
-            <p className="app-quickflow__step-subtitle">Auditoria rapida.</p>
-          </button>
-        </div>
-      )}
       </BuilderLayoutItemSlot>
 
       <BuilderLayoutItemSlot
         id="kpis"
         className={isSpotlightSlot('kpis') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
       >
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <div className="app-kpi">
-          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Fila D+1</p>
-          <p className="mt-2 text-3xl font-semibold">{inventoryKpis.plannedOrders}</p>
-          <p className="mt-1 text-xs text-neutral-500">pedidos nao entregues para {d1Date}</p>
-        </div>
-        <div className="app-kpi">
-          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Broas alvo</p>
-          <p className="mt-2 text-3xl font-semibold">{inventoryKpis.plannedBroas}</p>
-          <p className="mt-1 text-xs text-neutral-500">
-            {plannedDemand.saleUnits} caixas na base + {formatQty(plannerExtra)} extra
-          </p>
-        </div>
-        <div className="app-kpi">
-          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Fornadas</p>
-          <p className="mt-2 text-3xl font-semibold">{inventoryKpis.plannedFornadas}</p>
-          <p className="mt-1 text-xs text-neutral-500">{formatMinutesAsDuration(plannerOvenMinutes)} de forno</p>
-        </div>
-        <div className="app-kpi">
-          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Faltas D+1</p>
-          <p className="mt-2 text-3xl font-semibold">{inventoryKpis.d1Shortages}</p>
-          <p className="mt-1 text-xs text-neutral-500">itens com compra necessaria</p>
-        </div>
-        <div
-          className={`app-kpi ${inventoryKpis.negativeBalanceItems > 0 ? 'stock-kpi--alert' : ''}`}
+      <div className="app-panel flex flex-wrap items-center gap-2 text-sm">
+        <span className="rounded-full border border-white/80 bg-white/70 px-3 py-1 text-neutral-700">
+          {inventoryKpis.plannedOrders} pedidos
+        </span>
+        <span className="rounded-full border border-white/80 bg-white/70 px-3 py-1 text-neutral-700">
+          {inventoryKpis.plannedBroas} broas
+        </span>
+        <span className="rounded-full border border-white/80 bg-white/70 px-3 py-1 text-neutral-700">
+          {inventoryKpis.plannedFornadas} fornadas
+        </span>
+        <span className="rounded-full border border-white/80 bg-white/70 px-3 py-1 text-neutral-700">
+          {inventoryKpis.d1Shortages} faltas D+1
+        </span>
+        <span
+          className={`rounded-full border border-white/80 px-3 py-1 ${inventoryKpis.negativeBalanceItems > 0 ? 'bg-amber-100 text-amber-900' : 'bg-white/70 text-neutral-700'}`}
         >
-          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Capacidade</p>
-          <p className="mt-2 text-3xl font-semibold">{inventoryKpis.capacityBoxes}</p>
-          <p className="mt-1 text-xs text-neutral-500">
-            caixas possiveis com saldo atual
-            {inventoryKpis.negativeBalanceItems > 0 ? ' • revisar saldos negativos' : ''}
-          </p>
-        </div>
+          capacidade {inventoryKpis.capacityBoxes}
+        </span>
       </div>
       </BuilderLayoutItemSlot>
 
@@ -1209,19 +1088,19 @@ function StockPageContent() {
             ) : null}
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-xl border border-white/60 bg-white/70 px-3 py-3">
-              <p className="text-xs uppercase tracking-[0.15em] text-neutral-500">Caixas na fila</p>
-              <p className="mt-1 text-2xl font-semibold">{plannedDemand.saleUnits}</p>
-            </div>
-            <div className="rounded-xl border border-white/60 bg-white/70 px-3 py-3">
-              <p className="text-xs uppercase tracking-[0.15em] text-neutral-500">Broas base</p>
-              <p className="mt-1 text-2xl font-semibold">{formatQty(plannedDemand.broas)}</p>
-            </div>
-            <div className="rounded-xl border border-white/60 bg-white/70 px-3 py-3">
-              <p className="text-xs uppercase tracking-[0.15em] text-neutral-500">Broas alvo</p>
-              <p className="mt-1 text-2xl font-semibold">{plannerTargetBroas}</p>
-            </div>
+          <div className="flex flex-wrap gap-2 text-sm">
+            <span className="rounded-full border border-white/80 bg-white/70 px-3 py-1 text-neutral-700">
+              {plannedDemand.saleUnits} caixas
+            </span>
+            <span className="rounded-full border border-white/80 bg-white/70 px-3 py-1 text-neutral-700">
+              {formatQty(plannedDemand.broas)} base
+            </span>
+            <span className="rounded-full border border-white/80 bg-white/70 px-3 py-1 text-neutral-700">
+              alvo {plannerTargetBroas}
+            </span>
+            <span className="rounded-full border border-emerald-200 bg-emerald-50/70 px-3 py-1 text-emerald-900">
+              {plannerFornadas} fornadas
+            </span>
           </div>
 
           <div className="grid gap-3 md:grid-cols-[1fr_1fr_1.2fr]">
@@ -1247,12 +1126,9 @@ function StockPageContent() {
               />
             </label>
             <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-3 text-sm text-emerald-900">
-              <p className="text-xs uppercase tracking-[0.14em] text-emerald-700">Plano rapido</p>
+              <p>{formatMinutesAsDuration(plannerOvenMinutes)} de forno</p>
               <p className="mt-1">
-                {plannerFornadas} fornadas ({formatMinutesAsDuration(plannerOvenMinutes)} de forno)
-              </p>
-              <p className="mt-1">
-                Inicio sugerido:{' '}
+                Inicio:{' '}
                 {plannerStartMinutes == null
                   ? '--:--'
                   : plannerNeedsPreviousDay
@@ -1264,11 +1140,6 @@ function StockPageContent() {
         </div>
 
         <div className="app-panel stock-ops-panel stock-ops-panel--shopping grid gap-3">
-          <div>
-            <h3 className="text-xl font-semibold">Lista rapida de compras</h3>
-            <p className="text-sm text-neutral-500">Gerada automaticamente pelas faltas do D+1.</p>
-          </div>
-
           <div className="flex flex-wrap gap-2 text-xs">
             <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
               Ingredientes: {d1ShortageSummary.ingredients}
@@ -1321,7 +1192,9 @@ function StockPageContent() {
 
       {!isOperationMode ? (
       <BuilderLayoutItemSlot id="capacity">
-      <div className="app-panel grid gap-3">
+      <details className="app-details">
+      <summary>Capacidade por produto</summary>
+      <div className="app-panel mt-3 grid gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-xl font-semibold">Capacidade por produto</h3>
           <p className="text-sm text-neutral-500">Estimativa de caixas e custo atual por ficha tecnica</p>
@@ -1361,19 +1234,16 @@ function StockPageContent() {
           )}
         </div>
       </div>
+      </details>
       </BuilderLayoutItemSlot>
       ) : null}
 
       <BuilderLayoutItemSlot id="d1">
       <div className="app-panel grid gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-xl font-semibold">Planejamento de amanha (D+1)</h3>
-            <p className="text-sm text-neutral-500">
-              Necessidade por insumo para a data selecionada. Base usada:{' '}
-              {d1Basis === 'deliveryDate' ? 'data de entrega' : 'pedido + 1 dia'}.
-            </p>
-          </div>
+          <span className="text-sm font-semibold text-neutral-700">
+            D+1 ({d1Basis === 'deliveryDate' ? 'data de entrega' : 'pedido + 1 dia'})
+          </span>
           <div className="flex flex-wrap items-end gap-2">
             <label className="text-sm text-neutral-600">
               Data
@@ -1443,22 +1313,23 @@ function StockPageContent() {
           </table>
         </div>
 
-        {d1Warnings.length > 0 && (
-          <div className="grid gap-2">
-            <h4 className="font-semibold text-neutral-800">Alertas de BOM</h4>
-            {d1Warnings.map((warning, index) => (
-              <div key={`${warning.orderId}-${warning.productId}-${index}`} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                Pedido #{warning.orderId} • {warning.productName}: {warning.message}
-              </div>
-            ))}
-          </div>
-        )}
+        {d1Warnings.length > 0 ? (
+          <details className="app-details">
+            <summary>Alertas de BOM ({d1Warnings.length})</summary>
+            <div className="mt-3 grid gap-2">
+              {d1Warnings.map((warning, index) => (
+                <div key={`${warning.orderId}-${warning.productId}-${index}`} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  Pedido #{warning.orderId} • {warning.productName}: {warning.message}
+                </div>
+              ))}
+            </div>
+          </details>
+        ) : null}
       </div>
       </BuilderLayoutItemSlot>
 
       <BuilderLayoutItemSlot id="movement">
       <div className="app-panel grid gap-4">
-        <h3 className="text-lg font-semibold">Nova movimentacao</h3>
         <div className="grid gap-3 md:grid-cols-4">
           <select
             className="app-select"
@@ -1512,7 +1383,9 @@ function StockPageContent() {
         id="bom"
         className={isSpotlightSlot('bom') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
       >
-      <div className="app-panel grid gap-4">
+      <details className="app-details">
+      <summary>Fichas tecnicas</summary>
+      <div className="app-panel mt-3 grid gap-4">
         <div ref={bomSectionRef} className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-semibold">Fichas tecnicas</h3>
           <div className="flex flex-wrap gap-2">
@@ -1543,22 +1416,27 @@ function StockPageContent() {
             value={bomName}
             onChange={(e) => setBomName(e.target.value)}
           />
-          <input
-            className="app-input"
-            placeholder="Unidade de venda (ex: Caixa com 7)"
-            value={bomSaleUnitLabel}
-            onChange={(e) => setBomSaleUnitLabel(e.target.value)}
-          />
-          <input
-            className="app-input"
-            placeholder="Rendimento (caixas por receita)"
-            value={bomYieldUnits}
-            onChange={(e) => setBomYieldUnits(e.target.value)}
-          />
         </div>
+        <details className="app-details">
+          <summary>Mais detalhes da ficha</summary>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <input
+              className="app-input"
+              placeholder="Unidade de venda (ex: Caixa com 7)"
+              value={bomSaleUnitLabel}
+              onChange={(e) => setBomSaleUnitLabel(e.target.value)}
+            />
+            <input
+              className="app-input"
+              placeholder="Rendimento (caixas por receita)"
+              value={bomYieldUnits}
+              onChange={(e) => setBomYieldUnits(e.target.value)}
+            />
+          </div>
+        </details>
         <div className="grid gap-3">
           {bomItems.map((item, index) => (
-            <div key={`${item.itemId}-${index}`} className="grid gap-3 md:grid-cols-5">
+            <div key={`${item.itemId}-${index}`} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
               <select
                 className="app-select"
                 value={item.itemId}
@@ -1575,34 +1453,20 @@ function StockPageContent() {
               </select>
               <input
                 className="app-input"
-                placeholder="Qtd receita"
-                value={item.qtyPerRecipe ?? ''}
-                onChange={(e) => updateBomItem(index, { qtyPerRecipe: e.target.value })}
-                onBlur={() =>
-                  updateBomItem(index, {
-                    qtyPerRecipe: formatDecimalInputBR(item.qtyPerRecipe || '', { maxFractionDigits: 4 })
-                  })
-                }
-              />
-              <input
-                className="app-input"
-                placeholder="Qtd caixa"
+                placeholder="Peso por venda"
                 value={item.qtyPerSaleUnit ?? ''}
-                onChange={(e) => updateBomItem(index, { qtyPerSaleUnit: e.target.value })}
-                onBlur={() =>
+                onChange={(e) =>
                   updateBomItem(index, {
-                    qtyPerSaleUnit: formatDecimalInputBR(item.qtyPerSaleUnit || '', { maxFractionDigits: 4 })
+                    qtyPerRecipe: '',
+                    qtyPerSaleUnit: e.target.value,
+                    qtyPerUnit: ''
                   })
                 }
-              />
-              <input
-                className="app-input"
-                placeholder="Qtd unidade"
-                value={item.qtyPerUnit ?? ''}
-                onChange={(e) => updateBomItem(index, { qtyPerUnit: e.target.value })}
                 onBlur={() =>
                   updateBomItem(index, {
-                    qtyPerUnit: formatDecimalInputBR(item.qtyPerUnit || '', { maxFractionDigits: 4 })
+                    qtyPerRecipe: '',
+                    qtyPerSaleUnit: formatDecimalInputBR(item.qtyPerSaleUnit || '', { maxFractionDigits: 4 }),
+                    qtyPerUnit: ''
                   })
                 }
               />
@@ -1655,9 +1519,29 @@ function StockPageContent() {
               </div>
               <div className="mt-3 grid gap-2 text-sm text-neutral-500">
                 {(bom.items || []).map((item: any) => (
-                  <div key={item.id}>
-                    {item.item?.name || `Item ${item.itemId}`} • receita: {item.qtyPerRecipe ?? '-'} • caixa:{' '}
-                    {item.qtyPerSaleUnit ?? '-'} • unidade: {item.qtyPerUnit ?? '-'}
+                  <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/60 bg-white/70 px-3 py-2">
+                    <div>
+                      <p className="font-medium text-neutral-800">
+                        {item.item?.name || `Item ${item.itemId}`}
+                      </p>
+                      <p className="text-xs text-neutral-500">
+                        Peso: {item.qtyPerSaleUnit ?? item.qtyPerUnit ?? item.qtyPerRecipe ?? '-'} {item.item?.unit || ''}
+                        {' • '}
+                        Valor: {formatCurrencyBR(item.item?.purchasePackCost ?? 0)}
+                      </p>
+                    </div>
+                    {onlineRecommendationsByIngredientId.get(item.itemId)?.recommendedOffer ? (
+                      <a
+                        className="app-button app-button-ghost"
+                        href={sanitizeExternalHttpUrl(
+                          onlineRecommendationsByIngredientId.get(item.itemId)?.recommendedOffer?.url || ''
+                        )}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                      >
+                        Comprar
+                      </a>
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -1685,12 +1569,15 @@ function StockPageContent() {
           </div>
         </div>
       </div>
+      </details>
       </BuilderLayoutItemSlot>
       ) : null}
 
       {!isOperationMode ? (
       <BuilderLayoutItemSlot id="packaging">
-      <div className="app-panel grid gap-4">
+      <details className="app-details">
+      <summary>Custos de embalagem</summary>
+      <div className="app-panel mt-3 grid gap-4">
         <h3 className="text-lg font-semibold">Custo de compra por embalagem</h3>
         <div className="grid gap-3 md:grid-cols-3">
           <select
@@ -1737,12 +1624,14 @@ function StockPageContent() {
           </button>
         </div>
       </div>
+      </details>
       </BuilderLayoutItemSlot>
       ) : null}
 
       <BuilderLayoutItemSlot id="balance">
-      <div className="grid gap-3">
-        <h3 className="text-lg font-semibold">Saldo por item</h3>
+      <details className="app-details">
+        <summary>Saldo por item</summary>
+      <div className="mt-3 grid gap-3">
         {items.map((item) => (
           <div key={item.id} className="app-panel">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1761,12 +1650,14 @@ function StockPageContent() {
           </div>
         ))}
       </div>
+      </details>
       </BuilderLayoutItemSlot>
 
       {!isOperationMode ? (
       <BuilderLayoutItemSlot id="movements">
-      <div className="grid gap-3">
-        <h3 className="text-lg font-semibold">Historico de movimentacoes</h3>
+      <details className="app-details">
+        <summary>Historico de movimentacoes</summary>
+      <div className="mt-3 grid gap-3">
         <div className="app-panel">
           <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">
             Entradas automaticas por cupom
@@ -1807,10 +1698,10 @@ function StockPageContent() {
           </div>
         ))}
       </div>
+      </details>
       </BuilderLayoutItemSlot>
       ) : null}
 
-      {!isOperationMode ? <BuilderLayoutCustomCards /> : null}
       </section>
     </BuilderLayoutProvider>
   );

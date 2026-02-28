@@ -139,60 +139,6 @@ export class OrdersService {
     return order;
   }
 
-  private parseSaleUnits(label?: string | null) {
-    if (!label) return 1;
-    const match = label.match(/(\d+)/);
-    return match ? Number(match[1]) : 1;
-  }
-
-  private async applyInventoryMovements(
-    tx: Prisma.TransactionClient,
-    orderId: number,
-    items: Array<{ productId: number; quantity: number }>,
-    direction: 'OUT' | 'IN'
-  ) {
-    const productIds = Array.from(new Set(items.map((item) => item.productId)));
-    const boms = await tx.bom.findMany({
-      where: { productId: { in: productIds } },
-      include: { items: true },
-      orderBy: { id: 'asc' }
-    });
-    const bomMap = new Map<number, typeof boms[number]>();
-    for (const bom of boms) {
-      if (!bomMap.has(bom.productId)) {
-        bomMap.set(bom.productId, bom);
-      }
-    }
-
-    for (const item of items) {
-      const bom = bomMap.get(item.productId);
-      if (!bom) continue;
-      const unitsPerSale = this.parseSaleUnits(bom.saleUnitLabel);
-
-      for (const bomItem of bom.items) {
-        let perSale = bomItem.qtyPerSaleUnit ?? null;
-        if (perSale === null && bomItem.qtyPerUnit != null) {
-          perSale = bomItem.qtyPerUnit * unitsPerSale;
-        }
-        if (perSale === null && bomItem.qtyPerRecipe != null && bom.yieldUnits) {
-          perSale = bomItem.qtyPerRecipe / bom.yieldUnits;
-        }
-        if (perSale === null) continue;
-
-        const qty = perSale * item.quantity;
-        await tx.inventoryMovement.create({
-          data: {
-            itemId: bomItem.itemId,
-            orderId,
-            type: direction,
-            quantity: qty,
-            reason: direction === 'OUT' ? 'Consumo por pedido' : 'Estorno de pedido'
-          }
-        });
-      }
-    }
-  }
-
   async list() {
     const orders = await this.prisma.order.findMany({
       include: { items: true, customer: true, payments: true },
@@ -257,13 +203,6 @@ export class OrdersService {
         include: { items: true, customer: true, payments: true }
       });
 
-      await this.applyInventoryMovements(
-        tx,
-        createdOrder.id,
-        itemsData.map((item) => ({ productId: item.productId, quantity: item.quantity })),
-        'OUT'
-      );
-
       return this.withFinancial(createdOrder);
     });
   }
@@ -297,18 +236,8 @@ export class OrdersService {
   }
 
   async remove(id: number) {
-    const order = await this.getRaw(id);
-    await this.prisma.$transaction(async (tx) => {
-      if (order.status !== 'CANCELADO') {
-        await this.applyInventoryMovements(
-          tx,
-          order.id,
-          (order.items || []).map((item) => ({ productId: item.productId, quantity: item.quantity })),
-          'IN'
-        );
-      }
-      await tx.order.delete({ where: { id } });
-    });
+    await this.getRaw(id);
+    await this.prisma.order.delete({ where: { id } });
   }
 
   async addItem(orderId: number, payload: unknown) {
@@ -339,13 +268,6 @@ export class OrdersService {
       const newSubtotal = this.toMoney(order.items.reduce((sum, item) => sum + item.total, 0) + total);
       const newTotal = this.toMoney(Math.max(newSubtotal - order.discount, 0));
       await tx.order.update({ where: { id: orderId }, data: { subtotal: newSubtotal, total: newTotal } });
-
-      await this.applyInventoryMovements(
-        tx,
-        orderId,
-        [{ productId: data.productId, quantity: data.quantity }],
-        'OUT'
-      );
 
       const updatedOrder = await tx.order.findUnique({
         where: { id: orderId },
@@ -380,13 +302,6 @@ export class OrdersService {
 
       await tx.order.update({ where: { id: orderId }, data: { subtotal: newSubtotal, total: newTotal } });
 
-      await this.applyInventoryMovements(
-        tx,
-        orderId,
-        [{ productId: item.productId, quantity: item.quantity }],
-        'IN'
-      );
-
       const updatedOrder = await tx.order.findUnique({
         where: { id: orderId },
         include: { items: true, customer: true, payments: true }
@@ -406,14 +321,6 @@ export class OrdersService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      if (status === 'CANCELADO' && order.status !== 'CANCELADO') {
-        await this.applyInventoryMovements(
-          tx,
-          orderId,
-          (order.items || []).map((item) => ({ productId: item.productId, quantity: item.quantity })),
-          'IN'
-        );
-      }
       const updatedOrder = await tx.order.update({
         where: { id: orderId },
         data: { status },

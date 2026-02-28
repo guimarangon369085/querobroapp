@@ -13,9 +13,9 @@ export const paymentMethods = ['pix', 'dinheiro', 'cartao', 'transferencia'] as 
 
 export const nextStatusByCurrent: Record<string, string | null> = {
   ABERTO: 'CONFIRMADO',
-  CONFIRMADO: 'EM_PREPARACAO',
-  EM_PREPARACAO: 'PRONTO',
-  PRONTO: 'ENTREGUE',
+  CONFIRMADO: null,
+  EM_PREPARACAO: null,
+  PRONTO: null,
   ENTREGUE: null,
   CANCELADO: null
 };
@@ -71,4 +71,63 @@ export type UberDirectQuote = {
     pickupDurationSeconds: number | null;
     dropoffEta: string;
   };
+};
+
+export type DeliveryTracking = {
+  orderId: number;
+  provider: 'UBER_DIRECT' | 'LOCAL_SIMULATED';
+  mode: 'LIVE' | 'SIMULATED';
+  status: 'PENDING_REQUIREMENTS' | 'REQUESTED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'FAILED';
+  createdAt: string;
+  updatedAt: string;
+  providerDeliveryId: string;
+  providerQuoteId: string | null;
+  trackingUrl: string;
+  pickupEta: string | null;
+  dropoffEta: string | null;
+  lastProviderError: string | null;
+  draft: UberDirectReadiness['draft'];
+};
+
+export type ProductionBatchAllocation = {
+  orderId: number;
+  orderItemId: number;
+  productId: number;
+  productName: string;
+  broasPlanned: number;
+  saleUnitsApprox: number;
+};
+
+export type ProductionBatch = {
+  id: string;
+  triggerSource: 'ALEXA' | 'MANUAL';
+  triggerLabel: string;
+  requestedTimerMinutes: number | null;
+  bakeTimerMinutes: number;
+  ovenCapacityBroas: number;
+  startedAt: string;
+  readyAt: string;
+  status: 'BAKING' | 'READY' | 'DISPATCHED' | 'DELIVERED';
+  linkedOrderIds: number[];
+  allocations: ProductionBatchAllocation[];
+};
+
+export type ProductionBoard = {
+  oven: {
+    capacityBroas: number;
+    bakeTimerMinutes: number;
+    activeBatch: ProductionBatch | null;
+    busy: boolean;
+  };
+  queue: Array<{
+    orderId: number;
+    customerName: string;
+    scheduledAt: string | null;
+    status: string;
+    totalBroas: number;
+    producedBroas: number;
+    remainingBroas: number;
+    waitingAlexaTrigger: boolean;
+  }>;
+  recentBatches: ProductionBatch[];
 };

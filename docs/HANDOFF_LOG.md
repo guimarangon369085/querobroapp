@@ -185,6 +185,89 @@ Objetivo da sessao:
 No fim, registrar nova entrada no HANDOFF_LOG.
 ```
 
+## Entrada 037
+
+### 1) Metadados
+
+- Data/hora: 2026-02-28 19:10 -03
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `main`
+- Commit base (opcional): `5b3c138`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Trocar o fluxo “mock” por um fluxo operacional real e local, ligando pedido, producao, estoque, Alexa e entrega.
+- Resultado entregue: O backend agora executa a jornada real: pedido via WhatsApp Flow pode ser confirmado, entra em fila de producao, a fornada baixa estoque no inicio (1 forno, 14 broas por vez), a conclusao da fornada deixa o pedido pronto e dispara entrega com tracking persistente. Sem credenciais Uber, o sistema cai em simulacao local; com credenciais, tenta o caminho live antes do fallback.
+- O que ficou pendente: O dispatcher real do outbox para Meta WhatsApp Cloud API ainda nao foi ligado. O caminho live da Uber depende de preencher `UBER_DIRECT_*`. O mobile ainda nao recebeu essa mesma camada de fluxo.
+
+### 3) Mudancas tecnicas
+
+- Mudanca estrutural principal: `apps/api/src/modules/orders/orders.service.ts` deixou de baixar estoque no momento da criacao/edicao do pedido. A baixa agora ocorre apenas na producao real.
+- Novo comportamento real em `apps/api/src/modules/production/production.service.ts`:
+- `GET /production/queue`
+- `POST /production/batches/start-next`
+- `POST /production/batches/:id/complete`
+- `POST /production/rebalance-legacy-consumption`
+- A producao agora persiste o estado do forno em `IdempotencyRecord` (`scope=PRODUCTION_RUNTIME`) e usa `InventoryMovement` com `source=PRODUCTION_BATCH`.
+- `apps/api/src/modules/deliveries/deliveries.service.ts` passou a persistir tracking por pedido em `IdempotencyRecord` (`scope=DELIVERY_TRACKING`) e ganhou:
+- `POST /deliveries/orders/:id/uber-direct/dispatch`
+- `GET /deliveries/orders/:id/tracking`
+- `POST /deliveries/orders/:id/tracking/complete`
+- `POST /deliveries/uber-direct/webhook`
+- `apps/api/src/modules/alexa/alexa.service.ts` agora detecta intent/utterance com minutos de timer e aciona a proxima fornada real via `ProductionService`.
+- `apps/web/src/features/orders/orders-screen.tsx` recebeu:
+- leitura do forno em tempo real por polling
+- bloco `Operacao real` no detalhe do pedido
+- botoes reais para entrar no forno, concluir fornada, enviar entrega e marcar entregue
+- troca do “zoom +/-” por seletor direto `Dia | Semana | Mes`
+- corte do avanço manual de status nas etapas criticas (producao/entrega)
+- `apps/web/src/app/estoque/page.tsx` simplificou a ficha tecnica visivel: campos avancados ficaram recolhidos e a lista passou a mostrar nome, peso, valor e link de compra quando houver oferta recomendada.
+- `apps/api/.env.example` ganhou flags novas para despacho/tracking Uber live com fallback local.
+
+### 4) Validacao
+
+- Comandos executados:
+- `pnpm --filter @querobroapp/api typecheck`
+- `pnpm --filter @querobroapp/web typecheck`
+- Smoke/API real validada:
+- `PATCH /orders/6/status` -> `CONFIRMADO`
+- `GET /production/queue` mostrou o pedido aguardando Alexa/gatilho
+- `POST /production/batches/start-next` iniciou a fornada com 7 broas
+- `GET /orders/6` passou para `EM_PREPARACAO`
+- `POST /production/batches/:id/complete` concluiu a fornada
+- `GET /deliveries/orders/6/tracking` criou tracking local persistente
+- `POST /deliveries/orders/6/tracking/complete` marcou a entrega
+- `GET /orders/6` passou para `ENTREGUE` com pagamento ainda pendente
+- `POST /production/rebalance-legacy-consumption` criou 28 movimentos compensatorios para neutralizar a baixa antiga em pedidos ainda abertos/ativos
+- Smoke visual:
+- `/pedidos` abre com `Dia | Semana | Mes`
+- o detalhe do pedido exibe o bloco `Operacao real`
+
+### 5) Contexto para retomada
+
+- Decisao importante: manter o app funcional localmente mesmo sem credenciais externas, via fallback persistente e rastreavel, em vez de deixar a UX bloqueada esperando integracoes externas.
+- Suposicao feita: a fila de producao usa a BOM atual para derivar broas por venda; a capacidade do forno foi fixada em 14 broas e o tempo de forno em 50 minutos.
+- Risco conhecido: pedidos antigos ja criados no modelo anterior ainda carregavam baixas antigas; a normalizacao compensatoria foi aplicada apenas para pedidos ativos, preservando o historico bruto no banco.
+- Proximo passo recomendado (1 acao objetiva): Ligar o dispatcher real do outbox WhatsApp para enviar o convite do Flow pela Meta Cloud API quando as credenciais estiverem disponiveis.
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/NEXT_STEP_PLAN.md
+- docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+Ligar o provider real que ainda estiver faltando (Meta WhatsApp Cloud API ou Uber live) sem quebrar o fluxo local.
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
 ## Entrada 003
 
 ### 1) Metadados

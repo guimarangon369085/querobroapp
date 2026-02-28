@@ -9,13 +9,8 @@ import { useSurfaceMode } from '@/hooks/use-surface-mode';
 import { useTutorialSpotlight } from '@/hooks/use-tutorial-spotlight';
 import { useFeedback } from '@/components/feedback-provider';
 import { FormField } from '@/components/form/FormField';
-import { OnboardingTourCard } from '@/components/onboarding-tour-card';
 import { useSearchParams } from 'next/navigation';
-import {
-  BuilderLayoutCustomCards,
-  BuilderLayoutItemSlot,
-  BuilderLayoutProvider
-} from '@/components/builder-layout';
+import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
 
 const emptyCustomer: Partial<Customer> = {
   name: '',
@@ -344,79 +339,19 @@ function CustomersPageContent() {
     <BuilderLayoutProvider page="clientes">
       <section className="grid gap-8">
       <BuilderLayoutItemSlot
-        id="header"
-        className={isSpotlightSlot('header') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
-      >
-      <div className="app-section-title">
-        <div>
-          <span className="app-chip">Relacionamento</span>
-          <h2 className="mt-3 text-3xl font-semibold">Clientes</h2>
-          <p className="text-neutral-600">Cadastro rapido para atendimento.</p>
-        </div>
-      </div>
-      {tutorialMode ? (
-        <OnboardingTourCard
-          stepLabel="Tutorial 1a vez · passo 3 de 5"
-          title="Agora cadastre para quem voce vai vender"
-          description="Cliente fecha o circuito da venda: endereco, telefone e contato precisam existir antes do pedido."
-          points={[
-            { label: 'Agora', value: 'Cadastre 1 cliente com telefone e endereco.' },
-            { label: 'Depois', value: 'Volte para Pedidos e monte o primeiro pedido completo.' }
-          ]}
-          actions={[
-            {
-              label: 'Ir para criar pedido',
-              href: '/pedidos?focus=new_order&tutorial=primeira_vez',
-              variant: 'primary'
-            },
-            {
-              label: 'Voltar para ficha tecnica',
-              href: '/estoque?focus=bom&tutorial=primeira_vez',
-              variant: 'ghost'
-            }
-          ]}
-        />
-      ) : null}
-      <div className="app-quickflow app-quickflow--columns mt-4">
-        <button
-          type="button"
-          className={`app-quickflow__step text-left ${form.name && form.phone ? 'app-quickflow__step--done' : ''}`}
-          onClick={() => scrollToLayoutSlot('form', { focus: true })}
-        >
-          <p className="app-quickflow__step-title">1. Cadastro</p>
-          <p className="app-quickflow__step-subtitle">Nome, telefone e endereco.</p>
-        </button>
-        <button
-          type="button"
-          className={`app-quickflow__step text-left ${filteredCustomers.length > 0 ? 'app-quickflow__step--done' : ''}`}
-          onClick={() => scrollToLayoutSlot('list', { focus: true })}
-        >
-          <p className="app-quickflow__step-title">2. Lista</p>
-          <p className="app-quickflow__step-subtitle">Buscar, editar e remover.</p>
-        </button>
-      </div>
-      </BuilderLayoutItemSlot>
-
-      <BuilderLayoutItemSlot
         id="kpis_search"
         className={
           isSpotlightSlot('kpis_search') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'
         }
       >
-      <div className="grid gap-3 md:grid-cols-3">
-        <div className="app-kpi">
-          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Clientes</p>
-          <p className="mt-2 text-3xl font-semibold">{customers.length}</p>
-        </div>
-        <div className="app-panel md:col-span-2">
-          <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Busca rapida</p>
-          <input
-            className="app-input mt-2"
-            placeholder="Buscar por nome, telefone ou endereco"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
+      <div className="app-panel flex flex-wrap items-center gap-3">
+        <span className="text-sm font-semibold text-neutral-700">{customers.length} cliente(s)</span>
+        <input
+          className="app-input md:w-auto md:min-w-[320px]"
+          placeholder="Buscar por nome, telefone ou endereco"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
       </div>
       </BuilderLayoutItemSlot>
 
@@ -425,11 +360,6 @@ function CustomersPageContent() {
         className={isSpotlightSlot('form') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
       >
       <form onSubmit={submit} className="app-panel grid gap-5">
-        <div className="app-kid-hint">
-          {isOperationMode
-            ? 'Preencha nome, telefone e endereco.'
-            : 'Campos adicionais sao opcionais.'}
-        </div>
         <div className="grid gap-3 md:grid-cols-2">
           <FormField label="Nome completo" error={error}>
             <input
@@ -498,7 +428,7 @@ function CustomersPageContent() {
         </div>
 
         {isOperationMode ? null : (
-          <details className="app-details" open>
+          <details className="app-details">
             <summary>Campos avancados (Uber Direct, endereco detalhado e dados extras)</summary>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <FormField label="Primeiro nome" hint="Opcional (preenchido automaticamente)">
@@ -656,7 +586,6 @@ function CustomersPageContent() {
       </div>
       </BuilderLayoutItemSlot>
 
-      {!isOperationMode ? <BuilderLayoutCustomCards /> : null}
       </section>
     </BuilderLayoutProvider>
   );

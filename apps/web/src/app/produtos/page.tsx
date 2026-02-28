@@ -11,12 +11,7 @@ import { useSurfaceMode } from '@/hooks/use-surface-mode';
 import { useTutorialSpotlight } from '@/hooks/use-tutorial-spotlight';
 import { useFeedback } from '@/components/feedback-provider';
 import { FormField } from '@/components/form/FormField';
-import { OnboardingTourCard } from '@/components/onboarding-tour-card';
-import {
-  BuilderLayoutCustomCards,
-  BuilderLayoutItemSlot,
-  BuilderLayoutProvider
-} from '@/components/builder-layout';
+import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
 
 const emptyProduct: Partial<Product> = {
   name: '',
@@ -53,7 +48,7 @@ const TUTORIAL_QUERY_VALUE = 'primeira_vez';
 
 function ProductsPageContent() {
   const searchParams = useSearchParams();
-  const { tutorialMode, isSpotlightSlot } = useTutorialSpotlight(searchParams, TUTORIAL_QUERY_VALUE);
+  const { isSpotlightSlot } = useTutorialSpotlight(searchParams, TUTORIAL_QUERY_VALUE);
   const [products, setProducts] = useState<Product[]>([]);
   const [form, setForm] = useState<Partial<Product>>(emptyProduct);
   const [priceInput, setPriceInput] = useState('0,00');
@@ -238,89 +233,6 @@ function ProductsPageContent() {
   return (
     <BuilderLayoutProvider page="produtos">
       <section className="grid gap-8">
-        <BuilderLayoutItemSlot
-          id="header"
-          className={isSpotlightSlot('header') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
-        >
-          <div className="app-section-title">
-            <div>
-              <span className="app-chip">Catalogo</span>
-              <h2 className="mt-3 text-3xl font-semibold">Produtos e sabores</h2>
-              <p className="text-neutral-600">
-                Gerencie broas/produtos e variedades de sabor no mesmo cadastro.
-              </p>
-            </div>
-          </div>
-          {tutorialMode ? (
-            <OnboardingTourCard
-              stepLabel="Tutorial 1a vez · passo 1 de 5"
-              title="Cadastre a broa base antes de vender"
-              description="O produto e o ponto de partida do sistema. Sem ele, nao existe pedido, preco nem ficha tecnica."
-              points={[
-                { label: 'Agora', value: 'Crie 1 produto real com nome e preco.' },
-                { label: 'Depois', value: 'Siga para a ficha tecnica e conecte os insumos.' }
-              ]}
-              actions={[
-                {
-                  label: 'Ir para ficha tecnica',
-                  href: '/estoque?focus=bom&tutorial=primeira_vez',
-                  variant: 'primary'
-                },
-                {
-                  label: 'Pular para clientes',
-                  href: '/clientes?focus=form&tutorial=primeira_vez',
-                  variant: 'ghost'
-                }
-              ]}
-            />
-          ) : null}
-          {isOperationMode ? (
-            <div className="app-quickflow app-quickflow--columns mt-4">
-              <button
-                type="button"
-                className={`app-quickflow__step text-left ${form.name ? 'app-quickflow__step--done' : ''}`}
-                onClick={() => scrollToLayoutSlot('form', { focus: true })}
-              >
-                <p className="app-quickflow__step-title">1. Cadastro rapido</p>
-                <p className="app-quickflow__step-subtitle">Template + nome + preco para publicar.</p>
-              </button>
-              <button
-                type="button"
-                className={`app-quickflow__step text-left ${filteredProducts.length > 0 ? 'app-quickflow__step--done' : ''}`}
-                onClick={() => scrollToLayoutSlot('list', { focus: true })}
-              >
-                <p className="app-quickflow__step-title">2. Revisar ativos</p>
-                <p className="app-quickflow__step-subtitle">Lista operacional mostrando apenas itens ativos.</p>
-              </button>
-            </div>
-          ) : (
-            <div className="app-quickflow app-quickflow--columns mt-4">
-              <button
-                type="button"
-                className="app-quickflow__step text-left"
-                onClick={() => scrollToLayoutSlot('kpis_filters', { focus: true })}
-              >
-                <p className="app-quickflow__step-title">1. Auditar filtros</p>
-                <p className="app-quickflow__step-subtitle">Cruze ativos, inativos e busca textual.</p>
-              </button>
-              <button
-                type="button"
-                className="app-quickflow__step text-left"
-                onClick={() => scrollToLayoutSlot('form', { focus: true })}
-              >
-                <p className="app-quickflow__step-title">2. Ajustar categoria</p>
-                <p className="app-quickflow__step-subtitle">Gerencie unidade, status e taxonomia.</p>
-              </button>
-            </div>
-          )}
-        </BuilderLayoutItemSlot>
-
-        <BuilderLayoutItemSlot id="note">
-          <div className="app-panel">
-            <p className="text-sm text-neutral-600">Use a categoria &quot;Sabores&quot; para separar os recheios.</p>
-          </div>
-        </BuilderLayoutItemSlot>
-
         <BuilderLayoutItemSlot id="load_error">
           {loadError ? (
             <div className="app-panel">
@@ -335,40 +247,33 @@ function ProductsPageContent() {
             isSpotlightSlot('kpis_filters') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'
           }
         >
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="app-kpi">
-              <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Produtos</p>
-              <p className="mt-2 text-3xl font-semibold">{products.length}</p>
-            </div>
-            <div className="app-panel md:col-span-2">
-              <div className="flex flex-wrap items-center gap-3">
-                <input
-                  className="app-input md:w-auto"
-                  placeholder={
-                    isOperationMode
-                      ? 'Buscar produto ativo por nome ou categoria'
-                      : 'Buscar por nome ou categoria'
-                  }
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-                {!isOperationMode ? (
-                  <select
-                    className="app-select"
-                    value={activeFilter}
-                    onChange={(e) =>
-                      setActiveFilter(e.target.value as 'TODOS' | 'ATIVOS' | 'INATIVOS')
-                    }
-                  >
-                    <option value="TODOS">Todos</option>
-                    <option value="ATIVOS">Ativos</option>
-                    <option value="INATIVOS">Inativos</option>
-                  </select>
-                ) : (
-                  <span className="text-xs text-neutral-500">Mostrando apenas produtos ativos.</span>
-                )}
-              </div>
-            </div>
+          <div className="app-panel flex flex-wrap items-center gap-3">
+            <span className="text-sm font-semibold text-neutral-700">{products.length} produto(s)</span>
+            <input
+              className="app-input md:w-auto md:min-w-[280px]"
+              placeholder={
+                isOperationMode
+                  ? 'Buscar produto ativo por nome ou categoria'
+                  : 'Buscar por nome ou categoria'
+              }
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {!isOperationMode ? (
+              <select
+                className="app-select"
+                value={activeFilter}
+                onChange={(e) =>
+                  setActiveFilter(e.target.value as 'TODOS' | 'ATIVOS' | 'INATIVOS')
+                }
+              >
+                <option value="TODOS">Todos</option>
+                <option value="ATIVOS">Ativos</option>
+                <option value="INATIVOS">Inativos</option>
+              </select>
+            ) : (
+              <span className="text-xs text-neutral-500">Mostrando apenas ativos.</span>
+            )}
           </div>
         </BuilderLayoutItemSlot>
 
@@ -377,24 +282,18 @@ function ProductsPageContent() {
           className={isSpotlightSlot('form') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
         >
           <form onSubmit={submit} className="app-panel grid gap-5">
-            <div className="grid gap-2">
-              <p className="text-sm font-semibold text-neutral-700">Preenchimento rapido</p>
-              <div className="app-inline-actions">
-                {productQuickTemplates.map((template) => (
-                  <button
-                    key={template.label}
-                    type="button"
-                    className="app-button app-button-ghost"
-                    title={template.helper}
-                    onClick={() => applyTemplate(template)}
-                  >
-                    {template.label}
-                  </button>
-                ))}
-              </div>
-              <p className="text-xs text-neutral-500">
-                Selecione um atalho e complete apenas nome e preco.
-              </p>
+            <div className="app-inline-actions">
+              {productQuickTemplates.map((template) => (
+                <button
+                  key={template.label}
+                  type="button"
+                  className="app-button app-button-ghost"
+                  title={template.helper}
+                  onClick={() => applyTemplate(template)}
+                >
+                  {template.label}
+                </button>
+              ))}
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
@@ -425,7 +324,7 @@ function ProductsPageContent() {
             </div>
 
             {isOperationMode ? null : (
-              <details className="app-details" open>
+              <details className="app-details">
                 <summary>Campos avancados (categoria, unidade e status)</summary>
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
                   <FormField label="Categoria" hint="Ex: Broas, Sabores, Bebidas">
@@ -531,7 +430,6 @@ function ProductsPageContent() {
           </div>
         </BuilderLayoutItemSlot>
 
-        {!isOperationMode ? <BuilderLayoutCustomCards /> : null}
       </section>
     </BuilderLayoutProvider>
   );

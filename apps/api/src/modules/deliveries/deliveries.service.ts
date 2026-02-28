@@ -6,6 +6,7 @@ import {
   Injectable,
   NotFoundException
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../prisma.service.js';
 
 type OrderWithDeliveryContext = Awaited<ReturnType<DeliveriesService['getOrderForDelivery']>>;
@@ -53,6 +54,29 @@ type DeliveryQuoteResult = {
     pickupDurationSeconds: number | null;
     dropoffEta: string;
   };
+};
+
+type DeliveryTrackingStatus =
+  | 'PENDING_REQUIREMENTS'
+  | 'REQUESTED'
+  | 'OUT_FOR_DELIVERY'
+  | 'DELIVERED'
+  | 'FAILED';
+
+type DeliveryTrackingRecord = {
+  orderId: number;
+  provider: 'UBER_DIRECT' | 'LOCAL_SIMULATED';
+  mode: 'LIVE' | 'SIMULATED';
+  status: DeliveryTrackingStatus;
+  createdAt: string;
+  updatedAt: string;
+  providerDeliveryId: string;
+  providerQuoteId: string | null;
+  trackingUrl: string;
+  pickupEta: string | null;
+  dropoffEta: string | null;
+  lastProviderError: string | null;
+  draft: DeliveryDraft;
 };
 
 @Injectable()
@@ -163,6 +187,150 @@ export class DeliveriesService {
         pickupDurationSeconds: this.getNestedNumberField(body, 'pickup', 'duration'),
         dropoffEta: this.getNestedStringField(body, 'dropoff', 'eta')
       }
+    };
+  }
+
+  async dispatchOrderToUber(orderId: number) {
+    const readiness = await this.getUberDirectReadiness(orderId);
+    const existing = await this.readTracking(orderId);
+    if (existing && existing.status !== 'FAILED' && existing.status !== 'DELIVERED') {
+      return {
+        reusedExisting: true,
+        tracking: await this.syncTrackingRecord(existing)
+      };
+    }
+
+    if (readiness.missingRequirements.length > 0) {
+      const blocked = await this.saveTracking(orderId, {
+        orderId,
+        provider: 'LOCAL_SIMULATED',
+        mode: 'SIMULATED',
+        status: 'PENDING_REQUIREMENTS',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        providerDeliveryId: `blocked-${randomUUID()}`,
+        providerQuoteId: null,
+        trackingUrl: readiness.manualHandoffUrl,
+        pickupEta: null,
+        dropoffEta: null,
+        lastProviderError: readiness.missingRequirements.join(' • '),
+        draft: readiness.draft
+      });
+      return {
+        reusedExisting: false,
+        tracking: blocked
+      };
+    }
+
+    if (this.canUseLiveUberDispatch() && readiness.missingConfiguration.length === 0) {
+      try {
+        const liveTracking = await this.createLiveUberDirectDelivery(orderId, readiness);
+        return {
+          reusedExisting: false,
+          tracking: liveTracking
+        };
+      } catch (error) {
+        if (!this.shouldFallbackToLocalSimulation()) {
+          throw error;
+        }
+
+        const fallbackMessage = error instanceof Error ? error.message : 'Falha ao criar entrega Uber.';
+        const tracking = await this.createSimulatedTracking(orderId, readiness, fallbackMessage);
+        return {
+          reusedExisting: false,
+          tracking
+        };
+      }
+    }
+
+    const tracking = await this.createSimulatedTracking(
+      orderId,
+      readiness,
+      readiness.missingConfiguration.length > 0 ? readiness.missingConfiguration.join(' • ') : null
+    );
+    return {
+      reusedExisting: false,
+      tracking
+    };
+  }
+
+  async getOrderTracking(orderId: number) {
+    await this.getOrderForDelivery(orderId);
+    const tracking = await this.readTracking(orderId);
+    if (!tracking) {
+      return {
+        exists: false,
+        tracking: null
+      };
+    }
+
+    return {
+      exists: true,
+      tracking: await this.syncTrackingRecord(tracking)
+    };
+  }
+
+  async markTrackingAsDelivered(orderId: number) {
+    await this.getOrderForDelivery(orderId);
+    const tracking = await this.readTracking(orderId);
+    if (!tracking) {
+      throw new NotFoundException('Entrega ainda nao foi iniciada para este pedido.');
+    }
+
+    const delivered = await this.persistSyncedTracking({
+      ...tracking,
+      status: 'DELIVERED',
+      updatedAt: new Date().toISOString()
+    });
+    await this.markOrderDeliveredIfNeeded(orderId);
+    return delivered;
+  }
+
+  async handleUberDirectWebhook(payload: unknown) {
+    if (!payload || typeof payload !== 'object') {
+      throw new BadRequestException('Payload invalido para webhook da Uber.');
+    }
+
+    const providerDeliveryId =
+      this.getStringField(payload, 'delivery_id') ||
+      this.getStringField(payload, 'order_id') ||
+      this.getStringField(payload, 'id');
+    if (!providerDeliveryId) {
+      throw new BadRequestException('Webhook da Uber sem identificador da entrega.');
+    }
+
+    const tracking = await this.findTrackingByProviderDeliveryId(providerDeliveryId);
+    if (!tracking) {
+      return {
+        ok: true,
+        ignored: true,
+        reason: 'Entrega nao encontrada localmente.'
+      };
+    }
+
+    const nextStatus = this.mapProviderStatusToTrackingStatus(
+      this.getStringField(payload, 'status') ||
+        this.getNestedStringField(payload, 'delivery_status', 'status')
+    );
+
+    const synced = await this.persistSyncedTracking({
+      ...tracking,
+      status: nextStatus || tracking.status,
+      updatedAt: new Date().toISOString(),
+      dropoffEta:
+        this.getStringField(payload, 'dropoff_eta') ||
+        this.getNestedStringField(payload, 'dropoff', 'eta') ||
+        tracking.dropoffEta
+    });
+
+    if (synced.status === 'DELIVERED') {
+      await this.markOrderDeliveredIfNeeded(synced.orderId);
+    }
+
+    return {
+      ok: true,
+      ignored: false,
+      tracking: synced
     };
   }
 
@@ -350,6 +518,332 @@ export class DeliveriesService {
     } catch {
       return raw;
     }
+  }
+
+  private canUseLiveUberDispatch() {
+    return this.resolveBooleanEnv(process.env.UBER_DIRECT_LIVE_DISPATCH_ENABLED, false);
+  }
+
+  private shouldFallbackToLocalSimulation() {
+    return this.resolveBooleanEnv(process.env.UBER_DIRECT_FALLBACK_TO_LOCAL_SIMULATION, true);
+  }
+
+  private async createSimulatedTracking(
+    orderId: number,
+    readiness: DeliveryReadinessResult,
+    fallbackError: string | null
+  ) {
+    const now = Date.now();
+    const pickupEta = new Date(now + 10 * 60 * 1000).toISOString();
+    const dropoffEta = new Date(now + 40 * 60 * 1000).toISOString();
+    return this.saveTracking(orderId, {
+      orderId,
+      provider: 'LOCAL_SIMULATED',
+      mode: 'SIMULATED',
+      status: 'REQUESTED',
+      createdAt: new Date(now).toISOString(),
+      updatedAt: new Date(now).toISOString(),
+      providerDeliveryId: `local-${randomUUID()}`,
+      providerQuoteId: null,
+      trackingUrl: readiness.manualHandoffUrl,
+      pickupEta,
+      dropoffEta,
+      lastProviderError: fallbackError,
+      draft: readiness.draft
+    });
+  }
+
+  private async createLiveUberDirectDelivery(orderId: number, readiness: DeliveryReadinessResult) {
+    const quote = await this.getUberDirectQuote(orderId);
+    const customerId = String(process.env.UBER_DIRECT_CUSTOMER_ID || '').trim();
+    const createUrl = `${this.getUberDirectApiBaseUrl()}/v1/customers/${encodeURIComponent(customerId)}/deliveries`;
+    const accessToken = await this.getUberDirectAccessToken();
+
+    const response = await this.fetchWithTimeout(
+      createUrl,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          external_id: `querobroapp-order-${orderId}`,
+          quote_id: quote.quote.providerQuoteId,
+          pickup_name: String(process.env.UBER_DIRECT_PICKUP_NAME || '').trim(),
+          pickup_address: readiness.draft.pickupAddress,
+          pickup_phone_number: String(process.env.UBER_DIRECT_PICKUP_PHONE || '').trim(),
+          dropoff_name: readiness.draft.customerName,
+          dropoff_address: readiness.draft.dropoffAddress,
+          dropoff_phone_number: readiness.draft.customerPhone,
+          manifest_reference: `Pedido #${orderId}`,
+          manifest_items: readiness.draft.items.map((item) => ({
+            name: item.name,
+            quantity: item.quantity,
+            size: 'small'
+          }))
+        })
+      },
+      'Nao foi possivel criar a entrega da Uber.'
+    );
+    const body = await this.readResponseBody(response);
+
+    if (!response.ok) {
+      throw new BadGatewayException(
+        `Uber recusou a criacao da entrega (HTTP ${response.status}): ${this.summarizeProviderBody(body)}`
+      );
+    }
+
+    const providerDeliveryId =
+      this.getStringField(body, 'delivery_id') ||
+      this.getStringField(body, 'order_id') ||
+      this.getStringField(body, 'id');
+    if (!providerDeliveryId) {
+      throw new BadGatewayException('Uber nao retornou o identificador da entrega criada.');
+    }
+
+    return this.saveTracking(orderId, {
+      orderId,
+      provider: 'UBER_DIRECT',
+      mode: 'LIVE',
+      status: this.mapProviderStatusToTrackingStatus(this.getStringField(body, 'status')) || 'REQUESTED',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      providerDeliveryId,
+      providerQuoteId: quote.quote.providerQuoteId,
+      trackingUrl:
+        this.getStringField(body, 'tracking_url') ||
+        this.getNestedStringField(body, 'tracking', 'url') ||
+        quote.manualHandoffUrl,
+      pickupEta:
+        this.getStringField(body, 'pickup_eta') ||
+        this.getNestedStringField(body, 'pickup', 'eta') ||
+        null,
+      dropoffEta:
+        this.getStringField(body, 'dropoff_eta') ||
+        this.getNestedStringField(body, 'dropoff', 'eta') ||
+        quote.quote.dropoffEta ||
+        null,
+      lastProviderError: null,
+      draft: readiness.draft
+    });
+  }
+
+  private async syncTrackingRecord(tracking: DeliveryTrackingRecord) {
+    if (tracking.mode === 'SIMULATED') {
+      const now = Date.now();
+      const pickupAt = tracking.pickupEta ? new Date(tracking.pickupEta).getTime() : NaN;
+      const dropoffAt = tracking.dropoffEta ? new Date(tracking.dropoffEta).getTime() : NaN;
+
+      if (tracking.status !== 'DELIVERED' && Number.isFinite(dropoffAt) && now >= dropoffAt) {
+        const delivered = await this.persistSyncedTracking({
+          ...tracking,
+          status: 'DELIVERED',
+          updatedAt: new Date().toISOString()
+        });
+        await this.markOrderDeliveredIfNeeded(delivered.orderId);
+        return delivered;
+      }
+
+      if (
+        tracking.status === 'REQUESTED' &&
+        Number.isFinite(pickupAt) &&
+        now >= pickupAt
+      ) {
+        return this.persistSyncedTracking({
+          ...tracking,
+          status: 'OUT_FOR_DELIVERY',
+          updatedAt: new Date().toISOString()
+        });
+      }
+
+      return tracking;
+    }
+
+    const providerTracking = await this.trySyncLiveUberTracking(tracking);
+    if (!providerTracking) {
+      return tracking;
+    }
+
+    if (providerTracking.status === 'DELIVERED') {
+      await this.markOrderDeliveredIfNeeded(providerTracking.orderId);
+    }
+    return providerTracking;
+  }
+
+  private async trySyncLiveUberTracking(tracking: DeliveryTrackingRecord) {
+    if (!this.resolveBooleanEnv(process.env.UBER_DIRECT_LIVE_TRACKING_ENABLED, false)) {
+      return null;
+    }
+    if (!tracking.providerDeliveryId) {
+      return null;
+    }
+
+    const accessToken = await this.getUberDirectAccessToken();
+    const url = `${this.getUberDirectApiBaseUrl()}/v1/eats/deliveries/orders/${encodeURIComponent(tracking.providerDeliveryId)}`;
+
+    try {
+      const response = await this.fetchWithTimeout(
+        url,
+        {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${accessToken}`
+          }
+        },
+        'Nao foi possivel sincronizar o rastreio da Uber.'
+      );
+      const body = await this.readResponseBody(response);
+      if (!response.ok) {
+        return this.persistSyncedTracking({
+          ...tracking,
+          updatedAt: new Date().toISOString(),
+          lastProviderError: this.summarizeProviderBody(body)
+        });
+      }
+
+      const nextStatus = this.mapProviderStatusToTrackingStatus(this.getStringField(body, 'status'));
+      return this.persistSyncedTracking({
+        ...tracking,
+        status: nextStatus || tracking.status,
+        updatedAt: new Date().toISOString(),
+        trackingUrl:
+          this.getStringField(body, 'tracking_url') ||
+          this.getNestedStringField(body, 'tracking', 'url') ||
+          tracking.trackingUrl,
+        pickupEta:
+          this.getStringField(body, 'pickup_eta') ||
+          this.getNestedStringField(body, 'pickup', 'eta') ||
+          tracking.pickupEta,
+        dropoffEta:
+          this.getStringField(body, 'dropoff_eta') ||
+          this.getNestedStringField(body, 'dropoff', 'eta') ||
+          tracking.dropoffEta,
+        lastProviderError: null
+      });
+    } catch (error) {
+      return this.persistSyncedTracking({
+        ...tracking,
+        updatedAt: new Date().toISOString(),
+        lastProviderError: error instanceof Error ? error.message : 'Falha ao sincronizar rastreio.'
+      });
+    }
+  }
+
+  private mapProviderStatusToTrackingStatus(status: string) {
+    const normalized = status.trim().toUpperCase();
+    if (!normalized) return null;
+    if (
+      normalized.includes('DELIVERED') ||
+      normalized.includes('DROPPED_OFF') ||
+      normalized.includes('COMPLETED')
+    ) {
+      return 'DELIVERED';
+    }
+    if (
+      normalized.includes('COURIER') ||
+      normalized.includes('EN_ROUTE') ||
+      normalized.includes('PICKED')
+    ) {
+      return 'OUT_FOR_DELIVERY';
+    }
+    if (normalized.includes('FAILED') || normalized.includes('CANCELLED') || normalized.includes('CANCELED')) {
+      return 'FAILED';
+    }
+    if (normalized.includes('REQUESTED') || normalized.includes('PENDING') || normalized.includes('CREATED')) {
+      return 'REQUESTED';
+    }
+    return null;
+  }
+
+  private async markOrderDeliveredIfNeeded(orderId: number) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order || order.status === 'ENTREGUE' || order.status === 'CANCELADO') {
+      return;
+    }
+
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: { status: 'ENTREGUE' }
+    });
+  }
+
+  private async readTracking(orderId: number) {
+    const record = await this.prisma.idempotencyRecord.findUnique({
+      where: {
+        scope_idemKey: {
+          scope: 'DELIVERY_TRACKING',
+          idemKey: `ORDER_${orderId}`
+        }
+      }
+    });
+    if (!record) return null;
+
+    try {
+      return JSON.parse(record.responseJson) as DeliveryTrackingRecord;
+    } catch {
+      return null;
+    }
+  }
+
+  private async findTrackingByProviderDeliveryId(providerDeliveryId: string) {
+    const records = await this.prisma.idempotencyRecord.findMany({
+      where: {
+        scope: 'DELIVERY_TRACKING'
+      }
+    });
+
+    for (const record of records) {
+      try {
+        const parsed = JSON.parse(record.responseJson) as DeliveryTrackingRecord;
+        if (parsed.providerDeliveryId === providerDeliveryId) {
+          return parsed;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    return null;
+  }
+
+  private async saveTracking(orderId: number, tracking: DeliveryTrackingRecord) {
+    const expiresAt = new Date();
+    expiresAt.setFullYear(expiresAt.getFullYear() + 10);
+    await this.prisma.idempotencyRecord.upsert({
+      where: {
+        scope_idemKey: {
+          scope: 'DELIVERY_TRACKING',
+          idemKey: `ORDER_${orderId}`
+        }
+      },
+      update: {
+        requestHash: tracking.providerDeliveryId,
+        responseJson: JSON.stringify(tracking),
+        expiresAt
+      },
+      create: {
+        scope: 'DELIVERY_TRACKING',
+        idemKey: `ORDER_${orderId}`,
+        requestHash: tracking.providerDeliveryId,
+        responseJson: JSON.stringify(tracking),
+        expiresAt
+      }
+    });
+
+    return tracking;
+  }
+
+  private async persistSyncedTracking(tracking: DeliveryTrackingRecord) {
+    return this.saveTracking(tracking.orderId, tracking);
+  }
+
+  private resolveBooleanEnv(rawValue: string | undefined, fallback: boolean) {
+    if (rawValue == null || rawValue.trim() === '') return fallback;
+    const normalized = rawValue.trim().toLowerCase();
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+    return fallback;
   }
 
   private summarizeProviderBody(body: unknown) {

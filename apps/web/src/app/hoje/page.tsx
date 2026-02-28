@@ -1,5 +1,5 @@
-import { DayOpsView } from '@/components/day-ops-view';
+import { redirect } from 'next/navigation';
 
 export default function HojePage() {
-  return <DayOpsView mode="today" />;
+  redirect('/calendario');
 }

@@ -11,23 +11,35 @@ import { useSurfaceMode } from '@/hooks/use-surface-mode';
 import { useTutorialSpotlight } from '@/hooks/use-tutorial-spotlight';
 import { useFeedback } from '@/components/feedback-provider';
 import { FormField } from '@/components/form/FormField';
-import { OnboardingTourCard } from '@/components/onboarding-tour-card';
-import {
-  BuilderLayoutCustomCards,
-  BuilderLayoutItemSlot,
-  BuilderLayoutProvider
-} from '@/components/builder-layout';
+import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
+import { CalendarBoard } from '@/features/calendar/calendar-board';
+import { CalendarOrderDetailPanel } from '@/features/calendar/calendar-order-detail-panel';
 import { OrderFilters } from './order-filters';
+import { OrderQuickCreate } from './order-quick-create';
 import {
+  type DeliveryTracking,
   type FinancialFilter,
   type OrderView,
+  type ProductionBoard,
   type UberDirectQuote,
   type UberDirectReadiness,
   nextStatusByCurrent,
   orderStatuses,
   paymentMethods
 } from './orders-model';
-import { fetchOrdersWorkspace, fetchUberDirectQuote, fetchUberDirectReadiness } from './orders-api';
+import {
+  completeProductionBatch,
+  dispatchUberDirectOrder,
+  fetchOrderDeliveryTracking,
+  type WhatsappOrderIntakeLaunchResult,
+  fetchProductionBoard,
+  fetchOrdersWorkspace,
+  fetchUberDirectQuote,
+  fetchUberDirectReadiness,
+  launchWhatsappOrderIntakeFlow,
+  markOrderDeliveryComplete,
+  startNextProductionBatch
+} from './orders-api';
 
 const TEST_DATA_TAG = '[TESTE_E2E]';
 const TUTORIAL_QUERY_VALUE = 'primeira_vez';
@@ -220,6 +232,13 @@ function paymentRecordBadgeClass(status: string) {
 }
 
 type CalendarViewMode = 'DAY' | 'WEEK' | 'MONTH';
+type OrdersScreenMode = 'orders' | 'calendar';
+
+const calendarViewLabels: Record<CalendarViewMode, string> = {
+  DAY: 'Dia',
+  WEEK: 'Semana',
+  MONTH: 'Mes'
+};
 
 type CalendarOrderEntry = {
   order: OrderView;
@@ -339,7 +358,7 @@ function clampNumber(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-function OrdersPageContent() {
+function OrdersPageContent({ screenMode = 'orders' }: { screenMode?: OrdersScreenMode }) {
   const searchParams = useSearchParams();
   const { tutorialMode, isSpotlightSlot } = useTutorialSpotlight(searchParams, TUTORIAL_QUERY_VALUE);
   const [orders, setOrders] = useState<OrderView[]>([]);
@@ -364,7 +383,9 @@ function OrdersPageContent() {
   const [orderSearch, setOrderSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('TODOS');
   const [financialFilter, setFinancialFilter] = useState<FinancialFilter>('TODOS');
-  const [calendarView, setCalendarView] = useState<CalendarViewMode>('WEEK');
+  const [calendarView, setCalendarView] = useState<CalendarViewMode>(
+    screenMode === 'calendar' ? 'MONTH' : 'WEEK'
+  );
   const [calendarAnchorDate, setCalendarAnchorDate] = useState<Date>(() => startOfLocalDay(new Date()));
   const [selectedCalendarDateKey, setSelectedCalendarDateKey] = useState(() => dateKeyFromDate(new Date()));
   const [expandSelectedDayDetails, setExpandSelectedDayDetails] = useState(false);
@@ -378,15 +399,60 @@ function OrdersPageContent() {
   const [markingPaid, setMarkingPaid] = useState(false);
   const [selectedOrderScheduledAt, setSelectedOrderScheduledAt] = useState<string>('');
   const [savingOrderSchedule, setSavingOrderSchedule] = useState(false);
-  const [cleaningTestData, setCleaningTestData] = useState(false);
   const [uberReadinessLoading, setUberReadinessLoading] = useState(false);
   const [uberReadinessError, setUberReadinessError] = useState<string | null>(null);
   const [uberReadiness, setUberReadiness] = useState<UberDirectReadiness | null>(null);
   const [uberQuoteLoading, setUberQuoteLoading] = useState(false);
   const [uberQuoteError, setUberQuoteError] = useState<string | null>(null);
   const [uberQuote, setUberQuote] = useState<UberDirectQuote | null>(null);
+  const [productionBoard, setProductionBoard] = useState<ProductionBoard | null>(null);
+  const [productionLoading, setProductionLoading] = useState(false);
+  const [productionError, setProductionError] = useState<string | null>(null);
+  const [startingProductionBatch, setStartingProductionBatch] = useState(false);
+  const [completingProductionBatch, setCompletingProductionBatch] = useState(false);
+  const [deliveryTracking, setDeliveryTracking] = useState<DeliveryTracking | null>(null);
+  const [deliveryTrackingLoading, setDeliveryTrackingLoading] = useState(false);
+  const [deliveryTrackingError, setDeliveryTrackingError] = useState<string | null>(null);
+  const [whatsappFlowRecipientPhone, setWhatsappFlowRecipientPhone] = useState('');
+  const [launchingWhatsappFlow, setLaunchingWhatsappFlow] = useState(false);
+  const [whatsappFlowLaunchError, setWhatsappFlowLaunchError] = useState<string | null>(null);
+  const [whatsappFlowLaunchResult, setWhatsappFlowLaunchResult] =
+    useState<WhatsappOrderIntakeLaunchResult | null>(null);
   const selectedOrderId = selectedOrder?.id ?? null;
   const { confirm, notifyError, notifySuccess, notifyUndo } = useFeedback();
+
+  const refreshOperationalState = useCallback(
+    async (orderId: number | null) => {
+      setProductionLoading(true);
+      setProductionError(null);
+      try {
+        const board = await fetchProductionBoard();
+        setProductionBoard(board);
+      } catch (err) {
+        setProductionError(err instanceof Error ? err.message : 'Falha ao carregar o forno.');
+      } finally {
+        setProductionLoading(false);
+      }
+
+      if (!orderId) {
+        setDeliveryTracking(null);
+        setDeliveryTrackingError(null);
+        return;
+      }
+
+      setDeliveryTrackingLoading(true);
+      setDeliveryTrackingError(null);
+      try {
+        const response = await fetchOrderDeliveryTracking(orderId);
+        setDeliveryTracking(response.tracking);
+      } catch (err) {
+        setDeliveryTrackingError(err instanceof Error ? err.message : 'Falha ao carregar rastreio.');
+      } finally {
+        setDeliveryTrackingLoading(false);
+      }
+    },
+    []
+  );
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -420,6 +486,20 @@ function OrdersPageContent() {
       // erro tratado em loadError
     });
   }, [loadAll]);
+
+  useEffect(() => {
+    refreshOperationalState(selectedOrderId).catch(() => {
+      // erro tratado em estado proprio
+    });
+  }, [refreshOperationalState, selectedOrderId]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      refreshOperationalState(selectedOrderId).catch(() => undefined);
+    }, 10000);
+
+    return () => window.clearInterval(timer);
+  }, [refreshOperationalState, selectedOrderId]);
 
   useEffect(() => {
     const focus = consumeFocusQueryParam(searchParams);
@@ -538,6 +618,7 @@ function OrdersPageContent() {
       setNewOrderNotes(tutorialMode ? withTestDataTag('', 'Pedido do momento') : '');
       setNewOrderScheduledAt(defaultOrderDateTimeInput());
       const refreshedOrders = await loadAll();
+      await refreshOperationalState(createdOrder.id ?? null);
       const freshCreated = refreshedOrders.find((entry) => entry.id === createdOrder.id);
       notifySuccess('Pedido criado com sucesso.');
       if (freshCreated) {
@@ -552,94 +633,6 @@ function OrdersPageContent() {
     }
   };
 
-  const cleanupTestData = async () => {
-    const accepted = await confirm({
-      title: 'Limpar dados de teste?',
-      description: `Remove pedidos e clientes marcados com ${TEST_DATA_TAG}.`,
-      confirmLabel: 'Limpar dados de teste',
-      cancelLabel: 'Cancelar',
-      danger: true
-    });
-    if (!accepted) return;
-
-    setCleaningTestData(true);
-    const cleanupErrors: string[] = [];
-
-    try {
-      const [ordersData, customersData] = await Promise.all([
-        apiFetch<OrderView[]>('/orders'),
-        apiFetch<Customer[]>('/customers')
-      ]);
-
-      const taggedCustomerIds = new Set(
-        customersData
-          .filter((customer) => containsTestDataTag(customer.name) || containsTestDataTag(customer.deliveryNotes))
-          .map((customer) => customer.id)
-          .filter((id): id is number => Number.isFinite(id))
-      );
-
-      const orderIdsToDelete = ordersData
-        .filter((order) => containsTestDataTag(order.notes) || taggedCustomerIds.has(order.customerId))
-        .map((order) => order.id)
-        .filter((id): id is number => Number.isFinite(id))
-        .sort((a, b) => b - a);
-
-      let removedOrders = 0;
-      for (const orderId of orderIdsToDelete) {
-        try {
-          await apiFetch(`/orders/${orderId}`, { method: 'DELETE' });
-          removedOrders += 1;
-        } catch (err) {
-          cleanupErrors.push(`Pedido #${orderId}: ${err instanceof Error ? err.message : 'falha na exclusao'}`);
-        }
-      }
-
-      const [remainingOrders, refreshedCustomers] = await Promise.all([
-        apiFetch<OrderView[]>('/orders'),
-        apiFetch<Customer[]>('/customers')
-      ]);
-      const customerIdsWithOrders = new Set(remainingOrders.map((order) => order.customerId));
-
-      const customerIdsToDelete = refreshedCustomers
-        .filter((customer) => {
-          if (!customer.id) return false;
-          const tagged =
-            containsTestDataTag(customer.name) || containsTestDataTag(customer.deliveryNotes);
-          return tagged && !customerIdsWithOrders.has(customer.id);
-        })
-        .map((customer) => customer.id)
-        .filter((id): id is number => Number.isFinite(id))
-        .sort((a, b) => b - a);
-
-      let removedCustomers = 0;
-      for (const customerId of customerIdsToDelete) {
-        try {
-          await apiFetch(`/customers/${customerId}`, { method: 'DELETE' });
-          removedCustomers += 1;
-        } catch (err) {
-          cleanupErrors.push(
-            `Cliente #${customerId}: ${err instanceof Error ? err.message : 'falha na exclusao'}`
-          );
-        }
-      }
-
-      await loadAll();
-      if (cleanupErrors.length > 0) {
-        notifyError(
-          `Limpeza parcial: ${removedOrders} pedido(s), ${removedCustomers} cliente(s). Erros: ${cleanupErrors.length}.`
-        );
-      } else {
-        notifySuccess(
-          `Limpeza concluida: ${removedOrders} pedido(s) e ${removedCustomers} cliente(s) de teste removidos.`
-        );
-      }
-    } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Nao foi possivel limpar os dados de teste.');
-    } finally {
-      setCleaningTestData(false);
-    }
-  };
-
   const addItem = async (orderId: number) => {
     if (!addItemProductId || addItemQty <= 0) return;
     try {
@@ -651,6 +644,7 @@ function OrdersPageContent() {
       setAddItemProductSearch('');
       setAddItemQty(1);
       await loadAll();
+      await refreshOperationalState(orderId);
       notifySuccess('Item adicionado ao pedido.');
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Nao foi possivel adicionar o item.');
@@ -662,7 +656,7 @@ function OrdersPageContent() {
     const itemToRestore = orderScope?.items?.find((item) => item.id === itemId);
     const accepted = await confirm({
       title: 'Remover item do pedido?',
-      description: 'A quantidade sera estornada no estoque deste pedido.',
+      description: 'A fila de producao sera recalculada para este pedido.',
       confirmLabel: 'Remover',
       cancelLabel: 'Cancelar',
       danger: true
@@ -671,6 +665,7 @@ function OrdersPageContent() {
     try {
       await apiFetch(`/orders/${orderId}/items/${itemId}`, { method: 'DELETE' });
       await loadAll();
+      await refreshOperationalState(orderId);
       if (itemToRestore) {
         const productName = productMap.get(itemToRestore.productId)?.name ?? `Produto ${itemToRestore.productId}`;
         notifyUndo(`${productName} removido do pedido.`, async () => {
@@ -696,7 +691,7 @@ function OrdersPageContent() {
   const removeOrder = async (orderId: number) => {
     const accepted = await confirm({
       title: 'Excluir pedido?',
-      description: 'Essa acao remove o pedido e estorna o consumo de estoque quando aplicavel.',
+      description: 'Essa acao remove o pedido e tira a demanda da fila de producao.',
       confirmLabel: 'Excluir',
       cancelLabel: 'Cancelar',
       danger: true
@@ -706,6 +701,7 @@ function OrdersPageContent() {
       await apiFetch(`/orders/${orderId}`, { method: 'DELETE' });
       setSelectedOrder(null);
       await loadAll();
+      await refreshOperationalState(null);
       notifySuccess('Pedido excluido com sucesso.');
       scrollToLayoutSlot('list');
     } catch (err) {
@@ -720,6 +716,7 @@ function OrdersPageContent() {
         body: JSON.stringify({ status }),
       });
       await loadAll();
+      await refreshOperationalState(orderId);
       notifySuccess(`Status atualizado para ${status}.`);
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Nao foi possivel atualizar o status.');
@@ -741,6 +738,7 @@ function OrdersPageContent() {
         body: JSON.stringify({ scheduledAt: scheduledAt.toISOString() }),
       });
       await loadAll();
+      await refreshOperationalState(selectedOrder.id);
       notifySuccess('Data e horario do pedido atualizados.');
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Nao foi possivel atualizar a data do pedido.');
@@ -798,6 +796,74 @@ function OrdersPageContent() {
     }
   };
 
+  const startProductionNow = async () => {
+    setStartingProductionBatch(true);
+    try {
+      const result = await startNextProductionBatch({
+        triggerSource: 'MANUAL',
+        triggerLabel: 'Inicio manual pelo app'
+      });
+      setProductionBoard(result.board);
+      await loadAll();
+      await refreshOperationalState(selectedOrderId);
+      notifySuccess('Fornada iniciada com baixa real no estoque.');
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel iniciar a fornada.');
+    } finally {
+      setStartingProductionBatch(false);
+    }
+  };
+
+  const completeActiveProductionBatch = async () => {
+    const batchId = productionBoard?.oven.activeBatch?.id;
+    if (!batchId) return;
+
+    setCompletingProductionBatch(true);
+    try {
+      const result = await completeProductionBatch(batchId);
+      setProductionBoard(result.board);
+      await loadAll();
+      await refreshOperationalState(selectedOrderId);
+      notifySuccess('Fornada concluida. Pedidos prontos seguiram para entrega.');
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel concluir a fornada.');
+    } finally {
+      setCompletingProductionBatch(false);
+    }
+  };
+
+  const dispatchSelectedOrderToUber = async () => {
+    if (!selectedOrder?.id) return;
+
+    try {
+      const result = await dispatchUberDirectOrder(selectedOrder.id);
+      setDeliveryTracking(result.tracking);
+      await loadAll();
+      await refreshOperationalState(selectedOrder.id);
+      notifySuccess(
+        result.tracking.mode === 'LIVE'
+          ? 'Entrega enviada para a Uber.'
+          : 'Entrega criada localmente e pronta para acompanhar.'
+      );
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel enviar a entrega.');
+    }
+  };
+
+  const completeSelectedDelivery = async () => {
+    if (!selectedOrder?.id) return;
+
+    try {
+      const result = await markOrderDeliveryComplete(selectedOrder.id);
+      setDeliveryTracking(result);
+      await loadAll();
+      await refreshOperationalState(selectedOrder.id);
+      notifySuccess('Entrega marcada como concluida.');
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel concluir a entrega.');
+    }
+  };
+
   const registerPayment = async () => {
     if (!selectedOrder?.id) return;
     if (selectedOrder.status === 'CANCELADO') {
@@ -837,6 +903,7 @@ function OrdersPageContent() {
       setPaymentAmount('');
       setPaymentFeedback('Pagamento registrado com sucesso.');
       await loadAll();
+      await refreshOperationalState(selectedOrder.id);
       notifySuccess('Pagamento registrado com sucesso.');
     } catch (err) {
       setPaymentError(err instanceof Error ? err.message : 'Nao foi possivel registrar pagamento.');
@@ -881,6 +948,7 @@ function OrdersPageContent() {
       });
       setPaymentFeedback('Pedido marcado como pago com sucesso.');
       await loadAll();
+      await refreshOperationalState(selectedOrder.id);
       notifySuccess('Pedido marcado como pago.');
     } catch (err) {
       setPaymentError(err instanceof Error ? err.message : 'Nao foi possivel marcar o pedido como pago.');
@@ -903,6 +971,7 @@ function OrdersPageContent() {
     try {
       await apiFetch(`/payments/${paymentId}`, { method: 'DELETE' });
       await loadAll();
+      await refreshOperationalState(selectedOrder?.id ?? null);
       if (paymentToRestore) {
         notifyUndo('Pagamento removido com sucesso.', async () => {
           await apiFetch('/payments', {
@@ -1177,6 +1246,14 @@ function OrdersPageContent() {
     setCalendarAnchorDate(fallback);
   }, [calendarEntries, calendarOrdersByDate, selectedCalendarDateKey]);
 
+  useEffect(() => {
+    if (!newOrderCustomerId) return;
+    const customer = customers.find((entry) => entry.id === newOrderCustomerId);
+    const normalizedPhone = (customer?.phone || '').replace(/\D+/g, '');
+    if (!normalizedPhone) return;
+    setWhatsappFlowRecipientPhone(normalizedPhone);
+  }, [customers, newOrderCustomerId]);
+
   const draftSubtotal = useMemo(() => {
     return newOrderItems.reduce((sum, item) => {
       const product = productMap.get(item.productId);
@@ -1202,64 +1279,59 @@ function OrdersPageContent() {
   const selectedOrderDateLabel = formatOrderDateTimeLabel(selectedOrderDate);
   const selectedOrderUberUrl = buildUberDeliveryUrl(selectedCustomer);
   const selectedOrderUberSummary = buildUberOrderSummary(selectedOrder, selectedCustomer, productMap);
-  const selectedOrderPaymentStatus = selectedOrder ? derivePaymentStatus(selectedOrder) : 'PENDENTE';
   const selectedOrderIsCancelled = selectedOrder?.status === 'CANCELADO';
   const selectedOrderNextStatus = selectedOrder
     ? nextStatusByCurrent[selectedOrder.status || '']
     : null;
+  const activeProductionBatch = productionBoard?.oven.activeBatch || null;
+  const selectedOrderQueueState = selectedOrder
+    ? productionBoard?.queue.find((entry) => entry.orderId === selectedOrder.id) || null
+    : null;
+  const selectedOrderInActiveBatch = Boolean(
+    selectedOrder?.id && activeProductionBatch?.linkedOrderIds.includes(selectedOrder.id)
+  );
+  const selectedOrderTracking =
+    selectedOrder?.id && deliveryTracking?.orderId === selectedOrder.id ? deliveryTracking : null;
+  const isCalendarScreen = screenMode === 'calendar';
+
+  const launchOrderIntakeWhatsappFlow = async () => {
+    if (!whatsappFlowRecipientPhone.trim()) {
+      setWhatsappFlowLaunchError('Informe o telefone de destino para o WhatsApp Flow.');
+      return;
+    }
+
+    setLaunchingWhatsappFlow(true);
+    setWhatsappFlowLaunchError(null);
+    try {
+      const result = await launchWhatsappOrderIntakeFlow({
+        recipientPhone: whatsappFlowRecipientPhone,
+        customerId:
+          typeof newOrderCustomerId === 'number' && Number.isFinite(newOrderCustomerId)
+            ? newOrderCustomerId
+            : undefined,
+        scheduledAt: newOrderScheduledAt
+          ? new Date(newOrderScheduledAt).toISOString()
+          : null,
+        notes: newOrderNotes || null
+      });
+      setWhatsappFlowLaunchResult(result);
+      notifySuccess(
+        result.canSendViaMeta
+          ? 'WhatsApp Flow preparado e enfileirado no outbox.'
+          : 'WhatsApp Flow preparado. Falta configurar o Flow ID da Meta para envio automatico.'
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Nao foi possivel iniciar o WhatsApp Flow.';
+      setWhatsappFlowLaunchError(message);
+      notifyError(message);
+    } finally {
+      setLaunchingWhatsappFlow(false);
+    }
+  };
 
   return (
     <BuilderLayoutProvider page="pedidos">
       <section className="grid gap-8">
-      <BuilderLayoutItemSlot
-        id="header"
-        className={isSpotlightSlot('header') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
-      >
-      <div className="app-section-title">
-        <div>
-          <span className="app-chip">Operacao</span>
-          <h2 className="mt-3 text-3xl font-semibold">Pedidos</h2>
-          <p className="text-neutral-600">Criar, acompanhar e receber.</p>
-        </div>
-      </div>
-      <div className="app-inline-actions mt-4">
-        <button
-          type="button"
-          className="app-button app-button-ghost"
-          onClick={cleanupTestData}
-          disabled={cleaningTestData}
-        >
-          {cleaningTestData ? 'Limpando...' : 'Limpar dados de teste'}
-        </button>
-      </div>
-      <div className="app-quickflow app-quickflow--columns mt-4">
-        <button
-          type="button"
-          className={`app-quickflow__step text-left ${canCreateOrder ? 'app-quickflow__step--done' : ''}`}
-          onClick={() => scrollToLayoutSlot('new_order', { focus: true })}
-        >
-          <p className="app-quickflow__step-title">1. Criar pedido</p>
-          <p className="app-quickflow__step-subtitle">Cliente e itens.</p>
-        </button>
-        <button
-          type="button"
-          className={`app-quickflow__step text-left ${selectedOrder ? 'app-quickflow__step--done' : ''}`}
-          onClick={() => scrollToLayoutSlot('list', { focus: true })}
-        >
-          <p className="app-quickflow__step-title">2. Selecionar pedido</p>
-          <p className="app-quickflow__step-subtitle">Abrir detalhe.</p>
-        </button>
-        <button
-          type="button"
-          className={`app-quickflow__step text-left ${selectedOrderPaymentStatus === 'PAGO' ? 'app-quickflow__step--done' : ''}`}
-          onClick={() => scrollToLayoutSlot('detail', { focus: true })}
-        >
-          <p className="app-quickflow__step-title">3. Receber pagamento</p>
-          <p className="app-quickflow__step-subtitle">Parcial ou total.</p>
-        </button>
-      </div>
-      </BuilderLayoutItemSlot>
-
       <BuilderLayoutItemSlot
         id="load_error"
         className={isSpotlightSlot('load_error') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
@@ -1271,249 +1343,154 @@ function OrdersPageContent() {
       ) : null}
       </BuilderLayoutItemSlot>
 
+      {!isCalendarScreen ? (
       <BuilderLayoutItemSlot
         id="new_order"
         className={isSpotlightSlot('new_order') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
       >
-      <div className="app-panel grid gap-5">
-        {tutorialMode ? (
-          <OnboardingTourCard
-            stepLabel="Tutorial 1a vez · passo 4 de 5"
-            title="Monte o primeiro pedido completo"
-            description="Selecione o cliente, inclua os itens e crie o pedido. Isso ja prepara o consumo automatico do estoque."
-            points={[
-              { label: 'Agora', value: 'Cliente + itens obrigatorios + opcionalmente desconto.' },
-              { label: 'Depois', value: 'Abra o detalhe para confirmar status e pagamento.' }
-            ]}
-            actions={[
-              {
-                label: 'Voltar para cliente',
-                href: '/clientes?focus=form&tutorial=primeira_vez',
-                variant: 'ghost'
-              },
-              {
-                label: 'Ir para detalhe do pedido',
-                href: '/pedidos?focus=detail&tutorial=primeira_vez',
-                variant: 'primary'
-              }
-            ]}
-            className="mt-0"
-          />
-        ) : null}
-        <div>
-          <span className="app-chip">Criacao</span>
-          <h3 className="mt-3 text-xl font-semibold">Novo pedido</h3>
-        </div>
-        <div className="app-inline-actions">
-          <button className="app-button app-button-ghost" onClick={clearDraft}>
-            Limpar rascunho
-          </button>
-        </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          <FormField label="Cliente" hint="Digite para buscar e selecione">
-            <input
-              className="app-input"
-              list="customers-list"
-              placeholder="Buscar cliente..."
-              value={customerSearch}
-              onChange={(e) => {
-                const value = e.target.value;
-                setCustomerSearch(value);
-                const parsedId = parseIdFromLabel(value, customerOptions);
-                setNewOrderCustomerId(Number.isFinite(parsedId) ? parsedId : '');
-              }}
-            />
-            <datalist id="customers-list">
-              {customerOptions.map((c) => (
-                <option key={c.id} value={c.label} />
-              ))}
-            </datalist>
-          </FormField>
-          <FormField label="Produto" hint="Digite para buscar">
-            <input
-              className="app-input"
-              list="products-list"
-              placeholder="Buscar produto..."
-              value={draftProductSearch}
-              onChange={(e) => {
-                const value = e.target.value;
-                setDraftProductSearch(value);
-                const parsedId = parseIdFromLabel(value, productOptions);
-                setDraftProductId(Number.isFinite(parsedId) ? parsedId : '');
-              }}
-            />
-            <datalist id="products-list">
-              {productOptions.map((p) => (
-                <option key={p.id} value={p.label} />
-              ))}
-            </datalist>
-          </FormField>
-          <FormField label="Quantidade">
-            <input
-              className="app-input"
-              type="number"
-              min={1}
-              value={draftQty}
-              onChange={(e) => setDraftQty(parsePositiveIntegerInput(e.target.value))}
-            />
-          </FormField>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <FormField label="Data e horario" hint="Agenda principal do pedido">
-            <input
-              className="app-input"
-              type="datetime-local"
-              value={newOrderScheduledAt}
-              onChange={(e) => setNewOrderScheduledAt(e.target.value)}
-            />
-          </FormField>
-          <FormField label="Desconto (R$)" hint="Opcional">
-            <input
-              className="app-input"
-              placeholder="0,00"
-              value={newOrderDiscount}
-              inputMode="decimal"
-              onChange={(e) => setNewOrderDiscount(e.target.value)}
-              onBlur={() => setNewOrderDiscount(formatMoneyInputBR(newOrderDiscount || '0') || '0,00')}
-            />
-          </FormField>
-        </div>
-        <FormField label="Observacoes" hint="Opcional">
-          <input
-            className="app-input"
-            placeholder="Observacoes do pedido"
-            value={newOrderNotes}
-            onChange={(e) => setNewOrderNotes(e.target.value)}
-          />
-        </FormField>
-        <div className="app-form-actions app-form-actions--mobile-sticky">
-          <button className="app-button app-button-ghost" onClick={addItemDraft}>
-            Adicionar item
-          </button>
-          <button
-            className="app-button app-button-primary disabled:cursor-not-allowed disabled:opacity-60"
-            onClick={createOrder}
-            disabled={!canCreateOrder}
-          >
-            Criar pedido
-          </button>
-        </div>
-        {newOrderItems.length > 0 && (
-          <div className="grid gap-2 text-sm text-neutral-600">
-            {newOrderItems.map((item, index) => {
-              const product = productMap.get(item.productId);
-              const total = (product?.price ?? 0) * item.quantity;
-              return (
-                <div
-                  key={`${item.productId}-${index}`}
-                  className="flex items-center justify-between rounded-lg border border-white/60 bg-white/70 px-3 py-2"
-                >
-                  <div>
-                    <p className="text-neutral-800">
-                      {product?.name ?? `Produto ${item.productId}`} x {item.quantity}
-                    </p>
-                    <p className="text-xs text-neutral-500">{formatCurrencyBR(total)}</p>
-                  </div>
-                  <button
-                    className="app-button app-button-danger"
-                    onClick={() => removeDraftItem(index)}
-                  >
-                    Remover
-                  </button>
-                </div>
-              );
-            })}
-            <div className="flex flex-wrap items-center justify-between rounded-lg bg-white/70 px-3 py-2 text-sm">
-              <span>Subtotal</span>
-              <span className="font-semibold">{formatCurrencyBR(draftSubtotal)}</span>
-            </div>
-            <div className="flex flex-wrap items-center justify-between rounded-lg bg-white/70 px-3 py-2 text-sm">
-              <span>Desconto</span>
-              <span className="font-semibold">{formatCurrencyBR(draftDiscount)}</span>
-            </div>
-            <div className="flex flex-wrap items-center justify-between rounded-lg bg-white/90 px-3 py-2 text-sm">
-              <span>Total</span>
-              <span className="font-semibold">{formatCurrencyBR(draftTotal)}</span>
+      <details className="grid gap-4">
+        <summary className="cursor-pointer text-sm font-semibold text-neutral-700">Novo pedido</summary>
+        <div className="app-panel grid gap-3">
+          <div>
+            <p className="text-sm font-semibold text-neutral-900">Captar pelo WhatsApp Flow</p>
+            <p className="text-xs text-neutral-500">Cliente e pedido podem ser preenchidos no WhatsApp e voltar prontos para o app.</p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+            <FormField label="Telefone do WhatsApp">
+              <input
+                className="app-input"
+                placeholder="5511999999999"
+                value={whatsappFlowRecipientPhone}
+                inputMode="tel"
+                onChange={(event) => setWhatsappFlowRecipientPhone(event.target.value)}
+              />
+            </FormField>
+            <div className="app-form-actions app-form-actions--mobile-sticky">
+              <button
+                type="button"
+                className="app-button app-button-primary"
+                onClick={launchOrderIntakeWhatsappFlow}
+                disabled={launchingWhatsappFlow}
+              >
+                {launchingWhatsappFlow ? 'Preparando...' : 'Enviar Flow'}
+              </button>
             </div>
           </div>
-        )}
-        {orderError && <p className="text-xs text-red-600">{orderError}</p>}
-        {!canCreateOrder && !orderError && (
-          <p className="text-xs text-neutral-500">
-            Selecione um cliente e pelo menos um item para criar o pedido.
-          </p>
-        )}
-      </div>
+          {whatsappFlowLaunchError ? <p className="text-xs text-red-600">{whatsappFlowLaunchError}</p> : null}
+          {whatsappFlowLaunchResult ? (
+            <div className="rounded-lg border border-white/60 bg-white/70 px-3 py-3 text-sm text-neutral-700">
+              <p>
+                Sessao criada. Outbox #{whatsappFlowLaunchResult.outboxMessageId}
+                {whatsappFlowLaunchResult.canSendViaMeta ? '' : ' • envio automatico aguardando Flow ID da Meta'}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <a
+                  className="app-button app-button-ghost"
+                  href={whatsappFlowLaunchResult.previewUrl}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >
+                  Abrir Flow
+                </a>
+              </div>
+            </div>
+          ) : null}
+        </div>
+        <OrderQuickCreate
+          tutorialMode={tutorialMode}
+          customerOptions={customerOptions}
+          productOptions={productOptions}
+          customerSearch={customerSearch}
+          draftProductSearch={draftProductSearch}
+          draftQty={draftQty}
+          newOrderScheduledAt={newOrderScheduledAt}
+          newOrderDiscount={newOrderDiscount}
+          newOrderNotes={newOrderNotes}
+          newOrderItems={newOrderItems}
+          canCreateOrder={canCreateOrder}
+          orderError={orderError}
+          draftSubtotal={draftSubtotal}
+          draftDiscount={draftDiscount}
+          draftTotal={draftTotal}
+          productMap={productMap}
+          onCustomerSearchChange={(value) => {
+            setCustomerSearch(value);
+            const parsedId = parseIdFromLabel(value, customerOptions);
+            setNewOrderCustomerId(Number.isFinite(parsedId) ? parsedId : '');
+          }}
+          onProductSearchChange={(value) => {
+            setDraftProductSearch(value);
+            const parsedId = parseIdFromLabel(value, productOptions);
+            setDraftProductId(Number.isFinite(parsedId) ? parsedId : '');
+          }}
+          onDraftQtyChange={(value) => setDraftQty(parsePositiveIntegerInput(value))}
+          onScheduledAtChange={setNewOrderScheduledAt}
+          onDiscountChange={setNewOrderDiscount}
+          onDiscountBlur={() =>
+            setNewOrderDiscount(formatMoneyInputBR(newOrderDiscount || '0') || '0,00')
+          }
+          onNotesChange={setNewOrderNotes}
+          onAddItemDraft={addItemDraft}
+          onCreateOrder={createOrder}
+          onRemoveDraftItem={removeDraftItem}
+          onClearDraft={clearDraft}
+        />
+      </details>
       </BuilderLayoutItemSlot>
+      ) : null}
 
       <BuilderLayoutItemSlot
         id="list"
         className={isSpotlightSlot('list') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
       >
-      <div className="app-panel grid gap-4">
-        <OrderFilters
-          isOperationMode={isOperationMode}
-          orderSearch={orderSearch}
-          onOrderSearchChange={setOrderSearch}
-          statusFilter={statusFilter}
-          onStatusFilterChange={setStatusFilter}
-          financialFilter={financialFilter}
-          onFinancialFilterChange={setFinancialFilter}
-          orderStatuses={orderStatuses}
-        />
-        {isOperationMode ? (
-          <p className="text-xs text-neutral-500">
-            Mostrando apenas pedidos em andamento para reduzir ruido operacional.
-          </p>
-        ) : null}
-        <div className="orders-calendar-toolbar">
-          <div className="stock-view-toggle" role="group" aria-label="Visao do calendario de pedidos">
-            <button
-              type="button"
-              className={`stock-view-toggle__button ${calendarView === 'DAY' ? 'stock-view-toggle__button--active' : ''}`}
-              onClick={() => setCalendarView('DAY')}
-            >
-              dia
-            </button>
-            <button
-              type="button"
-              className={`stock-view-toggle__button ${calendarView === 'WEEK' ? 'stock-view-toggle__button--active' : ''}`}
-              onClick={() => setCalendarView('WEEK')}
-            >
-              semana
-            </button>
-            <button
-              type="button"
-              className={`stock-view-toggle__button ${calendarView === 'MONTH' ? 'stock-view-toggle__button--active' : ''}`}
-              onClick={() => setCalendarView('MONTH')}
-            >
-              mes
-            </button>
+      <CalendarBoard
+        filters={
+          isCalendarScreen ? null : (
+            <OrderFilters
+              isOperationMode={isOperationMode}
+              orderSearch={orderSearch}
+              onOrderSearchChange={setOrderSearch}
+              statusFilter={statusFilter}
+              onStatusFilterChange={setStatusFilter}
+              financialFilter={financialFilter}
+              onFinancialFilterChange={setFinancialFilter}
+              orderStatuses={orderStatuses}
+            />
+          )
+        }
+        helperText={null}
+        toolbar={
+          <div className="orders-calendar-toolbar">
+          <div className="app-inline-actions">
+            {(['DAY', 'WEEK', 'MONTH'] as CalendarViewMode[]).map((view) => (
+              <button
+                key={view}
+                type="button"
+                className={`app-button ${calendarView === view ? 'app-button-primary' : 'app-button-ghost'}`}
+                onClick={() => setCalendarView(view)}
+              >
+                {calendarViewLabels[view]}
+              </button>
+            ))}
           </div>
           <div className="orders-calendar-nav">
             <button type="button" className="app-button app-button-ghost" onClick={() => shiftCalendar(-1)}>
-              ← anterior
+              ←
             </button>
             <p className="orders-calendar-nav__label">{calendarRangeLabel}</p>
             <button type="button" className="app-button app-button-ghost" onClick={() => shiftCalendar(1)}>
-              proximo →
+              →
             </button>
             <button type="button" className="app-button app-button-primary" onClick={jumpCalendarToToday}>
               hoje
             </button>
           </div>
         </div>
+        }
+      >
         {loading ? (
           <div className="app-panel border-dashed text-sm text-neutral-500">
             Carregando pedidos...
-          </div>
-        ) : visibleOrders.length === 0 ? (
-          <div className="app-panel border-dashed text-sm text-neutral-500">
-            {orders.length === 0
-              ? 'Sem pedidos ainda — crie o primeiro.'
-              : isOperationMode
-              ? 'Nenhum pedido em andamento para operar agora.'
-              : 'Nenhum pedido encontrado com os filtros atuais.'}
           </div>
         ) : (
           <>
@@ -1818,17 +1795,17 @@ function OrdersPageContent() {
 
             <div className="orders-calendar-details">
               <div className="orders-calendar-details__header">
-                <div>
-                  <p className="orders-calendar-details__eyebrow">Data selecionada</p>
-                  <h4 className="orders-calendar-details__title">
-                    {selectedCalendarDate.toLocaleDateString('pt-BR', {
-                      weekday: 'long',
-                      day: '2-digit',
-                      month: 'long',
-                      year: 'numeric'
-                    })}
-                  </h4>
-                </div>
+                <h4 className="orders-calendar-details__title">
+                  {selectedCalendarDate.toLocaleDateString('pt-BR', {
+                    weekday: 'long',
+                    day: '2-digit',
+                    month: 'long',
+                    year: 'numeric'
+                  })}
+                </h4>
+                <span className="rounded-full border border-white/80 bg-white/70 px-3 py-1 text-xs font-semibold text-neutral-700">
+                  {selectedDateEntries.length} pedido(s)
+                </span>
                 {selectedDateEntries.length > 4 ? (
                   <button
                     type="button"
@@ -1859,30 +1836,26 @@ function OrdersPageContent() {
                         className={`app-panel text-left ${selectedOrder?.id === entry.order.id ? 'ring-2 ring-orange-200' : ''}`}
                         onClick={() => openOrderDetail(entry.order)}
                       >
-                        <p className="text-lg font-semibold">Pedido #{entry.order.id ?? '-'}</p>
-                        <p className="text-sm text-neutral-500">
-                          {entry.createdAt.toLocaleTimeString('pt-BR', {
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}{' '}
-                          • {customerMap.get(entry.order.customerId)?.name || 'Sem cliente'}
-                        </p>
-                        <p className="text-sm text-neutral-500">
-                          <span
-                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${orderStatusBadgeClass(entry.order.status || '')}`}
-                          >
-                            {entry.order.status}
-                          </span>{' '}
-                          •{' '}
-                          <span
-                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${paymentStatusBadgeClass(derivePaymentStatus(entry.order))}`}
-                          >
-                            {derivePaymentStatus(entry.order)}
-                          </span>
-                        </p>
-                        <p className="text-sm text-neutral-500">
-                          Total: {formatCurrencyBR(entry.order.total ?? 0)} • Saldo: {formatCurrencyBR(balance)}
-                        </p>
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-neutral-900">
+                              {entry.createdAt.toLocaleTimeString('pt-BR', {
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}{' '}
+                              • {customerMap.get(entry.order.customerId)?.name || 'Sem cliente'}
+                            </p>
+                            <p className="text-xs text-neutral-500">Pedido #{entry.order.id ?? '-'}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-semibold text-neutral-900">
+                              {formatCurrencyBR(entry.order.total ?? 0)}
+                            </p>
+                            <p className="text-xs text-neutral-500">
+                              {balance > 0 ? `saldo ${formatCurrencyBR(balance)}` : 'pago'}
+                            </p>
+                          </div>
+                        </div>
                       </button>
                     );
                   })}
@@ -1896,45 +1869,40 @@ function OrdersPageContent() {
             </div>
           </>
         )}
-      </div>
+      </CalendarBoard>
       </BuilderLayoutItemSlot>
 
       <BuilderLayoutItemSlot
         id="detail"
         className={isSpotlightSlot('detail') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
       >
-      {selectedOrder && (
+      {selectedOrder && (isCalendarScreen ? (
+        <CalendarOrderDetailPanel
+          selectedOrder={selectedOrder}
+          customerName={
+            customers.find((customer) => customer.id === selectedOrder.customerId)?.name || 'Sem cliente'
+          }
+          selectedOrderDateLabel={selectedOrderDateLabel}
+          selectedOrderScheduledAt={selectedOrderScheduledAt}
+          savingOrderSchedule={savingOrderSchedule}
+          productMap={productMap}
+          orderStatusBadgeClass={orderStatusBadgeClass}
+          onSelectedOrderScheduledAtChange={setSelectedOrderScheduledAt}
+          onSaveSelectedOrderSchedule={saveSelectedOrderSchedule}
+        />
+      ) : (
         <div className="app-panel grid gap-4">
-          {tutorialMode ? (
-            <OnboardingTourCard
-              stepLabel="Tutorial 1a vez · passo 5 de 5"
-              title="Conclua a operacao do pedido"
-              description="Aqui voce transforma o pedido em fluxo real: confirma, produz, entrega e registra o recebimento."
-              points={[
-                { label: 'Agora', value: 'Avance o status do pedido e registre pagamento parcial ou total.' },
-                { label: 'Fechamento', value: 'Use a limpeza de teste se quiser voltar ao estado inicial.' }
-              ]}
-              actions={[
-                {
-                  label: 'Ir para estoque',
-                  href: '/estoque?focus=ops',
-                  variant: 'primary'
-                }
-              ]}
-              className="mt-0"
-            />
-          ) : null}
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h3 className="text-xl font-semibold">Pedido #{selectedOrder.id}</h3>
-              <p className="text-sm text-neutral-500">
-                Status atual:{' '}
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-neutral-500">
                 <span
                   className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${orderStatusBadgeClass(selectedOrder.status || '')}`}
                 >
                   {selectedOrder.status}
                 </span>
-              </p>
+                <span>{formatCurrencyBR(selectedOrder.total ?? 0)}</span>
+              </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Link
@@ -1952,181 +1920,254 @@ function OrdersPageContent() {
                   Avancar para {selectedOrderNextStatus}
                 </button>
               ) : null}
-              {!isOperationMode ? (
-                <select
-                  className="app-select"
-                  value={selectedOrder.status}
-                  onChange={(e) => updateStatus(selectedOrder.id!, e.target.value)}
-                >
-                  {orderStatuses.map((status) => (
-                    <option key={status} value={status}>
-                      {status}
-                    </option>
-                  ))}
-                </select>
-              ) : null}
             </div>
           </div>
-          {selectedOrderUberSummary || selectedOrderUberUrl ? (
-            <div className="rounded-3xl border border-neutral-200 bg-neutral-50 p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-neutral-900">Entrega via Uber</p>
-                  <p className="text-sm text-neutral-600">
-                    Valide aqui dentro se o pedido ja esta pronto para uma integracao real com Uber Direct.
+          <details className="app-details" open>
+            <summary>Operacao real</summary>
+            <div className="mt-3 grid gap-3">
+              <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-700">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-neutral-900">
+                      {selectedOrderQueueState
+                        ? `${selectedOrderQueueState.producedBroas}/${selectedOrderQueueState.totalBroas} broa(s) produzidas`
+                        : selectedOrder.status === 'ENTREGUE'
+                        ? 'Pedido entregue'
+                        : 'Aguardando entrar na fila de producao'}
+                    </p>
+                    <p className="mt-1 text-xs text-neutral-500">
+                      {productionLoading
+                        ? 'Sincronizando forno...'
+                        : activeProductionBatch
+                        ? `Forno ocupado ate ${formatOrderDateTimeLabel(safeDateFromIso(activeProductionBatch.readyAt))}`
+                        : `Forno livre • capacidade ${productionBoard?.oven.capacityBroas || 14} broas`}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedOrder.status === 'CONFIRMADO' && !activeProductionBatch ? (
+                      <button
+                        type="button"
+                        className="app-button app-button-primary"
+                        onClick={startProductionNow}
+                        disabled={startingProductionBatch}
+                      >
+                        {startingProductionBatch ? 'Iniciando...' : 'Entrar no forno'}
+                      </button>
+                    ) : null}
+                    {selectedOrderInActiveBatch && activeProductionBatch ? (
+                      <button
+                        type="button"
+                        className="app-button app-button-ghost"
+                        onClick={completeActiveProductionBatch}
+                        disabled={completingProductionBatch}
+                      >
+                        {completingProductionBatch ? 'Concluindo...' : 'Concluir fornada agora'}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                {selectedOrderQueueState ? (
+                  <p className="mt-3 text-xs text-neutral-500">
+                    Restam {selectedOrderQueueState.remainingBroas} broa(s) para este pedido.
+                    {selectedOrderQueueState.waitingAlexaTrigger ? ' Aguardando o gatilho da Alexa.' : ''}
                   </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    className="app-button app-button-primary disabled:cursor-not-allowed disabled:opacity-60"
-                    type="button"
-                    onClick={loadUberReadiness}
-                    disabled={uberReadinessLoading}
-                  >
-                    {uberReadinessLoading ? 'Validando...' : 'Validar entrega Uber'}
-                  </button>
-                  <button
-                    className="app-button app-button-ghost disabled:cursor-not-allowed disabled:opacity-60"
-                    type="button"
-                    onClick={loadUberQuote}
-                    disabled={uberQuoteLoading || uberReadinessLoading || !uberReadiness?.ready}
-                  >
-                    {uberQuoteLoading ? 'Cotando...' : 'Cotar entrega Uber'}
-                  </button>
-                  {selectedOrderUberUrl ? (
-                    <a
-                      className="app-button app-button-ghost"
-                      href={selectedOrderUberUrl}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                    >
-                      Abrir Uber manual
-                    </a>
-                  ) : null}
-                </div>
+                ) : null}
+                {productionError ? <p className="mt-2 text-xs text-red-700">{productionError}</p> : null}
               </div>
-              {selectedCustomerAddress ? (
-                <p className="mt-3 text-sm text-neutral-700">
-                  <span className="font-semibold text-neutral-900">Destino:</span> {selectedCustomerAddress}
-                </p>
-              ) : null}
-              {selectedOrderDateLabel ? (
-                <p className="mt-1 text-sm text-neutral-700">
-                  <span className="font-semibold text-neutral-900">Horario:</span> {selectedOrderDateLabel}
-                </p>
-              ) : null}
-              {selectedOrderUberSummary ? (
-                <div className="mt-3 rounded-2xl border border-neutral-200 bg-white p-3 text-sm leading-6 text-neutral-600 whitespace-pre-line">
-                  {selectedOrderUberSummary}
+
+              <div className="rounded-2xl border border-neutral-200 bg-white p-4 text-sm text-neutral-700">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-neutral-900">
+                      {selectedOrderTracking
+                        ? `Entrega ${selectedOrderTracking.status}`
+                        : 'Entrega ainda nao iniciada'}
+                    </p>
+                    <p className="mt-1 text-xs text-neutral-500">
+                      {selectedOrderTracking?.dropoffEta
+                        ? `ETA ${formatOrderDateTimeLabel(safeDateFromIso(selectedOrderTracking.dropoffEta))}`
+                        : 'Assim que a fornada fechar, o app despacha a entrega automaticamente.'}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedOrder.status === 'PRONTO' && !selectedOrderTracking ? (
+                      <button
+                        type="button"
+                        className="app-button app-button-primary"
+                        onClick={dispatchSelectedOrderToUber}
+                      >
+                        Enviar entrega
+                      </button>
+                    ) : null}
+                    {selectedOrderTracking && selectedOrderTracking.status !== 'DELIVERED' ? (
+                      <button
+                        type="button"
+                        className="app-button app-button-ghost"
+                        onClick={completeSelectedDelivery}
+                      >
+                        Marcar entregue
+                      </button>
+                    ) : null}
+                    {selectedOrderTracking?.trackingUrl ? (
+                      <a
+                        className="app-button app-button-ghost"
+                        href={selectedOrderTracking.trackingUrl}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                      >
+                        Acompanhar
+                      </a>
+                    ) : null}
+                  </div>
                 </div>
-              ) : null}
-              {uberReadinessError ? (
-                <p className="mt-3 text-sm text-red-700">{uberReadinessError}</p>
-              ) : null}
-              {uberReadiness ? (
-                <div className="mt-3 rounded-2xl border border-neutral-200 bg-white p-3 text-sm text-neutral-700">
-                  <p className="font-semibold text-neutral-900">
-                    {uberReadiness.ready
-                      ? 'Pronto para integrar via Uber Direct no backend.'
-                      : 'Ainda faltam dados para uma integracao real com Uber Direct.'}
-                  </p>
-                  <p className="mt-1 text-neutral-600">
-                    Fluxo: server-to-server • iframe no web: bloqueado pela Uber
-                  </p>
-                  {!uberReadiness.ready ? (
-                    <p className="mt-1 text-neutral-600">
-                      Corrija as pendencias acima e depois rode a cotacao real aqui no app.
-                    </p>
-                  ) : (
-                    <p className="mt-1 text-neutral-600">
-                      Pronto para consultar a taxa real sem sair da tela.
-                    </p>
-                  )}
-                  {uberReadiness.draft.pickupAddress ? (
-                    <p className="mt-2">
-                      <span className="font-semibold text-neutral-900">Coleta:</span>{' '}
-                      {uberReadiness.draft.pickupAddress}
-                    </p>
-                  ) : null}
-                  {uberReadiness.missingRequirements.length > 0 ? (
-                    <p className="mt-2">
-                      <span className="font-semibold text-neutral-900">Falta no pedido:</span>{' '}
-                      {uberReadiness.missingRequirements.join(' • ')}
-                    </p>
-                  ) : null}
-                  {uberReadiness.missingConfiguration.length > 0 ? (
-                    <p className="mt-2">
-                      <span className="font-semibold text-neutral-900">Falta configurar:</span>{' '}
-                      {uberReadiness.missingConfiguration.join(' • ')}
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
-              {uberQuoteError ? (
-                <p className="mt-3 text-sm text-red-700">{uberQuoteError}</p>
-              ) : null}
-              {uberQuote ? (
-                <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
-                  <p className="font-semibold">Cotacao Uber recebida.</p>
-                  <p className="mt-1">
-                    <span className="font-semibold">Taxa:</span>{' '}
-                    {formatCurrencyByCode(uberQuote.quote.fee, uberQuote.quote.currencyCode)}
-                  </p>
-                  {uberQuote.quote.expiresAt ? (
-                    <p className="mt-1">
-                      <span className="font-semibold">Expira em:</span>{' '}
-                      {formatOrderDateTimeLabel(safeDateFromIso(uberQuote.quote.expiresAt))}
-                    </p>
-                  ) : null}
-                  {uberQuote.quote.dropoffEta ? (
-                    <p className="mt-1">
-                      <span className="font-semibold">ETA destino:</span>{' '}
-                      {formatOrderDateTimeLabel(safeDateFromIso(uberQuote.quote.dropoffEta))}
-                    </p>
-                  ) : null}
-                  {uberQuote.quote.pickupDurationSeconds != null ? (
-                    <p className="mt-1">
-                      <span className="font-semibold">Janela ate coleta:</span>{' '}
-                      {Math.max(1, Math.round(uberQuote.quote.pickupDurationSeconds / 60))} min
-                    </p>
-                  ) : null}
-                  <p className="mt-1 text-emerald-900/80">
-                    Quote ID: {uberQuote.quote.providerQuoteId}
-                  </p>
-                </div>
-              ) : null}
+                {deliveryTrackingLoading ? (
+                  <p className="mt-3 text-xs text-neutral-500">Atualizando rastreio...</p>
+                ) : null}
+                {selectedOrderTracking?.lastProviderError ? (
+                  <p className="mt-3 text-xs text-amber-700">{selectedOrderTracking.lastProviderError}</p>
+                ) : null}
+                {deliveryTrackingError ? <p className="mt-3 text-xs text-red-700">{deliveryTrackingError}</p> : null}
+              </div>
             </div>
+          </details>
+          {selectedOrderUberSummary || selectedOrderUberUrl ? (
+            <details className="app-details">
+              <summary>Entrega via Uber</summary>
+              <div className="mt-3 rounded-3xl border border-neutral-200 bg-neutral-50 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className="app-button app-button-primary disabled:cursor-not-allowed disabled:opacity-60"
+                      type="button"
+                      onClick={loadUberReadiness}
+                      disabled={uberReadinessLoading}
+                    >
+                      {uberReadinessLoading ? 'Validando...' : 'Validar'}
+                    </button>
+                    <button
+                      className="app-button app-button-ghost disabled:cursor-not-allowed disabled:opacity-60"
+                      type="button"
+                      onClick={loadUberQuote}
+                      disabled={uberQuoteLoading || uberReadinessLoading || !uberReadiness?.ready}
+                    >
+                      {uberQuoteLoading ? 'Cotando...' : 'Cotar'}
+                    </button>
+                    {selectedOrderUberUrl ? (
+                      <a
+                        className="app-button app-button-ghost"
+                        href={selectedOrderUberUrl}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                      >
+                        Abrir Uber
+                      </a>
+                    ) : null}
+                  </div>
+                </div>
+                {selectedCustomerAddress ? (
+                  <p className="mt-3 text-sm text-neutral-700">
+                    <span className="font-semibold text-neutral-900">Destino:</span> {selectedCustomerAddress}
+                  </p>
+                ) : null}
+                {selectedOrderDateLabel ? (
+                  <p className="mt-1 text-sm text-neutral-700">
+                    <span className="font-semibold text-neutral-900">Horario:</span> {selectedOrderDateLabel}
+                  </p>
+                ) : null}
+                {selectedOrderUberSummary ? (
+                  <div className="mt-3 rounded-2xl border border-neutral-200 bg-white p-3 text-sm leading-6 text-neutral-600 whitespace-pre-line">
+                    {selectedOrderUberSummary}
+                  </div>
+                ) : null}
+                {uberReadinessError ? (
+                  <p className="mt-3 text-sm text-red-700">{uberReadinessError}</p>
+                ) : null}
+                {uberReadiness ? (
+                  <div className="mt-3 rounded-2xl border border-neutral-200 bg-white p-3 text-sm text-neutral-700">
+                    <p className="font-semibold text-neutral-900">
+                      {uberReadiness.ready ? 'Pronto para integrar.' : 'Ainda faltam dados.'}
+                    </p>
+                    {uberReadiness.draft.pickupAddress ? (
+                      <p className="mt-2">
+                        <span className="font-semibold text-neutral-900">Coleta:</span>{' '}
+                        {uberReadiness.draft.pickupAddress}
+                      </p>
+                    ) : null}
+                    {uberReadiness.missingRequirements.length > 0 ? (
+                      <p className="mt-2">
+                        <span className="font-semibold text-neutral-900">Falta no pedido:</span>{' '}
+                        {uberReadiness.missingRequirements.join(' • ')}
+                      </p>
+                    ) : null}
+                    {uberReadiness.missingConfiguration.length > 0 ? (
+                      <p className="mt-2">
+                        <span className="font-semibold text-neutral-900">Falta configurar:</span>{' '}
+                        {uberReadiness.missingConfiguration.join(' • ')}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+                {uberQuoteError ? (
+                  <p className="mt-3 text-sm text-red-700">{uberQuoteError}</p>
+                ) : null}
+                {uberQuote ? (
+                  <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
+                    <p className="font-semibold">
+                      {formatCurrencyByCode(uberQuote.quote.fee, uberQuote.quote.currencyCode)}
+                    </p>
+                    {uberQuote.quote.expiresAt ? (
+                      <p className="mt-1">
+                        Expira em {formatOrderDateTimeLabel(safeDateFromIso(uberQuote.quote.expiresAt))}
+                      </p>
+                    ) : null}
+                    {uberQuote.quote.dropoffEta ? (
+                      <p className="mt-1">
+                        ETA {formatOrderDateTimeLabel(safeDateFromIso(uberQuote.quote.dropoffEta))}
+                      </p>
+                    ) : null}
+                    {uberQuote.quote.pickupDurationSeconds != null ? (
+                      <p className="mt-1">
+                        Coleta em {Math.max(1, Math.round(uberQuote.quote.pickupDurationSeconds / 60))} min
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            </details>
           ) : null}
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-            <FormField
-              label="Data e horario do pedido"
-              hint={
-                selectedCustomerAddress
-                  ? `Entrega em ${selectedCustomerAddress}`
-                  : 'Usado no calendario, no D+1 e na exportacao para a Uber.'
-              }
-            >
-              <input
-                className="app-input"
-                type="datetime-local"
-                value={selectedOrderScheduledAt}
-                onChange={(e) => setSelectedOrderScheduledAt(e.target.value)}
-              />
-              {selectedOrderDateLabel ? (
-                <p className="mt-2 text-xs text-neutral-500">Agenda atual: {selectedOrderDateLabel}</p>
-              ) : null}
-            </FormField>
-            <div className="app-form-actions app-form-actions--mobile-sticky">
-              <button
-                className="app-button app-button-primary w-full disabled:cursor-not-allowed disabled:opacity-60"
-                type="button"
-                onClick={saveSelectedOrderSchedule}
-                disabled={savingOrderSchedule}
+          <details className="app-details">
+            <summary>Horario e agenda</summary>
+            <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+              <FormField
+                label="Data e horario do pedido"
+                hint={
+                  selectedCustomerAddress
+                    ? `Entrega em ${selectedCustomerAddress}`
+                    : 'Usado no calendario, no D+1 e na exportacao para a Uber.'
+                }
               >
-                {savingOrderSchedule ? 'Salvando...' : 'Salvar horario'}
-              </button>
+                <input
+                  className="app-input"
+                  type="datetime-local"
+                  value={selectedOrderScheduledAt}
+                  onChange={(e) => setSelectedOrderScheduledAt(e.target.value)}
+                />
+                {selectedOrderDateLabel ? (
+                  <p className="mt-2 text-xs text-neutral-500">Agenda atual: {selectedOrderDateLabel}</p>
+                ) : null}
+              </FormField>
+              <div className="app-form-actions app-form-actions--mobile-sticky">
+                <button
+                  className="app-button app-button-primary w-full disabled:cursor-not-allowed disabled:opacity-60"
+                  type="button"
+                  onClick={saveSelectedOrderSchedule}
+                  disabled={savingOrderSchedule}
+                >
+                  {savingOrderSchedule ? 'Salvando...' : 'Salvar horario'}
+                </button>
+              </div>
             </div>
-          </div>
+          </details>
 
           <div>
             <h4 className="font-semibold">Itens</h4>
@@ -2156,166 +2197,189 @@ function OrdersPageContent() {
           </div>
 
           {!isOperationMode ? (
-            <div className="grid gap-3 md:grid-cols-3">
-              <FormField label="Produto">
-                <input
-                  className="app-input"
-                  list="products-list"
-                  placeholder="Buscar produto..."
-                  value={addItemProductSearch}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setAddItemProductSearch(value);
-                    const parsedId = parseIdFromLabel(value, productOptions);
-                    setAddItemProductId(Number.isFinite(parsedId) ? parsedId : '');
-                  }}
-                />
-              </FormField>
-              <FormField label="Quantidade">
-                <input
-                  className="app-input"
-                  type="number"
-                  min={1}
-                  value={addItemQty}
-                  onChange={(e) => setAddItemQty(parsePositiveIntegerInput(e.target.value))}
-                />
-              </FormField>
-              <div className="app-form-actions app-form-actions--mobile-sticky">
-                <button className="app-button app-button-ghost w-full" onClick={() => addItem(selectedOrder.id!)}>
-                  Adicionar item
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          <div className="grid gap-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h4 className="font-semibold">Pagamentos</h4>
-              {!isOperationMode ? (
-                <button className="app-button app-button-danger" onClick={() => removeOrder(selectedOrder.id!)}>
-                  Excluir pedido
-                </button>
-              ) : null}
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-4">
-              <FormField label="Valor" hint={`Saldo atual: ${formatCurrencyBR(selectedOrderBalance)}`}>
-                <input
-                  className="app-input"
-                  placeholder="0,00"
-                  inputMode="decimal"
-                  value={paymentAmount}
-                  onChange={(e) => setPaymentAmount(e.target.value)}
-                  onBlur={() => setPaymentAmount(formatMoneyInputBR(paymentAmount || '0') || '')}
-                  disabled={selectedOrderIsCancelled}
-                />
-                <div className="app-inline-actions">
-                  <button
-                    type="button"
-                    className="app-button app-button-ghost"
-                    onClick={() =>
-                      setPaymentAmount(formatMoneyInputBR(selectedOrderBalance) || selectedOrderBalance.toFixed(2))
-                    }
-                    disabled={selectedOrderIsCancelled || selectedOrderBalance <= 0}
-                  >
-                    Usar saldo restante
+            <details className="app-details">
+              <summary>Editar itens</summary>
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                <FormField label="Produto">
+                  <input
+                    className="app-input"
+                    list="products-list"
+                    placeholder="Buscar produto..."
+                    value={addItemProductSearch}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setAddItemProductSearch(value);
+                      const parsedId = parseIdFromLabel(value, productOptions);
+                      setAddItemProductId(Number.isFinite(parsedId) ? parsedId : '');
+                    }}
+                  />
+                </FormField>
+                <FormField label="Quantidade">
+                  <input
+                    className="app-input"
+                    type="number"
+                    min={1}
+                    value={addItemQty}
+                    onChange={(e) => setAddItemQty(parsePositiveIntegerInput(e.target.value))}
+                  />
+                </FormField>
+                <div className="app-form-actions app-form-actions--mobile-sticky">
+                  <button className="app-button app-button-ghost w-full" onClick={() => addItem(selectedOrder.id!)}>
+                    Adicionar item
                   </button>
                 </div>
-              </FormField>
-              <FormField label="Metodo">
-                <select
-                  className="app-select"
-                  value={paymentMethod}
-                  onChange={(e) => setPaymentMethod(e.target.value)}
-                  disabled={selectedOrderIsCancelled}
-                >
-                  {paymentMethods.map((method) => (
-                    <option key={method} value={method}>
-                      {method}
-                    </option>
-                  ))}
-                </select>
-              </FormField>
-              <FormField label="Data do pagamento">
-                <input
-                  className="app-input"
-                  type="date"
-                  value={paymentDate}
-                  onChange={(e) => setPaymentDate(e.target.value)}
-                  disabled={selectedOrderIsCancelled}
-                />
-              </FormField>
-              <div className="app-form-actions app-form-actions--mobile-sticky">
+              </div>
+            </details>
+          ) : null}
+
+          <details className="app-details">
+            <summary>{selectedOrderBalance > 0 ? `Receber ${formatCurrencyBR(selectedOrderBalance)}` : 'Recebimento'}</summary>
+            <div className="mt-3 grid gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                {!isOperationMode ? (
+                  <button className="app-button app-button-danger" onClick={() => removeOrder(selectedOrder.id!)}>
+                    Excluir pedido
+                  </button>
+                ) : (
+                  <span className="text-sm text-neutral-500">
+                    {selectedOrderBalance > 0 ? `Saldo atual: ${formatCurrencyBR(selectedOrderBalance)}` : 'Sem saldo pendente'}
+                  </span>
+                )}
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-4">
+                <FormField label="Valor" hint={`Saldo atual: ${formatCurrencyBR(selectedOrderBalance)}`}>
+                  <input
+                    className="app-input"
+                    placeholder="0,00"
+                    inputMode="decimal"
+                    value={paymentAmount}
+                    onChange={(e) => setPaymentAmount(e.target.value)}
+                    onBlur={() => setPaymentAmount(formatMoneyInputBR(paymentAmount || '0') || '')}
+                    disabled={selectedOrderIsCancelled}
+                  />
+                  <div className="app-inline-actions">
+                    <button
+                      type="button"
+                      className="app-button app-button-ghost"
+                      onClick={() =>
+                        setPaymentAmount(formatMoneyInputBR(selectedOrderBalance) || selectedOrderBalance.toFixed(2))
+                      }
+                      disabled={selectedOrderIsCancelled || selectedOrderBalance <= 0}
+                    >
+                      Usar saldo restante
+                    </button>
+                  </div>
+                </FormField>
+                <FormField label="Metodo">
+                  <select
+                    className="app-select"
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value)}
+                    disabled={selectedOrderIsCancelled}
+                  >
+                    {paymentMethods.map((method) => (
+                      <option key={method} value={method}>
+                        {method}
+                      </option>
+                    ))}
+                  </select>
+                </FormField>
+                <FormField label="Data do pagamento">
+                  <input
+                    className="app-input"
+                    type="date"
+                    value={paymentDate}
+                    onChange={(e) => setPaymentDate(e.target.value)}
+                    disabled={selectedOrderIsCancelled}
+                  />
+                </FormField>
+                <div className="app-form-actions app-form-actions--mobile-sticky">
+                  <button
+                    className="app-button app-button-primary w-full disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={registerPayment}
+                    disabled={selectedOrderIsCancelled}
+                  >
+                    Registrar pagamento
+                  </button>
+                </div>
+              </div>
+
+              <div className="app-form-actions">
                 <button
-                  className="app-button app-button-primary w-full disabled:cursor-not-allowed disabled:opacity-60"
-                  onClick={registerPayment}
-                  disabled={selectedOrderIsCancelled}
+                  className="app-button app-button-ghost disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={markOrderPaid}
+                  disabled={markingPaid || selectedOrderBalance <= 0 || selectedOrderIsCancelled}
                 >
-                  Registrar pagamento
+                  {markingPaid ? 'Marcando...' : `Marcar pedido como pago (${formatCurrencyBR(selectedOrderBalance)})`}
                 </button>
               </div>
-            </div>
 
-            <div className="app-form-actions">
-              <button
-                className="app-button app-button-ghost disabled:cursor-not-allowed disabled:opacity-60"
-                onClick={markOrderPaid}
-                disabled={markingPaid || selectedOrderBalance <= 0 || selectedOrderIsCancelled}
-              >
-                {markingPaid ? 'Marcando...' : `Marcar pedido como pago (${formatCurrencyBR(selectedOrderBalance)})`}
-              </button>
-            </div>
+              {selectedOrderIsCancelled ? (
+                <p className="text-xs text-neutral-500">
+                  Pagamentos estao bloqueados para pedidos cancelados.
+                </p>
+              ) : null}
+              {paymentError ? <p className="text-xs text-red-600">{paymentError}</p> : null}
+              {paymentFeedback ? <p className="text-xs text-emerald-700">{paymentFeedback}</p> : null}
 
-            {selectedOrderIsCancelled ? (
-              <p className="text-xs text-neutral-500">
-                Pagamentos estao bloqueados para pedidos cancelados.
-              </p>
-            ) : null}
-            {paymentError ? <p className="text-xs text-red-600">{paymentError}</p> : null}
-            {paymentFeedback ? <p className="text-xs text-emerald-700">{paymentFeedback}</p> : null}
-
-            <div className="mt-1 grid gap-2">
-              {selectedPayments.length === 0 ? (
-                <p className="text-sm text-neutral-500">Nenhum pagamento registrado.</p>
-              ) : (
-                selectedPayments.map((payment) => (
-                  <div key={payment.id} className="rounded-lg border border-white/60 bg-white/70 px-3 py-2 text-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span>
-                        {payment.method} •{' '}
-                        <span
-                          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${paymentRecordBadgeClass(payment.status || '')}`}
-                        >
-                          {payment.status}
-                        </span>{' '}
-                        • {formatCurrencyBR(payment.amount)} •{' '}
-                        {payment.paidAt ? new Date(payment.paidAt).toLocaleDateString('pt-BR') : 'sem data'}
-                      </span>
-                      {!isOperationMode ? (
-                        <button className="app-button app-button-danger" onClick={() => removePayment(payment.id!)}>
-                          Remover
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                ))
-              )}
+              <details className="app-details">
+                <summary>Historico de pagamentos</summary>
+                <div className="mt-3 grid gap-2">
+                  {selectedPayments.length === 0 ? (
+                    <p className="text-sm text-neutral-500">Nenhum pagamento registrado.</p>
+                  ) : (
+                    selectedPayments.map((payment) => (
+                      <div key={payment.id} className="rounded-lg border border-white/60 bg-white/70 px-3 py-2 text-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span>
+                            {payment.method} •{' '}
+                            <span
+                              className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${paymentRecordBadgeClass(payment.status || '')}`}
+                            >
+                              {payment.status}
+                            </span>{' '}
+                            • {formatCurrencyBR(payment.amount)} •{' '}
+                            {payment.paidAt ? new Date(payment.paidAt).toLocaleDateString('pt-BR') : 'sem data'}
+                          </span>
+                          {!isOperationMode ? (
+                            <button className="app-button app-button-danger" onClick={() => removePayment(payment.id!)}>
+                              Remover
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </details>
             </div>
-          </div>
+          </details>
         </div>
-      )}
+      ))}
       </BuilderLayoutItemSlot>
 
-      {!isOperationMode ? <BuilderLayoutCustomCards /> : null}
       </section>
     </BuilderLayoutProvider>
   );
 }
 
-export default function OrdersScreen() {
+export function OrdersWorkspaceScreen({
+  screenMode = 'orders'
+}: {
+  screenMode?: OrdersScreenMode;
+} = {}) {
   return (
     <Suspense fallback={null}>
-      <OrdersPageContent />
+      <OrdersPageContent screenMode={screenMode} />
     </Suspense>
   );
+}
+
+export function OrdersCalendarExperience() {
+  return <OrdersWorkspaceScreen screenMode="calendar" />;
+}
+
+export default function OrdersScreen() {
+  return <OrdersWorkspaceScreen screenMode="orders" />;
 }

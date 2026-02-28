@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { parseWithSchema } from '../../common/validation.js';
 import { AlexaOauthService } from './alexa-oauth.service.js';
 import { AutomationsService } from '../automations/automations.service.js';
+import { ProductionService } from '../production/production.service.js';
 
 const alexaBridgeInputSchema = z.object({
   applicationId: z.string().trim().max(220).optional().default(''),
@@ -60,7 +61,8 @@ export class AlexaService {
 
   constructor(
     @Inject(AutomationsService) private readonly automationsService: AutomationsService,
-    @Inject(AlexaOauthService) private readonly alexaOauthService: AlexaOauthService
+    @Inject(AlexaOauthService) private readonly alexaOauthService: AlexaOauthService,
+    @Inject(ProductionService) private readonly productionService: ProductionService
   ) {}
 
   async handleBridge(payload: unknown, auth: AlexaBridgeAuthInput = {}): Promise<AlexaBridgeResponse> {
@@ -103,6 +105,7 @@ export class AlexaService {
   private async handleIntentRequest(input: AlexaBridgeInput): Promise<AlexaBridgeResponse> {
     const intentName = (input.intentName || '').trim();
     const slots = this.normalizeSlots(input.slots || {});
+    const utterance = (input.utterance || '').trim();
 
     if (!intentName) {
       return this.response(
@@ -204,6 +207,30 @@ export class AlexaService {
           runSkill: run.skill,
           runStatus: run.status,
           updatedAt: run.updatedAt
+        }
+      );
+    }
+
+    const timerMinutes = this.extractTimerMinutesFromAlexaIntent(intentName, slots, utterance);
+    if (timerMinutes != null) {
+      const result = await this.productionService.startNextBatch({
+        triggerSource: 'ALEXA',
+        triggerLabel: utterance || `Alexa timer ${timerMinutes} minutos`,
+        requestedTimerMinutes: timerMinutes
+      });
+      const allocationSummary = result.allocations
+        .map((entry) => `${entry.productName}: ${entry.broasPlanned} broa(s)`)
+        .join(', ');
+
+      return this.response(
+        'OVEN_BATCH_STARTED',
+        `Fornada iniciada. ${allocationSummary}. Forno ajustado para ${result.board.oven.bakeTimerMinutes} minutos.`,
+        true,
+        {
+          batchId: result.batchId,
+          readyAt: result.readyAt,
+          requestedTimerMinutes: timerMinutes,
+          allocations: result.allocations
         }
       );
     }
@@ -391,6 +418,33 @@ export class AlexaService {
     if (!value) return '';
     if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
     return '';
+  }
+
+  private extractTimerMinutesFromAlexaIntent(
+    intentName: string,
+    slots: Map<string, string>,
+    utterance: string
+  ) {
+    const explicitIntentNames = new Set([
+      'StartNextBatchIntent',
+      'StartOvenBatchIntent',
+      'SetOvenTimerIntent'
+    ]);
+    const fromSlot = this.pickSlotValue(slots, ['minutes', 'minute', 'timer', 'minutos']);
+    const fromSlotNumber = fromSlot ? Number.parseInt(fromSlot, 10) : NaN;
+    if (explicitIntentNames.has(intentName) && Number.isFinite(fromSlotNumber) && fromSlotNumber > 0) {
+      return Math.max(1, Math.min(240, fromSlotNumber));
+    }
+
+    const match = utterance.match(/(\d{1,3})\s*minutos?/i);
+    if (match) {
+      const parsed = Number.parseInt(match[1] || '', 10);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return Math.max(1, Math.min(240, parsed));
+      }
+    }
+
+    return null;
   }
 
   private stableStringify(value: unknown): string {

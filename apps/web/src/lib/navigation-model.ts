@@ -11,71 +11,51 @@ export type AppNavSection = {
   items: AppNavItem[];
 };
 
-const allItems: AppNavItem[] = [
+export const primaryNavItems: AppNavItem[] = [
   {
-    href: '/hoje',
-    label: 'Hoje',
-    title: 'Hoje',
-    hint: 'Tocar o dia'
-  },
-  {
-    href: '/producao',
-    label: 'Producao',
-    title: 'Producao',
-    hint: 'Planejar e produzir'
-  },
-  {
-    href: '/saidas',
-    label: 'Saidas',
-    title: 'Saidas',
-    hint: 'Separar e entregar'
-  },
-  {
-    href: '/caixa',
-    label: 'Caixa',
-    title: 'Caixa',
-    hint: 'Receber e fechar'
-  },
-  {
-    href: '/base',
-    label: 'Base',
-    title: 'Base',
-    hint: 'Clientes e broas'
+    href: '/calendario',
+    label: 'Calendario',
+    title: 'Calendario',
+    hint: 'Base diaria de planejamento'
   },
   {
     href: '/pedidos',
-    label: 'Hoje',
-    title: 'Hoje',
-    hint: 'Compromissos do dia'
+    label: 'Pedidos',
+    title: 'Pedidos',
+    hint: 'Trabalhar os pedidos dentro do calendario'
   },
   {
     href: '/clientes',
-    label: 'Base',
-    title: 'Base',
-    hint: 'Clientes'
+    label: 'Clientes',
+    title: 'Clientes',
+    hint: 'Cadastro e historico de atendimento'
   },
   {
     href: '/produtos',
-    label: 'Base',
-    title: 'Base',
-    hint: 'Produtos'
+    label: 'Produtos',
+    title: 'Produtos',
+    hint: 'Catalogo e precos'
   },
   {
     href: '/estoque',
-    label: 'Producao',
-    title: 'Producao',
-    hint: 'Planejar D+1'
+    label: 'Estoque',
+    title: 'Estoque',
+    hint: 'Produzir, conferir e repor'
   }
 ];
 
-const byHref = new Map(allItems.map((item) => [item.href, item]));
+const byHref = new Map(primaryNavItems.map((item) => [item.href, item]));
 const pathAliases = new Map<string, string>([
-  ['/pedidos', '/hoje'],
-  ['/dashboard', '/hoje'],
-  ['/jornada', '/hoje'],
-  ['/estoque', '/producao'],
-  ['/clientes', '/base'],
-  ['/produtos', '/base']
+  ['/', '/calendario'],
+  ['/dashboard', '/calendario'],
+  ['/jornada', '/calendario'],
+  ['/hoje', '/calendario'],
+  ['/producao', '/estoque'],
+  ['/saidas', '/pedidos'],
+  ['/caixa', '/pedidos'],
+  ['/base', '/clientes'],
+  ['/whatsapp-flow', '/pedidos'],
+  ['/builder', '/calendario']
 ]);
 
 function pickItems(hrefs: string[]) {
@@ -86,14 +66,9 @@ function pickItems(hrefs: string[]) {
 
 export const navSections: AppNavSection[] = [
   {
-    id: 'jornada',
-    label: 'Jornada',
-    items: pickItems(['/hoje', '/producao', '/saidas', '/caixa'])
-  },
-  {
-    id: 'base',
-    label: 'Base',
-    items: pickItems(['/base'])
+    id: 'principal',
+    label: 'Principal',
+    items: pickItems(['/calendario', '/pedidos', '/clientes', '/produtos', '/estoque'])
   }
 ];
 
@@ -107,6 +82,11 @@ export function isActivePath(pathname: string, href: string) {
 export function resolveNavItem(pathname: string) {
   const direct = byHref.get(pathname);
   if (direct) return direct;
+  const aliasTarget = pathAliases.get(pathname);
+  if (aliasTarget) {
+    return byHref.get(aliasTarget) || primaryNavItems[0];
+  }
   const firstSegment = `/${pathname.split('/').filter(Boolean)[0] || ''}`;
-  return byHref.get(firstSegment) || byHref.get('/hoje') || allItems[0];
+  const aliasedSegment = pathAliases.get(firstSegment) || firstSegment;
+  return byHref.get(aliasedSegment) || byHref.get('/calendario') || primaryNavItems[0];
 }

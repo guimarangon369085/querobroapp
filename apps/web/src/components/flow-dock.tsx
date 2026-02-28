@@ -1,61 +1,57 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useOperationFlow } from '@/hooks/use-operation-flow';
+import { isActivePath, primaryNavItems } from '@/lib/navigation-model';
+import { formatCurrencyBR } from '@/lib/format';
 
 export function FlowDock() {
+  const pathname = usePathname();
   const { flow, error } = useOperationFlow({ refreshIntervalMs: 30000 });
-  const currentStep = flow.currentStep;
 
   return (
     <section className="flow-dock" aria-label="Fluxo principal">
       <div className="flow-dock__head">
-        <p className="flow-dock__eyebrow">Roteiro do dia</p>
+        <p className="flow-dock__eyebrow">Acesso rapido</p>
       </div>
 
       <div className="flow-dock__main">
-        <p className="flow-dock__title">
-          Etapa {currentStep.index}/7: {currentStep.title}
-        </p>
+        <p className="flow-dock__title">As 5 telas principais concentram toda a operacao.</p>
         <div className="flow-dock__progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={flow.progressPercent}>
           <span className="flow-dock__progress-fill" style={{ width: `${flow.progressPercent}%` }} />
         </div>
       </div>
 
       <div className="flow-dock__stepline">
-        {flow.steps.map((step) => (
-          step.state === 'locked' ? (
-            <span
-              key={step.key}
-              className={`flow-dock__stepchip flow-dock__stepchip--${step.state}`}
-              aria-label={`${step.index}. ${step.title}`}
-            >
-              <span>{step.index}</span>
-              <small>{step.icon}</small>
-            </span>
-          ) : (
+        {primaryNavItems.map((item, index) => {
+          const active = isActivePath(pathname, item.href);
+          return (
             <Link
-              key={step.key}
-              href={step.href}
-              className={`flow-dock__stepchip flow-dock__stepchip--${step.state}`}
-              aria-label={`${step.index}. ${step.title}`}
+              key={item.href}
+              href={item.href}
+              className={`flow-dock__stepchip ${active ? 'flow-dock__stepchip--current' : 'flow-dock__stepchip--done'}`}
+              aria-label={`${index + 1}. ${item.label}`}
             >
-              <span>{step.index}</span>
-              <small>{step.icon}</small>
+              <span>{index + 1}</span>
+              <small>{item.label.slice(0, 1)}</small>
             </Link>
-          )
-        ))}
+          );
+        })}
       </div>
 
       <div className="flow-dock__meta">
         <span>{flow.metrics.openOrders} abertos</span>
         <span>{flow.metrics.deliveredOrders} entregues</span>
+        <span>{flow.metrics.customers} clientes</span>
+        <span>{flow.metrics.products} produtos</span>
       </div>
 
       <div className="flow-dock__actions">
-        <Link href={currentStep.href} className="app-primary">
-          {currentStep.actionLabel}
+        <Link href="/pedidos" className="app-primary">
+          Abrir pedidos
         </Link>
+        <span>{formatCurrencyBR(flow.metrics.pendingValue)} pendente</span>
       </div>
 
       {error ? (
