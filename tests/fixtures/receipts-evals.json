@@ -1,0 +1,41 @@
+[
+  {
+    "name": "cupom sintetico 1 - basicos de producao",
+    "enabled": true,
+    "request": {
+      "imageFile": "receipts/receipt_case_1.png",
+      "providerHint": "Supermercado Broa"
+    },
+    "checks": {
+      "minItems": 2,
+      "requireItems": ["FARINHA DE TRIGO", "LEITE"],
+      "forbidItems": []
+    }
+  },
+  {
+    "name": "cupom sintetico 2 - recheios e manteiga",
+    "enabled": true,
+    "request": {
+      "imageFile": "receipts/receipt_case_2.png",
+      "providerHint": "Mercado da Vila"
+    },
+    "checks": {
+      "minItems": 2,
+      "requireItems": ["GOIABADA", "DOCE DE LEITE"],
+      "forbidItems": []
+    }
+  },
+  {
+    "name": "cupom sintetico 3 - embalagem e queijos",
+    "enabled": true,
+    "request": {
+      "imageFile": "receipts/receipt_case_3.png",
+      "providerHint": "Armazem Artesanal"
+    },
+    "checks": {
+      "minItems": 2,
+      "requireItems": ["SACOLA", "QUEIJO DO SERRO"],
+      "forbidItems": []
+    }
+  }
+]

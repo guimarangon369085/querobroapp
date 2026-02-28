@@ -4,8 +4,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# shellcheck source=./scripts/runtime-path.sh
+source "$ROOT_DIR/scripts/runtime-path.sh"
+setup_runtime_path
+
 API_URL="http://127.0.0.1:3001/health"
-WEB_URL="http://127.0.0.1:3000"
+WEB_URL="http://127.0.0.1:3000/pedidos"
 API_LOG="/tmp/querobroapp-api.log"
 WEB_LOG="/tmp/querobroapp-web.log"
 UID_VALUE="$(id -u)"
@@ -97,6 +101,8 @@ start_launch_agent() {
   launchctl kickstart -k "gui/$UID_VALUE/$label" >/dev/null 2>&1 || true
 }
 
+printf -v ESCAPED_PATH '%q' "$PATH"
+
 if is_port_listening 3000 && is_port_listening 3001; then
   echo "QUEROBROAPP ja esta em execucao."
   open_web
@@ -104,14 +110,18 @@ if is_port_listening 3000 && is_port_listening 3001; then
 fi
 
 ./scripts/kill-ports.sh
+./scripts/reset-web-dev-cache.sh
 
 echo "Preparando ambiente..."
-pnpm --filter @querobroapp/shared build
-pnpm --filter @querobroapp/api prisma:migrate:dev
+"$PNPM_BIN" --filter @querobroapp/shared build
+"$PNPM_BIN" --filter @querobroapp/api prisma:migrate:dev
+
+: > "$API_LOG"
+: > "$WEB_LOG"
 
 mkdir -p "$AGENTS_DIR"
-write_agent_plist "$API_LABEL" "cd '$ROOT_DIR' && '$PNPM_BIN' --filter @querobroapp/api dev" "$API_LOG" "$API_PLIST"
-write_agent_plist "$WEB_LABEL" "cd '$ROOT_DIR' && '$PNPM_BIN' --filter @querobroapp/web dev" "$WEB_LOG" "$WEB_PLIST"
+write_agent_plist "$API_LABEL" "export PATH=$ESCAPED_PATH && cd '$ROOT_DIR' && '$PNPM_BIN' --filter @querobroapp/api dev" "$API_LOG" "$API_PLIST"
+write_agent_plist "$WEB_LABEL" "export PATH=$ESCAPED_PATH && cd '$ROOT_DIR' && '$PNPM_BIN' --filter @querobroapp/web dev" "$WEB_LOG" "$WEB_PLIST"
 
 echo "Iniciando API..."
 start_launch_agent "$API_LABEL" "$API_PLIST"
@@ -121,7 +131,7 @@ wait_for_http "API" "$API_URL" 120
 echo "Iniciando Web..."
 start_launch_agent "$WEB_LABEL" "$WEB_PLIST"
 
-wait_for_http "WEB" "$WEB_URL" 120
+./scripts/wait-web-dev-ready.sh "$WEB_URL" 120
 
 echo "QUEROBROAPP pronto."
 echo "Web: $WEB_URL"

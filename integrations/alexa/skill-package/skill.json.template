@@ -1,0 +1,56 @@
+{
+  "manifest": {
+    "publishingInformation": {
+      "locales": {
+        "pt-BR": {
+          "name": "QUEROBROAPP",
+          "summary": "Automacoes operacionais seguras para o QUEROBROAPP.",
+          "description": "Skill privada para sincronizar fornecedores, gerar plano de compras e consultar status operacional.",
+          "examplePhrases": [
+            "Alexa, abrir quero broa",
+            "Alexa, pedir ao quero broa para sincronizar fornecedores",
+            "Alexa, pedir ao quero broa para gerar plano de compras"
+          ],
+          "keywords": [
+            "querobroapp",
+            "estoque",
+            "operação"
+          ]
+        }
+      },
+      "isAvailableWorldwide": false,
+      "distributionCountries": [
+        "BR"
+      ],
+      "category": "PRODUCTIVITY",
+      "testingInstructions": "Skill privada para uso interno."
+    },
+    "apis": {
+      "custom": {
+        "endpoint": {
+          "uri": "arn:aws:lambda:REGION:ACCOUNT_ID:function:querobroapp-alexa-bridge"
+        }
+      }
+    },
+    "manifestVersion": "1.0",
+    "permissions": [],
+    "privacyAndCompliance": {
+      "allowsPurchases": false,
+      "usesPersonalInfo": false,
+      "isChildDirected": false,
+      "isExportCompliant": true,
+      "containsAds": false
+    },
+    "accountLinking": {
+      "type": "AUTH_CODE",
+      "authorizationUrl": "https://SEU_HOST/alexa/oauth/authorize",
+      "accessTokenUrl": "https://SEU_HOST/alexa/oauth/token",
+      "clientId": "SEU_ALEXA_OAUTH_CLIENT_ID",
+      "clientSecret": "SEU_ALEXA_OAUTH_CLIENT_SECRET",
+      "accessTokenScheme": "HTTP_BASIC",
+      "scopes": [
+        "alexa:bridge"
+      ]
+    }
+  }
+}

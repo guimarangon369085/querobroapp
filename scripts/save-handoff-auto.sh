@@ -9,16 +9,36 @@ cd "$REPO_DIR"
 extract_next_step() {
   local next_step=""
 
-  if [[ -f docs/NEXT_STEP_PLAN.md ]]; then
-    next_step="$(awk '
-      /^## 6\. Prioridade Da Proxima Etapa/ { in_section=1; next }
+  extract_from_section() {
+    local section_pattern="$1"
+    awk -v section_pattern="$section_pattern" '
+      $0 ~ section_pattern { in_section=1; next }
       /^## / && in_section { exit }
-      in_section && /^[0-9]+\./ {
-        sub(/^[0-9]+\.[[:space:]]*/, "", $0)
-        print
+      in_section && /^[[:space:]]*[-*][[:space:]]+/ {
+        line=$0
+        sub(/^[[:space:]]*[-*][[:space:]]+/, "", line)
+        print line
         exit
       }
-    ' docs/NEXT_STEP_PLAN.md)"
+      in_section && /^[[:space:]]*[0-9]+\.[[:space:]]+/ {
+        line=$0
+        sub(/^[[:space:]]*[0-9]+\.[[:space:]]+/, "", line)
+        print line
+        exit
+      }
+    ' docs/NEXT_STEP_PLAN.md
+  }
+
+  if [[ -f docs/NEXT_STEP_PLAN.md ]]; then
+    next_step="$(extract_from_section '^## 6\. Prioridade Da Proxima Etapa$')"
+
+    if [[ -z "$next_step" ]]; then
+      next_step="$(extract_from_section '^## Prioridade 1 \(agora\)$')"
+    fi
+
+    if [[ -z "$next_step" ]]; then
+      next_step="$(extract_from_section '^## Ordem de execucao$')"
+    fi
   fi
 
   if [[ -z "$next_step" ]]; then

@@ -63,6 +63,13 @@ function randomId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function isTypingTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tagName = target.tagName.toLowerCase();
+  return tagName === 'input' || tagName === 'textarea' || tagName === 'select';
+}
+
 export function FeedbackProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
@@ -179,6 +186,35 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
     }),
     [notify, notifySuccess, notifyError, notifyInfo, notifyUndo, confirm]
   );
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing) return;
+
+      if (confirmState) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          closeConfirm(true);
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          closeConfirm(false);
+        }
+        return;
+      }
+
+      if (event.key !== 'Enter') return;
+      if (isTypingTarget(event.target)) return;
+
+      const actionableToast = toasts.find((toast) => toast.actionLabel && toast.onAction);
+      if (!actionableToast) return;
+
+      event.preventDefault();
+      void runToastAction(actionableToast);
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [closeConfirm, confirmState, runToastAction, toasts]);
 
   return (
     <FeedbackContext.Provider value={contextValue}>

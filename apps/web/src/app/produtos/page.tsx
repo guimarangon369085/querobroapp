@@ -1,14 +1,17 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { Product } from '@querobroapp/shared';
 import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
-import { formatCurrencyBR, titleCase } from '@/lib/format';
+import { formatCurrencyBR, formatMoneyInputBR, parseCurrencyBR, titleCase } from '@/lib/format';
 import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
+import { useSurfaceMode } from '@/hooks/use-surface-mode';
+import { useTutorialSpotlight } from '@/hooks/use-tutorial-spotlight';
 import { useFeedback } from '@/components/feedback-provider';
 import { FormField } from '@/components/form/FormField';
+import { OnboardingTourCard } from '@/components/onboarding-tour-card';
 import {
   BuilderLayoutCustomCards,
   BuilderLayoutItemSlot,
@@ -23,16 +26,44 @@ const emptyProduct: Partial<Product> = {
   active: true
 };
 
-export default function ProductsPage() {
+const productQuickTemplates: Array<{ label: string; helper: string; values: Partial<Product> }> = [
+  {
+    label: 'Broa',
+    helper: 'Produto final para venda.',
+    values: { category: 'Broas', unit: 'un', active: true }
+  },
+  {
+    label: 'Sabor',
+    helper: 'Recheio/sabor para combinacoes.',
+    values: { category: 'Sabores', unit: 'un', active: true }
+  },
+  {
+    label: 'Bebida',
+    helper: 'Itens de bebidas do catalogo.',
+    values: { category: 'Bebidas', unit: 'un', active: true }
+  },
+  {
+    label: 'Embalagem',
+    helper: 'Uso interno de embalagem.',
+    values: { category: 'Embalagens', unit: 'un', active: true }
+  }
+];
+
+const TUTORIAL_QUERY_VALUE = 'primeira_vez';
+
+function ProductsPageContent() {
   const searchParams = useSearchParams();
+  const { tutorialMode, isSpotlightSlot } = useTutorialSpotlight(searchParams, TUTORIAL_QUERY_VALUE);
   const [products, setProducts] = useState<Product[]>([]);
   const [form, setForm] = useState<Partial<Product>>(emptyProduct);
+  const [priceInput, setPriceInput] = useState('0,00');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'TODOS' | 'ATIVOS' | 'INATIVOS'>('TODOS');
+  const { isOperationMode } = useSurfaceMode('produtos');
   const productNameInputRef = useRef<HTMLInputElement | null>(null);
   const { confirm, notifyError, notifyInfo, notifySuccess, notifyUndo } = useFeedback();
 
@@ -71,11 +102,13 @@ export default function ProductsPage() {
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    const parsedPrice = parseCurrencyBR(priceInput);
+
     if (!form.name || form.name.trim().length < 2) {
       setError('Informe um nome valido.');
       return;
     }
-    if ((form.price ?? 0) < 0) {
+    if (parsedPrice < 0) {
       setError('Preco nao pode ser negativo.');
       return;
     }
@@ -86,7 +119,7 @@ export default function ProductsPage() {
       name: titleCase(form.name || ''),
       category: form.category ? titleCase(form.category) : '',
       unit: form.unit ? form.unit.trim().toLowerCase() : 'un',
-      price: Number.isFinite(form.price) ? Math.round((form.price ?? 0) * 100) / 100 : 0
+      price: Math.round(parsedPrice * 100) / 100
     };
 
     try {
@@ -103,6 +136,7 @@ export default function ProductsPage() {
       }
 
       setForm(emptyProduct);
+      setPriceInput('0,00');
       setEditingId(null);
       await load();
       notifySuccess(editingId ? 'Produto atualizado com sucesso.' : 'Produto criado com sucesso.');
@@ -121,12 +155,23 @@ export default function ProductsPage() {
       price: product.price,
       active: product.active
     });
+    setPriceInput(formatMoneyInputBR(product.price) || '0,00');
     scrollToLayoutSlot('form', { focus: true, focusSelector: 'input, select, textarea' });
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setForm(emptyProduct);
+    setPriceInput('0,00');
+  };
+
+  const applyTemplate = (template: (typeof productQuickTemplates)[number]) => {
+    setForm((prev) => ({
+      ...prev,
+      ...template.values,
+      name: prev.name || ''
+    }));
+    productNameInputRef.current?.focus();
   };
 
   const remove = async (id: number) => {
@@ -177,9 +222,10 @@ export default function ProductsPage() {
 
   const filteredProducts = useMemo(() => {
     const query = search.trim().toLowerCase();
+    const effectiveFilter = isOperationMode ? 'ATIVOS' : activeFilter;
     return products.filter((product) => {
-      if (activeFilter === 'ATIVOS' && !product.active) return false;
-      if (activeFilter === 'INATIVOS' && product.active) return false;
+      if (effectiveFilter === 'ATIVOS' && !product.active) return false;
+      if (effectiveFilter === 'INATIVOS' && product.active) return false;
       if (!query) return true;
       return (
         product.name.toLowerCase().includes(query) ||
@@ -187,12 +233,15 @@ export default function ProductsPage() {
         `${product.id}`.includes(query)
       );
     });
-  }, [products, search, activeFilter]);
+  }, [activeFilter, isOperationMode, products, search]);
 
   return (
     <BuilderLayoutProvider page="produtos">
       <section className="grid gap-8">
-        <BuilderLayoutItemSlot id="header">
+        <BuilderLayoutItemSlot
+          id="header"
+          className={isSpotlightSlot('header') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
+        >
           <div className="app-section-title">
             <div>
               <span className="app-chip">Catalogo</span>
@@ -202,6 +251,68 @@ export default function ProductsPage() {
               </p>
             </div>
           </div>
+          {tutorialMode ? (
+            <OnboardingTourCard
+              stepLabel="Tutorial 1a vez · passo 1 de 5"
+              title="Cadastre a broa base antes de vender"
+              description="O produto e o ponto de partida do sistema. Sem ele, nao existe pedido, preco nem ficha tecnica."
+              points={[
+                { label: 'Agora', value: 'Crie 1 produto real com nome e preco.' },
+                { label: 'Depois', value: 'Siga para a ficha tecnica e conecte os insumos.' }
+              ]}
+              actions={[
+                {
+                  label: 'Ir para ficha tecnica',
+                  href: '/estoque?focus=bom&tutorial=primeira_vez',
+                  variant: 'primary'
+                },
+                {
+                  label: 'Pular para clientes',
+                  href: '/clientes?focus=form&tutorial=primeira_vez',
+                  variant: 'ghost'
+                }
+              ]}
+            />
+          ) : null}
+          {isOperationMode ? (
+            <div className="app-quickflow app-quickflow--columns mt-4">
+              <button
+                type="button"
+                className={`app-quickflow__step text-left ${form.name ? 'app-quickflow__step--done' : ''}`}
+                onClick={() => scrollToLayoutSlot('form', { focus: true })}
+              >
+                <p className="app-quickflow__step-title">1. Cadastro rapido</p>
+                <p className="app-quickflow__step-subtitle">Template + nome + preco para publicar.</p>
+              </button>
+              <button
+                type="button"
+                className={`app-quickflow__step text-left ${filteredProducts.length > 0 ? 'app-quickflow__step--done' : ''}`}
+                onClick={() => scrollToLayoutSlot('list', { focus: true })}
+              >
+                <p className="app-quickflow__step-title">2. Revisar ativos</p>
+                <p className="app-quickflow__step-subtitle">Lista operacional mostrando apenas itens ativos.</p>
+              </button>
+            </div>
+          ) : (
+            <div className="app-quickflow app-quickflow--columns mt-4">
+              <button
+                type="button"
+                className="app-quickflow__step text-left"
+                onClick={() => scrollToLayoutSlot('kpis_filters', { focus: true })}
+              >
+                <p className="app-quickflow__step-title">1. Auditar filtros</p>
+                <p className="app-quickflow__step-subtitle">Cruze ativos, inativos e busca textual.</p>
+              </button>
+              <button
+                type="button"
+                className="app-quickflow__step text-left"
+                onClick={() => scrollToLayoutSlot('form', { focus: true })}
+              >
+                <p className="app-quickflow__step-title">2. Ajustar categoria</p>
+                <p className="app-quickflow__step-subtitle">Gerencie unidade, status e taxonomia.</p>
+              </button>
+            </div>
+          )}
         </BuilderLayoutItemSlot>
 
         <BuilderLayoutItemSlot id="note">
@@ -218,7 +329,12 @@ export default function ProductsPage() {
           ) : null}
         </BuilderLayoutItemSlot>
 
-        <BuilderLayoutItemSlot id="kpis_filters">
+        <BuilderLayoutItemSlot
+          id="kpis_filters"
+          className={
+            isSpotlightSlot('kpis_filters') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'
+          }
+        >
           <div className="grid gap-3 md:grid-cols-3">
             <div className="app-kpi">
               <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Produtos</p>
@@ -228,28 +344,59 @@ export default function ProductsPage() {
               <div className="flex flex-wrap items-center gap-3">
                 <input
                   className="app-input md:w-auto"
-                  placeholder="Buscar por nome ou categoria"
+                  placeholder={
+                    isOperationMode
+                      ? 'Buscar produto ativo por nome ou categoria'
+                      : 'Buscar por nome ou categoria'
+                  }
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
-                <select
-                  className="app-select"
-                  value={activeFilter}
-                  onChange={(e) =>
-                    setActiveFilter(e.target.value as 'TODOS' | 'ATIVOS' | 'INATIVOS')
-                  }
-                >
-                  <option value="TODOS">Todos</option>
-                  <option value="ATIVOS">Ativos</option>
-                  <option value="INATIVOS">Inativos</option>
-                </select>
+                {!isOperationMode ? (
+                  <select
+                    className="app-select"
+                    value={activeFilter}
+                    onChange={(e) =>
+                      setActiveFilter(e.target.value as 'TODOS' | 'ATIVOS' | 'INATIVOS')
+                    }
+                  >
+                    <option value="TODOS">Todos</option>
+                    <option value="ATIVOS">Ativos</option>
+                    <option value="INATIVOS">Inativos</option>
+                  </select>
+                ) : (
+                  <span className="text-xs text-neutral-500">Mostrando apenas produtos ativos.</span>
+                )}
               </div>
             </div>
           </div>
         </BuilderLayoutItemSlot>
 
-        <BuilderLayoutItemSlot id="form">
+        <BuilderLayoutItemSlot
+          id="form"
+          className={isSpotlightSlot('form') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
+        >
           <form onSubmit={submit} className="app-panel grid gap-5">
+            <div className="grid gap-2">
+              <p className="text-sm font-semibold text-neutral-700">Preenchimento rapido</p>
+              <div className="app-inline-actions">
+                {productQuickTemplates.map((template) => (
+                  <button
+                    key={template.label}
+                    type="button"
+                    className="app-button app-button-ghost"
+                    title={template.helper}
+                    onClick={() => applyTemplate(template)}
+                  >
+                    {template.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-neutral-500">
+                Selecione um atalho e complete apenas nome e preco.
+              </p>
+            </div>
+
             <div className="grid gap-3 md:grid-cols-2">
               <FormField label="Nome" error={error}>
                 <input
@@ -261,57 +408,62 @@ export default function ProductsPage() {
                   onBlur={(e) => setForm((prev) => ({ ...prev, name: titleCase(e.target.value) }))}
                 />
               </FormField>
-              <FormField label="Categoria" hint="Ex: Bebidas, Lanches">
+              <FormField label="Preco" hint="Ex: 12,50">
                 <input
                   className="app-input"
-                  placeholder="Categoria (ex.: Sabores)"
-                  value={form.category || ''}
-                  onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}
-                  onBlur={(e) =>
-                    setForm((prev) => ({ ...prev, category: titleCase(e.target.value) }))
-                  }
-                />
-              </FormField>
-              <FormField label="Unidade" hint="Ex: un, kg, pct">
-                <input
-                  className="app-input"
-                  placeholder="Unidade"
-                  value={form.unit || ''}
-                  onChange={(e) => setForm((prev) => ({ ...prev, unit: e.target.value }))}
-                  onBlur={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      unit: e.target.value.trim().toLowerCase() || 'un'
-                    }))
-                  }
-                />
-              </FormField>
-              <FormField label="Preco" hint="Use ponto para centavos">
-                <input
-                  className="app-input"
-                  placeholder="0.00"
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  value={form.price ?? 0}
-                  onChange={(e) => setForm((prev) => ({ ...prev, price: Number(e.target.value) }))}
-                  onBlur={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      price: Math.round(Number(e.target.value || 0) * 100) / 100
-                    }))
-                  }
+                  placeholder="0,00"
+                  inputMode="decimal"
+                  value={priceInput}
+                  onChange={(e) => setPriceInput(e.target.value)}
+                  onBlur={() => {
+                    const formatted = formatMoneyInputBR(priceInput || '0');
+                    setPriceInput(formatted || '0,00');
+                    setForm((prev) => ({ ...prev, price: parseCurrencyBR(formatted || '0') }));
+                  }}
                 />
               </FormField>
             </div>
-            <label className="flex items-center gap-2 text-sm text-neutral-700">
-              <input
-                type="checkbox"
-                checked={form.active ?? true}
-                onChange={(e) => setForm((prev) => ({ ...prev, active: e.target.checked }))}
-              />
-              Ativo
-            </label>
+
+            {isOperationMode ? null : (
+              <details className="app-details" open>
+                <summary>Campos avancados (categoria, unidade e status)</summary>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <FormField label="Categoria" hint="Ex: Broas, Sabores, Bebidas">
+                    <input
+                      className="app-input"
+                      placeholder="Categoria"
+                      value={form.category || ''}
+                      onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}
+                      onBlur={(e) =>
+                        setForm((prev) => ({ ...prev, category: titleCase(e.target.value) }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="Unidade" hint="Ex: un, kg, pct">
+                    <input
+                      className="app-input"
+                      placeholder="Unidade"
+                      value={form.unit || ''}
+                      onChange={(e) => setForm((prev) => ({ ...prev, unit: e.target.value }))}
+                      onBlur={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          unit: e.target.value.trim().toLowerCase() || 'un'
+                        }))
+                      }
+                    />
+                  </FormField>
+                </div>
+                <label className="mt-3 flex items-center gap-2 text-sm text-neutral-700">
+                  <input
+                    type="checkbox"
+                    checked={form.active ?? true}
+                    onChange={(e) => setForm((prev) => ({ ...prev, active: e.target.checked }))}
+                  />
+                  Produto ativo
+                </label>
+              </details>
+            )}
             <div className="app-form-actions app-form-actions--mobile-sticky">
               <button className="app-button app-button-primary" type="submit">
                 {editingId ? 'Atualizar' : 'Criar'}
@@ -329,7 +481,10 @@ export default function ProductsPage() {
           </form>
         </BuilderLayoutItemSlot>
 
-        <BuilderLayoutItemSlot id="list">
+        <BuilderLayoutItemSlot
+          id="list"
+          className={isSpotlightSlot('list') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
+        >
           <div className="grid gap-3">
             {loading ? (
               <div className="app-panel border-dashed text-sm text-neutral-500">
@@ -356,9 +511,11 @@ export default function ProductsPage() {
                       <Link className="app-button app-button-ghost" href={`/estoque?bomProductId=${product.id}`}>
                         Ficha tecnica
                       </Link>
-                      <button className="app-button app-button-danger" onClick={() => remove(product.id!)}>
-                        Remover
-                      </button>
+                      {!isOperationMode ? (
+                        <button className="app-button app-button-danger" onClick={() => remove(product.id!)}>
+                          Remover
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 ))}
@@ -374,8 +531,16 @@ export default function ProductsPage() {
           </div>
         </BuilderLayoutItemSlot>
 
-        <BuilderLayoutCustomCards />
+        {!isOperationMode ? <BuilderLayoutCustomCards /> : null}
       </section>
     </BuilderLayoutProvider>
+  );
+}
+
+export default function ProductsPage() {
+  return (
+    <Suspense fallback={null}>
+      <ProductsPageContent />
+    </Suspense>
   );
 }

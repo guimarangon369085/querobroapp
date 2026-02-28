@@ -1,0 +1,13 @@
+{
+  "name": "querobroapp-alexa-bridge-lambda",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.mjs",
+  "engines": {
+    "node": ">=20 <21"
+  },
+  "dependencies": {
+    "ask-sdk-core": "^2.14.0"
+  }
+}

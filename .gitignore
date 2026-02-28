@@ -20,3 +20,9 @@ node_modules
 /packages/shared/dist
 /docs/.cache
 tsconfig.tsbuildinfo
+secrets/*.dec.*
+/apps/web/public/querobroa/brand/*
+!/apps/web/public/querobroa/brand/.gitkeep
+/.playwright-cli/
+/output/
+/packages/ui/dist/

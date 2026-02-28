@@ -2,38 +2,33 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-
-const links = [
-  { href: '/dashboard', label: 'Dashboard' },
-  { href: '/produtos', label: 'Produtos' },
-  { href: '/clientes', label: 'Clientes' },
-  { href: '/pedidos', label: 'Pedidos' },
-  { href: '/estoque', label: 'Estoque' },
-  { href: '/builder', label: 'Builder' },
-];
-
-function isActive(pathname: string, href: string) {
-  return pathname === href || pathname.startsWith(`${href}/`);
-}
+import { isActivePath, navSections } from '@/lib/navigation-model';
 
 export function Nav() {
   const pathname = usePathname();
 
   return (
     <nav className="app-nav" aria-label="Navegacao principal">
-      {links.map((link) => {
-        const active = isActive(pathname, link.href);
-        return (
-          <Link
-            key={link.href}
-            href={link.href}
-            aria-current={active ? 'page' : undefined}
-            className={`app-nav__link ${active ? 'app-nav__link--active' : ''}`}
-          >
-            {link.label}
-          </Link>
-        );
-      })}
+      {navSections.map((section) => (
+        <section key={section.id} className="app-nav__section" aria-label={section.label}>
+          <p className="app-nav__section-title">{section.label}</p>
+          {section.items.map((item) => {
+            const active = isActivePath(pathname, item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-current={active ? 'page' : undefined}
+                className={`app-nav__link ${active ? 'app-nav__link--active' : ''}`}
+              >
+                <span className="app-nav__content">
+                  <span>{item.label}</span>
+                </span>
+              </Link>
+            );
+          })}
+        </section>
+      ))}
     </nav>
   );
 }

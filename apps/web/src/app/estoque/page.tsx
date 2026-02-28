@@ -14,8 +14,11 @@ import type {
 import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
-import { parseLocaleNumber } from '@/lib/format';
+import { formatDecimalInputBR, formatMoneyInputBR, parseLocaleNumber } from '@/lib/format';
+import { useSurfaceMode } from '@/hooks/use-surface-mode';
+import { useTutorialSpotlight } from '@/hooks/use-tutorial-spotlight';
 import { useFeedback } from '@/components/feedback-provider';
+import { OnboardingTourCard } from '@/components/onboarding-tour-card';
 import {
   BuilderLayoutCustomCards,
   BuilderLayoutItemSlot,
@@ -75,6 +78,8 @@ type OnlinePriceRecommendationResponse = {
   items: OnlinePriceRecommendationItem[];
 };
 
+const TUTORIAL_QUERY_VALUE = 'primeira_vez';
+
 function defaultTomorrowDate() {
   const now = new Date();
   const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
@@ -89,6 +94,18 @@ function formatQty(value: number) {
 function formatCurrencyBR(value: number) {
   if (!Number.isFinite(value)) return 'R$ 0,00';
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function sanitizeExternalHttpUrl(url: string) {
+  try {
+    const parsed = new URL((url || '').trim());
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.toString();
+    }
+  } catch {
+    return '#';
+  }
+  return '#';
 }
 
 function inventoryCategoryLabel(category: string) {
@@ -163,6 +180,7 @@ function resolveBomItemQtyPerSale(
 
 function StockPageContent() {
   const searchParams = useSearchParams();
+  const { tutorialMode, isSpotlightSlot } = useTutorialSpotlight(searchParams, TUTORIAL_QUERY_VALUE);
   const bomSectionRef = useRef<HTMLDivElement | null>(null);
   const openedBomProductIdRef = useRef<number | null>(null);
 
@@ -196,21 +214,13 @@ function StockPageContent() {
   const [flavorComboLoading, setFlavorComboLoading] = useState(false);
   const [plannerExtraBroas, setPlannerExtraBroas] = useState<string>('0');
   const [plannerDeadline, setPlannerDeadline] = useState<string>('15:00');
-  const [isCompactViewport, setIsCompactViewport] = useState(false);
-  const [viewMode, setViewMode] = useState<'operation' | 'full'>('full');
+  const { isOperationMode } = useSurfaceMode('estoque');
   const [onlinePriceLoading, setOnlinePriceLoading] = useState(false);
   const [onlinePriceError, setOnlinePriceError] = useState<string | null>(null);
   const [onlinePriceRecommendations, setOnlinePriceRecommendations] =
     useState<OnlinePriceRecommendationResponse | null>(null);
-  const compactViewportRef = useRef<boolean | null>(null);
   const onlinePriceSignatureRef = useRef<string>('');
   const { confirm, notifyError, notifySuccess, notifyUndo } = useFeedback();
-
-  const advancedSlots = useMemo(
-    () => new Set(['capacity', 'bom', 'packaging', 'movements']),
-    []
-  );
-  const isOperationMode = isCompactViewport && viewMode === 'operation';
 
   const load = useCallback(async () => {
     const [productsData, ordersData, itemsData, movementsData, bomsData] = await Promise.all([
@@ -232,27 +242,6 @@ function StockPageContent() {
   }, [load]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const syncViewportMode = () => {
-      const compact = window.innerWidth <= 1024;
-      setIsCompactViewport(compact);
-
-      if (compactViewportRef.current === null) {
-        setViewMode(compact ? 'operation' : 'full');
-      } else if (compactViewportRef.current !== compact) {
-        setViewMode(compact ? 'operation' : 'full');
-      }
-
-      compactViewportRef.current = compact;
-    };
-
-    syncViewportMode();
-    window.addEventListener('resize', syncViewportMode);
-    return () => window.removeEventListener('resize', syncViewportMode);
-  }, []);
-
-  useEffect(() => {
     const focus = consumeFocusQueryParam(searchParams);
     if (!focus) return;
 
@@ -270,21 +259,11 @@ function StockPageContent() {
     ]);
     if (!allowed.has(focus)) return;
 
-    if (isOperationMode && advancedSlots.has(focus)) {
-      setViewMode('full');
-      scrollToLayoutSlot(focus, {
-        delayMs: 140,
-        focus: focus === 'movement' || focus === 'bom' || focus === 'packaging',
-        focusSelector: 'input, select, textarea, button'
-      });
-      return;
-    }
-
     scrollToLayoutSlot(focus, {
       focus: focus === 'movement' || focus === 'bom' || focus === 'packaging' || focus === 'ops',
       focusSelector: 'input, select, textarea, button'
     });
-  }, [advancedSlots, isOperationMode, searchParams]);
+  }, [searchParams]);
 
   const loadD1 = useCallback(async (targetDate: string) => {
     setD1Loading(true);
@@ -958,34 +937,40 @@ function StockPageContent() {
   return (
     <BuilderLayoutProvider page="estoque">
       <section className="grid gap-8">
-      <BuilderLayoutItemSlot id="header">
+      <BuilderLayoutItemSlot
+        id="header"
+        className={isSpotlightSlot('header') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
+      >
       <div className="app-section-title">
         <div>
           <span className="app-chip">Estoque</span>
-          <h2 className="mt-3 text-3xl font-semibold">Operacao diaria: estoque e producao</h2>
-          <p className="text-neutral-600">
-            Primeiro planeje faltas, depois rode fornadas, e por fim confira saldo e historico.
-          </p>
-        </div>
-        <div className="stock-view-toggle" role="group" aria-label="Modo de visualizacao do estoque">
-          <button
-            type="button"
-            className={`stock-view-toggle__button ${viewMode === 'operation' ? 'stock-view-toggle__button--active' : ''}`}
-            onClick={() => setViewMode('operation')}
-            disabled={!isCompactViewport && viewMode === 'operation'}
-            title={isCompactViewport ? 'Modo foco operacional' : 'Disponivel apenas no viewport compacto'}
-          >
-            foco do dia
-          </button>
-          <button
-            type="button"
-            className={`stock-view-toggle__button ${viewMode === 'full' ? 'stock-view-toggle__button--active' : ''}`}
-            onClick={() => setViewMode('full')}
-          >
-            completo
-          </button>
+          <h2 className="mt-3 text-3xl font-semibold">Estoque e producao</h2>
+          <p className="text-neutral-600">Planejar D+1, movimentar e conferir.</p>
         </div>
       </div>
+      {tutorialMode ? (
+        <OnboardingTourCard
+          stepLabel="Tutorial 1a vez · passo 2 de 5"
+          title="Confirme a ficha tecnica antes do primeiro pedido"
+          description="Aqui o sistema aprende o consumo da broa. Se a ficha nao estiver certa, o estoque nao acompanha a venda."
+          points={[
+            { label: 'Agora', value: 'Revise a BOM do produto e deixe os insumos base conectados.' },
+            { label: 'Depois', value: 'Siga para Clientes e prepare o cadastro de entrega.' }
+          ]}
+          actions={[
+            {
+              label: 'Ir para clientes',
+              href: '/clientes?focus=form&tutorial=primeira_vez',
+              variant: 'primary'
+            },
+            {
+              label: 'Voltar para produtos',
+              href: '/produtos?focus=form&tutorial=primeira_vez',
+              variant: 'ghost'
+            }
+          ]}
+        />
+      ) : null}
       {hasImmediatePurchaseAlert ? (
         <div className="stock-alert-card" role="alert" aria-live="polite">
           <div className="stock-alert-card__head">
@@ -1049,11 +1034,11 @@ function StockPageContent() {
                         </p>
                         <a
                           className="stock-alert-card__offer-link"
-                          href={bestOffer.url}
+                          href={sanitizeExternalHttpUrl(bestOffer.url)}
                           target="_blank"
                           rel="noreferrer noopener"
                         >
-                          Abrir oferta
+                          Comprar agora
                         </a>
                       </>
                     ) : (
@@ -1086,53 +1071,88 @@ function StockPageContent() {
           </div>
         </div>
       ) : null}
-      {isOperationMode ? (
-        <div className="stock-flag stock-flag--focus">
-          Modo foco ativo: blocos tecnicos ficam ocultos para reduzir carga cognitiva.
-        </div>
-      ) : null}
       {inventoryKpis.negativeBalanceItems > 0 ? (
         <div className="stock-flag stock-flag--warning">
           {inventoryKpis.negativeBalanceItems} item(ns) com saldo negativo precisam de ajuste.
         </div>
       ) : null}
-      <div className="app-quickflow app-quickflow--columns mt-4">
-        <button
-          type="button"
-          className="app-quickflow__step text-left"
-          onClick={() => scrollToLayoutSlot('ops', { focus: true })}
-        >
-          <p className="app-quickflow__step-title">1. Organizar o dia</p>
-          <p className="app-quickflow__step-subtitle">Fila de pedidos, fornadas e hora de inicio.</p>
-        </button>
-        <button
-          type="button"
-          className="app-quickflow__step text-left"
-          onClick={() => scrollToLayoutSlot('d1', { focus: true })}
-        >
-          <p className="app-quickflow__step-title">2. Planejar compras</p>
-          <p className="app-quickflow__step-subtitle">Veja faltas por ingrediente e embalagem.</p>
-        </button>
-        <button
-          type="button"
-          className="app-quickflow__step text-left"
-          onClick={() => scrollToLayoutSlot('movement', { focus: true })}
-        >
-          <p className="app-quickflow__step-title">3. Registrar compras/consumo</p>
-          <p className="app-quickflow__step-subtitle">Entradas e saidas em poucos toques.</p>
-        </button>
-        <button
-          type="button"
-          className="app-quickflow__step text-left"
-          onClick={() => scrollToLayoutSlot('balance', { focus: true })}
-        >
-          <p className="app-quickflow__step-title">4. Fechar conferencia</p>
-          <p className="app-quickflow__step-subtitle">Valide saldo por item e historico.</p>
-        </button>
-      </div>
+      {isOperationMode ? (
+        <div className="app-quickflow app-quickflow--columns mt-4">
+          <button
+            type="button"
+            className="app-quickflow__step text-left"
+            onClick={() => scrollToLayoutSlot('ops', { focus: true })}
+          >
+            <p className="app-quickflow__step-title">1. Planejar dia</p>
+            <p className="app-quickflow__step-subtitle">Fila e ritmo.</p>
+          </button>
+          <button
+            type="button"
+            className="app-quickflow__step text-left"
+            onClick={() => scrollToLayoutSlot('d1', { focus: true })}
+          >
+            <p className="app-quickflow__step-title">2. Faltas D+1</p>
+            <p className="app-quickflow__step-subtitle">O que comprar.</p>
+          </button>
+          <button
+            type="button"
+            className="app-quickflow__step text-left"
+            onClick={() => scrollToLayoutSlot('movement', { focus: true })}
+          >
+            <p className="app-quickflow__step-title">3. Movimentar</p>
+            <p className="app-quickflow__step-subtitle">Entrada e saida.</p>
+          </button>
+          <button
+            type="button"
+            className="app-quickflow__step text-left"
+            onClick={() => scrollToLayoutSlot('balance', { focus: true })}
+          >
+            <p className="app-quickflow__step-title">4. Conferir saldo</p>
+            <p className="app-quickflow__step-subtitle">Fechamento do dia.</p>
+          </button>
+        </div>
+      ) : (
+        <div className="app-quickflow app-quickflow--columns mt-4">
+          <button
+            type="button"
+            className="app-quickflow__step text-left"
+            onClick={() => scrollToLayoutSlot('capacity', { focus: true })}
+          >
+            <p className="app-quickflow__step-title">1. Capacidade</p>
+            <p className="app-quickflow__step-subtitle">Gargalos de insumo.</p>
+          </button>
+          <button
+            type="button"
+            className="app-quickflow__step text-left"
+            onClick={() => scrollToLayoutSlot('bom', { focus: true })}
+          >
+            <p className="app-quickflow__step-title">2. Fichas</p>
+            <p className="app-quickflow__step-subtitle">Receitas e rendimento.</p>
+          </button>
+          <button
+            type="button"
+            className="app-quickflow__step text-left"
+            onClick={() => scrollToLayoutSlot('packaging', { focus: true })}
+          >
+            <p className="app-quickflow__step-title">3. Custos</p>
+            <p className="app-quickflow__step-subtitle">Preco por embalagem.</p>
+          </button>
+          <button
+            type="button"
+            className="app-quickflow__step text-left"
+            onClick={() => scrollToLayoutSlot('movements', { focus: true })}
+          >
+            <p className="app-quickflow__step-title">4. Historico</p>
+            <p className="app-quickflow__step-subtitle">Auditoria rapida.</p>
+          </button>
+        </div>
+      )}
       </BuilderLayoutItemSlot>
 
-      <BuilderLayoutItemSlot id="kpis">
+      <BuilderLayoutItemSlot
+        id="kpis"
+        className={isSpotlightSlot('kpis') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
+      >
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <div className="app-kpi">
           <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Fila D+1</p>
@@ -1169,7 +1189,10 @@ function StockPageContent() {
       </div>
       </BuilderLayoutItemSlot>
 
-      <BuilderLayoutItemSlot id="ops">
+      <BuilderLayoutItemSlot
+        id="ops"
+        className={isSpotlightSlot('ops') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
+      >
       <div className="stock-ops-grid">
         <div className="app-panel stock-ops-panel stock-ops-panel--production grid gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1465,6 +1488,7 @@ function StockPageContent() {
             type="number"
             value={quantity}
             onChange={(e) => setQuantity(e.target.value)}
+            onBlur={() => setQuantity(formatDecimalInputBR(quantity, { maxFractionDigits: 4 }) || '')}
             inputMode="decimal"
             placeholder="Quantidade"
           />
@@ -1484,7 +1508,10 @@ function StockPageContent() {
       </BuilderLayoutItemSlot>
 
       {!isOperationMode ? (
-      <BuilderLayoutItemSlot id="bom">
+      <BuilderLayoutItemSlot
+        id="bom"
+        className={isSpotlightSlot('bom') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
+      >
       <div className="app-panel grid gap-4">
         <div ref={bomSectionRef} className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-semibold">Fichas tecnicas</h3>
@@ -1551,18 +1578,33 @@ function StockPageContent() {
                 placeholder="Qtd receita"
                 value={item.qtyPerRecipe ?? ''}
                 onChange={(e) => updateBomItem(index, { qtyPerRecipe: e.target.value })}
+                onBlur={() =>
+                  updateBomItem(index, {
+                    qtyPerRecipe: formatDecimalInputBR(item.qtyPerRecipe || '', { maxFractionDigits: 4 })
+                  })
+                }
               />
               <input
                 className="app-input"
                 placeholder="Qtd caixa"
                 value={item.qtyPerSaleUnit ?? ''}
                 onChange={(e) => updateBomItem(index, { qtyPerSaleUnit: e.target.value })}
+                onBlur={() =>
+                  updateBomItem(index, {
+                    qtyPerSaleUnit: formatDecimalInputBR(item.qtyPerSaleUnit || '', { maxFractionDigits: 4 })
+                  })
+                }
               />
               <input
                 className="app-input"
                 placeholder="Qtd unidade"
                 value={item.qtyPerUnit ?? ''}
                 onChange={(e) => updateBomItem(index, { qtyPerUnit: e.target.value })}
+                onBlur={() =>
+                  updateBomItem(index, {
+                    qtyPerUnit: formatDecimalInputBR(item.qtyPerUnit || '', { maxFractionDigits: 4 })
+                  })
+                }
               />
               <button
                 className="app-button app-button-danger"
@@ -1676,12 +1718,14 @@ function StockPageContent() {
             placeholder="Tamanho embalagem"
             value={packSize}
             onChange={(e) => setPackSize(e.target.value)}
+            onBlur={() => setPackSize(formatDecimalInputBR(packSize, { maxFractionDigits: 4 }) || '0')}
           />
           <input
             className="app-input"
             placeholder="Custo embalagem (R$)"
             value={packCost}
             onChange={(e) => setPackCost(e.target.value)}
+            onBlur={() => setPackCost(formatMoneyInputBR(packCost || '0') || '0,00')}
           />
         </div>
         <div className="app-form-actions app-form-actions--mobile-sticky">

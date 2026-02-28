@@ -5,7 +5,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { randomUUID } from 'node:crypto';
 import helmet from 'helmet';
 import { AppModule } from './app.module.js';
-import { UPLOADS_DIR } from './modules/builder/builder.service.js';
+import { UPLOADS_DIR } from './modules/runtime-config/runtime-config.service.js';
 import { ZodExceptionFilter } from './common/filters/zod-exception.filter.js';
 import { getSecurityRuntimeConfig } from './security/security-config.js';
 
@@ -25,6 +25,14 @@ function ensureDatabaseUrl() {
   if (!isDev && !process.env.DATABASE_URL && process.env.DATABASE_URL_PROD) {
     process.env.DATABASE_URL = process.env.DATABASE_URL_PROD;
   }
+}
+
+function parseBooleanEnv(value: string | undefined, fallback: boolean) {
+  const normalized = (value || '').trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
+  return fallback;
 }
 
 function parseAllowedOrigins() {
@@ -57,7 +65,16 @@ type ResponseLike = {
 
 async function bootstrap() {
   ensureDatabaseUrl();
+  const isProd = (process.env.NODE_ENV || 'development') === 'production';
   const securityConfig = getSecurityRuntimeConfig();
+  const allowUnsafeAuthInProd = parseBooleanEnv(process.env.APP_ALLOW_UNSAFE_AUTH_IN_PROD, false);
+
+  if (isProd && !securityConfig.enabled && !allowUnsafeAuthInProd) {
+    throw new Error(
+      'NODE_ENV=production exige APP_AUTH_ENABLED=true. Use APP_ALLOW_UNSAFE_AUTH_IN_PROD=true apenas para excecoes temporarias.'
+    );
+  }
+
   if (securityConfig.enabled && securityConfig.tokensBySecret.size === 0) {
     throw new Error(
       'APP_AUTH_ENABLED=true, mas nenhum token foi configurado. Defina APP_AUTH_TOKEN ou APP_AUTH_TOKENS.'
@@ -119,6 +136,13 @@ async function bootstrap() {
   });
 
   const enableSwagger = process.env.ENABLE_SWAGGER === 'true';
+  const allowSwaggerInProd = parseBooleanEnv(process.env.APP_ALLOW_SWAGGER_IN_PROD, false);
+  if (isProd && enableSwagger && !allowSwaggerInProd) {
+    throw new Error(
+      'Swagger em producao esta bloqueado por padrao. Defina APP_ALLOW_SWAGGER_IN_PROD=true para liberar conscientemente.'
+    );
+  }
+
   if (enableSwagger) {
     const config = new DocumentBuilder()
       .setTitle('QuerobroApp API')

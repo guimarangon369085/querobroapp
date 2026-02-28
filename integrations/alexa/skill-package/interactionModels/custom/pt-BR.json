@@ -1,0 +1,66 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "quero broa",
+      "intents": [
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        },
+        {
+          "name": "SyncSupplierPricesIntent",
+          "slots": [],
+          "samples": [
+            "sincronizar fornecedores",
+            "atualizar preços de fornecedores",
+            "sincronizar preços de fornecedores",
+            "rodar sincronização de fornecedores",
+            "atualizar custos de fornecedores"
+          ]
+        },
+        {
+          "name": "BuildPurchasePlanIntent",
+          "slots": [
+            {
+              "name": "date",
+              "type": "AMAZON.DATE",
+              "samples": []
+            }
+          ],
+          "samples": [
+            "gerar plano de compras",
+            "gerar plano de compras para {date}",
+            "montar lista de compras",
+            "montar lista de compras para {date}",
+            "planejar compras",
+            "planejar compras para {date}"
+          ]
+        },
+        {
+          "name": "LatestAutomationStatusIntent",
+          "slots": [],
+          "samples": [
+            "status da última automação",
+            "como está a última automação",
+            "qual o status da automação",
+            "me diga o status da automação",
+            "último status operacional"
+          ]
+        }
+      ],
+      "types": []
+    }
+  }
+}

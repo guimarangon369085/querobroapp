@@ -4,34 +4,60 @@ import {
   Injectable,
   InternalServerErrorException
 } from '@nestjs/common';
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { lookup } from 'node:dns/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { isIP } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
 import {
   BuilderIntegrationsSchema,
   ReceiptOfficialItemEnum,
+  type BuilderReceiptPromptPersonality,
   type BuilderReceiptStockRule,
   type BuilderSupplierPriceSource,
   type ReceiptOfficialItem
 } from '@querobroapp/shared';
 import { z } from 'zod';
+import WebSocket, { type RawData } from 'ws';
 import { parseLocaleNumber } from '../../common/normalize.js';
 import { parseWithSchema } from '../../common/validation.js';
-import { BuilderService } from '../builder/builder.service.js';
 import { InventoryService } from '../inventory/inventory.service.js';
 import { PrismaService } from '../../prisma.service.js';
+import { RuntimeConfigService } from '../runtime-config/runtime-config.service.js';
 
+const execFileAsync = promisify(execFile);
 const officialItems = [...ReceiptOfficialItemEnum.options];
 
-const parseReceiptInputSchema = z
-  .object({
-    imageBase64: z.string().trim().min(1).optional(),
-    imageUrl: z.string().trim().url().optional(),
-    mimeType: z.string().trim().min(1).optional().default('image/jpeg'),
-    providerHint: z.string().trim().min(1).max(120).optional(),
-    sourceFriendly: z.string().trim().min(1).max(140).optional()
-  })
-  .refine((data) => Boolean(data.imageBase64 || data.imageUrl), {
-    message: 'Informe imageBase64 ou imageUrl para analisar o cupom fiscal.'
+const parseReceiptInputBaseSchema = z.object({
+  imageBase64: z.string().trim().min(1).optional(),
+  imageUrl: z.string().trim().url().optional(),
+  rawText: z.string().trim().min(1).max(120_000).optional(),
+  mimeType: z.string().trim().min(1).optional().default('image/jpeg'),
+  providerHint: z.string().trim().min(1).max(120).optional(),
+  sourceFriendly: z.string().trim().min(1).max(140).optional()
+});
+
+const parseReceiptInputSchema = parseReceiptInputBaseSchema
+  .refine((data) => Boolean(data.imageBase64 || data.imageUrl || data.rawText), {
+    message: 'Informe imageBase64, imageUrl ou rawText para analisar o cupom fiscal.'
   });
+
+const ingestBatchItemSchema = parseReceiptInputBaseSchema
+  .extend({
+    id: z.string().trim().min(1).max(80).optional(),
+    idempotencyKey: z.string().trim().min(1).max(120).optional()
+  })
+  .refine((data) => Boolean(data.imageBase64 || data.imageUrl || data.rawText), {
+    message: 'Cada item do lote precisa de imageBase64, imageUrl ou rawText.'
+  });
+
+const ingestBatchInputSchema = z.object({
+  continueOnError: z.boolean().default(true),
+  items: z.array(ingestBatchItemSchema).min(1).max(25)
+});
 
 const recommendOnlineSupplierPricesSchema = z.object({
   date: z.string().trim().max(32).optional(),
@@ -66,6 +92,7 @@ const parsedReceiptSchema = z.object({
 });
 
 type ParseReceiptInput = z.output<typeof parseReceiptInputSchema>;
+type IngestBatchInput = z.output<typeof ingestBatchInputSchema>;
 type RecommendOnlineSupplierPricesInput = z.output<typeof recommendOnlineSupplierPricesSchema>;
 type ParsedReceipt = z.output<typeof parsedReceiptSchema>;
 
@@ -80,15 +107,46 @@ type ChatCompletionResponse = {
   }>;
 };
 
+type ResponsesOutputContent = {
+  type?: string;
+  text?: string;
+  json?: unknown;
+};
+
+type ResponsesOutputMessage = {
+  type?: string;
+  content?: ResponsesOutputContent[];
+};
+
+type ResponsesApiResponse = {
+  output_text?: string;
+  output?: ResponsesOutputMessage[];
+  error?: {
+    message?: string;
+  };
+};
+
 type ParsedReceiptItem = {
   item: ReceiptOfficialItem;
   quantity: number;
   unitPrice: number;
 };
 
+type LocalItemMatchRule = {
+  item: ReceiptOfficialItem;
+  patterns: RegExp[];
+};
+
 type ReceiptsRuntimeConfig = {
   shortcutsEnabled: boolean;
   receiptsPrompt: string;
+  receiptsPromptPersonality: BuilderReceiptPromptPersonality;
+  receiptsContextHints: string;
+  receiptsContextCompactionEnabled: boolean;
+  receiptsContextCompactionMaxChars: number;
+  receiptsModelOverride: string;
+  receiptsPromptCacheEnabled: boolean;
+  receiptsPromptCacheTtlMinutes: number;
   receiptsSeparator: string;
   receiptsAutoIngestEnabled: boolean;
   receiptStockRules: BuilderReceiptStockRule[];
@@ -158,6 +216,26 @@ type ReceiptsIngestResponse = {
   ingest: IngestSummary;
 };
 
+type ReceiptsIngestBatchItemResult = {
+  index: number;
+  id: string;
+  status: 'ok' | 'error';
+  appliedCount: number;
+  ignoredCount: number;
+  lineCount: number;
+  sourceFriendly: string;
+  purchaseDate: string;
+  error: string;
+};
+
+type ReceiptsIngestBatchResponse = {
+  processedAt: string;
+  total: number;
+  okCount: number;
+  errorCount: number;
+  results: ReceiptsIngestBatchItemResult[];
+};
+
 type SupplierPriceSyncItem = {
   sourceId: string;
   officialItem: ReceiptOfficialItem;
@@ -219,12 +297,31 @@ type SearchCandidate = {
   supplierName: string;
 };
 
+type ReceiptsApiMode = 'responses' | 'responses_websocket' | 'chat_completions';
+
+type ReceiptInferenceCacheEntry = {
+  expiresAt: number;
+  payload: unknown;
+};
+
+type ExternalHostSafetyCacheEntry = {
+  expiresAt: number;
+  safe: boolean;
+};
+
 @Injectable()
 export class ReceiptsService {
-  private readonly model = process.env.OPENAI_RECEIPTS_MODEL || 'gpt-4o-mini';
-  private readonly openAiBaseUrl = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(
-    /\/+$/,
-    ''
+  private readonly defaultModel = process.env.OPENAI_RECEIPTS_MODEL || 'gpt-4o-mini';
+  private readonly localOcrEnabled = this.resolveBooleanEnv(process.env.RECEIPTS_LOCAL_OCR_ENABLED, true);
+  private readonly localOcrTimeoutMs = this.resolveLocalOcrTimeoutMs();
+  private readonly localOcrMaxBufferBytes = 4 * 1024 * 1024;
+  private readonly openAiBaseUrl = this.resolveOpenAiBaseUrl();
+  private readonly responsesWebsocketUrl = this.resolveResponsesWebsocketUrl();
+  private readonly responsesWebsocketTimeoutMs = this.resolveResponsesWebsocketTimeoutMs();
+  private readonly receiptsApiMode = this.resolveReceiptsApiMode();
+  private readonly fallbackToChatCompletions = this.resolveBooleanEnv(
+    process.env.OPENAI_RECEIPTS_FALLBACK_TO_CHAT_COMPLETIONS,
+    true
   );
   private readonly receiptsApiToken = (process.env.RECEIPTS_API_TOKEN || '').trim();
   private readonly defaultSeparator = ';';
@@ -232,8 +329,11 @@ export class ReceiptsService {
   private readonly idempotencyTtlHours = this.resolveIdempotencyTtlHours();
   private readonly onlineSearchTtlMs = 20 * 60 * 1000;
   private readonly onlinePriceTtlMs = 120 * 60 * 1000;
+  private readonly externalHostSafetyTtlMs = 10 * 60 * 1000;
   private readonly onlineSearchCache = new Map<string, { expiresAt: number; results: SearchCandidate[] }>();
   private readonly onlinePriceCache = new Map<string, { expiresAt: number; price: number | null }>();
+  private readonly externalHostSafetyCache = new Map<string, ExternalHostSafetyCacheEntry>();
+  private readonly receiptInferenceCache = new Map<string, ReceiptInferenceCacheEntry>();
   private readonly blockedSearchDomains = [
     'duckduckgo.com',
     'google.com',
@@ -248,9 +348,63 @@ export class ReceiptsService {
     'linkedin.com',
     'pinterest.com'
   ];
+  private readonly localItemMatchRules: LocalItemMatchRule[] = [
+    {
+      item: 'PAPEL MANTEIGA',
+      patterns: [/\bPAPEL\s+MANT(?:EIGA)?\b/i]
+    },
+    {
+      item: 'DOCE DE LEITE',
+      patterns: [/\bDOCE\s+(?:DE\s+)?LEITE\b/i, /\bDOC(?:E)?\s+LEITE\b/i]
+    },
+    {
+      item: 'QUEIJO DO SERRO',
+      patterns: [/\bQUEIJO\b.*\bSERRO\b/i, /\bQJO\b.*\bSERRO\b/i]
+    },
+    {
+      item: 'REQUEIJÃO DE CORTE',
+      patterns: [/\bREQUEIJAO\b.*\bCORTE\b/i, /\bREQUEIJAO\b/i]
+    },
+    {
+      item: 'FARINHA DE TRIGO',
+      patterns: [/\bFARINH[AO]?\b.*\bTRIGO\b/i, /\bTRIGO\b/i]
+    },
+    {
+      item: 'FUBÁ DE CANJICA',
+      patterns: [/\bFUBA\b/i, /\bCANJICA\b/i]
+    },
+    {
+      item: 'AÇÚCAR',
+      patterns: [/\bACUCAR\b/i, /\bACUC\b/i]
+    },
+    {
+      item: 'MANTEIGA',
+      patterns: [/\bMANTEIGA\b/i, /\bMANT\b/i]
+    },
+    {
+      item: 'LEITE',
+      patterns: [/\bLEITE\b/i]
+    },
+    {
+      item: 'OVOS',
+      patterns: [/\bOVOS?\b/i]
+    },
+    {
+      item: 'GOIABADA',
+      patterns: [/\bGOIABADA\b/i, /\bGOIAB\b/i]
+    },
+    {
+      item: 'SACOLA',
+      patterns: [/\bSACOLA\b/i]
+    },
+    {
+      item: 'CAIXA DE PLÁSTICO',
+      patterns: [/\bCAIXA\b.*\bPLAST(?:ICO)?\b/i, /\bCX\b.*\bPLAST\b/i]
+    }
+  ];
 
   constructor(
-    @Inject(BuilderService) private readonly builderService: BuilderService,
+    @Inject(RuntimeConfigService) private readonly runtimeConfigService: RuntimeConfigService,
     @Inject(InventoryService) private readonly inventoryService: InventoryService,
     @Inject(PrismaService) private readonly prisma: PrismaService
   ) {}
@@ -282,11 +436,61 @@ export class ReceiptsService {
     return response;
   }
 
+  async ingestBatch(payload: unknown, token?: string): Promise<ReceiptsIngestBatchResponse> {
+    this.ensureReceiptsToken(token);
+    const input = parseWithSchema(ingestBatchInputSchema, payload) as IngestBatchInput;
+    const results: ReceiptsIngestBatchItemResult[] = [];
+
+    for (const [index, entry] of input.items.entries()) {
+      const { id, idempotencyKey, ...receiptPayload } = entry;
+      const itemId = (id || `item-${index + 1}`).trim();
+
+      try {
+        const response = await this.ingest(receiptPayload, token, idempotencyKey);
+        results.push({
+          index,
+          id: itemId,
+          status: 'ok',
+          appliedCount: response.ingest.appliedCount,
+          ignoredCount: response.ingest.ignoredCount,
+          lineCount: response.lineCount,
+          sourceFriendly: response.sourceFriendly,
+          purchaseDate: response.purchaseDate,
+          error: ''
+        });
+      } catch (error) {
+        results.push({
+          index,
+          id: itemId,
+          status: 'error',
+          appliedCount: 0,
+          ignoredCount: 0,
+          lineCount: 0,
+          sourceFriendly: (entry.sourceFriendly || entry.providerHint || 'Cupom fiscal').trim(),
+          purchaseDate: '',
+          error: this.stringifyError(error)
+        });
+        if (!input.continueOnError) break;
+      }
+    }
+
+    const okCount = results.filter((entry) => entry.status === 'ok').length;
+    const errorCount = results.length - okCount;
+
+    return {
+      processedAt: new Date().toISOString(),
+      total: results.length,
+      okCount,
+      errorCount,
+      results
+    };
+  }
+
   async syncSupplierPrices(token?: string): Promise<SupplierPriceSyncResult> {
     this.ensureReceiptsToken(token);
     const runtimeConfig = await this.getRuntimeConfig();
     if (!runtimeConfig.supplierPricesEnabled) {
-      throw new BadRequestException('Sincronizacao de preco de fornecedor esta desabilitada no Builder.');
+      throw new BadRequestException('Sincronizacao de preco de fornecedor esta desabilitada na configuracao interna.');
     }
 
     const enabledSources = runtimeConfig.supplierPriceSources.filter((source) => source.enabled);
@@ -537,9 +741,7 @@ export class ReceiptsService {
     const parsed = await this.parseReceiptPayload(payload, token);
 
     if (!parsed.runtimeConfig.receiptsAutoIngestEnabled) {
-      throw new BadRequestException(
-        'Automacao de entrada de estoque por cupom esta desabilitada no Builder > Integracoes.'
-      );
+      throw new BadRequestException('Automacao de entrada de estoque por cupom esta desabilitada na configuracao interna.');
     }
 
     const ingest = await this.applyStockIngest(
@@ -559,25 +761,48 @@ export class ReceiptsService {
     this.ensureReceiptsToken(token);
 
     const input = parseWithSchema(parseReceiptInputSchema, payload) as ParseReceiptInput;
-    const apiKey = process.env.OPENAI_API_KEY;
     const runtimeConfig = await this.getRuntimeConfig();
-
-    if (!apiKey) {
-      throw new BadRequestException(
-        'OPENAI_API_KEY nao configurada. Defina a chave no ambiente da API para usar /receipts/parse.'
-      );
-    }
+    const sourceFriendly = (input.sourceFriendly || input.providerHint || 'Cupom fiscal').trim();
 
     if (!runtimeConfig.shortcutsEnabled) {
+      throw new BadRequestException('Integracao de Atalhos desabilitada na configuracao interna.');
+    }
+
+    const localParsed = this.tryParseRawReceiptText(input.rawText || '', sourceFriendly, runtimeConfig);
+    const ocrRawText = await this.extractRawTextFromImageInput(input);
+    const localParsedFromImage = ocrRawText
+      ? this.tryParseRawReceiptText(ocrRawText, sourceFriendly, runtimeConfig)
+      : null;
+    const mergedLocalParsed = this.mergeParsedReceiptRuntime(localParsed, localParsedFromImage);
+    if (mergedLocalParsed) {
+      return mergedLocalParsed;
+    }
+
+    if (ocrRawText) {
+      input.rawText = [input.rawText || '', ocrRawText].filter(Boolean).join('\n');
+    }
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
       throw new BadRequestException(
-        'Integracao de Atalhos desabilitada no Builder. Reative em /builder > Integracoes.'
+        'OPENAI_API_KEY nao configurada e rawText nao foi suficiente. Envie rawText com OCR do cupom ou configure OPENAI_API_KEY.'
       );
     }
 
-    const modelOutput = await this.callVisionModel(input, apiKey, runtimeConfig.receiptsPrompt);
+    const modelOutput = await this.callVisionModel(
+      input,
+      apiKey,
+      this.resolveReceiptsModel(runtimeConfig.receiptsModelOverride),
+      runtimeConfig.receiptsPrompt,
+      runtimeConfig.receiptsPromptPersonality,
+      runtimeConfig.receiptsContextHints,
+      runtimeConfig.receiptsContextCompactionEnabled,
+      runtimeConfig.receiptsContextCompactionMaxChars,
+      runtimeConfig.receiptsPromptCacheEnabled,
+      runtimeConfig.receiptsPromptCacheTtlMinutes
+    );
     const extracted = parseWithSchema(parsedReceiptSchema, modelOutput) as ParsedReceipt;
     const purchaseDate = this.normalizeDate(extracted.purchaseDate);
-    const sourceFriendly = (input.sourceFriendly || input.providerHint || 'Cupom fiscal').trim();
     const items = this.normalizeItems(extracted);
     const lines = items.map((item) =>
       [
@@ -597,6 +822,47 @@ export class ReceiptsService {
     };
   }
 
+  private mergeParsedReceiptRuntime(
+    primary: ParsedReceiptRuntime | null,
+    secondary: ParsedReceiptRuntime | null
+  ): ParsedReceiptRuntime | null {
+    if (!primary) return secondary;
+    if (!secondary) return primary;
+
+    const grouped = new Map<string, ParsedReceiptItem>();
+    const register = (item: ParsedReceiptItem) => {
+      const key = `${item.item}|${item.unitPrice.toFixed(2)}`;
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.quantity = this.normalizeQuantity(Math.max(existing.quantity, item.quantity));
+        return;
+      }
+
+      grouped.set(key, { ...item });
+    };
+
+    primary.items.forEach(register);
+    secondary.items.forEach(register);
+
+    const items = [...grouped.values()];
+    const lines = items.map((item) =>
+      [
+        primary.purchaseDate || secondary.purchaseDate,
+        item.item,
+        this.formatQuantity(item.quantity),
+        this.formatMoney(item.unitPrice)
+      ].join(primary.runtimeConfig.receiptsSeparator)
+    );
+
+    return {
+      purchaseDate: primary.purchaseDate || secondary.purchaseDate,
+      sourceFriendly: primary.sourceFriendly || secondary.sourceFriendly,
+      items,
+      lines,
+      runtimeConfig: primary.runtimeConfig
+    };
+  }
+
   private toPublicParseResponse(parsed: ParsedReceiptRuntime) {
     return {
       purchaseDate: parsed.purchaseDate,
@@ -608,6 +874,296 @@ export class ReceiptsService {
       separator: parsed.runtimeConfig.receiptsSeparator,
       officialItems
     };
+  }
+
+  private tryParseRawReceiptText(
+    rawText: string,
+    sourceFriendly: string,
+    runtimeConfig: ReceiptsRuntimeConfig
+  ): ParsedReceiptRuntime | null {
+    const normalizedText = this.normalizeRawReceiptText(rawText);
+    if (!normalizedText) return null;
+
+    const textLines = normalizedText
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (textLines.length === 0) return null;
+
+    const purchaseDate = this.extractPurchaseDateFromRawLines(textLines);
+    const grouped = new Map<string, ParsedReceiptItem>();
+
+    for (let index = 0; index < textLines.length; index += 1) {
+      const metrics = this.extractQuantityAndUnitPriceFromLine(textLines[index] || '');
+      if (!metrics) continue;
+
+      const context = [textLines[index - 2], textLines[index - 1], textLines[index], textLines[index + 1]]
+        .filter(Boolean)
+        .join(' ');
+      const matchedItem = this.resolveOfficialItemFromTextContext(context, metrics.unitPrice);
+      if (!matchedItem) continue;
+
+      const key = `${matchedItem}|${metrics.unitPrice.toFixed(2)}`;
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.quantity = this.normalizeQuantity(existing.quantity + metrics.quantity);
+        continue;
+      }
+
+      grouped.set(key, {
+        item: matchedItem,
+        quantity: this.normalizeQuantity(metrics.quantity),
+        unitPrice: this.normalizeMoney(metrics.unitPrice)
+      });
+    }
+
+    if (grouped.size === 0) return null;
+
+    const items = [...grouped.values()].filter(
+      (item) => !(item.item === 'SACOLA' && this.isLikelyCheckoutBagPrice(item.unitPrice))
+    );
+    if (items.length === 0) return null;
+    const lines = items.map((item) =>
+      [
+        purchaseDate,
+        item.item,
+        this.formatQuantity(item.quantity),
+        this.formatMoney(item.unitPrice)
+      ].join(runtimeConfig.receiptsSeparator)
+    );
+
+    return {
+      purchaseDate,
+      sourceFriendly,
+      items,
+      lines,
+      runtimeConfig
+    };
+  }
+
+  private normalizeRawReceiptText(value: string) {
+    return (value || '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .replace(/\u00a0/g, ' ')
+      .replace(/[^\S\n]+/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  private async extractRawTextFromImageInput(input: ParseReceiptInput) {
+    if (!this.localOcrEnabled) return '';
+    if (process.platform !== 'darwin') return '';
+    if (!input.imageBase64) return '';
+
+    const startedAt = Date.now();
+    const imageDataUrl = this.buildImageUrl(input);
+    const dataUrlMatch = imageDataUrl.match(/^data:([^;,]+);base64,(.*)$/is);
+    if (!dataUrlMatch) return '';
+
+    const mimeType = (dataUrlMatch[1] || '').trim().toLowerCase();
+    const base64Payload = this.sanitizeBase64(dataUrlMatch[2] || '');
+    if (!base64Payload) return '';
+
+    let imageBuffer: Buffer;
+    try {
+      imageBuffer = Buffer.from(base64Payload, 'base64');
+    } catch {
+      return '';
+    }
+    if (!imageBuffer.length) return '';
+
+    const extension = this.resolveImageExtensionFromMimeType(mimeType);
+    const tempDir = await mkdtemp(join(tmpdir(), 'querobroapp-receipt-ocr-'));
+    const imagePath = join(tempDir, `receipt.${extension}`);
+    const scriptPath = join(tmpdir(), 'querobroapp-receipt-ocr.swift');
+
+    try {
+      await writeFile(imagePath, imageBuffer);
+      await writeFile(scriptPath, this.getLocalVisionOcrSwiftScript(), 'utf8');
+
+      const execution = await execFileAsync('swift', [scriptPath, imagePath], {
+        timeout: this.localOcrTimeoutMs,
+        encoding: 'utf8',
+        maxBuffer: this.localOcrMaxBufferBytes
+      });
+      const output = this.normalizeRawReceiptText(execution.stdout || '');
+
+      this.logReceiptsLocalOcr({
+        ok: Boolean(output),
+        durationMs: Date.now() - startedAt,
+        source: 'imageBase64',
+        chars: output.length,
+        error: ''
+      });
+
+      return output;
+    } catch (error) {
+      this.logReceiptsLocalOcr({
+        ok: false,
+        durationMs: Date.now() - startedAt,
+        source: 'imageBase64',
+        chars: 0,
+        error: this.stringifyError(error)
+      });
+      return '';
+    } finally {
+      await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
+  private resolveImageExtensionFromMimeType(mimeType: string) {
+    switch (mimeType) {
+      case 'image/png':
+        return 'png';
+      case 'image/gif':
+        return 'gif';
+      case 'image/webp':
+        return 'webp';
+      case 'image/heic':
+        return 'heic';
+      case 'image/heif':
+        return 'heif';
+      case 'image/jpg':
+      case 'image/jpeg':
+      default:
+        return 'jpg';
+    }
+  }
+
+  private getLocalVisionOcrSwiftScript() {
+    return `
+import Foundation
+import Vision
+import CoreGraphics
+import ImageIO
+
+func readText(from imagePath: String) throws -> String {
+  let imageUrl = URL(fileURLWithPath: imagePath)
+  guard let source = CGImageSourceCreateWithURL(imageUrl as CFURL, nil),
+        let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+    return ""
+  }
+
+  let request = VNRecognizeTextRequest()
+  request.recognitionLevel = .accurate
+  request.usesLanguageCorrection = false
+  if #available(macOS 13.0, *) {
+    request.automaticallyDetectsLanguage = true
+  }
+
+  let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+  try handler.perform([request])
+
+  let observations = request.results ?? []
+  let lines = observations.compactMap { observation in
+    observation.topCandidates(1).first?.string.trimmingCharacters(in: .whitespacesAndNewlines)
+  }.filter { !$0.isEmpty }
+
+  return lines.joined(separator: "\\n")
+}
+
+let args = CommandLine.arguments
+guard args.count >= 2 else {
+  FileHandle.standardError.write(Data("missing image path\\n".utf8))
+  exit(2)
+}
+
+do {
+  let text = try readText(from: args[1])
+  FileHandle.standardOutput.write(Data(text.utf8))
+} catch {
+  FileHandle.standardError.write(Data("ocr error: \\(error.localizedDescription)\\n".utf8))
+  exit(1)
+}
+`.trim();
+  }
+
+  private extractPurchaseDateFromRawLines(lines: string[]) {
+    for (const line of lines) {
+      const match = line.match(/\b(\d{2}[/-]\d{2}[/-](?:\d{2}|\d{4}))\b/);
+      if (!match) continue;
+      const dateRaw = match[1];
+      const shortYear = dateRaw.match(/^(\d{2})[/-](\d{2})[/-](\d{2})$/);
+      if (shortYear) {
+        const year = Number(shortYear[3]);
+        const fullYear = year >= 70 ? `19${shortYear[3]}` : `20${shortYear[3]}`;
+        return this.normalizeDate(`${shortYear[1]}/${shortYear[2]}/${fullYear}`);
+      }
+      return this.normalizeDate(dateRaw);
+    }
+    return '';
+  }
+
+  private extractQuantityAndUnitPriceFromLine(line: string) {
+    const compact = line.trim().toUpperCase();
+    if (!compact) return null;
+
+    const patterns = [
+      /(\d+(?:[.,]\s*\d+)?)\s*(?:UN|UND|KG|G|L|LT|ML)\s*[Xx*]\s*(\d{1,5}[.,]\s*\d{2})/,
+      /(\d+(?:[.,]\s*\d+)?)\s*[Xx*]\s*(\d{1,5}[.,]\s*\d{2})/
+    ];
+
+    for (const pattern of patterns) {
+      const match = compact.match(pattern);
+      if (!match) continue;
+      const quantity = parseLocaleNumber(match[1]);
+      const unitPrice = parseLocaleNumber(match[2]);
+      if (!quantity || !unitPrice || quantity <= 0 || unitPrice <= 0) continue;
+      return {
+        quantity: this.normalizeQuantity(quantity),
+        unitPrice: this.normalizeMoney(unitPrice)
+      };
+    }
+
+    return null;
+  }
+
+  private resolveOfficialItemFromTextContext(text: string, unitPrice: number): ReceiptOfficialItem | null {
+    const normalized = this.normalizeLookup(text || '');
+    if (!normalized) return null;
+
+    for (const rule of this.localItemMatchRules) {
+      if (rule.patterns.some((pattern) => pattern.test(normalized))) {
+        if (rule.item === 'SACOLA' && this.shouldIgnoreCheckoutBag(normalized, unitPrice)) {
+          continue;
+        }
+        return rule.item;
+      }
+    }
+
+    for (const officialItem of officialItems as ReceiptOfficialItem[]) {
+      const officialNormalized = this.normalizeLookup(officialItem);
+      if (officialNormalized && normalized.includes(officialNormalized)) {
+        if (officialItem === 'SACOLA' && this.shouldIgnoreCheckoutBag(normalized, unitPrice)) {
+          continue;
+        }
+        return officialItem;
+      }
+    }
+
+    return null;
+  }
+
+  private shouldIgnoreCheckoutBag(normalizedContext: string, unitPrice: number) {
+    if (!/\bSACOLA\b/.test(normalizedContext)) return false;
+
+    // Packaging/replenishment signals that indicate the official consumable item.
+    const hasPackagingSignals =
+      /\b(KRAFT|EMBALAGEM|PACOTE|PCT|BOBINA|DELIVERY|IFOOD|ALCA|ALCAS|PAPEL)\b/.test(normalizedContext);
+    if (hasPackagingSignals) return false;
+
+    // Typical retail checkout shopping bag wording from supermarkets.
+    const hasCheckoutSignals =
+      /\b(VERDE|ECO|SUPERMERCADO|MERCADO|CHECKOUT|CHECK-OUT|CAIXA|SP)\b/.test(normalizedContext);
+    if (hasCheckoutSignals) return true;
+
+    // Fallback guard: supermarket checkout bag usually has symbolic low value.
+    return this.isLikelyCheckoutBagPrice(unitPrice);
+  }
+
+  private isLikelyCheckoutBagPrice(unitPrice: number) {
+    return Number.isFinite(unitPrice) && unitPrice > 0 && unitPrice <= 2;
   }
 
   private ensureReceiptsToken(token?: string) {
@@ -622,10 +1178,21 @@ export class ReceiptsService {
     const defaults = BuilderIntegrationsSchema.parse({});
 
     try {
-      const config = await this.builderService.getConfig();
+      const config = await this.runtimeConfigService.getConfig();
       return {
         shortcutsEnabled: config.integrations.shortcutsEnabled,
         receiptsPrompt: (config.integrations.receiptsPrompt || '').trim(),
+        receiptsPromptPersonality: config.integrations.receiptsPromptPersonality,
+        receiptsContextHints: (config.integrations.receiptsContextHints || '').trim(),
+        receiptsContextCompactionEnabled: config.integrations.receiptsContextCompactionEnabled !== false,
+        receiptsContextCompactionMaxChars: this.normalizeContextCompactionMaxChars(
+          config.integrations.receiptsContextCompactionMaxChars
+        ),
+        receiptsModelOverride: (config.integrations.receiptsModelOverride || '').trim(),
+        receiptsPromptCacheEnabled: config.integrations.receiptsPromptCacheEnabled !== false,
+        receiptsPromptCacheTtlMinutes: this.normalizePromptCacheTtlMinutes(
+          config.integrations.receiptsPromptCacheTtlMinutes
+        ),
         receiptsSeparator: this.normalizeSeparator(config.integrations.receiptsSeparator),
         receiptsAutoIngestEnabled: config.integrations.receiptsAutoIngestEnabled,
         receiptStockRules: this.normalizeStockRules(config.integrations.receiptStockRules),
@@ -636,6 +1203,17 @@ export class ReceiptsService {
       return {
         shortcutsEnabled: defaults.shortcutsEnabled,
         receiptsPrompt: defaults.receiptsPrompt,
+        receiptsPromptPersonality: defaults.receiptsPromptPersonality,
+        receiptsContextHints: defaults.receiptsContextHints,
+        receiptsContextCompactionEnabled: defaults.receiptsContextCompactionEnabled !== false,
+        receiptsContextCompactionMaxChars: this.normalizeContextCompactionMaxChars(
+          defaults.receiptsContextCompactionMaxChars
+        ),
+        receiptsModelOverride: defaults.receiptsModelOverride,
+        receiptsPromptCacheEnabled: defaults.receiptsPromptCacheEnabled !== false,
+        receiptsPromptCacheTtlMinutes: this.normalizePromptCacheTtlMinutes(
+          defaults.receiptsPromptCacheTtlMinutes
+        ),
         receiptsSeparator: this.normalizeSeparator(defaults.receiptsSeparator),
         receiptsAutoIngestEnabled: defaults.receiptsAutoIngestEnabled,
         receiptStockRules: this.normalizeStockRules(defaults.receiptStockRules),
@@ -649,6 +1227,18 @@ export class ReceiptsService {
     const normalized = (value || '').trim();
     if (!normalized) return this.defaultSeparator;
     return normalized.slice(0, 4);
+  }
+
+  private normalizeContextCompactionMaxChars(value: number | undefined) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 300) return 1200;
+    return Math.min(6000, Math.round(parsed));
+  }
+
+  private normalizePromptCacheTtlMinutes(value: number | undefined) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 1) return 90;
+    return Math.min(1440, Math.round(parsed));
   }
 
   private normalizeStockRules(rules: BuilderReceiptStockRule[] | undefined): BuilderReceiptStockRule[] {
@@ -692,7 +1282,7 @@ export class ReceiptsService {
       if (seen.has(id)) continue;
       seen.add(id);
 
-      const url = (source.url || '').trim();
+      const url = this.normalizeExternalHttpUrl(source.url || '');
       if (!url) continue;
 
       const fallbackPrice =
@@ -917,6 +1507,116 @@ export class ReceiptsService {
     }
   }
 
+  private isSafeExternalHttpUrl(url: string) {
+    return Boolean(this.normalizeExternalHttpUrl(url));
+  }
+
+  private async isDnsSafeExternalHttpUrl(url: string) {
+    const normalizedUrl = this.normalizeExternalHttpUrl(url);
+    if (!normalizedUrl) return false;
+
+    let hostname = '';
+    try {
+      hostname = new URL(normalizedUrl).hostname.trim().toLowerCase();
+    } catch {
+      return false;
+    }
+
+    if (!hostname) return false;
+    if (this.isUnsafeExternalHostname(hostname)) return false;
+
+    const now = Date.now();
+    const cached = this.externalHostSafetyCache.get(hostname);
+    if (cached && cached.expiresAt > now) return cached.safe;
+
+    const safe = await this.resolveExternalHostnameSafety(hostname);
+    this.externalHostSafetyCache.set(hostname, {
+      expiresAt: now + this.externalHostSafetyTtlMs,
+      safe
+    });
+    return safe;
+  }
+
+  private async resolveExternalHostnameSafety(hostname: string) {
+    if (isIP(hostname)) {
+      return !this.isUnsafeExternalHostname(hostname);
+    }
+
+    try {
+      const records = await lookup(hostname, { all: true, verbatim: true });
+      if (!records.length) return false;
+      for (const record of records) {
+        if (this.isUnsafeExternalHostname(record.address)) {
+          return false;
+        }
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private normalizeExternalHttpUrl(rawUrl: string) {
+    try {
+      const parsed = new URL((rawUrl || '').trim());
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+      if (this.isUnsafeExternalHostname(parsed.hostname)) return '';
+      parsed.username = '';
+      parsed.password = '';
+      return parsed.toString();
+    } catch {
+      return '';
+    }
+  }
+
+  private isUnsafeExternalHostname(hostname: string) {
+    const normalized = (hostname || '').trim().toLowerCase();
+    if (!normalized) return true;
+    if (normalized === 'localhost' || normalized.endsWith('.localhost') || normalized.endsWith('.local')) {
+      return true;
+    }
+
+    const withoutBrackets = normalized.replace(/^\[/, '').replace(/\]$/, '').split('%')[0];
+    const ipType = isIP(withoutBrackets);
+    if (ipType === 4) return this.isPrivateIpv4(withoutBrackets);
+    if (ipType === 6) return this.isPrivateIpv6(withoutBrackets);
+    return false;
+  }
+
+  private isPrivateIpv4(value: string) {
+    const parts = value.split('.').map((part) => Number(part));
+    if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+      return true;
+    }
+
+    const [a, b] = parts;
+    if (a === 10) return true;
+    if (a === 127) return true;
+    if (a === 0) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+    if (a >= 224) return true;
+    return false;
+  }
+
+  private isPrivateIpv6(value: string) {
+    const normalized = (value || '').toLowerCase();
+    if (!normalized) return true;
+    if (normalized === '::1' || normalized === '::') return true;
+    if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
+    if (normalized.startsWith('fe80')) return true;
+    if (normalized.startsWith('ff')) return true;
+    if (normalized.startsWith('::ffff:')) {
+      const mapped = normalized.slice('::ffff:'.length);
+      if (isIP(mapped) === 4) {
+        return this.isPrivateIpv4(mapped);
+      }
+    }
+    return false;
+  }
+
   private async searchOnlineProductCandidates(query: string, limit: number): Promise<SearchCandidate[]> {
     const normalizedQuery = query.trim().toLowerCase();
     if (!normalizedQuery) return [];
@@ -949,6 +1649,8 @@ export class ReceiptsService {
       const resolved = this.resolveSearchResultUrl(rawHref);
       if (!resolved || !/^https?:\/\//i.test(resolved)) continue;
       if (this.isBlockedSearchDomain(resolved)) continue;
+      if (!this.isSafeExternalHttpUrl(resolved)) continue;
+      if (!(await this.isDnsSafeExternalHttpUrl(resolved))) continue;
 
       const normalizedUrl = this.normalizeUrlForCache(resolved);
       if (!normalizedUrl || seen.has(normalizedUrl)) continue;
@@ -1040,6 +1742,9 @@ export class ReceiptsService {
     for (const [key, entry] of this.onlinePriceCache.entries()) {
       if (entry.expiresAt <= now) this.onlinePriceCache.delete(key);
     }
+    for (const [key, entry] of this.externalHostSafetyCache.entries()) {
+      if (entry.expiresAt <= now) this.externalHostSafetyCache.delete(key);
+    }
   }
 
   private async extractPriceFromUrl(url: string) {
@@ -1064,17 +1769,37 @@ export class ReceiptsService {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(url, {
-        signal: controller.signal,
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
-          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.7'
+      let currentUrl = this.normalizeExternalHttpUrl(url);
+      if (!currentUrl) return '';
+      if (!(await this.isDnsSafeExternalHttpUrl(currentUrl))) return '';
+
+      for (let redirectCount = 0; redirectCount <= 3; redirectCount += 1) {
+        const response = await fetch(currentUrl, {
+          signal: controller.signal,
+          redirect: 'manual',
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.7'
+          }
+        });
+
+        if ([301, 302, 303, 307, 308].includes(response.status)) {
+          const location = response.headers.get('location') || '';
+          if (!location) return '';
+          const redirected = this.normalizeExternalHttpUrl(new URL(location, currentUrl).toString());
+          if (!redirected) return '';
+          if (!(await this.isDnsSafeExternalHttpUrl(redirected))) return '';
+          currentUrl = redirected;
+          continue;
         }
-      });
-      if (!response.ok) return '';
-      return await response.text();
+
+        if (!response.ok) return '';
+        return await response.text();
+      }
+
+      return '';
     } catch {
       return '';
     } finally {
@@ -1124,75 +1849,408 @@ export class ReceiptsService {
     return this.normalizeMoney(parsed);
   }
 
-  private async callVisionModel(input: ParseReceiptInput, apiKey: string, customPrompt: string) {
+  private async callVisionModel(
+    input: ParseReceiptInput,
+    apiKey: string,
+    model: string,
+    customPrompt: string,
+    promptPersonality: BuilderReceiptPromptPersonality,
+    contextHints: string,
+    contextCompactionEnabled: boolean,
+    contextCompactionMaxChars: number,
+    promptCacheEnabled: boolean,
+    promptCacheTtlMinutes: number
+  ) {
     const imageUrl = this.buildImageUrl(input);
-    const itemListText = officialItems.map((item) => `- ${item}`).join('\n');
-    const providerInfo = input.providerHint ? `Fornecedor informado: ${input.providerHint}.` : '';
+    const prompts = this.buildPromptPack(
+      input,
+      customPrompt,
+      promptPersonality,
+      contextHints,
+      contextCompactionEnabled,
+      contextCompactionMaxChars
+    );
+    const cacheKey = this.buildReceiptInferenceCacheKey(model, imageUrl, prompts.systemPrompt, prompts.userPrompt);
+    const startedAt = Date.now();
+    const attempts: string[] = [];
 
-    const systemPrompt = [
-      'Voce extrai dados de cupom fiscal e responde SOMENTE em JSON valido.',
-      'Itens validos (use exatamente o nome oficial):',
-      itemListText,
-      'Se item nao estiver na lista, ignore completamente.',
-      'Retorne purchaseDate em YYYY-MM-DD quando possivel.',
-      'Para cada item aceito, retorne quantity e unitPrice numericos.'
-    ].join('\n');
+    const completeSuccess = (result: unknown, resolvedMode: string, cacheHit: boolean) => {
+      if (!cacheHit) {
+        this.storeReceiptInferenceCache(cacheKey, result, promptCacheEnabled, promptCacheTtlMinutes);
+      }
 
-    const defaultUserPrompt = [
-      'Extrair dados do cupom fiscal da imagem.',
-      'Nao inclua itens fora da lista oficial.',
-      'Se nao identificar data, use string vazia em purchaseDate.'
-    ].join('\n');
+      this.logReceiptsAiCall({
+        requestedMode: this.receiptsApiMode,
+        resolvedMode,
+        model,
+        cacheHit,
+        attempts,
+        durationMs: Date.now() - startedAt,
+        ok: true,
+        error: ''
+      });
+      return result;
+    };
 
-    const userPrompt = [
-      customPrompt ? `Prompt operacional:\n${customPrompt}` : defaultUserPrompt,
-      providerInfo,
-      'Responda SOMENTE com JSON valido no schema solicitado.'
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const cachedResult = this.readReceiptInferenceCache(cacheKey, promptCacheEnabled);
+    if (cachedResult != null) {
+      return completeSuccess(cachedResult, 'cache', true);
+    }
 
+    try {
+      if (this.receiptsApiMode === 'chat_completions') {
+        attempts.push('chat_completions');
+        const result = await this.callVisionModelChatCompletions(
+          model,
+          imageUrl,
+          apiKey,
+          prompts.systemPrompt,
+          prompts.userPrompt
+        );
+        return completeSuccess(result, 'chat_completions', false);
+      }
+
+      if (this.receiptsApiMode === 'responses_websocket') {
+        let websocketError = '';
+        attempts.push('responses_websocket');
+        try {
+          const result = await this.callVisionModelResponsesWebsocket(
+            model,
+            imageUrl,
+            apiKey,
+            prompts.systemPrompt,
+            prompts.userPrompt
+          );
+          return completeSuccess(result, 'responses_websocket', false);
+        } catch (error) {
+          websocketError = this.stringifyError(error);
+        }
+
+        let responsesError = '';
+        attempts.push('responses');
+        try {
+          const result = await this.callVisionModelResponses(
+            model,
+            imageUrl,
+            apiKey,
+            prompts.systemPrompt,
+            prompts.userPrompt
+          );
+          return completeSuccess(result, 'responses', false);
+        } catch (error) {
+          responsesError = this.stringifyError(error);
+          if (!this.fallbackToChatCompletions) {
+            throw new BadRequestException(
+              `Falha no modo responses_websocket e no fallback responses HTTP. websocket=${this.compactText(
+                websocketError,
+                220
+              )} | responses=${this.compactText(responsesError, 220)}`
+            );
+          }
+        }
+
+        attempts.push('chat_completions');
+        try {
+          const result = await this.callVisionModelChatCompletions(
+            model,
+            imageUrl,
+            apiKey,
+            prompts.systemPrompt,
+            prompts.userPrompt
+          );
+          return completeSuccess(result, 'chat_completions', false);
+        } catch (fallbackError) {
+          throw new BadRequestException(
+            `Falha no modo responses_websocket e nos fallbacks HTTP. websocket=${this.compactText(
+              websocketError,
+              180
+            )} | responses=${this.compactText(responsesError, 180)} | chat=${this.compactText(
+              this.stringifyError(fallbackError),
+              180
+            )}`
+          );
+        }
+      }
+
+      let responsesError = '';
+      attempts.push('responses');
+      try {
+        const result = await this.callVisionModelResponses(
+          model,
+          imageUrl,
+          apiKey,
+          prompts.systemPrompt,
+          prompts.userPrompt
+        );
+        return completeSuccess(result, 'responses', false);
+      } catch (error) {
+        responsesError = this.stringifyError(error);
+        if (!this.fallbackToChatCompletions) {
+          throw error;
+        }
+      }
+
+      attempts.push('chat_completions');
+      try {
+        const result = await this.callVisionModelChatCompletions(
+          model,
+          imageUrl,
+          apiKey,
+          prompts.systemPrompt,
+          prompts.userPrompt
+        );
+        return completeSuccess(result, 'chat_completions', false);
+      } catch (fallbackError) {
+        throw new BadRequestException(
+          `Falha no modo responses e no fallback chat/completions. responses=${this.compactText(
+            responsesError,
+            220
+          )} | chat=${this.compactText(this.stringifyError(fallbackError), 220)}`
+        );
+      }
+    } catch (error) {
+      this.logReceiptsAiCall({
+        requestedMode: this.receiptsApiMode,
+        resolvedMode: '',
+        model,
+        cacheHit: false,
+        attempts,
+        durationMs: Date.now() - startedAt,
+        ok: false,
+        error: this.stringifyError(error)
+      });
+      throw error;
+    }
+  }
+
+  private async callVisionModelResponses(
+    model: string,
+    imageUrl: string,
+    apiKey: string,
+    systemPrompt: string,
+    userPrompt: string
+  ) {
     const body = {
-      model: this.model,
+      model,
+      temperature: 0,
+      input: [
+        {
+          role: 'system',
+          content: [
+            {
+              type: 'input_text',
+              text: systemPrompt
+            }
+          ]
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: userPrompt
+            },
+            {
+              type: 'input_image',
+              image_url: imageUrl
+            }
+          ]
+        }
+      ],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'receipt_extraction',
+          strict: true,
+          schema: this.getReceiptJsonSchema()
+        }
+      }
+    };
+
+    const data = (await this.callOpenAiJsonEndpoint('/responses', apiKey, body)) as ResponsesApiResponse;
+    const payload = this.extractResponsesPayload(data);
+    if (!payload) {
+      if (data.error?.message) {
+        throw new BadRequestException(`Modelo retornou erro: ${data.error.message}`);
+      }
+      throw new BadRequestException('Modelo nao retornou conteudo JSON parseavel.');
+    }
+
+    return this.parseModelJsonOutput(payload);
+  }
+
+  private async callVisionModelResponsesWebsocket(
+    model: string,
+    imageUrl: string,
+    apiKey: string,
+    systemPrompt: string,
+    userPrompt: string
+  ) {
+    const eventBody = {
+      type: 'response.create',
+      model,
+      temperature: 0,
+      store: false,
+      instructions: systemPrompt,
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: userPrompt
+            },
+            {
+              type: 'input_image',
+              image_url: imageUrl
+            }
+          ]
+        }
+      ],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'receipt_extraction',
+          strict: true,
+          schema: this.getReceiptJsonSchema()
+        }
+      },
+      tools: []
+    };
+
+    return new Promise<unknown>((resolve, reject) => {
+      const socket = new WebSocket(this.responsesWebsocketUrl, {
+        headers: {
+          Authorization: `Bearer ${apiKey}`
+        }
+      });
+
+      let settled = false;
+      let aggregatedOutputText = '';
+
+      const closeSocket = () => {
+        try {
+          socket.close();
+        } catch {
+          // no-op
+        }
+      };
+
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        closeSocket();
+        reject(
+          new BadRequestException(
+            `WebSocket responses excedeu timeout de ${Math.round(this.responsesWebsocketTimeoutMs / 1000)}s.`
+          )
+        );
+      }, this.responsesWebsocketTimeoutMs);
+
+      const resolveOutput = (payload: unknown) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        closeSocket();
+        try {
+          resolve(this.parseModelJsonOutput(payload));
+        } catch (error) {
+          reject(error);
+        }
+      };
+
+      const rejectWith = (message: string) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        closeSocket();
+        reject(new BadRequestException(message));
+      };
+
+      socket.on('open', () => {
+        socket.send(JSON.stringify(eventBody));
+      });
+
+      socket.on('message', (rawData: RawData) => {
+        const event = this.parseWebsocketEventPayload(rawData);
+        if (!event) return;
+
+        const eventType = typeof event.type === 'string' ? event.type : '';
+        if (!eventType) return;
+
+        if (eventType === 'response.output_text.delta' && typeof event.delta === 'string') {
+          aggregatedOutputText += event.delta;
+          return;
+        }
+
+        if (eventType === 'response.output_text.done' && typeof event.text === 'string') {
+          aggregatedOutputText = event.text;
+          return;
+        }
+
+        if (eventType === 'response.completed') {
+          const responsePayload =
+            event.response && typeof event.response === 'object'
+              ? this.extractResponsesPayload(event.response as ResponsesApiResponse)
+              : '';
+
+          if (responsePayload) {
+            resolveOutput(responsePayload);
+            return;
+          }
+
+          if (aggregatedOutputText.trim()) {
+            resolveOutput(aggregatedOutputText);
+            return;
+          }
+
+          rejectWith('WebSocket responses finalizou sem retorno JSON parseavel.');
+          return;
+        }
+
+        if (eventType === 'response.failed' || eventType === 'response.incomplete' || eventType === 'error') {
+          rejectWith(
+            `WebSocket responses retornou ${eventType}: ${this.compactText(
+              this.extractWebsocketEventError(event),
+              280
+            )}`
+          );
+        }
+      });
+
+      socket.on('error', (error: Error) => {
+        rejectWith(`Falha no transporte WebSocket: ${this.stringifyError(error)}`);
+      });
+
+      socket.on('close', (code: number, reasonBuffer: Buffer) => {
+        if (settled) return;
+        const reason = this.decodeWebsocketCloseReason(reasonBuffer);
+        rejectWith(
+          `Conexao WebSocket encerrada antes da conclusao (code=${code})${
+            reason ? `: ${this.compactText(reason, 280)}` : ''
+          }`
+        );
+      });
+    });
+  }
+
+  private async callVisionModelChatCompletions(
+    model: string,
+    imageUrl: string,
+    apiKey: string,
+    systemPrompt: string,
+    userPrompt: string
+  ) {
+    const body = {
+      model,
       temperature: 0,
       response_format: {
         type: 'json_schema',
         json_schema: {
           name: 'receipt_extraction',
           strict: true,
-          schema: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['purchaseDate', 'items'],
-            properties: {
-              purchaseDate: {
-                type: 'string',
-                description: 'Data da compra no formato YYYY-MM-DD. Se nao encontrar, retornar string vazia.'
-              },
-              items: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  additionalProperties: false,
-                  required: ['item', 'quantity', 'unitPrice'],
-                  properties: {
-                    item: {
-                      type: 'string',
-                      enum: [...officialItems]
-                    },
-                    quantity: {
-                      type: 'number',
-                      minimum: 0.000001
-                    },
-                    unitPrice: {
-                      type: 'number',
-                      minimum: 0.000001
-                    }
-                  }
-                }
-              }
-            }
-          }
+          schema: this.getReceiptJsonSchema()
         }
       },
       messages: [
@@ -1218,9 +2276,281 @@ export class ReceiptsService {
       ]
     };
 
+    const data = (await this.callOpenAiJsonEndpoint('/chat/completions', apiKey, body)) as ChatCompletionResponse;
+    const message = data.choices?.[0]?.message;
+    const contentText = this.extractMessageContent(message);
+
+    if (!contentText) {
+      if (message?.refusal) {
+        throw new BadRequestException(`Modelo recusou o pedido: ${message.refusal}`);
+      }
+      throw new BadRequestException('Modelo nao retornou conteudo JSON parseavel.');
+    }
+
+    return this.parseModelJsonOutput(contentText);
+  }
+
+  private buildPromptPack(
+    input: ParseReceiptInput,
+    customPrompt: string,
+    promptPersonality: BuilderReceiptPromptPersonality,
+    contextHints: string,
+    contextCompactionEnabled: boolean,
+    contextCompactionMaxChars: number
+  ) {
+    const itemListText = officialItems.map((item) => `- ${item}`).join('\n');
+    const providerInfo = input.providerHint ? `Fornecedor informado: ${input.providerHint}.` : '';
+    const personalityPack = this.resolvePromptPersonalityPack(promptPersonality);
+    const normalizedContextHints = contextCompactionEnabled
+      ? this.compactPromptContextHints(contextHints, contextCompactionMaxChars)
+      : this.compactText((contextHints || '').trim(), contextCompactionMaxChars);
+    const baseUserPrompt = [
+      'Extrair dados do cupom fiscal da imagem.',
+      'Nao inclua itens fora da lista oficial.',
+      'Se nao identificar data, use string vazia em purchaseDate.'
+    ].join('\n');
+
+    const systemPrompt = [
+      'Voce extrai dados de cupom fiscal e responde SOMENTE em JSON valido.',
+      'Itens validos (use exatamente o nome oficial):',
+      itemListText,
+      'Se item nao estiver na lista, ignore completamente.',
+      'Retorne purchaseDate em YYYY-MM-DD quando possivel.',
+      'Para cada item aceito, retorne quantity e unitPrice numericos.',
+      personalityPack.system
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const userPrompt = [
+      personalityPack.user,
+      customPrompt ? `Prompt operacional:\n${customPrompt}` : baseUserPrompt,
+      normalizedContextHints ? `Contexto operacional adicional:\n${normalizedContextHints}` : '',
+      providerInfo,
+      'Responda SOMENTE com JSON valido no schema solicitado.'
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    return { systemPrompt, userPrompt };
+  }
+
+  private compactPromptContextHints(rawValue: string, maxChars: number) {
+    const normalizedMaxChars = this.normalizeContextCompactionMaxChars(maxChars);
+    const normalizedLines = (rawValue || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => line.replace(/^[-*•\s]+/, '').trim())
+      .filter(Boolean);
+
+    if (normalizedLines.length === 0) return '';
+
+    const uniqueLines = Array.from(new Set(normalizedLines));
+    const compacted: string[] = [];
+    let length = 0;
+
+    for (const line of uniqueLines) {
+      const candidate = `- ${line}`;
+      const extra = compacted.length > 0 ? candidate.length + 1 : candidate.length;
+      if (length + extra > normalizedMaxChars) break;
+      compacted.push(candidate);
+      length += extra;
+    }
+
+    if (compacted.length === 0) {
+      return this.compactText(uniqueLines[0] || '', normalizedMaxChars);
+    }
+
+    const droppedCount = uniqueLines.length - compacted.length;
+    if (droppedCount > 0) {
+      const suffix = `- ... +${droppedCount} linha(s) compactadas`;
+      const suffixExtra = suffix.length + 1;
+      if (length + suffixExtra <= normalizedMaxChars) {
+        compacted.push(suffix);
+      }
+    }
+
+    return compacted.join('\n');
+  }
+
+  private buildReceiptInferenceCacheKey(
+    model: string,
+    imageUrl: string,
+    systemPrompt: string,
+    userPrompt: string
+  ) {
+    const promptHash = createHash('sha256')
+      .update(`${systemPrompt}\n---\n${userPrompt}`)
+      .digest('hex');
+    const imageHash = createHash('sha256').update(imageUrl).digest('hex');
+    return `${this.receiptsApiMode}|${model}|${promptHash}|${imageHash}`;
+  }
+
+  private readReceiptInferenceCache(cacheKey: string, enabled: boolean) {
+    if (!enabled) return null;
+    const entry = this.receiptInferenceCache.get(cacheKey);
+    if (!entry) return null;
+
+    const now = Date.now();
+    if (entry.expiresAt <= now) {
+      this.receiptInferenceCache.delete(cacheKey);
+      return null;
+    }
+
+    return this.clonePayload(entry.payload);
+  }
+
+  private storeReceiptInferenceCache(
+    cacheKey: string,
+    payload: unknown,
+    enabled: boolean,
+    ttlMinutes: number
+  ) {
+    if (!enabled) return;
+    const ttl = this.normalizePromptCacheTtlMinutes(ttlMinutes) * 60_000;
+    this.cleanupReceiptInferenceCache();
+    this.receiptInferenceCache.set(cacheKey, {
+      expiresAt: Date.now() + ttl,
+      payload: this.clonePayload(payload)
+    });
+
+    while (this.receiptInferenceCache.size > 500) {
+      const oldestKey = this.receiptInferenceCache.keys().next().value as string | undefined;
+      if (!oldestKey) break;
+      this.receiptInferenceCache.delete(oldestKey);
+    }
+  }
+
+  private cleanupReceiptInferenceCache(now = Date.now()) {
+    for (const [key, entry] of this.receiptInferenceCache.entries()) {
+      if (entry.expiresAt <= now) {
+        this.receiptInferenceCache.delete(key);
+      }
+    }
+  }
+
+  private clonePayload(payload: unknown) {
+    try {
+      return JSON.parse(JSON.stringify(payload)) as unknown;
+    } catch {
+      return payload;
+    }
+  }
+
+  private logReceiptsAiCall(entry: {
+    requestedMode: string;
+    resolvedMode: string;
+    model: string;
+    cacheHit: boolean;
+    attempts: string[];
+    durationMs: number;
+    ok: boolean;
+    error: string;
+  }) {
+    console.log(
+      JSON.stringify({
+        event: 'receipts_ai_call',
+        ...entry,
+        durationMs: Math.max(0, Math.round(entry.durationMs)),
+        at: new Date().toISOString()
+      })
+    );
+  }
+
+  private resolvePromptPersonalityPack(promptPersonality: BuilderReceiptPromptPersonality) {
+    if (promptPersonality === 'CONSERVADOR') {
+      return {
+        system: 'Modo conservador: quando houver duvida de leitura, prefira ignorar o item.',
+        user: 'Priorize precisao alta e descarte linhas ambiguas.'
+      };
+    }
+    if (promptPersonality === 'AGIL') {
+      return {
+        system: 'Modo agil: aceite abreviacoes comuns quando houver alta confianca visual.',
+        user: 'Priorize cobertura, sem violar a lista oficial de itens.'
+      };
+    }
+    return {
+      system: 'Modo operacional: equilibrio entre precisao e cobertura para uso diario.',
+      user: 'Priorize itens com confianca alta e mantenha resposta objetiva.'
+    };
+  }
+
+  private getReceiptJsonSchema() {
+    return {
+      type: 'object',
+      additionalProperties: false,
+      required: ['purchaseDate', 'items'],
+      properties: {
+        purchaseDate: {
+          type: 'string',
+          description: 'Data da compra no formato YYYY-MM-DD. Se nao encontrar, retornar string vazia.'
+        },
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['item', 'quantity', 'unitPrice'],
+            properties: {
+              item: {
+                type: 'string',
+                enum: [...officialItems]
+              },
+              quantity: {
+                type: 'number',
+                minimum: 0.000001
+              },
+              unitPrice: {
+                type: 'number',
+                minimum: 0.000001
+              }
+            }
+          }
+        }
+      }
+    };
+  }
+
+  private extractResponsesPayload(data: ResponsesApiResponse): string | unknown {
+    if (typeof data.output_text === 'string' && data.output_text.trim()) {
+      return data.output_text.trim();
+    }
+
+    for (const outputItem of data.output || []) {
+      for (const contentItem of outputItem.content || []) {
+        if (typeof contentItem.text === 'string' && contentItem.text.trim()) {
+          return contentItem.text.trim();
+        }
+        if (contentItem.json && typeof contentItem.json === 'object') {
+          return contentItem.json;
+        }
+      }
+    }
+    return '';
+  }
+
+  private parseModelJsonOutput(payload: string | unknown) {
+    if (typeof payload === 'object' && payload !== null) {
+      return payload;
+    }
+    const contentText = String(payload || '').trim();
+    if (!contentText) {
+      throw new BadRequestException('Modelo nao retornou JSON parseavel.');
+    }
+
+    try {
+      return JSON.parse(contentText) as unknown;
+    } catch {
+      throw new BadRequestException(`Modelo retornou JSON invalido: ${this.compactText(contentText, 600)}`);
+    }
+  }
+
+  private async callOpenAiJsonEndpoint(path: string, apiKey: string, body: unknown) {
     let response: Response;
     try {
-      response = await fetch(`${this.openAiBaseUrl}/chat/completions`, {
+      response = await fetch(`${this.openAiBaseUrl}${path}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1239,22 +2569,7 @@ export class ReceiptsService {
       );
     }
 
-    const data = (await response.json()) as ChatCompletionResponse;
-    const message = data.choices?.[0]?.message;
-    const contentText = this.extractMessageContent(message);
-
-    if (!contentText) {
-      if (message?.refusal) {
-        throw new BadRequestException(`Modelo recusou o pedido: ${message.refusal}`);
-      }
-      throw new BadRequestException('Modelo nao retornou conteudo JSON parseavel.');
-    }
-
-    try {
-      return JSON.parse(contentText) as unknown;
-    } catch {
-      throw new BadRequestException(`Modelo retornou JSON invalido: ${this.compactText(contentText, 600)}`);
-    }
+    return response.json();
   }
 
   private buildImageUrl(input: ParseReceiptInput) {
@@ -1329,12 +2644,138 @@ export class ReceiptsService {
     return '';
   }
 
+  private resolveReceiptsModel(modelOverride: string) {
+    const normalized = (modelOverride || '').trim();
+    if (normalized) return normalized;
+    return this.defaultModel;
+  }
+
+  private resolveReceiptsApiMode(): ReceiptsApiMode {
+    const raw = (process.env.OPENAI_RECEIPTS_API_MODE || 'responses').trim().toLowerCase();
+    if (raw === 'responses_websocket') return 'responses_websocket';
+    if (raw === 'chat_completions') return 'chat_completions';
+    return 'responses';
+  }
+
+  private resolveOpenAiBaseUrl() {
+    const raw = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').trim();
+    let parsed: URL;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      throw new Error('OPENAI_BASE_URL invalida. Use URL absoluta com protocolo http(s).');
+    }
+
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new Error('OPENAI_BASE_URL deve usar http:// ou https://');
+    }
+
+    const host = parsed.hostname.toLowerCase();
+    const isLocalhost = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+    if (parsed.protocol === 'http:' && !isLocalhost) {
+      throw new Error('OPENAI_BASE_URL com http:// so e permitida para localhost.');
+    }
+
+    return parsed.toString().replace(/\/+$/, '');
+  }
+
+  private resolveResponsesWebsocketUrl() {
+    const base = this.openAiBaseUrl.replace(/^http/i, 'ws');
+    return `${base}/responses`;
+  }
+
+  private resolveResponsesWebsocketTimeoutMs() {
+    const parsed = Number(process.env.OPENAI_RECEIPTS_WEBSOCKET_TIMEOUT_MS || 25000);
+    if (!Number.isFinite(parsed) || parsed < 4000) return 25000;
+    return Math.min(120000, Math.round(parsed));
+  }
+
+  private parseWebsocketEventPayload(rawData: unknown) {
+    try {
+      if (typeof rawData === 'string') {
+        const parsed = JSON.parse(rawData) as Record<string, unknown>;
+        return parsed;
+      }
+
+      if (Buffer.isBuffer(rawData)) {
+        const parsed = JSON.parse(rawData.toString('utf8')) as Record<string, unknown>;
+        return parsed;
+      }
+
+      if (rawData instanceof Uint8Array) {
+        const parsed = JSON.parse(Buffer.from(rawData).toString('utf8')) as Record<string, unknown>;
+        return parsed;
+      }
+    } catch {
+      return null;
+    }
+
+    return null;
+  }
+
+  private extractWebsocketEventError(event: Record<string, unknown>) {
+    const directMessage = typeof event.message === 'string' ? event.message : '';
+    const error = event.error;
+    if (!error || typeof error !== 'object') {
+      return directMessage || 'sem detalhes';
+    }
+
+    const errorRecord = error as Record<string, unknown>;
+    const code = typeof errorRecord.code === 'string' ? errorRecord.code : '';
+    const message = typeof errorRecord.message === 'string' ? errorRecord.message : '';
+    return [code, message, directMessage].filter(Boolean).join(' | ') || 'sem detalhes';
+  }
+
+  private decodeWebsocketCloseReason(value: unknown) {
+    if (typeof value === 'string') return value;
+    if (Buffer.isBuffer(value)) return value.toString('utf8');
+    if (value instanceof Uint8Array) return Buffer.from(value).toString('utf8');
+    return '';
+  }
+
+  private resolveLocalOcrTimeoutMs() {
+    const parsed = Number(process.env.RECEIPTS_LOCAL_OCR_TIMEOUT_MS || 30000);
+    if (!Number.isFinite(parsed) || parsed <= 0) return 30000;
+    return Math.max(4000, Math.min(60000, Math.round(parsed)));
+  }
+
+  private logReceiptsLocalOcr(entry: {
+    ok: boolean;
+    durationMs: number;
+    source: string;
+    chars: number;
+    error: string;
+  }) {
+    console.log(
+      JSON.stringify({
+        event: 'receipts_local_ocr',
+        ok: entry.ok,
+        durationMs: Math.max(0, Math.round(entry.durationMs)),
+        source: entry.source,
+        chars: Math.max(0, Math.round(entry.chars)),
+        error: entry.error,
+        at: new Date().toISOString()
+      })
+    );
+  }
+
+  private resolveBooleanEnv(rawValue: string | undefined, fallback: boolean) {
+    if (rawValue == null) return fallback;
+    const value = rawValue.trim().toLowerCase();
+    if (!value) return fallback;
+    if (['1', 'true', 'yes', 'on'].includes(value)) return true;
+    if (['0', 'false', 'no', 'off'].includes(value)) return false;
+    return fallback;
+  }
+
   private normalizeItems(extracted: ParsedReceipt) {
-    return extracted.items.map((item) => ({
-      item: item.item,
-      quantity: this.normalizeQuantity(item.quantity),
-      unitPrice: this.normalizeMoney(item.unitPrice)
-    }));
+    return extracted.items
+      .map((item) => ({
+        item: item.item,
+        quantity: this.normalizeQuantity(item.quantity),
+        unitPrice: this.normalizeMoney(item.unitPrice)
+      }))
+      .filter((item) => !(item.item === 'SACOLA' && this.isLikelyCheckoutBagPrice(item.unitPrice)));
   }
 
   private normalizeDate(raw: string) {

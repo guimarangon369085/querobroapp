@@ -52,19 +52,27 @@ export class PaymentsService {
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({ where: { id: data.orderId } });
       if (!order) throw new NotFoundException('Pedido nao encontrado');
+      if (order.status === 'CANCELADO') {
+        throw new BadRequestException('Nao e possivel registrar pagamento para pedido cancelado.');
+      }
+
+      const amount = this.toMoney(data.amount);
+      if (amount <= 0) {
+        throw new BadRequestException('Valor do pagamento deve ser maior que zero.');
+      }
 
       const isPaid = data.status === PaymentStatusEnum.enum.PAGO || Boolean(data.paidAt);
-      const amountToAdd = isPaid ? this.toMoney(data.amount) : 0;
+      const amountToAdd = isPaid ? amount : 0;
       const paidCurrent = await this.getPaidTotal(tx, data.orderId);
       this.ensureWithinOrderTotal(order.total, paidCurrent, amountToAdd);
 
       return tx.payment.create({
         data: {
           orderId: data.orderId,
-          amount: this.toMoney(data.amount),
+          amount,
           method: data.method,
           status: isPaid ? PaymentStatusEnum.enum.PAGO : data.status,
-          paidAt: data.paidAt ? new Date(data.paidAt) : null,
+          paidAt: isPaid ? (data.paidAt ? new Date(data.paidAt) : new Date()) : null,
           dueDate: data.dueDate ? new Date(data.dueDate) : null,
           providerRef: data.providerRef ?? null
         }
@@ -78,11 +86,20 @@ export class PaymentsService {
       if (!payment) throw new NotFoundException('Pagamento nao encontrado');
 
       if (payment.status === PaymentStatusEnum.enum.PAGO) {
-        return payment;
+        if (payment.paidAt) {
+          return payment;
+        }
+        return tx.payment.update({
+          where: { id },
+          data: { paidAt: new Date() }
+        });
       }
 
       const order = await tx.order.findUnique({ where: { id: payment.orderId } });
       if (!order) throw new NotFoundException('Pedido nao encontrado');
+      if (order.status === 'CANCELADO') {
+        throw new BadRequestException('Nao e possivel marcar pagamento para pedido cancelado.');
+      }
 
       const paidCurrent = await this.getPaidTotal(tx, payment.orderId, payment.id);
       this.ensureWithinOrderTotal(order.total, paidCurrent, this.toMoney(payment.amount));

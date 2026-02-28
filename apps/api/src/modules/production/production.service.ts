@@ -47,20 +47,33 @@ export class ProductionService {
   }
 
   private formatDate(date: Date) {
-    return date.toISOString().slice(0, 10);
+    const year = date.getFullYear();
+    const month = `${date.getMonth() + 1}`.padStart(2, '0');
+    const day = `${date.getDate()}`.padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
 
   private parseDateParam(date?: string) {
     if (!date) {
       const now = new Date();
-      const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
       return this.formatDate(tomorrow);
     }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       throw new BadRequestException('Formato de data invalido. Use YYYY-MM-DD.');
     }
-    const parsed = new Date(`${date}T00:00:00.000Z`);
-    if (Number.isNaN(parsed.getTime())) {
+    const [yearRaw, monthRaw, dayRaw] = date.split('-');
+    const year = Number(yearRaw);
+    const month = Number(monthRaw);
+    const day = Number(dayRaw);
+    const parsed = new Date(year, month - 1, day);
+    if (
+      Number.isNaN(parsed.getTime()) ||
+      parsed.getFullYear() !== year ||
+      parsed.getMonth() !== month - 1 ||
+      parsed.getDate() !== day
+    ) {
       throw new BadRequestException('Data invalida.');
     }
     return this.formatDate(parsed);
@@ -88,12 +101,25 @@ export class ProductionService {
     return null;
   }
 
-  private orderProductionDate(order: Pick<OrderWithItems, 'createdAt'>) {
+  private orderTargetDate(order: Pick<OrderWithItems, 'createdAt' | 'scheduledAt'>) {
+    if (order.scheduledAt) {
+      const scheduled = new Date(order.scheduledAt);
+      if (!Number.isNaN(scheduled.getTime())) {
+        return {
+          date: this.formatDate(scheduled),
+          basis: 'deliveryDate' as const,
+        };
+      }
+    }
+
     const base = new Date(order.createdAt);
-    const productionDate = new Date(
-      Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate() + 1)
-    );
-    return this.formatDate(productionDate);
+    const productionDate = new Date(base);
+    productionDate.setHours(0, 0, 0, 0);
+    productionDate.setDate(productionDate.getDate() + 1);
+    return {
+      date: this.formatDate(productionDate),
+      basis: 'createdAtPlus1' as const,
+    };
   }
 
   private buildAvailableQtyMap(
@@ -141,8 +167,14 @@ export class ProductionService {
     const warnings: ProductionRequirementWarning[] = [];
     const byIngredient = new Map<number, RequirementAccumulator>();
 
+    let basis: 'deliveryDate' | 'createdAtPlus1' = 'createdAtPlus1';
+
     for (const order of orders) {
-      if (this.orderProductionDate(order) !== targetDate) continue;
+      const orderTarget = this.orderTargetDate(order);
+      if (orderTarget.date !== targetDate) continue;
+      if (orderTarget.basis === 'deliveryDate') {
+        basis = 'deliveryDate';
+      }
 
       for (const item of order.items) {
         const bom = bomByProductId.get(item.productId);
@@ -219,7 +251,7 @@ export class ProductionService {
 
     return {
       date: targetDate,
-      basis: 'createdAtPlus1',
+      basis,
       rows,
       warnings,
     };

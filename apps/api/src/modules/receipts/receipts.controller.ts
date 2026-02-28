@@ -35,6 +35,12 @@ export class ReceiptsController {
     return this.service.ingest(body, token, idempotencyKey);
   }
 
+  @Post('ingest-batch')
+  @Throttle({ default: { limit: 4, ttl: 60_000 } })
+  ingestBatch(@Body() body: unknown, @Headers('x-receipts-token') token?: string) {
+    return this.service.ingestBatch(body, token);
+  }
+
   @Post('ingest-notification')
   @Throttle({ default: { limit: 12, ttl: 60_000 } })
   @Header('Content-Type', 'text/plain; charset=utf-8')

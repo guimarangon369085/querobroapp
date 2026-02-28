@@ -1,4 +1,5 @@
 const PHONE_DIGITS_MAX = 11;
+const POSTAL_CODE_DIGITS_MAX = 8;
 
 const onlyDigits = (value: string) => value.replace(/\D/g, '');
 
@@ -35,6 +36,13 @@ export function formatPhoneBR(value?: string | null) {
   if (digits.length <= 2) return `(${ddd}`;
   if (digits.length <= 7) return `(${ddd}) ${part1}`;
   return `(${ddd}) ${part1}-${part2}`.trim();
+}
+
+export function formatPostalCodeBR(value?: string | null) {
+  const digits = onlyDigits(value || '').slice(0, POSTAL_CODE_DIGITS_MAX);
+  if (!digits) return '';
+  if (digits.length <= 5) return digits;
+  return `${digits.slice(0, 5)}-${digits.slice(5)}`;
 }
 
 export function formatCurrencyBR(value?: number | null) {
@@ -88,6 +96,26 @@ export function parseLocaleNumber(value: string | number | null | undefined) {
 
 export function parseCurrencyBR(value: string) {
   return parseLocaleNumber(value) ?? 0;
+}
+
+export function formatMoneyInputBR(value: string | number | null | undefined) {
+  const parsed = parseLocaleNumber(value);
+  if (parsed == null) return '';
+  return parsed.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+export function formatDecimalInputBR(
+  value: string | number | null | undefined,
+  options?: { minFractionDigits?: number; maxFractionDigits?: number }
+) {
+  const parsed = parseLocaleNumber(value);
+  if (parsed == null) return '';
+  const minFractionDigits = options?.minFractionDigits ?? 0;
+  const maxFractionDigits = options?.maxFractionDigits ?? 4;
+  return parsed.toLocaleString('pt-BR', {
+    minimumFractionDigits: minFractionDigits,
+    maximumFractionDigits: maxFractionDigits
+  });
 }
 
 export function normalizeAddress(value?: string | null) {

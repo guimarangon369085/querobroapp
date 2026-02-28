@@ -58,6 +58,7 @@ model Order {
   discount   Float       @default(0)
   total      Float       @default(0)
   notes      String?
+  scheduledAt DateTime?
   createdAt  DateTime    @default(now())
   customer   Customer    @relation(fields: [customerId], references: [id])
   items      OrderItem[]

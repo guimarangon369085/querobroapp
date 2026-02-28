@@ -65,17 +65,23 @@ export function BuilderLayoutProvider({ page, children }: BuilderLayoutProviderP
 
 type BuilderLayoutItemProps = {
   id: string;
+  className?: string;
   children: ReactNode;
 };
 
-export function BuilderLayoutItemSlot({ id, children }: BuilderLayoutItemProps) {
+export function BuilderLayoutItemSlot({ id, className, children }: BuilderLayoutItemProps) {
   const { itemsById } = useContext(BuilderLayoutContext);
   const item = itemsById.get(id);
 
   if (item && !item.visible) return null;
 
   return (
-    <div id={`slot-${id}`} data-layout-slot-id={id} style={{ order: item?.order ?? 0 }}>
+    <div
+      id={`slot-${id}`}
+      data-layout-slot-id={id}
+      className={className}
+      style={{ order: item?.order ?? 0 }}
+    >
       {children}
     </div>
   );
@@ -85,7 +91,10 @@ export function BuilderLayoutCustomCards() {
   const pathname = usePathname();
   const { items } = useContext(BuilderLayoutContext);
   const cards = items
-    .filter((item) => item.kind === 'custom' && item.visible)
+    .filter((item) => {
+      if (item.kind !== 'custom' || !item.visible) return false;
+      return Boolean(item.actionLabel && (item.actionHref || item.actionFocusSlot));
+    })
     .sort((a, b) => a.order - b.order);
 
   if (cards.length === 0) return null;
@@ -93,7 +102,6 @@ export function BuilderLayoutCustomCards() {
   return (
     <div className="grid gap-3">
       {cards.map((card) => {
-        const hasAction = Boolean(card.actionLabel && (card.actionHref || card.actionFocusSlot));
         const href = (card.actionHref || '').trim();
         const actionPath = href.split('?')[0];
         const isSamePageFocus = Boolean(card.actionFocusSlot) && (!href || actionPath === pathname);
@@ -102,23 +110,21 @@ export function BuilderLayoutCustomCards() {
           <div key={card.id} className="app-panel" style={{ order: card.order }}>
             <p className="font-semibold text-neutral-900">{card.label}</p>
             {card.description ? <p className="mt-1 text-sm text-neutral-600">{card.description}</p> : null}
-            {hasAction ? (
-              <div className="mt-3">
-                {isSamePageFocus && card.actionFocusSlot ? (
-                  <button
-                    type="button"
-                    className="app-button app-button-ghost"
-                    onClick={() => scrollToLayoutSlot(card.actionFocusSlot!, { focus: true })}
-                  >
-                    {card.actionLabel}
-                  </button>
-                ) : (
-                  <Link href={href || '#'} className="app-button app-button-ghost">
-                    {card.actionLabel}
-                  </Link>
-                )}
-              </div>
-            ) : null}
+            <div className="mt-3">
+              {isSamePageFocus && card.actionFocusSlot ? (
+                <button
+                  type="button"
+                  className="app-button app-button-ghost"
+                  onClick={() => scrollToLayoutSlot(card.actionFocusSlot!, { focus: true })}
+                >
+                  {card.actionLabel}
+                </button>
+              ) : (
+                <Link href={href || '#'} className="app-button app-button-ghost">
+                  {card.actionLabel}
+                </Link>
+              )}
+            </div>
           </div>
         );
       })}

@@ -69,6 +69,7 @@ export const OrderSchema = z.object({
   balanceDue: z.number().nonnegative().optional(),
   paymentStatus: OrderPaymentStatusEnum.optional(),
   notes: z.string().optional().nullable(),
+  scheduledAt: z.string().optional().nullable(),
   createdAt: z.string().optional().nullable(),
   items: z.array(OrderItemSchema).optional()
 });
@@ -196,6 +197,11 @@ export const ReceiptOfficialItemEnum = z.enum([
 ]);
 
 export const BuilderReceiptQuantityModeEnum = z.enum(['PURCHASE_PACK', 'BASE_UNIT']);
+export const BuilderReceiptPromptPersonalityEnum = z.enum([
+  'PADRAO_OPERACIONAL',
+  'CONSERVADOR',
+  'AGIL'
+]);
 
 const HexColorSchema = z.string().regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
 
@@ -275,7 +281,13 @@ export const BuilderSupplierPriceSourceSchema = z.object({
   officialItem: ReceiptOfficialItemEnum,
   inventoryItemName: z.string().min(1).max(120),
   supplierName: z.string().trim().min(1).max(120),
-  url: z.string().url().max(500),
+  url: z
+    .string()
+    .url()
+    .max(500)
+    .refine((value) => /^https?:\/\//i.test(value.trim()), {
+      message: 'A URL do fornecedor deve usar http:// ou https://'
+    }),
   priceXPath: z.string().trim().max(400).default(''),
   enabled: z.boolean().default(true),
   fallbackPrice: z.number().positive().optional().nullable(),
@@ -287,6 +299,13 @@ export const BuilderIntegrationsSchema = z.object({
   shortcutsWebhookUrl: z.string().max(300).default(''),
   shortcutsNotes: z.string().max(500).default(''),
   receiptsPrompt: z.string().max(3000).default(''),
+  receiptsPromptPersonality: BuilderReceiptPromptPersonalityEnum.default('PADRAO_OPERACIONAL'),
+  receiptsContextHints: z.string().max(1200).default(''),
+  receiptsContextCompactionEnabled: z.boolean().default(true),
+  receiptsContextCompactionMaxChars: z.coerce.number().int().min(300).max(6000).default(1200),
+  receiptsModelOverride: z.string().trim().max(120).default(''),
+  receiptsPromptCacheEnabled: z.boolean().default(true),
+  receiptsPromptCacheTtlMinutes: z.coerce.number().int().min(1).max(1440).default(90),
   receiptsSeparator: z.string().min(1).max(4).default(';'),
   receiptsAutoIngestEnabled: z.boolean().default(true),
   supplierPricesEnabled: z.boolean().default(true),
@@ -662,14 +681,15 @@ export const BuilderLayoutsSchema = z.object({
   ]),
   estoque: BuilderPageLayoutSchema.default([
     { id: 'header', label: 'Cabecalho da pagina', kind: 'slot', visible: true, order: 0 },
-    { id: 'kpis', label: 'KPIs de estoque', kind: 'slot', visible: true, order: 1 },
-    { id: 'capacity', label: 'Capacidade por produto', kind: 'slot', visible: true, order: 2 },
+    { id: 'kpis', label: 'Resumo operacional', kind: 'slot', visible: true, order: 1 },
+    { id: 'ops', label: 'Painel do dia', kind: 'slot', visible: true, order: 2 },
     { id: 'd1', label: 'Quadro D+1', kind: 'slot', visible: true, order: 3 },
     { id: 'movement', label: 'Nova movimentacao', kind: 'slot', visible: true, order: 4 },
-    { id: 'bom', label: 'Fichas tecnicas (BOM)', kind: 'slot', visible: true, order: 5 },
-    { id: 'packaging', label: 'Custo de embalagem', kind: 'slot', visible: true, order: 6 },
-    { id: 'balance', label: 'Saldo por item', kind: 'slot', visible: true, order: 7 },
-    { id: 'movements', label: 'Historico de movimentacoes', kind: 'slot', visible: true, order: 8 }
+    { id: 'balance', label: 'Saldo por item', kind: 'slot', visible: true, order: 5 },
+    { id: 'movements', label: 'Historico de movimentacoes', kind: 'slot', visible: true, order: 6 },
+    { id: 'capacity', label: 'Capacidade por produto', kind: 'slot', visible: true, order: 7 },
+    { id: 'bom', label: 'Fichas tecnicas (BOM)', kind: 'slot', visible: true, order: 8 },
+    { id: 'packaging', label: 'Custo de embalagem', kind: 'slot', visible: true, order: 9 }
   ])
 });
 
@@ -734,6 +754,7 @@ export type BuilderForms = z.infer<typeof BuilderFormsSchema>;
 export type BuilderHomeImage = z.infer<typeof BuilderHomeImageSchema>;
 export type BuilderHome = z.infer<typeof BuilderHomeSchema>;
 export type BuilderReceiptQuantityMode = z.infer<typeof BuilderReceiptQuantityModeEnum>;
+export type BuilderReceiptPromptPersonality = z.infer<typeof BuilderReceiptPromptPersonalityEnum>;
 export type BuilderReceiptStockRule = z.infer<typeof BuilderReceiptStockRuleSchema>;
 export type BuilderSupplierPriceSource = z.infer<typeof BuilderSupplierPriceSourceSchema>;
 export type BuilderIntegrations = z.infer<typeof BuilderIntegrationsSchema>;

@@ -54,6 +54,25 @@ export class OrdersService {
     return 'PARCIAL';
   }
 
+  private ensureOrderTotalCoversPaid(total: number, amountPaid: number) {
+    const normalizedTotal = this.toMoney(total);
+    const normalizedAmountPaid = this.toMoney(amountPaid);
+    if (normalizedAmountPaid > normalizedTotal + 0.00001) {
+      throw new BadRequestException(
+        `Total do pedido nao pode ficar abaixo do valor ja pago. Total=${normalizedTotal} Pago=${normalizedAmountPaid}`
+      );
+    }
+  }
+
+  private parseOptionalDateTime(value: string | null | undefined) {
+    if (value == null) return null;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException('Data/hora do pedido invalida.');
+    }
+    return parsed;
+  }
+
   private withFinancial(order: OrderWithRelations) {
     const total = this.toMoney(order.total ?? 0);
     const amountPaid = this.getPaidAmount(order.payments || []);
@@ -188,7 +207,7 @@ export class OrdersService {
   }
 
   async create(payload: unknown) {
-    const data = OrderSchema.pick({ customerId: true, notes: true, discount: true, items: true }).parse(
+    const data = OrderSchema.pick({ customerId: true, notes: true, discount: true, scheduledAt: true, items: true }).parse(
       payload
     );
     const items = data.items ?? [];
@@ -227,6 +246,7 @@ export class OrdersService {
         data: {
           customerId: data.customerId,
           notes: data.notes ?? null,
+          scheduledAt: this.parseOptionalDateTime(data.scheduledAt),
           subtotal,
           discount,
           total,
@@ -251,10 +271,15 @@ export class OrdersService {
   async update(id: number, payload: unknown) {
     const existing = await this.getRaw(id);
     const data = updateSchema.parse(payload);
+    const nextScheduledAt = Object.prototype.hasOwnProperty.call(data, 'scheduledAt')
+      ? this.parseOptionalDateTime(data.scheduledAt)
+      : undefined;
 
     const subtotal = this.toMoney(existing.items.reduce((sum, item) => sum + item.total, 0));
     const discount = this.toMoney(data.discount ?? existing.discount ?? 0);
     const total = this.toMoney(Math.max(subtotal - discount, 0));
+    const amountPaid = this.getPaidAmount(existing.payments || []);
+    this.ensureOrderTotalCoversPaid(total, amountPaid);
 
     const updated = await this.prisma.order.update({
       where: { id },
@@ -262,7 +287,8 @@ export class OrdersService {
         notes: data.notes ?? undefined,
         discount,
         subtotal,
-        total
+        total,
+        ...(nextScheduledAt !== undefined ? { scheduledAt: nextScheduledAt } : {})
       },
       include: { items: true, customer: true, payments: true }
     });
@@ -332,7 +358,10 @@ export class OrdersService {
 
   async removeItem(orderId: number, itemId: number) {
     return this.prisma.$transaction(async (tx) => {
-      const order = await tx.order.findUnique({ where: { id: orderId }, include: { items: true } });
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        include: { items: true, payments: true }
+      });
       if (!order) throw new NotFoundException('Pedido nao encontrado');
       if (['CANCELADO', 'ENTREGUE'].includes(order.status)) {
         throw new BadRequestException('Pedido nao permite alterar itens neste status');
@@ -346,6 +375,8 @@ export class OrdersService {
       const remaining = order.items.filter((i) => i.id !== itemId);
       const newSubtotal = this.toMoney(remaining.reduce((sum, i) => sum + i.total, 0));
       const newTotal = this.toMoney(Math.max(newSubtotal - order.discount, 0));
+      const amountPaid = this.getPaidAmount(order.payments || []);
+      this.ensureOrderTotalCoversPaid(newTotal, amountPaid);
 
       await tx.order.update({ where: { id: orderId }, data: { subtotal: newSubtotal, total: newTotal } });
 

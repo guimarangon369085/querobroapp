@@ -27,8 +27,8 @@ printf '%s\n' \
   "docs/HANDOFF_LOG.md"
 echo
 
-echo "=== ULTIMA ENTRADA DE HANDOFF (trecho final) ==="
-tail -n 60 docs/HANDOFF_LOG.md
+echo "=== HANDOFF_LOG COMPLETO ==="
+cat docs/HANDOFF_LOG.md
 echo
 
 echo "=== PROXIMO PASSO ==="

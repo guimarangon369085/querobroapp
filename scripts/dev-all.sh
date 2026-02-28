@@ -3,6 +3,17 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# shellcheck source=./scripts/runtime-path.sh
+source "$ROOT/scripts/runtime-path.sh"
+setup_runtime_path
+
+PNPM_BIN="$(command -v pnpm || true)"
+
+if [ -z "$PNPM_BIN" ]; then
+  echo "pnpm nao encontrado no PATH."
+  exit 1
+fi
+
 API_PID=""
 WEB_PID=""
 SHUTDOWN_DONE=0
@@ -62,14 +73,15 @@ cleanup() {
 trap cleanup EXIT INT TERM HUP
 
 ./scripts/kill-ports.sh
-pnpm --filter @querobroapp/shared build
-pnpm --filter @querobroapp/api prisma:migrate:dev
+./scripts/reset-web-dev-cache.sh
+"$PNPM_BIN" --filter @querobroapp/shared build
+"$PNPM_BIN" --filter @querobroapp/api prisma:migrate:dev
 
 # Start API and Web in background and keep this shell alive as lifecycle owner.
-pnpm --filter @querobroapp/api dev > /tmp/querobroapp-api.log 2>&1 &
+"$PNPM_BIN" --filter @querobroapp/api dev > /tmp/querobroapp-api.log 2>&1 &
 API_PID=$!
 
-pnpm --filter @querobroapp/web dev > /tmp/querobroapp-web.log 2>&1 &
+"$PNPM_BIN" --filter @querobroapp/web dev > /tmp/querobroapp-web.log 2>&1 &
 WEB_PID=$!
 
 cat <<EOF
@@ -78,15 +90,15 @@ WEB PID: $WEB_PID (logs: /tmp/querobroapp-web.log)
 EOF
 
 wait_for_http "API" "http://127.0.0.1:3001/health" 120
-wait_for_http "WEB" "http://127.0.0.1:3000" 120
+./scripts/wait-web-dev-ready.sh "http://127.0.0.1:3000/pedidos" 120
 
 if command -v open >/dev/null 2>&1; then
-  open "http://127.0.0.1:3000" >/dev/null 2>&1 || true
+  open "http://127.0.0.1:3000/pedidos" >/dev/null 2>&1 || true
 elif command -v xdg-open >/dev/null 2>&1; then
-  xdg-open "http://127.0.0.1:3000" >/dev/null 2>&1 || true
+  xdg-open "http://127.0.0.1:3000/pedidos" >/dev/null 2>&1 || true
 fi
 
-echo "URL: http://127.0.0.1:3000"
+echo "URL: http://127.0.0.1:3000/pedidos"
 echo "Feche esta janela (ou Ctrl+C) para encerrar API e Web."
 
 while true; do

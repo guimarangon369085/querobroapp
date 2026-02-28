@@ -18,7 +18,8 @@
     "prisma:generate:dev": "NODE_ENV=development DATABASE_URL=file:./dev.db prisma generate",
     "prisma:migrate:dev": "NODE_ENV=development DATABASE_URL=file:./dev.db prisma migrate dev",
     "prisma:generate:prod": "NODE_ENV=production DATABASE_URL=\"$DATABASE_URL_PROD\" prisma generate --schema prisma/schema.prod.prisma",
-    "prisma:migrate:prod": "NODE_ENV=production DATABASE_URL=\"$DATABASE_URL_PROD\" prisma migrate deploy --schema prisma/schema.prod.prisma"
+    "prisma:push:prod": "NODE_ENV=production DATABASE_URL=\"$DATABASE_URL_PROD\" prisma db push --schema prisma/schema.prod.prisma",
+    "prisma:migrate:prod": "pnpm prisma:push:prod"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.3",
@@ -32,10 +33,12 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "swagger-ui-express": "^5.0.1",
+    "ws": "^8.18.3",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
+    "@types/ws": "^8.18.1",
     "nodemon": "^3.1.0",
     "prisma": "^5.18.0",
     "ts-node": "^10.9.2",

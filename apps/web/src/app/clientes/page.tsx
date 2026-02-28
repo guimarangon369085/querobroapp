@@ -1,13 +1,15 @@
 'use client';
-
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { Customer } from '@querobroapp/shared';
 import { apiFetch } from '@/lib/api';
-import { formatPhoneBR, normalizeAddress, normalizePhone, titleCase } from '@/lib/format';
+import { formatPhoneBR, formatPostalCodeBR, normalizeAddress, normalizePhone, titleCase } from '@/lib/format';
 import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
 import { loadGoogleMaps } from '@/lib/googleMaps';
+import { useSurfaceMode } from '@/hooks/use-surface-mode';
+import { useTutorialSpotlight } from '@/hooks/use-tutorial-spotlight';
 import { useFeedback } from '@/components/feedback-provider';
 import { FormField } from '@/components/form/FormField';
+import { OnboardingTourCard } from '@/components/onboarding-tour-card';
 import { useSearchParams } from 'next/navigation';
 import {
   BuilderLayoutCustomCards,
@@ -35,13 +37,29 @@ const emptyCustomer: Partial<Customer> = {
   deliveryNotes: ''
 };
 
+const TEST_DATA_TAG = '[TESTE_E2E]';
+const TUTORIAL_QUERY_VALUE = 'primeira_vez';
+
+function containsTestDataTag(value?: string | null) {
+  return (value || '').toLowerCase().includes(TEST_DATA_TAG.toLowerCase());
+}
+
+function withTestDataTag(value?: string | null) {
+  const normalized = (value || '').trim();
+  if (!normalized) return TEST_DATA_TAG;
+  if (containsTestDataTag(normalized)) return normalized;
+  return `${normalized} ${TEST_DATA_TAG}`;
+}
+
 function CustomersPageContent() {
   const searchParams = useSearchParams();
+  const { tutorialMode, isSpotlightSlot } = useTutorialSpotlight(searchParams, TUTORIAL_QUERY_VALUE);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [form, setForm] = useState<Partial<Customer>>(emptyCustomer);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const { isOperationMode } = useSurfaceMode('clientes');
   const [useAddressAutocomplete, setUseAddressAutocomplete] = useState(false);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const addressInputRef = useRef<HTMLInputElement | null>(null);
@@ -157,7 +175,7 @@ function CustomersPageContent() {
     const fallbackFirst = split[0] || '';
     const fallbackLast = split.length > 1 ? split.slice(1).join(' ') : '';
 
-    const payload = {
+    const payloadBase = {
       ...form,
       name: fullName,
       firstName: form.firstName ? titleCase(form.firstName) : fallbackFirst,
@@ -177,6 +195,13 @@ function CustomersPageContent() {
       lng: form.lng ?? undefined,
       deliveryNotes: form.deliveryNotes?.trim() || undefined
     };
+    const payload =
+      tutorialMode && !editingId
+        ? {
+            ...payloadBase,
+            deliveryNotes: withTestDataTag(payloadBase.deliveryNotes)
+          }
+        : payloadBase;
 
     try {
       if (editingId) {
@@ -318,17 +343,66 @@ function CustomersPageContent() {
   return (
     <BuilderLayoutProvider page="clientes">
       <section className="grid gap-8">
-      <BuilderLayoutItemSlot id="header">
+      <BuilderLayoutItemSlot
+        id="header"
+        className={isSpotlightSlot('header') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
+      >
       <div className="app-section-title">
         <div>
           <span className="app-chip">Relacionamento</span>
           <h2 className="mt-3 text-3xl font-semibold">Clientes</h2>
-          <p className="text-neutral-600">Cadastre e organize sua base de clientes.</p>
+          <p className="text-neutral-600">Cadastro rapido para atendimento.</p>
         </div>
+      </div>
+      {tutorialMode ? (
+        <OnboardingTourCard
+          stepLabel="Tutorial 1a vez · passo 3 de 5"
+          title="Agora cadastre para quem voce vai vender"
+          description="Cliente fecha o circuito da venda: endereco, telefone e contato precisam existir antes do pedido."
+          points={[
+            { label: 'Agora', value: 'Cadastre 1 cliente com telefone e endereco.' },
+            { label: 'Depois', value: 'Volte para Pedidos e monte o primeiro pedido completo.' }
+          ]}
+          actions={[
+            {
+              label: 'Ir para criar pedido',
+              href: '/pedidos?focus=new_order&tutorial=primeira_vez',
+              variant: 'primary'
+            },
+            {
+              label: 'Voltar para ficha tecnica',
+              href: '/estoque?focus=bom&tutorial=primeira_vez',
+              variant: 'ghost'
+            }
+          ]}
+        />
+      ) : null}
+      <div className="app-quickflow app-quickflow--columns mt-4">
+        <button
+          type="button"
+          className={`app-quickflow__step text-left ${form.name && form.phone ? 'app-quickflow__step--done' : ''}`}
+          onClick={() => scrollToLayoutSlot('form', { focus: true })}
+        >
+          <p className="app-quickflow__step-title">1. Cadastro</p>
+          <p className="app-quickflow__step-subtitle">Nome, telefone e endereco.</p>
+        </button>
+        <button
+          type="button"
+          className={`app-quickflow__step text-left ${filteredCustomers.length > 0 ? 'app-quickflow__step--done' : ''}`}
+          onClick={() => scrollToLayoutSlot('list', { focus: true })}
+        >
+          <p className="app-quickflow__step-title">2. Lista</p>
+          <p className="app-quickflow__step-subtitle">Buscar, editar e remover.</p>
+        </button>
       </div>
       </BuilderLayoutItemSlot>
 
-      <BuilderLayoutItemSlot id="kpis_search">
+      <BuilderLayoutItemSlot
+        id="kpis_search"
+        className={
+          isSpotlightSlot('kpis_search') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'
+        }
+      >
       <div className="grid gap-3 md:grid-cols-3">
         <div className="app-kpi">
           <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Clientes</p>
@@ -346,10 +420,15 @@ function CustomersPageContent() {
       </div>
       </BuilderLayoutItemSlot>
 
-      <BuilderLayoutItemSlot id="form">
+      <BuilderLayoutItemSlot
+        id="form"
+        className={isSpotlightSlot('form') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
+      >
       <form onSubmit={submit} className="app-panel grid gap-5">
         <div className="app-kid-hint">
-          Cadastro rapido: preencha nome, telefone e endereco. O resto fica em campos avancados.
+          {isOperationMode
+            ? 'Preencha nome, telefone e endereco.'
+            : 'Campos adicionais sao opcionais.'}
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           <FormField label="Nome completo" error={error}>
@@ -418,102 +497,106 @@ function CustomersPageContent() {
           </FormField>
         </div>
 
-        <details className="app-details">
-          <summary>Campos avancados (Uber Direct, endereco detalhado e dados extras)</summary>
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <FormField label="Primeiro nome" hint="Opcional (preenchido automaticamente)">
-              <input
-                className="app-input"
-                placeholder="Primeiro nome"
-                value={form.firstName || ''}
-                onChange={(e) => setForm((prev) => ({ ...prev, firstName: e.target.value }))}
-              />
-            </FormField>
-            <FormField label="Sobrenome" hint="Opcional (preenchido automaticamente)">
-              <input
-                className="app-input"
-                placeholder="Sobrenome"
-                value={form.lastName || ''}
-                onChange={(e) => setForm((prev) => ({ ...prev, lastName: e.target.value }))}
-              />
-            </FormField>
-            <FormField label="Email" hint="Opcional">
-              <input
-                className="app-input"
-                placeholder="email@exemplo.com"
-                value={form.email || ''}
-                inputMode="email"
-                autoComplete="email"
-                onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
-              />
-            </FormField>
-            <FormField label="Rua e numero" hint="Linha 1">
-              <input
-                className="app-input"
-                placeholder="Ex: Rua X, 123"
-                value={form.addressLine1 || ''}
-                onChange={(e) => setForm((prev) => ({ ...prev, addressLine1: e.target.value }))}
-              />
-            </FormField>
-            <FormField label="Complemento" hint="Apartamento, bloco, etc">
-              <input
-                className="app-input"
-                placeholder="Apto, bloco, andar..."
-                value={form.addressLine2 || ''}
-                onChange={(e) => setForm((prev) => ({ ...prev, addressLine2: e.target.value }))}
-              />
-            </FormField>
-            <FormField label="Bairro">
-              <input
-                className="app-input"
-                placeholder="Bairro"
-                value={form.neighborhood || ''}
-                onChange={(e) => setForm((prev) => ({ ...prev, neighborhood: e.target.value }))}
-              />
-            </FormField>
-            <FormField label="Cidade">
-              <input
-                className="app-input"
-                placeholder="Cidade"
-                value={form.city || ''}
-                onChange={(e) => setForm((prev) => ({ ...prev, city: e.target.value }))}
-              />
-            </FormField>
-            <FormField label="Estado (UF)">
-              <input
-                className="app-input"
-                placeholder="SP"
-                value={form.state || ''}
-                onChange={(e) => setForm((prev) => ({ ...prev, state: e.target.value }))}
-              />
-            </FormField>
-            <FormField label="CEP">
-              <input
-                className="app-input"
-                placeholder="00000-000"
-                value={form.postalCode || ''}
-                onChange={(e) => setForm((prev) => ({ ...prev, postalCode: e.target.value }))}
-              />
-            </FormField>
-            <FormField label="Pais">
-              <input
-                className="app-input"
-                placeholder="Brasil"
-                value={form.country || ''}
-                onChange={(e) => setForm((prev) => ({ ...prev, country: e.target.value }))}
-              />
-            </FormField>
-            <FormField label="Uber Direct (Place ID)">
-              <input className="app-input" value={form.placeId || ''} readOnly />
-            </FormField>
-            <FormField label="Latitude">
-              <input className="app-input" value={form.lat ?? ''} readOnly />
-            </FormField>
-            <FormField label="Longitude">
-              <input className="app-input" value={form.lng ?? ''} readOnly />
-            </FormField>
-          </div>
-        </details>
+        {isOperationMode ? null : (
+          <details className="app-details" open>
+            <summary>Campos avancados (Uber Direct, endereco detalhado e dados extras)</summary>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <FormField label="Primeiro nome" hint="Opcional (preenchido automaticamente)">
+                <input
+                  className="app-input"
+                  placeholder="Primeiro nome"
+                  value={form.firstName || ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, firstName: e.target.value }))}
+                />
+              </FormField>
+              <FormField label="Sobrenome" hint="Opcional (preenchido automaticamente)">
+                <input
+                  className="app-input"
+                  placeholder="Sobrenome"
+                  value={form.lastName || ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, lastName: e.target.value }))}
+                />
+              </FormField>
+              <FormField label="Email" hint="Opcional">
+                <input
+                  className="app-input"
+                  placeholder="email@exemplo.com"
+                  value={form.email || ''}
+                  inputMode="email"
+                  autoComplete="email"
+                  onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
+                />
+              </FormField>
+              <FormField label="Rua e numero" hint="Linha 1">
+                <input
+                  className="app-input"
+                  placeholder="Ex: Rua X, 123"
+                  value={form.addressLine1 || ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, addressLine1: e.target.value }))}
+                />
+              </FormField>
+              <FormField label="Complemento" hint="Apartamento, bloco, etc">
+                <input
+                  className="app-input"
+                  placeholder="Apto, bloco, andar..."
+                  value={form.addressLine2 || ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, addressLine2: e.target.value }))}
+                />
+              </FormField>
+              <FormField label="Bairro">
+                <input
+                  className="app-input"
+                  placeholder="Bairro"
+                  value={form.neighborhood || ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, neighborhood: e.target.value }))}
+                />
+              </FormField>
+              <FormField label="Cidade">
+                <input
+                  className="app-input"
+                  placeholder="Cidade"
+                  value={form.city || ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, city: e.target.value }))}
+                />
+              </FormField>
+              <FormField label="Estado (UF)">
+                <input
+                  className="app-input"
+                  placeholder="SP"
+                  value={form.state || ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, state: e.target.value }))}
+                />
+              </FormField>
+              <FormField label="CEP">
+                <input
+                  className="app-input"
+                  placeholder="00000-000"
+                  value={form.postalCode || ''}
+                  inputMode="numeric"
+                  autoComplete="postal-code"
+                  onChange={(e) => setForm((prev) => ({ ...prev, postalCode: formatPostalCodeBR(e.target.value) }))}
+                />
+              </FormField>
+              <FormField label="Pais">
+                <input
+                  className="app-input"
+                  placeholder="Brasil"
+                  value={form.country || ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, country: e.target.value }))}
+                />
+              </FormField>
+              <FormField label="Uber Direct (Place ID)">
+                <input className="app-input" value={form.placeId || ''} readOnly />
+              </FormField>
+              <FormField label="Latitude">
+                <input className="app-input" value={form.lat ?? ''} readOnly />
+              </FormField>
+              <FormField label="Longitude">
+                <input className="app-input" value={form.lng ?? ''} readOnly />
+              </FormField>
+            </div>
+          </details>
+        )}
         <div className="app-form-actions app-form-actions--mobile-sticky">
           <button className="app-button app-button-primary" type="submit">
             {editingId ? 'Atualizar' : 'Criar'}
@@ -531,7 +614,10 @@ function CustomersPageContent() {
       </form>
       </BuilderLayoutItemSlot>
 
-      <BuilderLayoutItemSlot id="list">
+      <BuilderLayoutItemSlot
+        id="list"
+        className={isSpotlightSlot('list') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
+      >
       <div className="grid gap-3">
         {filteredCustomers.map((customer) => (
           <div
@@ -551,12 +637,14 @@ function CustomersPageContent() {
               >
                 Editar
               </button>
-              <button
-                className="app-button app-button-danger"
-                onClick={() => remove(customer.id!)}
-              >
-                Remover
-              </button>
+              {!isOperationMode ? (
+                <button
+                  className="app-button app-button-danger"
+                  onClick={() => remove(customer.id!)}
+                >
+                  Remover
+                </button>
+              ) : null}
             </div>
           </div>
         ))}
@@ -568,7 +656,7 @@ function CustomersPageContent() {
       </div>
       </BuilderLayoutItemSlot>
 
-      <BuilderLayoutCustomCards />
+      {!isOperationMode ? <BuilderLayoutCustomCards /> : null}
       </section>
     </BuilderLayoutProvider>
   );
