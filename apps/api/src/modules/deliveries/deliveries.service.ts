@@ -71,11 +71,13 @@ type DeliveryTrackingRecord = {
   createdAt: string;
   updatedAt: string;
   providerDeliveryId: string;
+  providerOrderId: string | null;
   providerQuoteId: string | null;
   trackingUrl: string;
   pickupEta: string | null;
   dropoffEta: string | null;
   lastProviderError: string | null;
+  lastWebhookEventId: string | null;
   draft: DeliveryDraft;
 };
 
@@ -137,21 +139,39 @@ export class DeliveriesService {
       );
     }
 
-    const customerId = String(process.env.UBER_DIRECT_CUSTOMER_ID || '').trim();
-    const quoteUrl = `${this.getUberDirectApiBaseUrl()}/v1/customers/${encodeURIComponent(customerId)}/delivery_quotes`;
     const accessToken = await this.getUberDirectAccessToken();
+    const usingCurrentApi = this.usesCurrentUberDirectOrdersApi();
     const response = await this.fetchWithTimeout(
-      quoteUrl,
+      usingCurrentApi
+        ? `${this.getUberDirectApiBaseUrl()}/v1/eats/deliveries/estimates`
+        : `${this.getUberDirectApiBaseUrl()}/v1/customers/${encodeURIComponent(
+            String(process.env.UBER_DIRECT_CUSTOMER_ID || '').trim()
+          )}/delivery_quotes`,
       {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          pickup_address: readiness.draft.pickupAddress,
-          dropoff_address: readiness.draft.dropoffAddress
-        })
+        body: JSON.stringify(
+          usingCurrentApi
+            ? {
+                pickup: {
+                  store_id: this.getUberDirectStoreId()
+                },
+                dropoff_address: {
+                  formatted_address: readiness.draft.dropoffAddress
+                },
+                order_summary: {
+                  total_amount: Math.round(readiness.draft.orderTotal * 100),
+                  currency_code: 'BRL'
+                }
+              }
+            : {
+                pickup_address: readiness.draft.pickupAddress,
+                dropoff_address: readiness.draft.dropoffAddress
+              }
+        )
       },
       'Nao foi possivel consultar a cotacao da Uber.'
     );
@@ -163,9 +183,16 @@ export class DeliveriesService {
       );
     }
 
-    const quoteId = this.getStringField(body, 'quote_id');
-    const fee = this.getNumberField(body, 'fee');
-    const currencyCode = this.getStringField(body, 'currency_code');
+    const quoteId = usingCurrentApi
+      ? this.getStringField(body, 'estimate_id')
+      : this.getStringField(body, 'quote_id');
+    const fee = usingCurrentApi
+      ? this.getNestedNumberField(body, 'delivery_fee', 'total')
+      : this.getNumberField(body, 'fee');
+    const currencyCode = usingCurrentApi
+      ? this.getNestedStringField(body, 'delivery_fee', 'currency_code') ||
+        this.getStringField(body, 'currency_code')
+      : this.getStringField(body, 'currency_code');
 
     if (!quoteId || fee == null || !currencyCode) {
       throw new BadGatewayException('Uber respondeu sem os campos minimos da cotacao.');
@@ -181,11 +208,14 @@ export class DeliveriesService {
       draft: readiness.draft,
       quote: {
         providerQuoteId: quoteId,
-        fee: this.toMoney(fee),
+        fee: this.toMoney(usingCurrentApi ? fee / 100 : fee),
         currencyCode,
-        expiresAt: this.getStringField(body, 'expires'),
+        expiresAt: this.getStringField(body, 'expires') || this.getStringField(body, 'expires_at'),
         pickupDurationSeconds: this.getNestedNumberField(body, 'pickup', 'duration'),
-        dropoffEta: this.getNestedStringField(body, 'dropoff', 'eta')
+        dropoffEta:
+          this.getNestedStringField(body, 'dropoff', 'eta') ||
+          this.getStringField(body, 'dropoff_eta') ||
+          this.getStringField(body, 'etd')
       }
     };
   }
@@ -209,11 +239,13 @@ export class DeliveriesService {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         providerDeliveryId: `blocked-${randomUUID()}`,
+        providerOrderId: null,
         providerQuoteId: null,
         trackingUrl: readiness.manualHandoffUrl,
         pickupEta: null,
         dropoffEta: null,
         lastProviderError: readiness.missingRequirements.join(' • '),
+        lastWebhookEventId: null,
         draft: readiness.draft
       });
       return {
@@ -291,15 +323,23 @@ export class DeliveriesService {
       throw new BadRequestException('Payload invalido para webhook da Uber.');
     }
 
-    const providerDeliveryId =
-      this.getStringField(payload, 'delivery_id') ||
+    const providerDeliveryId = this.getStringField(payload, 'delivery_id') || this.getStringField(payload, 'id');
+    const providerOrderId =
       this.getStringField(payload, 'order_id') ||
-      this.getStringField(payload, 'id');
-    if (!providerDeliveryId) {
+      this.getNestedStringField(payload, 'meta', 'order_id');
+    const externalOrderId =
+      this.getNestedStringField(payload, 'meta', 'external_order_id') ||
+      this.getStringField(payload, 'external_order_id');
+
+    if (!providerDeliveryId && !providerOrderId && !externalOrderId) {
       throw new BadRequestException('Webhook da Uber sem identificador da entrega.');
     }
 
-    const tracking = await this.findTrackingByProviderDeliveryId(providerDeliveryId);
+    const tracking = await this.findTrackingByProviderIdentifiers({
+      providerDeliveryId,
+      providerOrderId,
+      externalOrderId
+    });
     if (!tracking) {
       return {
         ok: true,
@@ -308,8 +348,25 @@ export class DeliveriesService {
       };
     }
 
+    const resourceHref = this.getStringField(payload, 'resource_href');
+    if (resourceHref && tracking.mode === 'LIVE') {
+      const refreshed = await this.trySyncLiveUberTrackingFromUrl(tracking, resourceHref);
+      if (refreshed) {
+        if (refreshed.status === 'DELIVERED') {
+          await this.markOrderDeliveredIfNeeded(refreshed.orderId);
+        }
+
+        return {
+          ok: true,
+          ignored: false,
+          tracking: refreshed
+        };
+      }
+    }
+
     const nextStatus = this.mapProviderStatusToTrackingStatus(
-      this.getStringField(payload, 'status') ||
+      this.getStringField(payload, 'order_status') ||
+        this.getStringField(payload, 'status') ||
         this.getNestedStringField(payload, 'delivery_status', 'status')
     );
 
@@ -317,6 +374,10 @@ export class DeliveriesService {
       ...tracking,
       status: nextStatus || tracking.status,
       updatedAt: new Date().toISOString(),
+      lastWebhookEventId:
+        this.getStringField(payload, 'event_id') ||
+        this.getNestedStringField(payload, 'meta', 'event_id') ||
+        tracking.lastWebhookEventId,
       dropoffEta:
         this.getStringField(payload, 'dropoff_eta') ||
         this.getNestedStringField(payload, 'dropoff', 'eta') ||
@@ -411,11 +472,15 @@ export class DeliveriesService {
   }
 
   private listMissingUberDirectConfiguration(pickupAddress: string) {
+    const usingCurrentApi = this.usesCurrentUberDirectOrdersApi();
     return [
-      ...(!pickupAddress ? ['endereco de coleta da loja nao configurado'] : []),
+      ...(!pickupAddress && !usingCurrentApi ? ['endereco de coleta da loja nao configurado'] : []),
       ...(!String(process.env.UBER_DIRECT_PICKUP_NAME || '').trim() ? ['nome de coleta nao configurado'] : []),
       ...(!String(process.env.UBER_DIRECT_PICKUP_PHONE || '').trim() ? ['telefone de coleta nao configurado'] : []),
-      ...(!String(process.env.UBER_DIRECT_CUSTOMER_ID || '').trim() ? ['UBER_DIRECT_CUSTOMER_ID ausente'] : []),
+      ...(!usingCurrentApi && !String(process.env.UBER_DIRECT_CUSTOMER_ID || '').trim()
+        ? ['UBER_DIRECT_CUSTOMER_ID ausente']
+        : []),
+      ...(usingCurrentApi && !this.getUberDirectStoreId() ? ['UBER_DIRECT_STORE_ID ausente'] : []),
       ...(!String(process.env.UBER_DIRECT_CLIENT_ID || '').trim() ? ['UBER_DIRECT_CLIENT_ID ausente'] : []),
       ...(!String(process.env.UBER_DIRECT_CLIENT_SECRET || '').trim() ? ['UBER_DIRECT_CLIENT_SECRET ausente'] : [])
     ];
@@ -431,6 +496,14 @@ export class DeliveriesService {
 
   private getUberDirectScope() {
     return String(process.env.UBER_DIRECT_SCOPE || 'eats.deliveries').trim() || 'eats.deliveries';
+  }
+
+  private getUberDirectStoreId() {
+    return String(process.env.UBER_DIRECT_STORE_ID || '').trim();
+  }
+
+  private usesCurrentUberDirectOrdersApi() {
+    return Boolean(this.getUberDirectStoreId());
   }
 
   private getUberDirectRequestTimeoutMs() {
@@ -544,45 +617,81 @@ export class DeliveriesService {
       createdAt: new Date(now).toISOString(),
       updatedAt: new Date(now).toISOString(),
       providerDeliveryId: `local-${randomUUID()}`,
+      providerOrderId: null,
       providerQuoteId: null,
       trackingUrl: readiness.manualHandoffUrl,
       pickupEta,
       dropoffEta,
       lastProviderError: fallbackError,
+      lastWebhookEventId: null,
       draft: readiness.draft
     });
   }
 
   private async createLiveUberDirectDelivery(orderId: number, readiness: DeliveryReadinessResult) {
     const quote = await this.getUberDirectQuote(orderId);
-    const customerId = String(process.env.UBER_DIRECT_CUSTOMER_ID || '').trim();
-    const createUrl = `${this.getUberDirectApiBaseUrl()}/v1/customers/${encodeURIComponent(customerId)}/deliveries`;
     const accessToken = await this.getUberDirectAccessToken();
+    const usingCurrentApi = this.usesCurrentUberDirectOrdersApi();
 
     const response = await this.fetchWithTimeout(
-      createUrl,
+      usingCurrentApi
+        ? `${this.getUberDirectApiBaseUrl()}/v1/eats/deliveries/orders`
+        : `${this.getUberDirectApiBaseUrl()}/v1/customers/${encodeURIComponent(
+            String(process.env.UBER_DIRECT_CUSTOMER_ID || '').trim()
+          )}/deliveries`,
       {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          external_id: `querobroapp-order-${orderId}`,
-          quote_id: quote.quote.providerQuoteId,
-          pickup_name: String(process.env.UBER_DIRECT_PICKUP_NAME || '').trim(),
-          pickup_address: readiness.draft.pickupAddress,
-          pickup_phone_number: String(process.env.UBER_DIRECT_PICKUP_PHONE || '').trim(),
-          dropoff_name: readiness.draft.customerName,
-          dropoff_address: readiness.draft.dropoffAddress,
-          dropoff_phone_number: readiness.draft.customerPhone,
-          manifest_reference: `Pedido #${orderId}`,
-          manifest_items: readiness.draft.items.map((item) => ({
-            name: item.name,
-            quantity: item.quantity,
-            size: 'small'
-          }))
-        })
+        body: JSON.stringify(
+          usingCurrentApi
+            ? {
+                estimate_id: quote.quote.providerQuoteId,
+                external_order_id: `querobroapp-order-${orderId}`,
+                pickup: {
+                  store_id: this.getUberDirectStoreId(),
+                  instructions: String(process.env.UBER_DIRECT_PICKUP_INSTRUCTIONS || '').trim() || undefined
+                },
+                dropoff: {
+                  contact: {
+                    first_name: readiness.draft.customerName || 'Cliente',
+                    phone: readiness.draft.customerPhone
+                  },
+                  address: {
+                    formatted_address: readiness.draft.dropoffAddress
+                  }
+                },
+                order_items: readiness.draft.items.map((item) => ({
+                  id: String(item.productId),
+                  title: item.name,
+                  quantity: item.quantity
+                })),
+                order_summary: {
+                  subtotal: {
+                    amount: Math.round(readiness.draft.orderTotal * 100),
+                    currency_code: 'BRL'
+                  }
+                }
+              }
+            : {
+                external_id: `querobroapp-order-${orderId}`,
+                quote_id: quote.quote.providerQuoteId,
+                pickup_name: String(process.env.UBER_DIRECT_PICKUP_NAME || '').trim(),
+                pickup_address: readiness.draft.pickupAddress,
+                pickup_phone_number: String(process.env.UBER_DIRECT_PICKUP_PHONE || '').trim(),
+                dropoff_name: readiness.draft.customerName,
+                dropoff_address: readiness.draft.dropoffAddress,
+                dropoff_phone_number: readiness.draft.customerPhone,
+                manifest_reference: `Pedido #${orderId}`,
+                manifest_items: readiness.draft.items.map((item) => ({
+                  name: item.name,
+                  quantity: item.quantity,
+                  size: 'small'
+                }))
+              }
+        )
       },
       'Nao foi possivel criar a entrega da Uber.'
     );
@@ -594,11 +703,15 @@ export class DeliveriesService {
       );
     }
 
+    const providerOrderId =
+      this.getStringField(body, 'order_id') ||
+      this.getStringField(body, 'id') ||
+      null;
     const providerDeliveryId =
       this.getStringField(body, 'delivery_id') ||
-      this.getStringField(body, 'order_id') ||
-      this.getStringField(body, 'id');
-    if (!providerDeliveryId) {
+      providerOrderId ||
+      `uber-${randomUUID()}`;
+    if (!providerOrderId && !providerDeliveryId) {
       throw new BadGatewayException('Uber nao retornou o identificador da entrega criada.');
     }
 
@@ -606,12 +719,17 @@ export class DeliveriesService {
       orderId,
       provider: 'UBER_DIRECT',
       mode: 'LIVE',
-      status: this.mapProviderStatusToTrackingStatus(this.getStringField(body, 'status')) || 'REQUESTED',
+      status:
+        this.mapProviderStatusToTrackingStatus(
+          this.getStringField(body, 'order_status') || this.getStringField(body, 'status')
+        ) || 'REQUESTED',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       providerDeliveryId,
+      providerOrderId,
       providerQuoteId: quote.quote.providerQuoteId,
       trackingUrl:
+        this.getStringField(body, 'order_tracking_url') ||
         this.getStringField(body, 'tracking_url') ||
         this.getNestedStringField(body, 'tracking', 'url') ||
         quote.manualHandoffUrl,
@@ -625,6 +743,7 @@ export class DeliveriesService {
         quote.quote.dropoffEta ||
         null,
       lastProviderError: null,
+      lastWebhookEventId: null,
       draft: readiness.draft
     });
   }
@@ -675,16 +794,24 @@ export class DeliveriesService {
     if (!this.resolveBooleanEnv(process.env.UBER_DIRECT_LIVE_TRACKING_ENABLED, false)) {
       return null;
     }
-    if (!tracking.providerDeliveryId) {
+    if (!tracking.providerOrderId && !tracking.providerDeliveryId) {
       return null;
     }
 
+    const liveId = tracking.providerOrderId || tracking.providerDeliveryId;
+    const url = `${this.getUberDirectApiBaseUrl()}/v1/eats/deliveries/orders/${encodeURIComponent(liveId)}`;
+    return this.trySyncLiveUberTrackingFromUrl(tracking, url);
+  }
+
+  private async trySyncLiveUberTrackingFromUrl(tracking: DeliveryTrackingRecord, url: string) {
     const accessToken = await this.getUberDirectAccessToken();
-    const url = `${this.getUberDirectApiBaseUrl()}/v1/eats/deliveries/orders/${encodeURIComponent(tracking.providerDeliveryId)}`;
+    const normalizedUrl = /^https?:\/\//i.test(url)
+      ? url
+      : `${this.getUberDirectApiBaseUrl().replace(/\/+$/, '')}/${url.replace(/^\/+/, '')}`;
 
     try {
       const response = await this.fetchWithTimeout(
-        url,
+        normalizedUrl,
         {
           method: 'GET',
           headers: {
@@ -702,12 +829,19 @@ export class DeliveriesService {
         });
       }
 
-      const nextStatus = this.mapProviderStatusToTrackingStatus(this.getStringField(body, 'status'));
+      const nextStatus = this.mapProviderStatusToTrackingStatus(
+        this.getStringField(body, 'order_status') || this.getStringField(body, 'status')
+      );
       return this.persistSyncedTracking({
         ...tracking,
         status: nextStatus || tracking.status,
         updatedAt: new Date().toISOString(),
+        providerDeliveryId:
+          this.getStringField(body, 'delivery_id') || tracking.providerDeliveryId,
+        providerOrderId:
+          this.getStringField(body, 'order_id') || tracking.providerOrderId || tracking.providerDeliveryId,
         trackingUrl:
+          this.getStringField(body, 'order_tracking_url') ||
           this.getStringField(body, 'tracking_url') ||
           this.getNestedStringField(body, 'tracking', 'url') ||
           tracking.trackingUrl,
@@ -743,14 +877,22 @@ export class DeliveriesService {
     if (
       normalized.includes('COURIER') ||
       normalized.includes('EN_ROUTE') ||
-      normalized.includes('PICKED')
+      normalized.includes('PICKED') ||
+      normalized.includes('ACTIVE')
     ) {
       return 'OUT_FOR_DELIVERY';
     }
     if (normalized.includes('FAILED') || normalized.includes('CANCELLED') || normalized.includes('CANCELED')) {
       return 'FAILED';
     }
-    if (normalized.includes('REQUESTED') || normalized.includes('PENDING') || normalized.includes('CREATED')) {
+    if (
+      normalized.includes('REQUESTED') ||
+      normalized.includes('PENDING') ||
+      normalized.includes('CREATED') ||
+      normalized.includes('ACCEPTED') ||
+      normalized.includes('PROCESSING') ||
+      normalized.includes('UNASSIGNED')
+    ) {
       return 'REQUESTED';
     }
     return null;
@@ -780,13 +922,42 @@ export class DeliveriesService {
     if (!record) return null;
 
     try {
-      return JSON.parse(record.responseJson) as DeliveryTrackingRecord;
+      return this.normalizeTrackingRecord(JSON.parse(record.responseJson) as DeliveryTrackingRecord);
     } catch {
       return null;
     }
   }
 
-  private async findTrackingByProviderDeliveryId(providerDeliveryId: string) {
+  private normalizeTrackingRecord(tracking: DeliveryTrackingRecord) {
+    return {
+      ...tracking,
+      providerOrderId: tracking.providerOrderId || tracking.providerDeliveryId || null,
+      lastWebhookEventId: tracking.lastWebhookEventId || null
+    };
+  }
+
+  private extractLocalOrderIdFromExternalId(externalOrderId: string) {
+    const match = externalOrderId.trim().match(/^querobroapp-order-(\d+)$/i);
+    if (!match) return null;
+    const parsed = Number.parseInt(match[1] || '', 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return parsed;
+  }
+
+  private async findTrackingByProviderIdentifiers(input: {
+    providerDeliveryId?: string | null;
+    providerOrderId?: string | null;
+    externalOrderId?: string | null;
+  }) {
+    const localOrderId =
+      input.externalOrderId && input.externalOrderId.trim()
+        ? this.extractLocalOrderIdFromExternalId(input.externalOrderId)
+        : null;
+    if (localOrderId) {
+      const direct = await this.readTracking(localOrderId);
+      if (direct) return direct;
+    }
+
     const records = await this.prisma.idempotencyRecord.findMany({
       where: {
         scope: 'DELIVERY_TRACKING'
@@ -795,8 +966,11 @@ export class DeliveriesService {
 
     for (const record of records) {
       try {
-        const parsed = JSON.parse(record.responseJson) as DeliveryTrackingRecord;
-        if (parsed.providerDeliveryId === providerDeliveryId) {
+        const parsed = this.normalizeTrackingRecord(JSON.parse(record.responseJson) as DeliveryTrackingRecord);
+        if (
+          (input.providerDeliveryId && parsed.providerDeliveryId === input.providerDeliveryId) ||
+          (input.providerOrderId && parsed.providerOrderId === input.providerOrderId)
+        ) {
           return parsed;
         }
       } catch {
@@ -810,6 +984,7 @@ export class DeliveriesService {
   private async saveTracking(orderId: number, tracking: DeliveryTrackingRecord) {
     const expiresAt = new Date();
     expiresAt.setFullYear(expiresAt.getFullYear() + 10);
+    const normalized = this.normalizeTrackingRecord(tracking);
     await this.prisma.idempotencyRecord.upsert({
       where: {
         scope_idemKey: {
@@ -818,20 +993,20 @@ export class DeliveriesService {
         }
       },
       update: {
-        requestHash: tracking.providerDeliveryId,
-        responseJson: JSON.stringify(tracking),
+        requestHash: normalized.providerOrderId || normalized.providerDeliveryId,
+        responseJson: JSON.stringify(normalized),
         expiresAt
       },
       create: {
         scope: 'DELIVERY_TRACKING',
         idemKey: `ORDER_${orderId}`,
-        requestHash: tracking.providerDeliveryId,
-        responseJson: JSON.stringify(tracking),
+        requestHash: normalized.providerOrderId || normalized.providerDeliveryId,
+        responseJson: JSON.stringify(normalized),
         expiresAt
       }
     });
 
-    return tracking;
+    return normalized;
   }
 
   private async persistSyncedTracking(tracking: DeliveryTrackingRecord) {

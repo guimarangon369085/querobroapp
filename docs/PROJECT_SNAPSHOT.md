@@ -48,8 +48,8 @@ Ultima atualizacao: 2026-02-28
 
 ## Gaps abertos
 
-1. Despacho real da Meta WhatsApp Cloud API ainda nao esta ligado; o Flow local ja funciona, mas o envio automatico do convite ainda depende do dispatcher do outbox + credenciais.
-2. Uber live dispatch/tracking depende de preencher `UBER_DIRECT_*`; sem credenciais, o fallback local de simulacao continua ativo e funcional.
+1. O dispatcher real da Meta WhatsApp Cloud API ja existe e consome o outbox, mas so envia de verdade quando `WHATSAPP_CLOUD_*` estiver preenchido; sem isso, o Flow continua local e auditavel.
+2. Uber live agora suporta o caminho mais atual por `store_id` e o legado por `customer_id`, mas ainda depende de preencher `UBER_DIRECT_*`; sem credenciais, o fallback local de simulacao continua ativo e funcional.
 3. Ainda existe historico legado de movimentos antigos no banco; a normalizacao por compensacao foi aplicada para pedidos em aberto, mas o historico anterior foi preservado.
 4. Mobile segue atras do web no fluxo novo.
 

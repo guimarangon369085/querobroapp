@@ -1,4 +1,11 @@
-import { BadRequestException, Injectable, Inject, NotFoundException } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  GatewayTimeoutException,
+  Injectable,
+  Inject,
+  NotFoundException
+} from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
 import { OutboxStatusEnum } from '@querobroapp/shared';
 import { OrdersService } from '../orders/orders.service.js';
@@ -40,11 +47,28 @@ const orderIntakeSubmitSchema = z.object({
   })
 });
 
+const outboxDispatchSchema = z.object({
+  messageId: z.coerce.number().int().positive().optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+  includeFailed: z.coerce.boolean().optional().default(false)
+});
+
 type OrderIntakeProductOption = {
   id: number;
   name: string;
   price: number;
   category: string | null;
+};
+
+type OutboxDispatchMode = 'FLOW' | 'TEXT_LINK' | 'TEXT_ONLY' | 'NONE';
+
+type OutboxDispatchResult = {
+  outboxId: number;
+  template: string;
+  status: 'SENT' | 'FAILED' | 'SKIPPED';
+  transport: OutboxDispatchMode;
+  providerMessageId: string | null;
+  error: string | null;
 };
 
 type OrderIntakeSessionRecord = {
@@ -92,6 +116,50 @@ export class WhatsappService {
 
   private resolveApiBaseUrl() {
     return (process.env.WHATSAPP_FLOW_API_BASE_URL || 'http://127.0.0.1:3001').trim();
+  }
+
+  private resolveCloudApiBaseUrl() {
+    return (process.env.WHATSAPP_CLOUD_API_BASE_URL || 'https://graph.facebook.com').trim();
+  }
+
+  private resolveCloudApiVersion() {
+    return (process.env.WHATSAPP_CLOUD_API_VERSION || 'v21.0').trim();
+  }
+
+  private resolveCloudPhoneNumberId() {
+    return (process.env.WHATSAPP_CLOUD_PHONE_NUMBER_ID || '').trim();
+  }
+
+  private resolveCloudAccessToken() {
+    return (process.env.WHATSAPP_CLOUD_ACCESS_TOKEN || '').trim();
+  }
+
+  private resolveCloudRequestTimeoutMs() {
+    const parsed = Number.parseInt(String(process.env.WHATSAPP_CLOUD_REQUEST_TIMEOUT_MS || ''), 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return 12_000;
+    return parsed;
+  }
+
+  private resolveBooleanEnv(rawValue: string | undefined, fallback: boolean) {
+    if (rawValue == null || rawValue.trim() === '') return fallback;
+    const normalized = rawValue.trim().toLowerCase();
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+    return fallback;
+  }
+
+  private isOutboxAutoDispatchEnabled() {
+    return this.resolveBooleanEnv(process.env.WHATSAPP_OUTBOX_AUTO_DISPATCH_ENABLED, true);
+  }
+
+  private hasMetaCloudDeliveryConfig() {
+    return Boolean(this.resolveCloudPhoneNumberId() && this.resolveCloudAccessToken());
+  }
+
+  private resolveFlowInviteDispatchMode(flowId?: string | null): OutboxDispatchMode {
+    if (!this.hasMetaCloudDeliveryConfig()) return 'NONE';
+    if ((flowId || '').trim()) return 'FLOW';
+    return 'TEXT_LINK';
   }
 
   private hashToken(token: string) {
@@ -192,6 +260,422 @@ export class WhatsappService {
     };
   }
 
+  private parseOutboxPayload(payload: string) {
+    try {
+      const parsed = JSON.parse(payload) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+      return {
+        rawPayload: parsed
+      };
+    } catch {
+      return {
+        rawPayload: payload
+      };
+    }
+  }
+
+  private stringifyOutboxPayloadWithDispatchMeta(
+    payload: string,
+    dispatchMeta: Record<string, unknown>
+  ) {
+    const record = this.parseOutboxPayload(payload);
+    const previousMeta =
+      record.dispatchMeta && typeof record.dispatchMeta === 'object' && !Array.isArray(record.dispatchMeta)
+        ? (record.dispatchMeta as Record<string, unknown>)
+        : {};
+
+    return JSON.stringify({
+      ...record,
+      dispatchMeta: {
+        ...previousMeta,
+        ...dispatchMeta
+      }
+    });
+  }
+
+  private formatCurrencyBr(value: number | null | undefined) {
+    const normalized = Number.isFinite(value) ? Number(value) : 0;
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL'
+    }).format(normalized);
+  }
+
+  private buildGraphMessagesUrl() {
+    const phoneNumberId = this.resolveCloudPhoneNumberId();
+    if (!phoneNumberId) {
+      throw new BadRequestException('WHATSAPP_CLOUD_PHONE_NUMBER_ID ausente para envio real no WhatsApp.');
+    }
+
+    const baseUrl = this.resolveCloudApiBaseUrl().replace(/\/+$/, '');
+    const version = this.resolveCloudApiVersion().replace(/^\/+/, '');
+    return `${baseUrl}/${version}/${encodeURIComponent(phoneNumberId)}/messages`;
+  }
+
+  private async fetchMetaWithTimeout(url: string, init: RequestInit, timeoutMessage: string) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.resolveCloudRequestTimeoutMs());
+
+    try {
+      return await fetch(url, {
+        ...init,
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new GatewayTimeoutException(timeoutMessage);
+      }
+
+      const detail = error instanceof Error ? error.message : 'unknown error';
+      throw new BadGatewayException(`${timeoutMessage} (${detail})`);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private async readProviderBody(response: Response): Promise<unknown> {
+    const raw = await response.text();
+    if (!raw) return '';
+
+    try {
+      return JSON.parse(raw) as unknown;
+    } catch {
+      return raw;
+    }
+  }
+
+  private summarizeProviderBody(body: unknown) {
+    if (typeof body === 'string') {
+      return body.trim() || 'sem detalhes';
+    }
+
+    if (!body || typeof body !== 'object') {
+      return 'sem detalhes';
+    }
+
+    const record = body as Record<string, unknown>;
+    const errors: string[] = [];
+    const pushString = (value: unknown) => {
+      if (typeof value === 'string' && value.trim()) {
+        errors.push(value.trim());
+      }
+    };
+
+    pushString(record.message);
+    pushString(record.error);
+    pushString(record.error_description);
+
+    const nestedError = record.error_data;
+    if (nestedError && typeof nestedError === 'object' && !Array.isArray(nestedError)) {
+      for (const value of Object.values(nestedError)) {
+        pushString(value);
+      }
+    }
+
+    if (record.error && typeof record.error === 'object' && !Array.isArray(record.error)) {
+      for (const value of Object.values(record.error as Record<string, unknown>)) {
+        pushString(value);
+      }
+    }
+
+    if (errors.length > 0) {
+      return errors.join(' • ');
+    }
+
+    try {
+      return JSON.stringify(body);
+    } catch {
+      return 'sem detalhes';
+    }
+  }
+
+  private async sendCloudApiMessage(payload: Record<string, unknown>) {
+    const accessToken = this.resolveCloudAccessToken();
+    if (!accessToken) {
+      throw new BadRequestException('WHATSAPP_CLOUD_ACCESS_TOKEN ausente para envio real no WhatsApp.');
+    }
+
+    const response = await this.fetchMetaWithTimeout(
+      this.buildGraphMessagesUrl(),
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      },
+      'Nao foi possivel enviar a mensagem pela Meta Cloud API.'
+    );
+    const body = await this.readProviderBody(response);
+
+    if (!response.ok) {
+      throw new BadGatewayException(
+        `Meta recusou a mensagem (HTTP ${response.status}): ${this.summarizeProviderBody(body)}`
+      );
+    }
+
+    const messages =
+      body && typeof body === 'object' && !Array.isArray(body)
+        ? ((body as Record<string, unknown>).messages as Array<Record<string, unknown>> | undefined)
+        : undefined;
+    const providerMessageId =
+      Array.isArray(messages) &&
+      messages.find((entry) => entry && typeof entry.id === 'string' && entry.id.trim())?.id;
+
+    return {
+      providerMessageId: typeof providerMessageId === 'string' ? providerMessageId.trim() : null,
+      body
+    };
+  }
+
+  private buildOrderIntakeInviteFallbackText(payload: Record<string, unknown>) {
+    const previewUrl =
+      typeof payload.previewUrl === 'string' && payload.previewUrl.trim()
+        ? payload.previewUrl.trim()
+        : '';
+    if (!previewUrl) {
+      throw new BadRequestException('Payload do convite sem previewUrl para fallback de link.');
+    }
+
+    return `Monte seu pedido aqui: ${previewUrl}`;
+  }
+
+  private buildOrderIntakeCompletedText(payload: Record<string, unknown>) {
+    const orderId =
+      typeof payload.orderId === 'number' && Number.isFinite(payload.orderId) ? payload.orderId : null;
+    return orderId
+      ? `Pedido #${orderId} criado com sucesso no QUEROBROAPP. Agora ele segue para confirmacao e producao.`
+      : 'Pedido criado com sucesso no QUEROBROAPP.';
+  }
+
+  private buildOrderStatusChangedText(payload: Record<string, unknown>) {
+    const orderId =
+      typeof payload.orderId === 'number' && Number.isFinite(payload.orderId) ? payload.orderId : null;
+    const status = typeof payload.status === 'string' ? payload.status.trim() : '';
+    const totals =
+      payload.totals && typeof payload.totals === 'object' && !Array.isArray(payload.totals)
+        ? (payload.totals as Record<string, unknown>)
+        : null;
+    const balanceDue =
+      totals && typeof totals.balanceDue === 'number' && Number.isFinite(totals.balanceDue)
+        ? totals.balanceDue
+        : null;
+
+    const orderLabel = orderId ? `Pedido #${orderId}` : 'Seu pedido';
+    const base = status ? `${orderLabel} agora esta ${status.toLowerCase()}.` : `${orderLabel} teve atualizacao.`;
+    if (balanceDue != null && balanceDue > 0) {
+      return `${base} Falta receber ${this.formatCurrencyBr(balanceDue)}.`;
+    }
+    return base;
+  }
+
+  private async sendTextMessage(to: string, bodyText: string) {
+    return this.sendCloudApiMessage({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: this.normalizePhone(to),
+      type: 'text',
+      text: {
+        preview_url: false,
+        body: bodyText
+      }
+    });
+  }
+
+  private async sendFlowInviteMessage(to: string, payload: Record<string, unknown>) {
+    const flow =
+      payload.flow && typeof payload.flow === 'object' && !Array.isArray(payload.flow)
+        ? (payload.flow as Record<string, unknown>)
+        : null;
+    const flowId = flow && typeof flow.flowId === 'string' ? flow.flowId.trim() : '';
+    const mode = this.resolveFlowInviteDispatchMode(flowId);
+
+    if (mode === 'NONE') {
+      throw new BadRequestException('Credenciais da Meta Cloud API ausentes para disparar o WhatsApp Flow.');
+    }
+
+    if (mode === 'TEXT_LINK') {
+      return {
+        transport: 'TEXT_LINK' as const,
+        ...(await this.sendTextMessage(to, this.buildOrderIntakeInviteFallbackText(payload)))
+      };
+    }
+
+    const flowToken = flow && typeof flow.flowToken === 'string' ? flow.flowToken.trim() : '';
+    if (!flowToken) {
+      throw new BadRequestException('Payload do convite sem flowToken.');
+    }
+
+    const flowMessageVersion =
+      flow && typeof flow.flowMessageVersion === 'string' && flow.flowMessageVersion.trim()
+        ? flow.flowMessageVersion.trim()
+        : '3';
+    const flowCta =
+      flow && typeof flow.flowCta === 'string' && flow.flowCta.trim() ? flow.flowCta.trim() : 'Montar pedido';
+    const flowAction =
+      flow && typeof flow.flowAction === 'string' && flow.flowAction.trim()
+        ? flow.flowAction.trim()
+        : 'navigate';
+    const flowActionPayload =
+      flow &&
+      flow.flowActionPayload &&
+      typeof flow.flowActionPayload === 'object' &&
+      !Array.isArray(flow.flowActionPayload)
+        ? (flow.flowActionPayload as Record<string, unknown>)
+        : undefined;
+
+    const providerResponse = await this.sendCloudApiMessage({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: this.normalizePhone(to),
+      type: 'interactive',
+      interactive: {
+        type: 'flow',
+        body: {
+          text: 'Abra o fluxo para montar seu pedido.'
+        },
+        action: {
+          name: 'flow',
+          parameters: {
+            flow_message_version: flowMessageVersion,
+            flow_id: flowId,
+            flow_cta: flowCta,
+            flow_token: flowToken,
+            flow_action: flowAction,
+            ...(flowActionPayload ? { flow_action_payload: flowActionPayload } : {})
+          }
+        }
+      }
+    });
+
+    return {
+      transport: 'FLOW' as const,
+      ...providerResponse
+    };
+  }
+
+  private async sendOutboxMessage(row: {
+    id: number;
+    to: string;
+    template: string;
+    payload: string;
+    status: string;
+  }): Promise<OutboxDispatchResult> {
+    if (row.status === 'SENT') {
+      return {
+        outboxId: row.id,
+        template: row.template,
+        status: 'SKIPPED',
+        transport: 'NONE',
+        providerMessageId: null,
+        error: null
+      };
+    }
+
+    const payload = this.parseOutboxPayload(row.payload);
+
+    try {
+      const dispatch =
+        row.template === 'order_intake_flow_invite'
+          ? await this.sendFlowInviteMessage(row.to, payload)
+          : row.template === 'order_intake_flow_completed'
+            ? {
+                transport: 'TEXT_ONLY' as const,
+                ...(await this.sendTextMessage(row.to, this.buildOrderIntakeCompletedText(payload)))
+              }
+            : row.template === 'order_status_changed'
+              ? {
+                  transport: 'TEXT_ONLY' as const,
+                  ...(await this.sendTextMessage(row.to, this.buildOrderStatusChangedText(payload)))
+                }
+              : (() => {
+                  throw new BadRequestException(
+                    `Template ${row.template} ainda nao suporta dispatch real da Meta Cloud API.`
+                  );
+                })();
+
+      await this.prisma.outboxMessage.update({
+        where: { id: row.id },
+        data: {
+          status: 'SENT',
+          sentAt: new Date(),
+          payload: this.stringifyOutboxPayloadWithDispatchMeta(row.payload, {
+            lastAttemptAt: new Date().toISOString(),
+            lastStatus: 'SENT',
+            transport: dispatch.transport,
+            providerMessageId: dispatch.providerMessageId
+          })
+        }
+      });
+
+      return {
+        outboxId: row.id,
+        template: row.template,
+        status: 'SENT',
+        transport: dispatch.transport,
+        providerMessageId: dispatch.providerMessageId,
+        error: null
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Falha ao enviar no WhatsApp.';
+      await this.prisma.outboxMessage.update({
+        where: { id: row.id },
+        data: {
+          status: 'FAILED',
+          payload: this.stringifyOutboxPayloadWithDispatchMeta(row.payload, {
+            lastAttemptAt: new Date().toISOString(),
+            lastStatus: 'FAILED',
+            error: message
+          })
+        }
+      });
+
+      return {
+        outboxId: row.id,
+        template: row.template,
+        status: 'FAILED',
+        transport: 'NONE',
+        providerMessageId: null,
+        error: message
+      };
+    }
+  }
+
+  private async maybeAutoDispatchOutboxMessage(outboxId: number) {
+    if (!this.isOutboxAutoDispatchEnabled() || !this.hasMetaCloudDeliveryConfig()) {
+      return {
+        attempted: false,
+        status: 'PENDING' as const,
+        transport: 'NONE' as OutboxDispatchMode,
+        providerMessageId: null,
+        error: null
+      };
+    }
+
+    const row = await this.prisma.outboxMessage.findUnique({ where: { id: outboxId } });
+    if (!row) {
+      return {
+        attempted: false,
+        status: 'PENDING' as const,
+        transport: 'NONE' as OutboxDispatchMode,
+        providerMessageId: null,
+        error: 'Outbox nao encontrado para auto-dispatch.'
+      };
+    }
+
+    const result = await this.sendOutboxMessage(row);
+    return {
+      attempted: true,
+      status: result.status === 'SKIPPED' ? 'PENDING' : result.status,
+      transport: result.transport,
+      providerMessageId: result.providerMessageId,
+      error: result.error
+    };
+  }
+
   async listOutbox(status?: string) {
     let normalizedStatus: string | undefined;
     if (status) {
@@ -219,6 +703,43 @@ export class WhatsappService {
         payload,
       };
     });
+  }
+
+  async dispatchOutbox(payload: unknown) {
+    const data = outboxDispatchSchema.parse(payload ?? {});
+
+    const rows = await this.prisma.outboxMessage.findMany({
+      where: data.messageId
+        ? {
+            id: data.messageId,
+            channel: 'whatsapp'
+          }
+        : {
+            channel: 'whatsapp',
+            status: {
+              in: data.includeFailed ? ['PENDING', 'FAILED'] : ['PENDING']
+            }
+          },
+      orderBy: { id: 'asc' },
+      ...(data.messageId ? {} : { take: data.limit })
+    });
+
+    if (data.messageId && rows.length === 0) {
+      throw new NotFoundException('Mensagem de outbox nao encontrada.');
+    }
+
+    const results: OutboxDispatchResult[] = [];
+    for (const row of rows) {
+      results.push(await this.sendOutboxMessage(row));
+    }
+
+    return {
+      attempted: results.length,
+      sent: results.filter((entry) => entry.status === 'SENT').length,
+      failed: results.filter((entry) => entry.status === 'FAILED').length,
+      skipped: results.filter((entry) => entry.status === 'SKIPPED').length,
+      results
+    };
   }
 
   async launchOrderIntakeFlow(payload: unknown) {
@@ -295,6 +816,7 @@ export class WhatsappService {
     const webBaseUrl = this.resolveWebBaseUrl();
     const previewUrl = `${webBaseUrl}/whatsapp-flow/pedido/${sessionId}?token=${sessionToken}`;
     const flowId = (process.env.WHATSAPP_FLOW_ORDER_INTAKE_ID || '').trim();
+    const metaDispatchMode = this.resolveFlowInviteDispatchMode(flowId || null);
 
     const outboxPayload = {
       event: 'ORDER_INTAKE_FLOW_REQUESTED',
@@ -317,7 +839,8 @@ export class WhatsappService {
         }
       },
       recipientPhone,
-      canSendViaMeta: Boolean(flowId),
+      canSendViaMeta: metaDispatchMode !== 'NONE',
+      metaDispatchMode,
       previewUrl,
       createdAt: new Date().toISOString()
     };
@@ -332,14 +855,19 @@ export class WhatsappService {
         status: 'PENDING'
       }
     });
+    const autoDispatch = await this.maybeAutoDispatchOutboxMessage(outbox.id);
 
     return {
       sessionId,
       sessionToken,
       previewUrl,
       outboxMessageId: outbox.id,
-      canSendViaMeta: Boolean(flowId),
-      flowId: flowId || null
+      canSendViaMeta: metaDispatchMode !== 'NONE',
+      metaDispatchMode,
+      flowId: flowId || null,
+      dispatchStatus: autoDispatch.status,
+      dispatchTransport: autoDispatch.transport,
+      dispatchError: autoDispatch.error
     };
   }
 
@@ -439,7 +967,7 @@ export class WhatsappService {
       }
     });
 
-    await this.prisma.outboxMessage.create({
+    const completionOutbox = await this.prisma.outboxMessage.create({
       data: {
         messageId: randomUUID(),
         channel: 'whatsapp',
@@ -456,12 +984,16 @@ export class WhatsappService {
         orderId: order.id ?? null
       }
     });
+    const autoDispatch = await this.maybeAutoDispatchOutboxMessage(completionOutbox.id);
 
     return {
       ok: true,
       sessionId: data.sessionId,
       customerId: savedCustomer.id,
-      orderId: order.id ?? null
+      orderId: order.id ?? null,
+      dispatchStatus: autoDispatch.status,
+      dispatchTransport: autoDispatch.transport,
+      dispatchError: autoDispatch.error
     };
   }
 }

@@ -1316,9 +1316,11 @@ function OrdersPageContent({ screenMode = 'orders' }: { screenMode?: OrdersScree
       });
       setWhatsappFlowLaunchResult(result);
       notifySuccess(
-        result.canSendViaMeta
-          ? 'WhatsApp Flow preparado e enfileirado no outbox.'
-          : 'WhatsApp Flow preparado. Falta configurar o Flow ID da Meta para envio automatico.'
+        result.dispatchStatus === 'SENT'
+          ? 'WhatsApp Flow disparado de verdade no WhatsApp.'
+          : result.canSendViaMeta
+            ? 'WhatsApp Flow preparado e enfileirado no outbox.'
+            : 'WhatsApp Flow preparado. Falta configurar a Meta Cloud API para envio automatico.'
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Nao foi possivel iniciar o WhatsApp Flow.';
@@ -1381,7 +1383,15 @@ function OrdersPageContent({ screenMode = 'orders' }: { screenMode?: OrdersScree
             <div className="rounded-lg border border-white/60 bg-white/70 px-3 py-3 text-sm text-neutral-700">
               <p>
                 Sessao criada. Outbox #{whatsappFlowLaunchResult.outboxMessageId}
-                {whatsappFlowLaunchResult.canSendViaMeta ? '' : ' • envio automatico aguardando Flow ID da Meta'}
+                {whatsappFlowLaunchResult.dispatchStatus === 'SENT'
+                  ? ' • enviado no WhatsApp'
+                  : whatsappFlowLaunchResult.dispatchStatus === 'FAILED'
+                    ? ` • envio falhou: ${whatsappFlowLaunchResult.dispatchError || 'erro desconhecido'}`
+                    : whatsappFlowLaunchResult.canSendViaMeta
+                      ? whatsappFlowLaunchResult.metaDispatchMode === 'TEXT_LINK'
+                        ? ' • pronto para envio por link'
+                        : ' • aguardando envio automatico'
+                      : ' • configure a Meta Cloud API'}
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
                 <a

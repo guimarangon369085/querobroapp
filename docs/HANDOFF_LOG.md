@@ -189,6 +189,71 @@ No fim, registrar nova entrada no HANDOFF_LOG.
 
 ### 1) Metadados
 
+- Data/hora: 2026-02-28 19:45 -03
+- Canal origem: Codex Terminal
+- Canal destino: Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `feat/real-local-ops-flow-2026-02-28`
+- Commit base (opcional): `2eb2110`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Fechar as 3 integracoes aprovadas pelo usuario (Meta WhatsApp Cloud API no outbox, Uber Direct live mais robusto e Alexa com intent explicita) sem quebrar o fluxo local real.
+- Resultado entregue: O outbox de WhatsApp agora tem dispatcher real pela Cloud API, com auto-dispatch quando houver credenciais e fallback por link quando ainda nao existir Flow publicado. O Uber live foi endurecido para separar `order_id` de `delivery_id`, aceitar o caminho atual por `store_id` e sincronizar tracking com mais robustez. A Alexa passou a priorizar intent explicita para iniciar fornada, deixando o fallback por utterance como opcional por env.
+- O que ficou pendente: Falta apenas preencher as credenciais reais (`WHATSAPP_CLOUD_*`, `UBER_DIRECT_*`, `ALEXA_*`) para validar chamadas externas em producao/conta real.
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados nesta wave:
+- ` M apps/api/src/modules/whatsapp/whatsapp.service.ts`
+- ` M apps/api/src/modules/whatsapp/whatsapp.controller.ts`
+- ` M apps/api/src/modules/deliveries/deliveries.service.ts`
+- ` M apps/api/src/modules/alexa/alexa.service.ts`
+- ` M apps/api/.env.example`
+- ` M apps/web/src/features/orders/orders-api.ts`
+- ` M apps/web/src/features/orders/orders-model.ts`
+- ` M apps/web/src/features/orders/orders-screen.tsx`
+- ` M docs/PROJECT_SNAPSHOT.md`
+- ` M docs/querobroapp-context.md`
+- ` M docs/HANDOFF_LOG.md`
+- Comportamento novo:
+- `POST /whatsapp/outbox/dispatch` agora despacha mensagens reais pela Meta Cloud API.
+- `POST /whatsapp/flows/order-intake/launch` e `submit` tentam auto-dispatch quando houver `WHATSAPP_CLOUD_*`.
+- O convite do WhatsApp Flow usa `interactive flow` se houver `WHATSAPP_FLOW_ORDER_INTAKE_ID`; sem isso, cai para texto com link da sessao.
+- O tracking de entrega agora preserva `providerOrderId` e `providerDeliveryId`, e o webhook tenta sincronizar por `resource_href`, `meta.order_id` ou `meta.external_order_id`.
+- `UBER_DIRECT_STORE_ID` habilita o caminho live mais atual (`/v1/eats/deliveries/estimates` + `/v1/eats/deliveries/orders`); sem ele, o codigo ainda suporta o caminho legado por `customer_id`.
+- A Alexa exige slot de minutos nas intents de forno; o fallback por texto so roda com `ALEXA_TIMER_UTTERANCE_FALLBACK_ENABLED=true`.
+- Seguranca aplicada: O outbox continua sendo a trilha de auditoria de WhatsApp. O envio automatico so acontece quando as credenciais existem. O bridge da Alexa manteve token, assinatura e replay protection.
+- Riscos/regressoes:
+- Sem credenciais, o dispatcher do WhatsApp nao envia e deixa o item em `PENDING`.
+- O payload live atual da Uber foi alinhado ao contrato mais recente conhecido, mas ainda depende de validar os campos finais com as credenciais reais da conta.
+
+### 4) Validacao
+
+- Comandos executados:
+- `pnpm --filter @querobroapp/api typecheck`
+- `pnpm --filter @querobroapp/web typecheck`
+- `curl -s -X POST http://127.0.0.1:3001/whatsapp/flows/order-intake/launch ...`
+- `curl -s http://127.0.0.1:3001/deliveries/orders/6/tracking`
+- Testes que passaram:
+- API e Web compilaram sem erro.
+- O launch do WhatsApp Flow retornou os novos campos `metaDispatchMode`, `dispatchStatus`, `dispatchTransport` e `dispatchError`.
+- Um tracking legado/local continuou legivel e passou a expor `providerOrderId` normalizado sem quebrar o contrato atual.
+- Testes nao executados (e motivo):
+- Nao houve envio real na Meta nem criacao live na Uber porque as credenciais privadas nao foram preenchidas nesta sessao.
+
+### 5) Contexto para retomada
+
+- Decisoes importantes:
+- O app segue funcional localmente mesmo sem provedores externos.
+- O caminho live foi acoplado por env e mantido com fallback seguro.
+- A Alexa agora trata utterance como fallback legado, nao como caminho principal.
+- Proximo passo recomendado (1 acao objetiva): Preencher `WHATSAPP_CLOUD_*`, `UBER_DIRECT_*` e `ALEXA_*` no ambiente local e validar um ciclo real com numero/conta de teste.
+
+## Entrada 037
+
+### 1) Metadados
+
 - Data/hora: 2026-02-28 19:10 -03
 - Canal origem: Codex Terminal
 - Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud

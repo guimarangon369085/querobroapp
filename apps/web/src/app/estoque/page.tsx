@@ -432,6 +432,33 @@ function StockPageContent() {
     }
   };
 
+  const clearAllMovements = async () => {
+    const accepted = await confirm({
+      title: 'Limpar todas as movimentacoes do estoque?',
+      description:
+        'Essa acao apaga todo o historico de movimentacoes de insumos e produtos. Os itens e fichas tecnicas permanecem, mas os saldos derivados serao recalculados a partir de zero.',
+      confirmLabel: 'Limpar tudo',
+      cancelLabel: 'Cancelar',
+      danger: true
+    });
+    if (!accepted) return;
+
+    try {
+      const result = await apiFetch<{
+        inventoryMovementsDeleted: number;
+        stockMovementsDeleted: number;
+        totalDeleted: number;
+      }>('/inventory-movements', { method: 'DELETE' });
+      await load();
+      notifySuccess(
+        `Historico limpo: ${result.totalDeleted} movimentacao(oes) removida(s).`
+      );
+      scrollToLayoutSlot('movements');
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel limpar as movimentacoes.');
+    }
+  };
+
   const startEditItem = (item: InventoryItem) => {
     setEditingItemId(item.id!);
     setPackSize(String(item.purchasePackSize ?? 0));
@@ -1658,6 +1685,15 @@ function StockPageContent() {
       <details className="app-details">
         <summary>Historico de movimentacoes</summary>
       <div className="mt-3 grid gap-3">
+        <div className="app-inline-actions">
+          <button
+            type="button"
+            className="app-button app-button-danger"
+            onClick={clearAllMovements}
+          >
+            Limpar todas as movimentacoes
+          </button>
+        </div>
         <div className="app-panel">
           <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">
             Entradas automaticas por cupom

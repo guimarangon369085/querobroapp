@@ -95,7 +95,11 @@ export type WhatsappOrderIntakeLaunchResult = {
   previewUrl: string;
   outboxMessageId: number;
   canSendViaMeta: boolean;
+  metaDispatchMode: 'FLOW' | 'TEXT_LINK' | 'NONE';
   flowId: string | null;
+  dispatchStatus: 'PENDING' | 'SENT' | 'FAILED';
+  dispatchTransport: 'FLOW' | 'TEXT_LINK' | 'TEXT_ONLY' | 'NONE';
+  dispatchError: string | null;
 };
 
 export function launchWhatsappOrderIntakeFlow(payload: {

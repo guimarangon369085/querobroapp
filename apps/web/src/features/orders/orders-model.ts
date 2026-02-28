@@ -81,11 +81,13 @@ export type DeliveryTracking = {
   createdAt: string;
   updatedAt: string;
   providerDeliveryId: string;
+  providerOrderId?: string | null;
   providerQuoteId: string | null;
   trackingUrl: string;
   pickupEta: string | null;
   dropoffEta: string | null;
   lastProviderError: string | null;
+  lastWebhookEventId?: string | null;
   draft: UberDirectReadiness['draft'];
 };
 

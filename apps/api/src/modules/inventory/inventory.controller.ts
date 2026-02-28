@@ -45,4 +45,9 @@ export class InventoryController {
     await this.service.removeMovement(parseWithSchema(idSchema, id));
     return { ok: true };
   }
+
+  @Delete('inventory-movements')
+  clearAllMovements() {
+    return this.service.clearAllMovements();
+  }
 }

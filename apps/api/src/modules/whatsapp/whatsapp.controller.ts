@@ -11,6 +11,11 @@ export class WhatsappController {
     return this.service.listOutbox(status);
   }
 
+  @Post('outbox/dispatch')
+  dispatch(@Body() body: unknown) {
+    return this.service.dispatchOutbox(body);
+  }
+
   @Post('flows/order-intake/launch')
   launchOrderIntakeFlow(@Body() body: unknown) {
     return this.service.launchOrderIntakeFlow(body);

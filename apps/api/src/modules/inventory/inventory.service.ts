@@ -111,4 +111,17 @@ export class InventoryService {
     if (!movement) throw new NotFoundException('Movimentacao nao encontrada');
     await this.prisma.inventoryMovement.delete({ where: { id } });
   }
+
+  async clearAllMovements() {
+    const [inventoryResult, stockResult] = await this.prisma.$transaction([
+      this.prisma.inventoryMovement.deleteMany({}),
+      this.prisma.stockMovement.deleteMany({})
+    ]);
+
+    return {
+      inventoryMovementsDeleted: inventoryResult.count,
+      stockMovementsDeleted: stockResult.count,
+      totalDeleted: inventoryResult.count + stockResult.count
+    };
+  }
 }

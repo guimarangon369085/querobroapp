@@ -49,6 +49,10 @@ export class AlexaService {
     process.env.ALEXA_BRIDGE_REQUIRE_SKILL_ID_ALLOWLIST,
     this.isProduction
   );
+  private readonly allowTimerUtteranceFallback = this.resolveBooleanEnv(
+    process.env.ALEXA_TIMER_UTTERANCE_FALLBACK_ENABLED,
+    false
+  );
   private readonly bridgeMaxSkewSeconds = this.resolveBridgeMaxSkewSeconds();
   private readonly bridgeReplayTtlSeconds = this.resolveBridgeReplayTtlSeconds();
   private readonly replayCache = new Map<string, number>();
@@ -211,12 +215,21 @@ export class AlexaService {
       );
     }
 
-    const timerMinutes = this.extractTimerMinutesFromAlexaIntent(intentName, slots, utterance);
-    if (timerMinutes != null) {
+    const explicitTimerMinutes = this.extractTimerMinutesFromExplicitAlexaIntent(intentName, slots);
+    if (this.isOvenBatchIntent(intentName)) {
+      if (explicitTimerMinutes == null) {
+        return this.response(
+          'MISSING_TIMER_MINUTES',
+          'Nao recebi o tempo do timer. Configure o slot minutes na intent da Alexa.',
+          false,
+          { intentName }
+        );
+      }
+
       const result = await this.productionService.startNextBatch({
         triggerSource: 'ALEXA',
-        triggerLabel: utterance || `Alexa timer ${timerMinutes} minutos`,
-        requestedTimerMinutes: timerMinutes
+        triggerLabel: intentName,
+        requestedTimerMinutes: explicitTimerMinutes
       });
       const allocationSummary = result.allocations
         .map((entry) => `${entry.productName}: ${entry.broasPlanned} broa(s)`)
@@ -229,7 +242,31 @@ export class AlexaService {
         {
           batchId: result.batchId,
           readyAt: result.readyAt,
-          requestedTimerMinutes: timerMinutes,
+          requestedTimerMinutes: explicitTimerMinutes,
+          allocations: result.allocations
+        }
+      );
+    }
+
+    const fallbackTimerMinutes = this.extractTimerMinutesFromUtteranceFallback(utterance);
+    if (fallbackTimerMinutes != null) {
+      const result = await this.productionService.startNextBatch({
+        triggerSource: 'ALEXA',
+        triggerLabel: utterance || `Alexa timer ${fallbackTimerMinutes} minutos`,
+        requestedTimerMinutes: fallbackTimerMinutes
+      });
+      const allocationSummary = result.allocations
+        .map((entry) => `${entry.productName}: ${entry.broasPlanned} broa(s)`)
+        .join(', ');
+
+      return this.response(
+        'OVEN_BATCH_STARTED_FALLBACK',
+        `Fornada iniciada. ${allocationSummary}. Forno ajustado para ${result.board.oven.bakeTimerMinutes} minutos.`,
+        true,
+        {
+          batchId: result.batchId,
+          readyAt: result.readyAt,
+          requestedTimerMinutes: fallbackTimerMinutes,
           allocations: result.allocations
         }
       );
@@ -420,20 +457,27 @@ export class AlexaService {
     return '';
   }
 
-  private extractTimerMinutesFromAlexaIntent(
-    intentName: string,
-    slots: Map<string, string>,
-    utterance: string
-  ) {
-    const explicitIntentNames = new Set([
-      'StartNextBatchIntent',
-      'StartOvenBatchIntent',
-      'SetOvenTimerIntent'
-    ]);
+  private isOvenBatchIntent(intentName: string) {
+    return ['StartNextBatchIntent', 'StartOvenBatchIntent', 'SetOvenTimerIntent'].includes(intentName);
+  }
+
+  private extractTimerMinutesFromExplicitAlexaIntent(intentName: string, slots: Map<string, string>) {
+    if (!this.isOvenBatchIntent(intentName)) {
+      return null;
+    }
+
     const fromSlot = this.pickSlotValue(slots, ['minutes', 'minute', 'timer', 'minutos']);
     const fromSlotNumber = fromSlot ? Number.parseInt(fromSlot, 10) : NaN;
-    if (explicitIntentNames.has(intentName) && Number.isFinite(fromSlotNumber) && fromSlotNumber > 0) {
+    if (Number.isFinite(fromSlotNumber) && fromSlotNumber > 0) {
       return Math.max(1, Math.min(240, fromSlotNumber));
+    }
+
+    return null;
+  }
+
+  private extractTimerMinutesFromUtteranceFallback(utterance: string) {
+    if (!this.allowTimerUtteranceFallback) {
+      return null;
     }
 
     const match = utterance.match(/(\d{1,3})\s*minutos?/i);
