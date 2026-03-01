@@ -527,34 +527,41 @@ export class WhatsappService {
         ? (flow.flowActionPayload as Record<string, unknown>)
         : undefined;
 
-    const providerResponse = await this.sendCloudApiMessage({
-      messaging_product: 'whatsapp',
-      recipient_type: 'individual',
-      to: this.normalizePhone(to),
-      type: 'interactive',
-      interactive: {
-        type: 'flow',
-        body: {
-          text: 'Abra o fluxo para montar seu pedido.'
-        },
-        action: {
-          name: 'flow',
-          parameters: {
-            flow_message_version: flowMessageVersion,
-            flow_id: flowId,
-            flow_cta: flowCta,
-            flow_token: flowToken,
-            flow_action: flowAction,
-            ...(flowActionPayload ? { flow_action_payload: flowActionPayload } : {})
+    try {
+      const providerResponse = await this.sendCloudApiMessage({
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: this.normalizePhone(to),
+        type: 'interactive',
+        interactive: {
+          type: 'flow',
+          body: {
+            text: 'Abra o fluxo para montar seu pedido.'
+          },
+          action: {
+            name: 'flow',
+            parameters: {
+              flow_message_version: flowMessageVersion,
+              flow_id: flowId,
+              flow_cta: flowCta,
+              flow_token: flowToken,
+              flow_action: flowAction,
+              ...(flowActionPayload ? { flow_action_payload: flowActionPayload } : {})
+            }
           }
         }
-      }
-    });
+      });
 
-    return {
-      transport: 'FLOW' as const,
-      ...providerResponse
-    };
+      return {
+        transport: 'FLOW' as const,
+        ...providerResponse
+      };
+    } catch {
+      return {
+        transport: 'TEXT_LINK' as const,
+        ...(await this.sendTextMessage(to, this.buildOrderIntakeInviteFallbackText(payload)))
+      };
+    }
   }
 
   private async sendOutboxMessage(row: {

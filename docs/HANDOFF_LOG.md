@@ -185,6 +185,268 @@ Objetivo da sessao:
 No fim, registrar nova entrada no HANDOFF_LOG.
 ```
 
+## Entrada 041
+
+### 1) Metadados
+
+- Data/hora: 2026-02-28 23:12 -03
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `main`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Avancar a integracao da Uber pelo caminho mais pragmatico, evitando depender cegamente do wizard de `Move To Production`.
+- Resultado entregue: O backend foi revalidado com os novos dados de coleta da loja e o `readiness` do pedido `#6` caiu para um unico bloqueio: `UBER_DIRECT_CUSTOMER_ID ausente`. Tambem ficou comprovado que a app atual `QUEROBROAPP Ops` foi criada no suite errado (`API Suite - Others`) e, por isso, nao e o melhor caminho para Uber Direct live.
+- O que ficou pendente: Ainda faltam `UBER_DIRECT_CUSTOMER_ID` ou `UBER_DIRECT_STORE_ID` e a app correta da Uber (suite apropriado) para autenticar e criar entregas live.
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados nesta wave:
+- ` M apps/api/.env` (somente ambiente local, fora do Git)
+- ` M docs/HANDOFF_LOG.md`
+- Mudancas locais no `.env`:
+- `UBER_DIRECT_PICKUP_NAME`, `UBER_DIRECT_PICKUP_PHONE`, `UBER_DIRECT_PICKUP_ADDRESS_LINE1`, `UBER_DIRECT_PICKUP_CITY`, `UBER_DIRECT_PICKUP_STATE`, `UBER_DIRECT_PICKUP_POSTAL_CODE` preenchidos com os dados reais de coleta identificados no fluxo.
+- `UBER_DIRECT_TOKEN_URL` alterado para `https://sandbox-login.uber.com/oauth/v2/token`.
+- `UBER_DIRECT_API_BASE_URL` alterado para `https://test-api.uber.com`.
+- Descoberta estrutural no painel da Uber:
+- A app existente `QUEROBROAPP Ops` aparece como `TEST APP` em `API Suite - Others`.
+- Teste direto de OAuth:
+- Em `https://login.uber.com/oauth/v2/token`, a Uber retornou `unauthorized_client` com `environment mismatched`.
+- Em `https://sandbox-login.uber.com/oauth/v2/token`, a Uber aceitou o ambiente, mas retornou `invalid_scope`.
+- Conclusao tecnica: o bloqueio mudou de `environment` para `scope`, o que confirma que o problema principal da app atual e o suite/escopo, nao mais a URL do ambiente.
+- Descoberta de caminho alternativo:
+- O fluxo de `Create Application` com `API Suite = Eats Marketplace` abre uma etapa nova `Testing | Production` e reconhece a organizacao `QUEROBROAPP`, indicando que a rota correta para a Uber e criar uma nova app no suite certo em vez de insistir em `Others`.
+
+### 4) Validacao
+
+- Comandos executados:
+- `curl http://127.0.0.1:3001/deliveries/orders/6/uber-direct/readiness`
+- `curl -X POST http://127.0.0.1:3001/deliveries/orders/6/uber-direct/quote`
+- `curl -X POST https://login.uber.com/oauth/v2/token ...`
+- `curl -X POST https://sandbox-login.uber.com/oauth/v2/token ...`
+- Testes que passaram:
+- `readiness` do pedido `#6` retornou `ready=false` e reduziu as pendencias para apenas `UBER_DIRECT_CUSTOMER_ID ausente`.
+- A cotacao falhou de forma controlada com `Entrega ainda nao pronta para cotacao Uber: UBER_DIRECT_CUSTOMER_ID ausente`.
+- Testes nao executados (e motivo):
+- Nao houve criacao live na Uber porque ainda nao existe `CUSTOMER_ID/STORE_ID`, e a app atual continua sem escopo valido para Uber Direct.
+
+### 5) Contexto para retomada
+
+- Decisoes importantes:
+- Nao insistir em promover a app `Others` como caminho principal.
+- Priorizar a criacao de uma nova app da Uber no suite correto (`Eats Marketplace`, em `Testing`) e so depois voltar para autenticar/cotar/criar entrega.
+- Bloqueios:
+- O wizard da Uber ja mostra a organizacao `QUEROBROAPP`, mas a selecao ainda nao foi concluida via automacao.
+- Ainda faltam `UBER_DIRECT_CUSTOMER_ID` ou `UBER_DIRECT_STORE_ID`.
+- Proximo passo recomendado (1 acao objetiva): Concluir a criacao de uma nova app Uber em `Eats Marketplace > Testing`, extrair o novo `client_id/client_secret` dessa app e testar novamente o OAuth em sandbox antes de religar a entrega live no app.
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com foco na Uber.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/NEXT_STEP_PLAN.md
+- docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+Criar a app correta da Uber (suite Eats Marketplace / Testing), extrair credenciais e validar OAuth sandbox.
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
+## Entrada 042
+
+### 1) Metadados
+
+- Data/hora: 2026-03-01 02:15 UTC
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `feat/real-local-ops-flow-2026-02-28`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Fazer as ultimas tentativas de conexao da Uber, consolidar seguranca/local state, salvar historico e encerrar a maquina com o workspace em estado limpo e rastreavel.
+- Resultado entregue: A API foi revalidada localmente e o fluxo Uber do pedido `#6` ficou reduzido a um unico bloqueio operacional (`UBER_DIRECT_CUSTOMER_ID ausente`). Tambem ficou consolidado que a app Uber atual foi criada no suite errado e que a rota correta e criar uma nova app em `Eats Marketplace > Testing`.
+- O que ficou pendente: Concluir a nova app correta da Uber, extrair `CUSTOMER_ID` ou `STORE_ID`, e religar o dispatch live quando a credencial certa existir.
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados nesta wave:
+- ` M apps/api/src/modules/whatsapp/whatsapp.service.ts`
+- ` M docs/HANDOFF_LOG.md`
+- Mudancas locais fora do Git:
+- `apps/api/.env` recebeu os dados de pickup reais da loja e foi alinhado para sandbox (`sandbox-login.uber.com` + `test-api.uber.com`).
+- Validacao de seguranca:
+- `apps/api/.env` e `apps/web/.env` continuam protegidos por `.gitignore`.
+- A busca em arquivos rastreados nao encontrou tokens reais expostos; apenas placeholders de `.env.example`.
+- O guard de segredos foi executado e nao encontrou segredos staged.
+- Descoberta importante da Uber:
+- A app atual `QUEROBROAPP Ops` em `API Suite - Others` nao e a app correta para Uber Direct.
+- Em `Create Application`, selecionar `Eats Marketplace` abre a trilha certa (`Testing | Production`) e reconhece a organizacao `QUEROBROAPP`.
+
+### 4) Validacao
+
+- Comandos executados:
+- `curl http://127.0.0.1:3001/health`
+- `curl http://127.0.0.1:3001/deliveries/orders/6/uber-direct/readiness`
+- `curl -X POST http://127.0.0.1:3001/deliveries/orders/6/uber-direct/quote`
+- `curl -X POST https://login.uber.com/oauth/v2/token ...`
+- `curl -X POST https://sandbox-login.uber.com/oauth/v2/token ...`
+- Testes que passaram:
+- `GET /health` respondeu `{\"status\":\"ok\"}`.
+- `readiness` do pedido `#6` retornou so `UBER_DIRECT_CUSTOMER_ID ausente`.
+- A cotacao falhou de forma controlada e coerente com esse unico bloqueio.
+- Testes que falharam (mas geraram diagnostico util):
+- OAuth na URL de producao falhou com `environment mismatched`.
+- OAuth na URL de sandbox falhou com `invalid_scope`.
+- Isso confirma que a app atual esta no ambiente/suite incorreto para o escopo desejado.
+
+### 5) Contexto para retomada
+
+- Decisoes importantes:
+- Nao insistir na app `Others` para Uber Direct.
+- Continuar pela criacao de uma nova app em `Eats Marketplace > Testing`.
+- Segurança e sincronismo:
+- Nenhum segredo foi adicionado a arquivos rastreados nesta rodada.
+- O `.env` local foi mantido fora do Git.
+- O historico desta sessao foi registrado no handoff.
+- Proximo passo recomendado (1 acao objetiva): Concluir a nova app `Eats Marketplace > Testing`, extrair as novas credenciais e revalidar o OAuth sandbox antes de religar `UBER_DIRECT_LIVE_DISPATCH_ENABLED`.
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp pelo ponto mais bloqueante da Uber.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/NEXT_STEP_PLAN.md
+- docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+Concluir a app Uber correta em Eats Marketplace / Testing, extrair as credenciais novas e revalidar OAuth sandbox.
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
+## Entrada 039 - 2026-03-01 03:10 UTC
+
+### 1) O que foi feito
+
+- A Meta/WhatsApp foi destravada por automacao no Chrome usando o fluxo antigo de criacao de app.
+- Foi criado um app real `QUEROBROAPP WA` do tipo `Business` com portfolio `Guilherme Marangon`.
+- O produto `WhatsApp` foi adicionado com sucesso ao app novo.
+- Foi acessado o console real do WhatsApp Cloud API (`wa-dev-console`) e os IDs reais passaram a existir.
+- Foi criado um Flow real em rascunho no WhatsApp Manager com nome `QUEROBROAPP Order Intake`.
+- O backend foi endurecido para cair automaticamente de `interactive flow` para `text link` se a Meta rejeitar o envio do Flow.
+
+### 2) Estado real obtido
+
+- App Meta novo: `QUEROBROAPP WA`
+- App ID Meta novo: `3326532090854473`
+- Test phone number provisionado pela Meta: `+1 555 176 7781`
+- O `Phone number ID` e o `WhatsApp Business Account ID` existem e ja foram extraidos localmente.
+- O Flow existe com `Flow ID` real, mas ainda esta em `Draft` no WhatsApp Manager.
+- Como o Flow esta em `Draft`, o envio interativo pode falhar; por isso o fallback automatico para link foi implementado.
+
+### 3) Arquivos alterados nesta rodada
+
+- `apps/api/src/modules/whatsapp/whatsapp.service.ts`
+- `apps/api/.env` (somente ambiente local, com segredos e IDs reais; nao subir)
+
+### 4) Validacao
+
+- `pnpm --filter @querobroapp/api typecheck` passou.
+- `./scripts/stop-all.sh` e `./scripts/dev-all.sh` foram rodados com sucesso.
+- `http://127.0.0.1:3001/health` respondeu `{\"status\":\"ok\"}`.
+- O tunnel publico da API continuou respondendo `{\"status\":\"ok\"}`.
+
+### 5) Bloqueio restante
+
+- O envio real ainda precisa de pelo menos um numero de destinatario de teste cadastrado no campo `To` do console da Meta.
+- O Flow foi criado, mas ainda nao esta publicado; se a Meta rejeitar o uso do Flow em mensagem interativa, o backend agora usa texto com link automaticamente.
+
+## Entrada 040 - 2026-03-01 00:58 UTC
+
+### 1) O que foi feito
+
+- Foi cadastrado um numero de destinatario de teste no console do WhatsApp Cloud API.
+- A Meta aceitou um envio real do template `hello_world` para esse numero.
+- O endpoint real `POST /whatsapp/flows/order-intake/launch` foi testado contra a API local com auto-dispatch ligado.
+- O disparo do convite saiu com sucesso e o backend registrou `dispatchStatus=SENT`.
+
+### 2) Resultado tecnico
+
+- Destinatario de teste entrou no campo `To` do console da Meta e passou a aparecer no `wa-dev-console`.
+- O Graph API retornou `message_status=accepted` para envio real do template de teste.
+- O fluxo do app tentou `metaDispatchMode=FLOW`, mas como o Flow ainda esta `DRAFT`, o backend caiu automaticamente para `dispatchTransport=TEXT_LINK`.
+- Isso confirmou o comportamento correto: com Meta viva, o app nao quebra se o Flow interativo ainda nao puder ser usado.
+
+### 3) Proximo passo objetivo
+
+- Publicar o Flow `QUEROBROAPP Order Intake` quando a conta permitir, para o dispatch sair como `FLOW` em vez de `TEXT_LINK`.
+
+### 4) Bloqueio confirmado pela Meta
+
+- Ao tentar publicar o Flow, a Meta mostrou explicitamente:
+- `Before you can publish this Flow:`
+- `Verify your business`
+- `OR`
+- `Send high-quality messages`
+- Portanto, o bloqueio de publicacao nao e do app nem do backend; e uma exigencia atual da propria Meta.
+
+## Entrada 038 - 2026-03-01 00:12 UTC
+
+### 1) Objetivo da rodada
+
+- Avancar configuracao real das integracoes externas no ambiente local, aproveitando as contas ja abertas no navegador do usuario.
+
+### 2) O que foi feito
+
+- Uber:
+- Uma app real foi criada no dashboard: `QUEROBROAPP Ops`.
+- O `Application ID` e o `Client Secret` foram extraidos do painel e gravados apenas em `apps/api/.env` local.
+- O painel confirmou bloqueio externo: a app ainda nao tem acesso a `Client Credential scopes`, entao Uber Direct live continua indisponivel ate liberacao da propria Uber.
+- Alexa:
+- Uma skill real foi criada no Amazon Developer Console: `QUEROBROAPP Ops`.
+- Skill ID real criado: `amzn1.ask.skill.a74a61d5-d225-4858-9cb1-b7800f9ec70f`.
+- O `ALEXA_ALLOWED_SKILL_IDS` foi preenchido no `.env` local e o allowlist da bridge foi reativado (`ALEXA_BRIDGE_REQUIRE_SKILL_ID_ALLOWLIST=true`).
+- O endpoint da skill foi configurado no console para usar HTTPS no bridge publico da API.
+- Meta:
+- A conta avancou ate o onboarding de `Meta for Developers`, mas o fluxo parou na verificacao obrigatoria por celular (`Verify Your Account`).
+- Ainda nao foi possivel chegar em `Apps` / `WhatsApp API Setup`, portanto `WHATSAPP_CLOUD_PHONE_NUMBER_ID`, `WHATSAPP_CLOUD_ACCESS_TOKEN` e `WHATSAPP_FLOW_ORDER_INTAKE_ID` continuam pendentes.
+- Infra local:
+- `cloudflared` foi reinstanciado e novos quick tunnels passaram a ser:
+- API: `https://bias-productions-snowboard-cio.trycloudflare.com`
+- Web: `https://dans-arrange-duplicate-las.trycloudflare.com`
+- `apps/api/.env` e `apps/web/.env` foram atualizados localmente para refletir os novos dominios.
+- O stack local foi reiniciado apos a troca.
+
+### 3) Validacao
+
+- Local:
+- `http://127.0.0.1:3001/health` respondeu `{\"status\":\"ok\"}` apos reinicio.
+- Publico:
+- `https://bias-productions-snowboard-cio.trycloudflare.com/health` respondeu `{\"status\":\"ok\"}`.
+- `https://dans-arrange-duplicate-las.trycloudflare.com` respondeu `307 -> /calendario`.
+- Alexa bridge:
+- Smoke test real executado com assinatura HMAC valida, primeiro localmente e depois pelo tunnel publico.
+- `POST /alexa/bridge` respondeu `201` com `action=LAUNCH` e `ok=true` nos dois casos.
+
+### 4) Riscos e bloqueios
+
+- O endpoint da Alexa esta funcional, mas a skill ainda precisa de configuracao de `Invocation Name` e `Intent/utterances` no modelo para disparar os fluxos operacionais por voz de forma completa.
+- A integracao Meta continua bloqueada pela verificacao obrigatoria de celular na criacao da conta de desenvolvedor.
+- A integracao Uber live continua bloqueada por escopo externo da conta (`Client Credential scopes` nao liberados).
+
+### 5) Proximo passo recomendado
+
+- Meta: concluir a verificacao de celular no onboarding do `Meta for Developers`, entrar em `WhatsApp > API Setup` e extrair `PHONE_NUMBER_ID` + `ACCESS_TOKEN`.
+
 ## Entrada 037
 
 ### 1) Metadados
