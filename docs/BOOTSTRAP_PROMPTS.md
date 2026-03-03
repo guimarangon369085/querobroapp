@@ -1,57 +1,27 @@
 # BOOTSTRAP_PROMPTS
 
-## Prompt base para nova sessao
+## Fonte Unica
 
-```txt
-Projeto: QUEROBROAPP.
-Bootstrap minimo inicial:
-- docs/PROJECT_SNAPSHOT.md
-- docs/NEXT_STEP_PLAN.md
-- ultimas 80 linhas de docs/HANDOFF_LOG.md
-- `git status --short --branch`
+O launcher [abrir-codex.command](/Users/gui/querobroapp/scripts/abrir-codex.command) nao carrega mais prompt inline. Ele le exatamente um destes templates versionados:
 
-So se a sessao envolver reboot, subida local, QA ou teste manual, leia tambem:
-- README.md
-- docs/TEST_RESET_PROTOCOL.md
+- `quick`: [codex-bootstrap-quick.txt](/Users/gui/querobroapp/docs/prompts/codex-bootstrap-quick.txt)
+- `reboot` e `qa`: [codex-bootstrap-reboot.txt](/Users/gui/querobroapp/docs/prompts/codex-bootstrap-reboot.txt)
+- `ux`: [codex-bootstrap-ux.txt](/Users/gui/querobroapp/docs/prompts/codex-bootstrap-ux.txt)
 
-Depois:
-1) resuma o estado atual em 3 bullets,
-2) liste 3 riscos ativos,
-3) confirme se o plano atual ainda vale ou cite apenas desvios visiveis,
-4) nao faca perguntas iniciais,
-5) trate `docs/HANDOFF_LOG.md` como historico, nao como snapshot atual.
+## Uso
 
-Diretrizes:
-- evite pedir comando manual para o usuario quando voce mesmo puder executar,
-- se precisar validar o web com o next dev aberto, prefira `pnpm qa:browser-smoke` e `pnpm qa:critical-e2e`,
-- nao rode `next build` manual de `apps/web` concorrente ao `next dev` sem necessidade.
+O default continua sendo o bootstrap rapido:
 
-No final:
-- validar com `pnpm qa:trust` (ou justificar o subset),
-- se mexer em fluxo operacional, preferir o gate forte com flags de lint/smoke/browser/critical-e2e,
-- registrar handoff em docs/HANDOFF_LOG.md.
-```
+- `./scripts/abrir-codex.command`
+- `./scripts/abrir-codex.command quick`
+- `./scripts/abrir-codex.command reboot`
+- `./scripts/abrir-codex.command qa`
+- `./scripts/abrir-codex.command ux`
 
-## Prompt curto para foco em UX
+## Regras De Desenho
 
-```txt
-Objetivo: simplificar UX para usuario leigo com minimo de cliques.
-Regras:
-- esconder campos avancados por padrao,
-- manter regra complexa no backend,
-- validar em desktop e mobile width,
-- testar o fluxo real em http://127.0.0.1:3000/pedidos,
-- entregar checklist de friccao corrigida.
-```
-
-## Prompt curto para validacao apos reboot
-
-```txt
-Objetivo: reiniciar o ambiente e validar o app manualmente.
-Regras:
-- usar README.md e docs/TEST_RESET_PROTOCOL.md como runbook,
-- subir com ./scripts/dev-all.sh sempre que possivel,
-- validar /pedidos, /clientes, /produtos e /estoque,
-- se o browser ja estava aberto, considerar hard refresh,
-- registrar no handoff o que foi validado de fato.
-```
+- `quick` e o modo padrao e nao faz perguntas iniciais.
+- Sem objetivo explicito, `quick` executa diretamente a Prioridade 1 (agora) de `docs/NEXT_STEP_PLAN.md`.
+- `reboot` e `qa` existem para o trilho pesado de religar ambiente, subir stack e validar manualmente.
+- `ux` existe para uma sessao focada em simplificacao de interface sem puxar o runbook de reboot por padrao.
+- Mudou o comportamento de um modo: atualizar primeiro o template `.txt` correspondente, e so depois esta pagina se a orientacao de uso tambem mudou.

@@ -5,8 +5,21 @@ REPO_DIR="$HOME/querobroapp"
 CODEX_BIN="$HOME/.npm-global/bin/codex"
 STATE_DIR="$HOME/.querobroapp"
 FULL_ACCESS_MARKER="$STATE_DIR/.abrir-codex-full-disk-access-ok"
+PROMPTS_DIR="$REPO_DIR/docs/prompts"
 
 export PATH="$HOME/.npm-global/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
+
+usage() {
+  cat <<'EOF'
+Uso: abrir-codex.command [quick|reboot|qa|ux]
+
+Modos:
+- quick  : bootstrap minimo padrao
+- reboot : reboot, subida local e validacao manual
+- qa     : alias de reboot
+- ux     : foco em simplificacao de UX
+EOF
+}
 
 if [[ ! -x "$CODEX_BIN" ]]; then
   CODEX_BIN="$(command -v codex 2>/dev/null || true)"
@@ -34,28 +47,34 @@ fi
 
 cd "$REPO_DIR"
 
-BOOTSTRAP_PROMPT=$(cat <<'EOF'
-Projeto: QUEROBROAPP.
+MODE="${1:-quick}"
 
-Bootstrap minimo inicial:
-1) Leia apenas:
-- docs/PROJECT_SNAPSHOT.md
-- docs/NEXT_STEP_PLAN.md
-- as ultimas 80 linhas de docs/HANDOFF_LOG.md
-2) Rode `git status --short --branch`.
-3) Entregue:
-- 3 bullets com o estado atual real,
-- 3 riscos ativos,
-- confirme se o plano atual ainda vale ou cite apenas desvios visiveis.
-4) Nao faca perguntas iniciais.
-5) So leia README.md e docs/TEST_RESET_PROTOCOL.md se a tarefa realmente envolver reboot, subida local, QA ou teste manual.
+case "$MODE" in
+  quick)
+    PROMPT_FILE="$PROMPTS_DIR/codex-bootstrap-quick.txt"
+    ;;
+  reboot | qa)
+    PROMPT_FILE="$PROMPTS_DIR/codex-bootstrap-reboot.txt"
+    ;;
+  ux)
+    PROMPT_FILE="$PROMPTS_DIR/codex-bootstrap-ux.txt"
+    ;;
+  -h | --help | help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "Modo invalido: $MODE"
+    usage
+    exit 1
+    ;;
+esac
 
-Diretriz operacional:
-- Evite pedir comando manual para o usuario quando voce mesmo puder executar.
-- Trate docs/HANDOFF_LOG.md como historico, nao como snapshot atual.
-- Se precisar validar o web com o next dev aberto, prefira pnpm qa:browser-smoke e pnpm qa:critical-e2e.
-- Nao rode next build manual de apps/web concorrente ao next dev sem necessidade; os scripts de QA ja usam dist dirs isolados para evitar corromper o .next do dev.
-EOF
-)
+if [[ ! -f "$PROMPT_FILE" ]]; then
+  echo "Template de bootstrap nao encontrado: $PROMPT_FILE"
+  exit 1
+fi
+
+BOOTSTRAP_PROMPT="$(<"$PROMPT_FILE")"
 
 exec "$CODEX_BIN" --cd "$REPO_DIR" "$BOOTSTRAP_PROMPT"
