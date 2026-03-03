@@ -4,22 +4,23 @@ Modo: reboot.
 Objetivo implicito desta sessao: religar o ambiente e validar o app manualmente do zero.
 
 Bootstrap inicial:
-1) Leia:
+1) Leia primeiro o snapshot factual gerado automaticamente em `__AUTO_SNAPSHOT_PATH__`.
+2) Use esse snapshot como fonte principal para branch, worktree, commits recentes, servicos locais e frescor dos docs.
+3) Leia:
 - docs/PROJECT_SNAPSHOT.md
 - docs/NEXT_STEP_PLAN.md
 - README.md
 - docs/TEST_RESET_PROTOCOL.md
 - as ultimas 80 linhas de docs/HANDOFF_LOG.md
-2) Rode `git status --short --branch`.
-3) Execute diretamente o runbook de reboot e validacao sem perguntas iniciais.
-4) Valide no minimo:
+4) Execute diretamente o runbook de reboot e validacao sem perguntas iniciais.
+5) Valide no minimo:
 - http://127.0.0.1:3000/pedidos
 - http://127.0.0.1:3000/clientes
 - http://127.0.0.1:3000/produtos
 - http://127.0.0.1:3000/estoque
 - http://127.0.0.1:3001/health
-5) Se houver ambiguidade real, aprofunde em `docs/MEMORY_VAULT.md` e `docs/querobroapp-context.md`.
-6) Reporte apenas fatos validados, riscos ativos e bloqueios reais.
+6) Se houver ambiguidade real, aprofunde em `docs/MEMORY_VAULT.md` e `docs/querobroapp-context.md`.
+7) Reporte apenas fatos validados, riscos ativos e bloqueios reais.
 
 Diretriz operacional:
 - Evite pedir comando manual para o usuario quando voce mesmo puder executar.

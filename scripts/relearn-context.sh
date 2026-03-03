@@ -1,37 +1,25 @@
 #!/bin/zsh
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$HOME/querobroapp"
+STATE_DIR="$HOME/.querobroapp"
+REFRESH_SCRIPT="$SCRIPT_DIR/refresh-codex-context.sh"
+SNAPSHOT_PATH="$STATE_DIR/codex-auto-session-snapshot.md"
 
 cd "$REPO_DIR"
 
+CODEX_CONTEXT_STATE_DIR="$STATE_DIR" \
+CODEX_CONTEXT_OUT_FILE="$SNAPSHOT_PATH" \
+  bash "$REFRESH_SCRIPT" >/dev/null
+
 echo "=== QUEROBROAPP RELEARN CONTEXT ==="
 echo "Repo: $REPO_DIR"
-echo "Data: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+echo "Snapshot: $SNAPSHOT_PATH"
 echo
 
-echo "=== GIT ==="
-echo "Branch: $(git branch --show-current)"
-echo "Remoto:"
-git remote -v | sed -n '1,4p'
+sed -n '1,220p' "$SNAPSHOT_PATH"
 echo
-echo "Worktree (curto):"
-git status --short | sed -n '1,40p'
-echo
-
-echo "=== ARQUIVOS DE CONTEXTO (obrigatorios) ==="
-printf '%s\n' \
-  "docs/MEMORY_VAULT.md" \
-  "docs/querobroapp-context.md" \
-  "docs/NEXT_STEP_PLAN.md" \
-  "docs/HANDOFF_LOG.md"
-echo
-
-echo "=== HANDOFF_LOG COMPLETO ==="
-cat docs/HANDOFF_LOG.md
-echo
-
-echo "=== PROXIMO PASSO ==="
-echo "1) Defina objetivo em 1 linha."
-echo "2) Execute mudancas."
-echo "3) Registre nova entrada em docs/HANDOFF_LOG.md."
+echo "=== LEITURA COMPLEMENTAR MINIMA ==="
+echo "- docs/NEXT_STEP_PLAN.md"
+echo "- ultimas 80 linhas de docs/HANDOFF_LOG.md"

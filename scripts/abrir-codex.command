@@ -6,6 +6,8 @@ CODEX_BIN="$HOME/.npm-global/bin/codex"
 STATE_DIR="$HOME/.querobroapp"
 FULL_ACCESS_MARKER="$STATE_DIR/.abrir-codex-full-disk-access-ok"
 PROMPTS_DIR="$REPO_DIR/docs/prompts"
+REFRESH_SCRIPT="$REPO_DIR/scripts/refresh-codex-context.sh"
+AUTO_SNAPSHOT_PATH="$STATE_DIR/codex-auto-session-snapshot.md"
 
 export PATH="$HOME/.npm-global/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
 
@@ -75,6 +77,16 @@ if [[ ! -f "$PROMPT_FILE" ]]; then
   exit 1
 fi
 
-BOOTSTRAP_PROMPT="$(<"$PROMPT_FILE")"
+if [[ ! -f "$REFRESH_SCRIPT" ]]; then
+  echo "Script de refresh de contexto nao encontrado: $REFRESH_SCRIPT"
+  exit 1
+fi
+
+CODEX_CONTEXT_STATE_DIR="$STATE_DIR" \
+CODEX_CONTEXT_OUT_FILE="$AUTO_SNAPSHOT_PATH" \
+  bash "$REFRESH_SCRIPT" >/dev/null
+
+TEMPLATE_PROMPT="$(<"$PROMPT_FILE")"
+BOOTSTRAP_PROMPT="${TEMPLATE_PROMPT//__AUTO_SNAPSHOT_PATH__/$AUTO_SNAPSHOT_PATH}"
 
 exec "$CODEX_BIN" --cd "$REPO_DIR" "$BOOTSTRAP_PROMPT"

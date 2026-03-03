@@ -42,12 +42,13 @@ Facilitar a operacao diaria da broa com interface simples, agenda centrada em `P
 1. Para retomar no modo padrao, rode `./scripts/abrir-codex.command`.
 2. Para reboot, subida local ou QA, rode `./scripts/abrir-codex.command reboot` (ou `qa`).
 3. Para foco em UX, rode `./scripts/abrir-codex.command ux`.
-4. No modo padrao, o Codex deve se atualizar com o contexto, responder com um resumo curto e ficar aguardando em silencio a proxima instrucao.
-5. Assuma por padrao que a conversa seguinte tratara de ajustes no app, UX, bugs ou refinamentos operacionais.
-6. Se retomar manualmente, leia `docs/PROJECT_SNAPSHOT.md`, `docs/NEXT_STEP_PLAN.md`, rode `git status --short --branch` e leia as ultimas 80 linhas de `docs/HANDOFF_LOG.md`.
-7. Leia `README.md` e `docs/TEST_RESET_PROTOCOL.md` so em reboot, subida local, QA ou teste manual.
-8. Leia `docs/MEMORY_VAULT.md` quando houver ambiguidade real, necessidade de continuidade mais profunda ou mudanca estrutural.
-9. Nao presumir integracoes externas: o codigo atual nao depende de WhatsApp, Uber, Alexa ou conectores de terceiros.
+4. Antes de abrir o Codex, o launcher gera `$HOME/.querobroapp/codex-auto-session-snapshot.md` com branch, worktree, commits recentes, servicos locais e frescor dos docs.
+5. No modo padrao, o Codex deve ler esse snapshot primeiro, responder com um resumo curto e ficar aguardando em silencio a proxima instrucao.
+6. Assuma por padrao que a conversa seguinte tratara de ajustes no app, UX, bugs ou refinamentos operacionais.
+7. Se retomar manualmente, leia o snapshot autoatualizado, depois `docs/PROJECT_SNAPSHOT.md`, `docs/NEXT_STEP_PLAN.md` e as ultimas 80 linhas de `docs/HANDOFF_LOG.md`.
+8. Leia `README.md` e `docs/TEST_RESET_PROTOCOL.md` so em reboot, subida local, QA ou teste manual.
+9. Leia `docs/MEMORY_VAULT.md` quando houver ambiguidade real, necessidade de continuidade mais profunda ou mudanca estrutural.
+10. Nao presumir integracoes externas: o codigo atual nao depende de WhatsApp, Uber, Alexa ou conectores de terceiros.
 
 ## Integracoes externas
 
