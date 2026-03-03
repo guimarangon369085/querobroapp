@@ -21,7 +21,8 @@ O default continua sendo o bootstrap rapido:
 ## Regras De Desenho
 
 - `quick` e o modo padrao e nao faz perguntas iniciais.
-- Sem objetivo explicito, `quick` executa diretamente a Prioridade 1 (agora) de `docs/NEXT_STEP_PLAN.md`.
+- Sem objetivo explicito, `quick` sincroniza contexto, entrega um resumo curto e fica aguardando silenciosamente a proxima instrucao.
+- `quick` assume por padrao que a proxima mensagem tratara de ajustes no app, UX, bugs ou refinamentos operacionais.
 - `reboot` e `qa` existem para o trilho pesado de religar ambiente, subir stack e validar manualmente.
 - `ux` existe para uma sessao focada em simplificacao de interface sem puxar o runbook de reboot por padrao.
 - Mudou o comportamento de um modo: atualizar primeiro o template `.txt` correspondente, e so depois esta pagina se a orientacao de uso tambem mudou.

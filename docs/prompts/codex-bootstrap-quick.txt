@@ -14,7 +14,8 @@ Bootstrap minimo inicial:
 - confirme se o plano atual ainda vale ou cite apenas desvios visiveis.
 4) Nao faca perguntas iniciais.
 5) So leia `README.md`, `docs/TEST_RESET_PROTOCOL.md`, `docs/MEMORY_VAULT.md` e `docs/querobroapp-context.md` se houver ambiguidade real, ou se a tarefa envolver reboot, subida local, QA ou continuidade mais profunda.
-6) Se nao houver objetivo explicito do usuario nesta sessao, execute diretamente a Prioridade 1 (agora) de `docs/NEXT_STEP_PLAN.md` sem pedir confirmacao, e depois reporte o que foi feito e o que ainda bloqueia.
+6) Depois de sincronizar o contexto e entregar o resumo curto, pare e fique aguardando em silencio a proxima instrucao do usuario.
+7) Assuma por padrao que a conversa seguira com ajustes no app, refinamentos de UX, correcao de bugs ou alinhamentos no fluxo operacional.
 
 Diretriz operacional:
 - Evite pedir comando manual para o usuario quando voce mesmo puder executar.

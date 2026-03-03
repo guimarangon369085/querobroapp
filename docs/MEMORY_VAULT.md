@@ -30,10 +30,11 @@ Manter continuidade entre sessoes sem depender de memoria de chat.
 2. Use `./scripts/abrir-codex.command reboot` (ou `qa`) quando a sessao envolver reboot, subida local ou QA; nesse modo, `README.md` e `docs/TEST_RESET_PROTOCOL.md` entram no bootstrap.
 3. Use `./scripts/abrir-codex.command ux` quando o foco for simplificacao de interface com minimo de cliques.
 4. `docs/MEMORY_VAULT.md` e `docs/querobroapp-context.md` entram quando houver ambiguidade real, mudanca estrutural ou necessidade de continuidade mais profunda.
-5. O modo `quick` nao faz perguntas iniciais; sem objetivo explicito, ele executa diretamente a Prioridade 1 (agora) de `docs/NEXT_STEP_PLAN.md`.
-6. Toda sessao termina com handoff novo.
-7. Se comportamento mudar, atualizar contexto, snapshot e plano no mesmo ciclo.
-8. Se o fluxo de reboot, teste ou QA mudar, atualizar `README.md`, `docs/TEST_RESET_PROTOCOL.md`, `docs/BOOTSTRAP_PROMPTS.md` e o template `.txt` correspondente no mesmo ciclo.
+5. O modo `quick` nao faz perguntas iniciais; sem objetivo explicito, ele so sincroniza contexto, entrega resumo curto e fica aguardando silenciosamente a proxima instrucao.
+6. O modo `quick` assume por padrao que a sessao seguira com ajustes no app, UX, bugs ou refinamentos no fluxo operacional.
+7. Toda sessao termina com handoff novo.
+8. Se comportamento mudar, atualizar contexto, snapshot e plano no mesmo ciclo.
+9. Se o fluxo de reboot, teste ou QA mudar, atualizar `README.md`, `docs/TEST_RESET_PROTOCOL.md`, `docs/BOOTSTRAP_PROMPTS.md` e o template `.txt` correspondente no mesmo ciclo.
 
 ## Riscos que devem ficar visiveis
 
