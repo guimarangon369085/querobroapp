@@ -1,5 +1,7 @@
 # MVP_FINANCEIRO_E_D+1
 
+> Nota historica: este documento mistura partes ainda validas do financeiro/D+1 com referencias a WhatsApp que nao fazem mais parte da base ativa. Use apenas os blocos de financeiro e D+1 como referencia atual.
+
 ## Objetivo
 
 Explicar de forma simples como o bloco financeiro e o bloco D+1 funcionam hoje.
@@ -38,12 +40,11 @@ Uso pratico:
 
 ## Outbox de WhatsApp
 
-Existe fundacao pronta:
+Esta secao ficou historica.
 
-- eventos de mudanca de status entram em outbox
-- consulta de pendencias por `GET /whatsapp/outbox`
-
-Envio real com provider externo fica para proxima etapa.
+- A base operacional atual nao expoe `GET /whatsapp/outbox`.
+- O fluxo ativo validado hoje e interno, sem provider externo.
+- Qualquer reintegracao futura deve ser redesenhada do zero.
 
 ## O que validar manualmente
 
@@ -53,4 +54,3 @@ Envio real com provider externo fica para proxima etapa.
 4. Quitar saldo restante.
 5. Confirmar `Status financeiro = PAGO`.
 6. Abrir D+1 e verificar leitura da falta por insumo.
-

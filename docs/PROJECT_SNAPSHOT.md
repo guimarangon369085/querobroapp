@@ -1,57 +1,72 @@
 # PROJECT_SNAPSHOT
 
-Ultima atualizacao: 2026-02-28
+Ultima atualizacao: 2026-03-04
 
 ## Estado atual
 
 - Monorepo ativo com API, Web, Mobile e contratos compartilhados.
-- Web agora e `calendar-first`, com as 5 telas mandatórias: `Calendario`, `Pedidos`, `Clientes`, `Produtos`, `Estoque`.
-- `Pedidos` e `Calendario` compartilham a mesma base de dados, mas a navegacao e o foco visual ja foram realinhados para o modelo novo.
-- A maior parte dos blocos decorativos, tutoriais e quickflows foi removida das telas principais.
-- API com regras de pedido, pagamento, estoque, BOM, D+1, WhatsApp Flow local, forno/fila de producao e entrega com tracking persistente.
-- Pipeline de seguranca e qualidade ativo (lint, drift, secret scan, policy gate).
+- Web consolidado em 4 telas reais: `Pedidos`, `Clientes`, `Produtos`, `Estoque`.
+- `Pedidos` e a entrada principal; agenda `Dia/Semana/Mes` na mesma tela, com criacao de pedido no proprio painel e lista completa de pedidos logo abaixo do calendario.
+- CTAs contextuais por tela: `Pedidos` usa acao `Criar` no painel, `Clientes/Produtos` usam acao inline/sticky e `Estoque` usa botao flutuante `Nova movimentacao`.
+- `Calendario`, `Inicio`, `Jornada`, `Resumo` e `Builder` nao existem mais como superficies operacionais.
+- Marca lateral usa o mark vetorial interno e favicon/shortcut usam `broa-mark.svg`, com o nome QUEROBROAPP.
+- API cobre pedido, pagamento, estoque, BOM, D+1, producao e entrega local interna.
+- O processo de qualidade atual inclui `qa:trust`, `qa:browser-smoke`, `qa:critical-e2e`, drift check e testes raiz.
 
 ## O que um usuario consegue fazer hoje
 
-1. Abrir o app direto em `Calendario`.
-2. Navegar por `Pedidos`, `Clientes`, `Produtos` e `Estoque`.
+1. Abrir o app direto em `Pedidos`.
+2. Navegar entre `Pedidos`, `Clientes`, `Produtos` e `Estoque`.
 3. Criar pedido manualmente no web.
-4. Criar pedido via WhatsApp Flow local (`launch -> session -> submit`), gerando cliente e pedido reais.
-5. Confirmar pedido e colocar ele na fila real de producao.
-6. Iniciar a proxima fornada (1 forno, 14 broas por vez), com baixa real de estoque no momento em que a fornada comeca.
-7. Concluir a fornada e deixar o pedido `PRONTO`.
-8. Disparar entrega com tracking persistente; sem credenciais Uber, o app cai em simulacao local rastreavel e continua funcional.
-9. Marcar entrega concluida e deixar o pedido em `ENTREGUE`, aguardando apenas pagamento.
-10. Registrar pagamento parcial/total.
+4. Confirmar pedido e colocar ele na fila de producao.
+5. Iniciar a proxima fornada com baixa real de estoque no momento em que a fornada comeca.
+6. Concluir a fornada e deixar o pedido `PRONTO`.
+7. Validar se a entrega local esta pronta para iniciar.
+8. Iniciar entrega local interna.
+9. Marcar entrega concluida e deixar o pedido em `ENTREGUE`.
+10. Registrar pagamento parcial ou total.
 
 ## Telas web
 
-- `/calendario`: entrada principal e base de leitura do dia/semana/mes.
-- `/pedidos`: execucao do pedido, WhatsApp Flow, producao, entrega e pagamento.
-- `/clientes`: cadastro minimo e historico curto.
-- `/produtos`: catalogo minimo.
-- `/estoque`: saldo, D+1, compras e ficha tecnica simplificada.
-- Rotas antigas (`/hoje`, `/producao`, `/saidas`, `/caixa`, `/base`) redirecionam para as 5 telas reais.
-- `/builder`: redirecionado para `/calendario`; runtime interno principal exposto em `GET /runtime-config` (com alias legado em `GET /builder/config`).
+- `/pedidos`: agenda do dia, criacao de pedido, status, producao, entrega e pagamento.
+- `/clientes`: cadastro e edicao rapida.
+- `/produtos`: catalogo e ficha tecnica.
+- `/estoque`: saldo, D+1, compras e leitura operacional.
+- `/calendario`: redirect permanente para `/pedidos`.
+- Rotas antigas (`/`, `/dashboard`, `/hoje`, `/jornada`, `/inicio`, `/resumo`, `/base`, `/producao`, `/saidas`, `/caixa`) convergem para `Pedidos`.
+- Alias legado de captura (`/whatsapp-flow/pedido/:sessionId`) tambem converte para `Pedidos`.
+- `/builder`: redirect para `/pedidos`; o runtime interno segue exposto por `GET /runtime-config`.
 
 ## API (blocos)
 
 - Cadastro: `products`, `customers`
 - Operacao: `orders`, `payments`, `deliveries`, `production`
-- Estoque: `inventory`, `stock`, `bom`, `production`
-- Automacao: `receipts`, `whatsapp/outbox`, `alexa`
+- Estoque: `inventory`, `stock`, `bom`
+- Suporte interno: `runtime-config` (read-only) e redirects legados controlados no web
 
 ## Qualidade tecnica
 
-- `pnpm --filter @querobroapp/api typecheck`: OK
-- `pnpm --filter @querobroapp/web typecheck`: OK
+- `pnpm qa:trust`: gate unico de docs, diff, typecheck, testes e build.
+- `pnpm qa:browser-smoke`: smoke de navegador real nas 4 telas principais.
+- `pnpm qa:critical-e2e`: jornada critica de produto -> cliente -> pedido -> status.
+- `pnpm check:prisma-drift`: guard de drift dev/prod.
+- Os flows de QA que sobem um web temporario agora usam dist dirs dedicados do Next, para nao disputar o `.next` do `next dev`.
+- O workflow principal de CI no GitHub agora roda `check:prisma-drift` e `qa:trust` com lint habilitado.
 
 ## Gaps abertos
 
-1. O dispatcher real da Meta WhatsApp Cloud API ja existe e consome o outbox, mas so envia de verdade quando `WHATSAPP_CLOUD_*` estiver preenchido; sem isso, o Flow continua local e auditavel.
-2. Uber live agora suporta o caminho mais atual por `store_id` e o legado por `customer_id`, mas ainda depende de preencher `UBER_DIRECT_*`; sem credenciais, o fallback local de simulacao continua ativo e funcional.
-3. Ainda existe historico legado de movimentos antigos no banco; a normalizacao por compensacao foi aplicada para pedidos em aberto, mas o historico anterior foi preservado.
-4. Mobile segue atras do web no fluxo novo.
+1. Integracoes externas foram removidas e devem ser replanejadas do zero quando a operacao principal estiver consolidada.
+2. Mobile segue atras do web no fluxo operacional novo.
+3. Ainda vale ampliar cobertura de testes alem dos gates atuais, principalmente em cenarios de edge case de dominio.
+4. Vale manter docs e env sem residuos legados para evitar falsa percepcao de feature ainda ativa.
+
+## Como religar e validar rapido
+
+1. `./scripts/stop-all.sh`
+2. `./scripts/dev-all.sh`
+3. Abrir `http://127.0.0.1:3000/pedidos`
+4. Validar `http://127.0.0.1:3001/health`
+5. Rodar `pnpm qa:browser-smoke` se quiser uma confirmacao automatizada rapida
 
 ## Arquivos chave
 

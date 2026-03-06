@@ -12,12 +12,7 @@ import { StockModule } from './modules/stock/stock.module.js';
 import { InventoryModule } from './modules/inventory/inventory.module.js';
 import { BomModule } from './modules/bom/bom.module.js';
 import { ProductionModule } from './modules/production/production.module.js';
-import { WhatsappModule } from './modules/whatsapp/whatsapp.module.js';
-import { ReceiptsModule } from './modules/receipts/receipts.module.js';
 import { RuntimeConfigModule } from './modules/runtime-config/runtime-config.module.js';
-import { AutomationsModule } from './modules/automations/automations.module.js';
-import { VoiceModule } from './modules/voice/voice.module.js';
-import { AlexaModule } from './modules/alexa/alexa.module.js';
 import { AuthGuard } from './security/auth.guard.js';
 import { RbacGuard } from './security/rbac.guard.js';
 
@@ -42,12 +37,7 @@ import { RbacGuard } from './security/rbac.guard.js';
     InventoryModule,
     BomModule,
     ProductionModule,
-    WhatsappModule,
-    ReceiptsModule,
-    RuntimeConfigModule,
-    AutomationsModule,
-    VoiceModule,
-    AlexaModule
+    RuntimeConfigModule
   ],
   controllers: [AppController],
   providers: [

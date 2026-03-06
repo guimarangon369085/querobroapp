@@ -1,7 +1,7 @@
-const devDefaultBaseUrl = 'http://127.0.0.1:3001';
-const baseUrl = (process.env.NEXT_PUBLIC_API_URL || devDefaultBaseUrl).trim() || devDefaultBaseUrl;
+import { devDefaultBaseUrl, getApiBaseUrl } from '@/lib/api-base-url';
 
 function toAbsoluteUrl(path: string) {
+  const baseUrl = getApiBaseUrl();
   if (/^https?:\/\//i.test(path)) return path;
   if (path.startsWith('/')) return `${baseUrl}${path}`;
   return `${baseUrl}/${path}`;

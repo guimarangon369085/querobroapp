@@ -70,23 +70,11 @@ echo "2) Prisma drift"
 "$PNPM_BIN" check:prisma-drift
 
 echo
-echo "3) Typecheck (workspace)"
-"$PNPM_BIN" typecheck
+echo "3) Trust gate (docs + diff + typecheck + test + build + lint + browser smoke)"
+QA_TRUST_INCLUDE_LINT=1 QA_TRUST_INCLUDE_BROWSER=1 "$PNPM_BIN" qa:trust
 
 echo
-echo "4) Lint (workspace)"
-"$PNPM_BIN" lint
-
-echo
-echo "5) Build CI (api + web + shared + ui)"
-"$PNPM_BIN" build:ci
-
-echo
-echo "6) Testes"
-"$PNPM_BIN" test
-
-echo
-echo "7) Smoke API (se online)"
+echo "4) Smoke API (se online)"
 if node -e "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1));"; then
   "$PNPM_BIN" qa:smoke
 else

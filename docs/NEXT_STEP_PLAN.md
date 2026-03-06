@@ -1,66 +1,69 @@
 # NEXT_STEP_PLAN
 
-Ultima atualizacao: 2026-02-20
+Ultima atualizacao: 2026-03-03
 
 ## Objetivo da fase atual
 
-Entregar UX extremamente simples para operacao diaria, mantendo toda regra complexa no backend.
+Permitir reboot e validacao manual sem ambiguidade, mantendo `Pedidos` como agenda unica do dia e consolidando o fluxo operacional real.
 
 ## Prioridade 1 (agora)
 
-### UX operacional em Estoque (foco do dia)
+### Rodada manual apos reboot
 
-- Hierarquia por jornada real: planejar -> comprar -> produzir -> conferir.
+- Reiniciar a maquina e subir o ambiente com `./scripts/dev-all.sh`.
+- Validar `Pedidos`, `Clientes`, `Produtos` e `Estoque` no navegador.
+- Confirmar que o browser abre em `http://127.0.0.1:3000/pedidos`.
+- Confirmar health da API e ausencia de erro de CORS ou bundle stale.
+- Registrar qualquer friccao real encontrada e corrigir no mesmo ciclo.
+
+Criterio de pronto:
+- o usuario consegue religar a maquina e testar sozinho sem depender de ajuste manual escondido.
+
+## Prioridade 2 (agora)
+
+### UX operacional em Estoque
+
+- Hierarquia por jornada real: `planejar -> comprar -> produzir -> conferir`.
 - Painel do dia com fila, broas alvo, fornadas e hora de inicio sugerida.
-- Lista rapida de compras por faltas D+1 (ingrediente/embalagem).
-- Validacao com uso real da Gabi (desktop e mobile width).
+- Lista rapida de compras por faltas D+1.
+- Validacao em desktop e mobile width com uso real.
 
 Criterio de pronto:
 - operador decide o plano do dia em menos de 5 minutos.
 
-## Prioridade 2 (agora)
-
-### UX wave 2 em Pedidos
-
-- Auto sugestao de cliente/produto com menos toques.
-- Acoes de status ainda mais diretas.
-- Reducao de campos visiveis para o minimo necessario.
-
-Criterio de pronto:
-- operador cria pedido completo sem treinamento tecnico.
-
 ## Prioridade 3 (agora)
 
-### Validacao real de usabilidade
+### Refino final de Pedidos como agenda do dia
 
-- Rodar validacao em navegador real (desktop e mobile width).
-- Mapear friccao por tarefa: criar produto, cliente, pedido, pagamento e checar D+1.
-- Corrigir pontos bloqueadores no mesmo ciclo.
-- Ao fim de cada rodada, aplicar `docs/TEST_RESET_PROTOCOL.md` para limpar clientes/pedidos de teste.
+- Continuar reduzindo densidade visual e scroll na visao `Dia`.
+- Extrair blocos grandes restantes de `orders-screen` para componentes menores.
+- Garantir consistencia total de clique inteiro em cards, listas e acoes.
+- Validar estados vazios, sem agendamento e mudanca de dia em desktop e mobile width.
 
 Criterio de pronto:
-- zero bloqueador no fluxo principal.
+- operador navega o dia, cria pedido e atualiza status sem friccao nem ambiguidades.
 
 ## Prioridade 4 (proxima)
 
-### Robustez de dominio
+### Robustez do nucleo e cobertura
 
-- Aumentar testes de pedido + pagamento + estoque.
-- Revisar pontos finais de drift Prisma dev/prod.
-- Preparar provider de WhatsApp sobre outbox existente.
+- Manter o app sem dependencias externas enquanto a operacao principal ainda estiver estabilizando.
+- Eliminar residuos legados de configuracao, docs e expectativas de integracao antiga.
+- Aumentar testes de dominio em pedidos, pagamentos, estoque, producao e entrega local.
+- Ampliar a cobertura de navegador alem do smoke e do E2E critico.
 
 Criterio de pronto:
-- regressao reduzida e trilha de deploy mais previsivel.
+- regressao reduzida, ambiente de teste previsivel e reintegracao futura feita com base limpa.
 
 ## Ordem de execucao
 
-1. UX operacional de estoque + validacao em campo.
-2. UX wave 2 (pedidos).
-3. Validacao Playwright + ajustes rapidos.
-4. Testes de dominio + melhorias de dados.
+1. Reboot real + validacao manual.
+2. UX de estoque.
+3. Refino final de pedidos.
+4. Hardening extra do nucleo e dos testes.
 
 ## Riscos de nao fazer
 
-- Interface continua exigindo muitas interacoes.
-- Cresce retrabalho operacional com aumento de volume.
-- Mudancas de backend podem quebrar fluxo sem testes suficientes.
+- O ambiente pode parecer instavel mesmo quando o codigo esta correto.
+- Interface continua exigindo interacoes demais em tarefas recorrentes.
+- Mudancas de backend ou uma reintegracao futura podem quebrar fluxo sem cobertura suficiente.

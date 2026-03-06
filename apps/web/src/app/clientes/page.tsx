@@ -1,16 +1,39 @@
 'use client';
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent
+} from 'react';
 import type { Customer } from '@querobroapp/shared';
 import { apiFetch } from '@/lib/api';
-import { formatPhoneBR, formatPostalCodeBR, normalizeAddress, normalizePhone, titleCase } from '@/lib/format';
+import {
+  buildWhatsAppUrl,
+  compactWhitespace,
+  formatPhoneBR,
+  formatPostalCodeBR,
+  normalizeAddress,
+  normalizePhone,
+  titleCase
+} from '@/lib/format';
 import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
-import { loadGoogleMaps } from '@/lib/googleMaps';
 import { useSurfaceMode } from '@/hooks/use-surface-mode';
 import { useTutorialSpotlight } from '@/hooks/use-tutorial-spotlight';
+import { AppIcon } from '@/components/app-icons';
 import { useFeedback } from '@/components/feedback-provider';
 import { FormField } from '@/components/form/FormField';
 import { useSearchParams } from 'next/navigation';
 import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
+import {
+  buildCustomerAddressAutofill,
+  buildCustomerAddressSummary,
+  buildCustomerNameAutofill,
+  type CustomerAutofillPatch,
+  lookupPostalCodeAutofill
+} from '@/lib/customer-autofill';
 
 const emptyCustomer: Partial<Customer> = {
   name: '',
@@ -26,14 +49,32 @@ const emptyCustomer: Partial<Customer> = {
   state: '',
   postalCode: '',
   country: 'Brasil',
-  placeId: '',
-  lat: undefined,
-  lng: undefined,
   deliveryNotes: ''
 };
 
 const TEST_DATA_TAG = '[TESTE_E2E]';
 const TUTORIAL_QUERY_VALUE = 'primeira_vez';
+const CUSTOMER_AUTOFILL_FIELDS = [
+  'address',
+  'addressLine1',
+  'addressLine2',
+  'city',
+  'country',
+  'firstName',
+  'lastName',
+  'neighborhood',
+  'postalCode',
+  'state'
+] as const;
+
+type CustomerAutofillField = (typeof CUSTOMER_AUTOFILL_FIELDS)[number];
+
+function createCustomerAutofillState() {
+  return Object.fromEntries(CUSTOMER_AUTOFILL_FIELDS.map((field) => [field, ''])) as Record<
+    CustomerAutofillField,
+    string
+  >;
+}
 
 function containsTestDataTag(value?: string | null) {
   return (value || '').toLowerCase().includes(TEST_DATA_TAG.toLowerCase());
@@ -55,23 +96,22 @@ function CustomersPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const { isOperationMode } = useSurfaceMode('clientes');
-  const [useAddressAutocomplete, setUseAddressAutocomplete] = useState(false);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
-  const addressInputRef = useRef<HTMLInputElement | null>(null);
   const openedCustomerIdRef = useRef<number | null>(null);
+  const customerAutofillRef = useRef(createCustomerAutofillState());
+  const postalCodeLookupAbortRef = useRef<AbortController | null>(null);
   const { confirm, notifyError, notifySuccess, notifyUndo } = useFeedback();
-
-  const hideAddressSuggestions = () => {
-    if (typeof document === 'undefined') return;
-    document.querySelectorAll<HTMLElement>('.pac-container').forEach((container) => {
-      container.style.display = 'none';
-    });
-  };
 
   const load = () => apiFetch<Customer[]>('/customers').then(setCustomers);
 
   useEffect(() => {
     load().catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      postalCodeLookupAbortRef.current?.abort();
+    };
   }, []);
 
   useEffect(() => {
@@ -87,66 +127,129 @@ function CustomersPageContent() {
     });
   }, [searchParams]);
 
-  useEffect(() => {
-    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-    if (!useAddressAutocomplete || !apiKey || !addressInputRef.current) {
-      hideAddressSuggestions();
+  const resetCustomerAutofill = () => {
+    postalCodeLookupAbortRef.current?.abort();
+    postalCodeLookupAbortRef.current = null;
+    customerAutofillRef.current = createCustomerAutofillState();
+  };
+
+  const mergeCustomerAutofill = (
+    currentForm: Partial<Customer>,
+    patch: CustomerAutofillPatch
+  ): Partial<Customer> => {
+    let nextForm = currentForm;
+
+    for (const field of CUSTOMER_AUTOFILL_FIELDS) {
+      if (!(field in patch)) continue;
+
+      const nextValue = `${(patch[field] as string | undefined) ?? ''}`;
+      const currentValue = `${(nextForm[field] as string | undefined) ?? ''}`;
+      const lastAutoValue = customerAutofillRef.current[field];
+
+      if (currentValue === nextValue) {
+        customerAutofillRef.current[field] = nextValue;
+        continue;
+      }
+
+      if (!currentValue || currentValue === lastAutoValue) {
+        if (nextForm === currentForm) {
+          nextForm = { ...currentForm };
+        }
+        (nextForm as Record<CustomerAutofillField, string | undefined>)[field] = nextValue;
+        customerAutofillRef.current[field] = nextValue;
+      }
+    }
+
+    return nextForm;
+  };
+
+  const seedCustomerAutofill = (currentForm: Partial<Customer>, patch: CustomerAutofillPatch) => {
+    for (const field of CUSTOMER_AUTOFILL_FIELDS) {
+      if (!(field in patch)) continue;
+      const nextValue = `${(patch[field] as string | undefined) ?? ''}`;
+      const currentValue = `${(currentForm[field] as string | undefined) ?? ''}`;
+      customerAutofillRef.current[field] = currentValue && currentValue === nextValue ? nextValue : '';
+    }
+  };
+
+  const primeCustomerAutofill = (currentForm: Partial<Customer>) => {
+    customerAutofillRef.current = createCustomerAutofillState();
+    seedCustomerAutofill(currentForm, buildCustomerNameAutofill(currentForm.name));
+    seedCustomerAutofill(currentForm, buildCustomerAddressAutofill(currentForm.address));
+
+    const structuredAddress = buildCustomerAddressSummary(currentForm);
+    if (structuredAddress && compactWhitespace(currentForm.address || '') === compactWhitespace(structuredAddress)) {
+      seedCustomerAutofill(currentForm, {
+        address: structuredAddress,
+        addressLine1: currentForm.addressLine1 || '',
+        city: currentForm.city || '',
+        country: currentForm.country || '',
+        neighborhood: currentForm.neighborhood || '',
+        postalCode: formatPostalCodeBR(currentForm.postalCode || ''),
+        state: currentForm.state?.trim().toUpperCase() || ''
+      });
+    }
+  };
+
+  const handleNameChange = (rawValue: string) => {
+    setForm((prev) => {
+      const nextForm = prev.name === rawValue ? prev : { ...prev, name: rawValue };
+      return mergeCustomerAutofill(nextForm, buildCustomerNameAutofill(rawValue));
+    });
+  };
+
+  const handleAddressChange = (rawValue: string) => {
+    setForm((prev) => {
+      const nextForm = prev.address === rawValue ? prev : { ...prev, address: rawValue };
+      return mergeCustomerAutofill(nextForm, buildCustomerAddressAutofill(rawValue));
+    });
+  };
+
+  const handlePostalCodeLookup = async (postalCode: string) => {
+    postalCodeLookupAbortRef.current?.abort();
+    const controller = new AbortController();
+    postalCodeLookupAbortRef.current = controller;
+
+    try {
+      const patch = await lookupPostalCodeAutofill(postalCode, { signal: controller.signal });
+      if (!patch) return;
+
+      setForm((prev) => {
+        if (formatPostalCodeBR(prev.postalCode || '') !== formatPostalCodeBR(postalCode)) {
+          return prev;
+        }
+
+        let nextForm = mergeCustomerAutofill(prev, patch);
+        const nextAddress = buildCustomerAddressSummary(nextForm);
+        if (nextAddress) {
+          nextForm = mergeCustomerAutofill(nextForm, { address: nextAddress });
+        }
+        return nextForm;
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
+      console.error(error);
+    } finally {
+      if (postalCodeLookupAbortRef.current === controller) {
+        postalCodeLookupAbortRef.current = null;
+      }
+    }
+  };
+
+  const handlePostalCodeChange = (rawValue: string) => {
+    const nextPostalCode = formatPostalCodeBR(rawValue);
+    setForm((prev) => (prev.postalCode === nextPostalCode ? prev : { ...prev, postalCode: nextPostalCode }));
+
+    if (nextPostalCode.replace(/\D/g, '').length === 8) {
+      void handlePostalCodeLookup(nextPostalCode);
       return;
     }
 
-    let autocomplete: google.maps.places.Autocomplete | null = null;
-    loadGoogleMaps(apiKey)
-      .then(() => {
-        if (!addressInputRef.current) return;
-        autocomplete = new google.maps.places.Autocomplete(addressInputRef.current, {
-          fields: ['formatted_address', 'address_components', 'geometry', 'place_id'],
-          types: ['address']
-        });
-        autocomplete.addListener('place_changed', () => {
-          const place = autocomplete?.getPlace();
-          if (!place) return;
-          const findComponent = (type: string) =>
-            place.address_components?.find((component) => component.types.includes(type));
-
-          const streetNumber = findComponent('street_number')?.long_name ?? '';
-          const route = findComponent('route')?.long_name ?? '';
-          const neighborhood =
-            findComponent('sublocality')?.long_name ||
-            findComponent('sublocality_level_1')?.long_name ||
-            findComponent('neighborhood')?.long_name ||
-            '';
-          const city =
-            findComponent('locality')?.long_name ||
-            findComponent('administrative_area_level_2')?.long_name ||
-            '';
-          const state = findComponent('administrative_area_level_1')?.short_name ?? '';
-          const postalCode = findComponent('postal_code')?.long_name ?? '';
-          const country = findComponent('country')?.long_name ?? '';
-          const addressLine1 = [route, streetNumber].filter(Boolean).join(', ');
-
-          setForm((prev) => ({
-            ...prev,
-            address: place.formatted_address || prev.address || '',
-            addressLine1: addressLine1 || prev.addressLine1 || '',
-            neighborhood: neighborhood || prev.neighborhood || '',
-            city: city || prev.city || '',
-            state: state || prev.state || '',
-            postalCode: postalCode || prev.postalCode || '',
-            country: country || prev.country || '',
-            placeId: place.place_id || prev.placeId || '',
-            lat: place.geometry?.location?.lat?.() ?? prev.lat,
-            lng: place.geometry?.location?.lng?.() ?? prev.lng
-          }));
-        });
-      })
-      .catch(console.error);
-
-    return () => {
-      if (autocomplete) {
-        google.maps.event.clearInstanceListeners(autocomplete);
-      }
-    };
-  }, [useAddressAutocomplete]);
+    postalCodeLookupAbortRef.current?.abort();
+    postalCodeLookupAbortRef.current = null;
+  };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -185,9 +288,6 @@ function CustomersPageContent() {
       state: form.state?.trim().toUpperCase() || undefined,
       postalCode: form.postalCode?.trim() || undefined,
       country: normalizeAddress(form.country || ''),
-      placeId: form.placeId?.trim() || undefined,
-      lat: form.lat ?? undefined,
-      lng: form.lng ?? undefined,
       deliveryNotes: form.deliveryNotes?.trim() || undefined
     };
     const payload =
@@ -211,6 +311,7 @@ function CustomersPageContent() {
         });
       }
 
+      resetCustomerAutofill();
       setForm(emptyCustomer);
       setEditingId(null);
       await load();
@@ -223,7 +324,7 @@ function CustomersPageContent() {
 
   const startEdit = (customer: Customer) => {
     setEditingId(customer.id!);
-    setForm({
+    const nextForm: Partial<Customer> = {
       name: customer.name,
       firstName: customer.firstName ?? '',
       lastName: customer.lastName ?? '',
@@ -237,16 +338,17 @@ function CustomersPageContent() {
       state: customer.state ?? '',
       postalCode: customer.postalCode ?? '',
       country: customer.country ?? 'Brasil',
-      placeId: customer.placeId ?? '',
-      lat: customer.lat ?? undefined,
-      lng: customer.lng ?? undefined,
       deliveryNotes: customer.deliveryNotes ?? ''
-    });
+    };
+    resetCustomerAutofill();
+    primeCustomerAutofill(nextForm);
+    setForm(nextForm);
     scrollToLayoutSlot('form', { focus: true, focusSelector: 'input, select, textarea' });
   };
 
   const cancelEdit = () => {
     setEditingId(null);
+    resetCustomerAutofill();
     setForm(emptyCustomer);
   };
 
@@ -261,6 +363,8 @@ function CustomersPageContent() {
     if (!customer) return;
     openedCustomerIdRef.current = parsed;
     startEdit(customer);
+    // `startEdit` changes identity on each render, but this effect should react only to the query param/list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, customers]);
 
   const remove = async (id: number) => {
@@ -297,9 +401,6 @@ function CustomersPageContent() {
               state: customerToRestore.state ?? null,
               postalCode: customerToRestore.postalCode ?? null,
               country: customerToRestore.country ?? 'Brasil',
-              placeId: customerToRestore.placeId ?? null,
-              lat: customerToRestore.lat ?? null,
-              lng: customerToRestore.lng ?? null,
               deliveryNotes: customerToRestore.deliveryNotes ?? null
             })
           });
@@ -313,6 +414,20 @@ function CustomersPageContent() {
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Nao foi possivel remover o cliente.');
     }
+  };
+
+  const handleCustomerCardKeyDown = (
+    event: KeyboardEvent<HTMLDivElement>,
+    customer: Customer
+  ) => {
+    if (event.currentTarget !== event.target) return;
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    startEdit(customer);
+  };
+
+  const stopCustomerCardAction = (event: MouseEvent<HTMLElement>) => {
+    event.stopPropagation();
   };
 
   const filteredCustomers = useMemo(() => {
@@ -336,6 +451,7 @@ function CustomersPageContent() {
   }, [customers, search]);
 
   return (
+    <>
     <BuilderLayoutProvider page="clientes">
       <section className="grid gap-8">
       <BuilderLayoutItemSlot
@@ -360,6 +476,15 @@ function CustomersPageContent() {
         className={isSpotlightSlot('form') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
       >
       <form onSubmit={submit} className="app-panel grid gap-5">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
+            Cadastro rapido
+          </p>
+          <h3 className="mt-1 text-lg font-semibold text-neutral-900">
+            So o minimo para vender e entregar
+          </h3>
+        </div>
+
         <div className="grid gap-3 md:grid-cols-2">
           <FormField label="Nome completo" error={error}>
             <input
@@ -367,11 +492,11 @@ function CustomersPageContent() {
               placeholder="Nome completo"
               ref={nameInputRef}
               value={form.name || ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
-              onBlur={(e) => setForm((prev) => ({ ...prev, name: titleCase(e.target.value) }))}
+              onChange={(e) => handleNameChange(e.target.value)}
+              onBlur={(e) => handleNameChange(titleCase(e.target.value))}
             />
           </FormField>
-          <FormField label="Telefone" hint="DDD + numero (WhatsApp)">
+          <FormField label="Telefone" hint="DDD + numero">
             <input
               className="app-input"
               placeholder="(11) 99999-9999"
@@ -381,154 +506,128 @@ function CustomersPageContent() {
               onChange={(e) => setForm((prev) => ({ ...prev, phone: formatPhoneBR(e.target.value) }))}
             />
           </FormField>
-          <FormField
-            label="Endereco completo"
-            hint={
-              useAddressAutocomplete
-                ? 'Sugestoes ativas. Se precisar, desligue para digitar manualmente.'
-                : 'Digite manualmente ou ative sugestoes.'
-            }
-          >
+          <FormField label="Endereco completo" hint="Digite o endereco manualmente.">
             <input
               className="app-input"
               placeholder="Rua, numero, bairro, cidade"
-              ref={addressInputRef}
               value={form.address || ''}
               autoComplete="street-address"
-              onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))}
-              onBlur={(e) => {
-                hideAddressSuggestions();
-                setForm((prev) => ({ ...prev, address: normalizeAddress(e.target.value) || '' }));
-              }}
-            />
-            <div className="app-inline-actions">
-              <button
-                type="button"
-                className="app-button app-button-ghost"
-                onClick={() => {
-                  setUseAddressAutocomplete((previous) => {
-                    const next = !previous;
-                    if (!next) hideAddressSuggestions();
-                    return next;
-                  });
-                }}
-              >
-                {useAddressAutocomplete ? 'Desligar sugestoes' : 'Ativar sugestoes'}
-              </button>
-            </div>
-          </FormField>
-          <FormField label="Instrucoes de entrega" hint="Portao, referencia, interfone">
-            <input
-              className="app-input"
-              placeholder="Ex: portao preto, tocar 18"
-              value={form.deliveryNotes || ''}
-              onChange={(e) => setForm((prev) => ({ ...prev, deliveryNotes: e.target.value }))}
+              onChange={(e) => handleAddressChange(e.target.value)}
+              onBlur={(e) => handleAddressChange(normalizeAddress(e.target.value) || '')}
             />
           </FormField>
         </div>
 
-        {isOperationMode ? null : (
-          <details className="app-details">
-            <summary>Campos avancados (Uber Direct, endereco detalhado e dados extras)</summary>
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <FormField label="Primeiro nome" hint="Opcional (preenchido automaticamente)">
-                <input
-                  className="app-input"
-                  placeholder="Primeiro nome"
-                  value={form.firstName || ''}
-                  onChange={(e) => setForm((prev) => ({ ...prev, firstName: e.target.value }))}
-                />
-              </FormField>
-              <FormField label="Sobrenome" hint="Opcional (preenchido automaticamente)">
-                <input
-                  className="app-input"
-                  placeholder="Sobrenome"
-                  value={form.lastName || ''}
-                  onChange={(e) => setForm((prev) => ({ ...prev, lastName: e.target.value }))}
-                />
-              </FormField>
-              <FormField label="Email" hint="Opcional">
-                <input
-                  className="app-input"
-                  placeholder="email@exemplo.com"
-                  value={form.email || ''}
-                  inputMode="email"
-                  autoComplete="email"
-                  onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
-                />
-              </FormField>
-              <FormField label="Rua e numero" hint="Linha 1">
-                <input
-                  className="app-input"
-                  placeholder="Ex: Rua X, 123"
-                  value={form.addressLine1 || ''}
-                  onChange={(e) => setForm((prev) => ({ ...prev, addressLine1: e.target.value }))}
-                />
-              </FormField>
-              <FormField label="Complemento" hint="Apartamento, bloco, etc">
-                <input
-                  className="app-input"
-                  placeholder="Apto, bloco, andar..."
-                  value={form.addressLine2 || ''}
-                  onChange={(e) => setForm((prev) => ({ ...prev, addressLine2: e.target.value }))}
-                />
-              </FormField>
-              <FormField label="Bairro">
-                <input
-                  className="app-input"
-                  placeholder="Bairro"
-                  value={form.neighborhood || ''}
-                  onChange={(e) => setForm((prev) => ({ ...prev, neighborhood: e.target.value }))}
-                />
-              </FormField>
-              <FormField label="Cidade">
-                <input
-                  className="app-input"
-                  placeholder="Cidade"
-                  value={form.city || ''}
-                  onChange={(e) => setForm((prev) => ({ ...prev, city: e.target.value }))}
-                />
-              </FormField>
-              <FormField label="Estado (UF)">
-                <input
-                  className="app-input"
-                  placeholder="SP"
-                  value={form.state || ''}
-                  onChange={(e) => setForm((prev) => ({ ...prev, state: e.target.value }))}
-                />
-              </FormField>
-              <FormField label="CEP">
-                <input
-                  className="app-input"
-                  placeholder="00000-000"
-                  value={form.postalCode || ''}
-                  inputMode="numeric"
-                  autoComplete="postal-code"
-                  onChange={(e) => setForm((prev) => ({ ...prev, postalCode: formatPostalCodeBR(e.target.value) }))}
-                />
-              </FormField>
-              <FormField label="Pais">
-                <input
-                  className="app-input"
-                  placeholder="Brasil"
-                  value={form.country || ''}
-                  onChange={(e) => setForm((prev) => ({ ...prev, country: e.target.value }))}
-                />
-              </FormField>
-              <FormField label="Uber Direct (Place ID)">
-                <input className="app-input" value={form.placeId || ''} readOnly />
-              </FormField>
-              <FormField label="Latitude">
-                <input className="app-input" value={form.lat ?? ''} readOnly />
-              </FormField>
-              <FormField label="Longitude">
-                <input className="app-input" value={form.lng ?? ''} readOnly />
-              </FormField>
-            </div>
-          </details>
-        )}
-        <div className="app-form-actions app-form-actions--mobile-sticky">
-          <button className="app-button app-button-primary" type="submit">
+        <details className="app-details">
+          <summary>
+            <span className="inline-flex items-center gap-2">
+              <AppIcon name="tools" className="h-4 w-4" />
+              Mais
+            </span>
+          </summary>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <FormField label="Instrucoes de entrega" hint="Portao, referencia, interfone">
+              <input
+                className="app-input"
+                placeholder="Ex: portao preto, tocar 18"
+                value={form.deliveryNotes || ''}
+                onChange={(e) => setForm((prev) => ({ ...prev, deliveryNotes: e.target.value }))}
+              />
+            </FormField>
+            <FormField label="Email" hint="Opcional">
+              <input
+                className="app-input"
+                placeholder="email@exemplo.com"
+                value={form.email || ''}
+                inputMode="email"
+                autoComplete="email"
+                onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
+              />
+            </FormField>
+
+            {!isOperationMode ? (
+              <>
+                <FormField label="Primeiro nome" hint="Opcional (preenchido automaticamente)">
+                  <input
+                    className="app-input"
+                    placeholder="Primeiro nome"
+                    value={form.firstName || ''}
+                    onChange={(e) => setForm((prev) => ({ ...prev, firstName: e.target.value }))}
+                  />
+                </FormField>
+                <FormField label="Sobrenome" hint="Opcional (preenchido automaticamente)">
+                  <input
+                    className="app-input"
+                    placeholder="Sobrenome"
+                    value={form.lastName || ''}
+                    onChange={(e) => setForm((prev) => ({ ...prev, lastName: e.target.value }))}
+                  />
+                </FormField>
+                <FormField label="Rua e numero" hint="Linha 1">
+                  <input
+                    className="app-input"
+                    placeholder="Ex: Rua X, 123"
+                    value={form.addressLine1 || ''}
+                    onChange={(e) => setForm((prev) => ({ ...prev, addressLine1: e.target.value }))}
+                  />
+                </FormField>
+                <FormField label="Complemento" hint="Apartamento, bloco, etc">
+                  <input
+                    className="app-input"
+                    placeholder="Apto, bloco, andar..."
+                    value={form.addressLine2 || ''}
+                    onChange={(e) => setForm((prev) => ({ ...prev, addressLine2: e.target.value }))}
+                  />
+                </FormField>
+                <FormField label="Bairro">
+                  <input
+                    className="app-input"
+                    placeholder="Bairro"
+                    value={form.neighborhood || ''}
+                    onChange={(e) => setForm((prev) => ({ ...prev, neighborhood: e.target.value }))}
+                  />
+                </FormField>
+                <FormField label="Cidade">
+                  <input
+                    className="app-input"
+                    placeholder="Cidade"
+                    value={form.city || ''}
+                    onChange={(e) => setForm((prev) => ({ ...prev, city: e.target.value }))}
+                  />
+                </FormField>
+                <FormField label="Estado (UF)">
+                  <input
+                    className="app-input"
+                    placeholder="SP"
+                    value={form.state || ''}
+                    onChange={(e) => setForm((prev) => ({ ...prev, state: e.target.value }))}
+                  />
+                </FormField>
+                <FormField label="CEP">
+                  <input
+                    className="app-input"
+                    placeholder="00000-000"
+                    value={form.postalCode || ''}
+                    inputMode="numeric"
+                    autoComplete="postal-code"
+                    onChange={(e) => handlePostalCodeChange(e.target.value)}
+                  />
+                </FormField>
+                <FormField label="Pais">
+                  <input
+                    className="app-input"
+                    placeholder="Brasil"
+                    value={form.country || ''}
+                    onChange={(e) => setForm((prev) => ({ ...prev, country: e.target.value }))}
+                  />
+                </FormField>
+              </>
+            ) : null}
+          </div>
+        </details>
+        <div className="app-form-actions">
+          <button className="app-button app-button-primary w-full md:w-auto" type="submit">
+            <AppIcon name={editingId ? 'refresh' : 'plus'} className="h-4 w-4" />
             {editingId ? 'Atualizar' : 'Criar'}
           </button>
           {editingId && (
@@ -537,6 +636,7 @@ function CustomersPageContent() {
               type="button"
               onClick={cancelEdit}
             >
+              <AppIcon name="close" className="h-4 w-4" />
               Cancelar
             </button>
           )}
@@ -549,35 +649,67 @@ function CustomersPageContent() {
         className={isSpotlightSlot('list') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
       >
       <div className="grid gap-3">
-        {filteredCustomers.map((customer) => (
-          <div
-            key={customer.id}
-            className="app-panel flex flex-wrap items-center justify-between gap-4"
-          >
-            <div>
-              <p className="text-lg font-semibold">{customer.name}</p>
-              <p className="text-sm text-neutral-500">
-                {formatPhoneBR(customer.phone) || 'Sem telefone'} • {customer.address || 'Sem endereco'}
-              </p>
+        {filteredCustomers.map((customer) => {
+          const isExpanded = editingId === customer.id;
+          const customerPhoneLabel = formatPhoneBR(customer.phone) || 'Sem telefone';
+          const customerPhoneHref = buildWhatsAppUrl(customer.phone);
+          return (
+            <div
+              key={customer.id}
+              className={`app-panel app-panel--interactive app-panel--expandable ${
+                isExpanded ? 'app-panel--expanded' : ''
+              }`}
+              role="button"
+              tabIndex={0}
+              onClick={() => startEdit(customer)}
+              onKeyDown={(event) => handleCustomerCardKeyDown(event, customer)}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-3">
+                    <p className="text-lg font-semibold">{customer.name}</p>
+                    <span className="app-panel__chevron" aria-hidden="true" />
+                  </div>
+                  {customerPhoneHref ? (
+                    <a
+                      href={customerPhoneHref}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 inline-flex text-sm text-neutral-500 underline decoration-dotted underline-offset-2 hover:text-neutral-900"
+                      onClick={stopCustomerCardAction}
+                    >
+                      {customerPhoneLabel}
+                    </a>
+                  ) : (
+                    <p className="mt-1 text-sm text-neutral-500">{customerPhoneLabel}</p>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  {!isOperationMode ? (
+                    <button
+                      type="button"
+                      className="app-button app-button-danger"
+                      onClick={(event) => {
+                        stopCustomerCardAction(event);
+                        void remove(customer.id!);
+                      }}
+                    >
+                      <AppIcon name="close" className="h-4 w-4" />
+                      Remover
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              <div className="app-panel__expand" aria-hidden={!isExpanded}>
+                <div className="app-panel__expand-inner">
+                  <div className="app-panel__expand-surface text-sm text-neutral-600">
+                    {customer.address || 'Sem endereco'}
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <button
-                className="app-button app-button-ghost"
-                onClick={() => startEdit(customer)}
-              >
-                Editar
-              </button>
-              {!isOperationMode ? (
-                <button
-                  className="app-button app-button-danger"
-                  onClick={() => remove(customer.id!)}
-                >
-                  Remover
-                </button>
-              ) : null}
-            </div>
-          </div>
-        ))}
+          );
+        })}
         {filteredCustomers.length === 0 && (
           <div className="app-panel border-dashed text-sm text-neutral-500">
             Nenhum cliente encontrado com este filtro.
@@ -588,6 +720,7 @@ function CustomersPageContent() {
 
       </section>
     </BuilderLayoutProvider>
+    </>
   );
 }
 

@@ -27,7 +27,9 @@
     "session:handoff:auto": "bash scripts/save-handoff-auto.sh",
     "brand:sync": "bash scripts/sync-brand-assets.sh",
     "cleanup:test-data": "node scripts/cleanup-test-data.mjs",
-    "eval:receipts": "node scripts/receipts-eval.mjs",
+    "qa:browser-smoke": "bash scripts/qa-browser-smoke.sh",
+    "qa:critical-e2e": "node scripts/qa-critical-e2e.mjs",
+    "qa:trust": "node scripts/qa-trust.mjs",
     "qa:smoke": "node scripts/qa-smoke.mjs",
     "test": "node --test tests/*.test.mjs && pnpm -r --if-present test"
   },

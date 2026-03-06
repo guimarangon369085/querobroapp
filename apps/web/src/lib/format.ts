@@ -1,4 +1,5 @@
-const PHONE_DIGITS_MAX = 11;
+import { formatPhoneNumber as formatPhoneNumberIntl, normalizePhoneNumber } from '@querobroapp/shared';
+
 const POSTAL_CODE_DIGITS_MAX = 8;
 
 const onlyDigits = (value: string) => value.replace(/\D/g, '');
@@ -14,28 +15,32 @@ export function titleCase(value: string) {
 }
 
 export function normalizePhone(value?: string | null) {
-  if (!value) return null;
-  const digits = onlyDigits(value).slice(0, PHONE_DIGITS_MAX);
-  return digits.length ? digits : null;
+  return normalizePhoneNumber(value);
 }
 
 export function formatPhoneBR(value?: string | null) {
-  const digits = onlyDigits(value || '').slice(0, PHONE_DIGITS_MAX);
+  return formatPhoneNumberIntl(value);
+}
+
+function normalizePhoneForWhatsApp(value?: string | null) {
+  const normalized = normalizePhone(value);
+  if (!normalized) return '';
+  const digits = normalized.replace(/\D/g, '');
   if (!digits) return '';
-  if (digits.length <= 10) {
-    const ddd = digits.slice(0, 2);
-    const part1 = digits.slice(2, 6);
-    const part2 = digits.slice(6, 10);
-    if (digits.length <= 2) return `(${ddd}`;
-    if (digits.length <= 6) return `(${ddd}) ${part1}`;
-    return `(${ddd}) ${part1}-${part2}`.trim();
+  if (digits.startsWith('55')) return digits;
+  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+  return digits;
+}
+
+export function buildWhatsAppUrl(value?: string | null, message?: string) {
+  const phone = normalizePhoneForWhatsApp(value);
+  if (!phone) return '';
+  const params = new URLSearchParams();
+  if (message?.trim()) {
+    params.set('text', message.trim());
   }
-  const ddd = digits.slice(0, 2);
-  const part1 = digits.slice(2, 7);
-  const part2 = digits.slice(7, 11);
-  if (digits.length <= 2) return `(${ddd}`;
-  if (digits.length <= 7) return `(${ddd}) ${part1}`;
-  return `(${ddd}) ${part1}-${part2}`.trim();
+  const query = params.toString();
+  return `https://wa.me/${phone}${query ? `?${query}` : ''}`;
 }
 
 export function formatPostalCodeBR(value?: string | null) {

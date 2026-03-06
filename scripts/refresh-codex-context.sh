@@ -68,12 +68,16 @@ api_pid="$(lsof -tiTCP:3001 -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
 web_pid="$(safe_first_line "$web_pid")"
 api_pid="$(safe_first_line "$api_pid")"
 
-last_handoff_entry="$(tail -n 120 docs/HANDOFF_LOG.md 2>/dev/null | awk '/^## Entrada /{entry=$0} END{print entry}' || true)"
+if command -v rg >/dev/null 2>&1; then
+  last_handoff_entry="$(rg -N "^## Entrada .+" docs/HANDOFF_LOG.md 2>/dev/null | tail -n 1 || true)"
+else
+  last_handoff_entry="$(grep -E "^## Entrada .+" docs/HANDOFF_LOG.md 2>/dev/null | tail -n 1 || true)"
+fi
 last_handoff_entry="$(safe_first_line "$last_handoff_entry")"
 if [[ "$last_handoff_entry" == *" - "* ]]; then
   last_handoff_date="${last_handoff_entry#* - }"
 else
-  last_handoff_date="indisponivel"
+  last_handoff_date="$(file_timestamp docs/HANDOFF_LOG.md)"
 fi
 
 cat > "$OUT_FILE" <<EOF

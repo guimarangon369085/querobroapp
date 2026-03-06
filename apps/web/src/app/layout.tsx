@@ -4,37 +4,41 @@ import { Nav } from '@/components/nav';
 import { Topbar } from '@/components/topbar';
 import { BuilderRuntimeTheme } from '@/components/builder-runtime-theme';
 import { FeedbackProvider } from '@/components/feedback-provider';
-import { Manrope, Cormorant_Garamond } from 'next/font/google';
-
-const bodyFont = Manrope({ subsets: ['latin'], variable: '--font-body', display: 'swap' });
-const displayFont = Cormorant_Garamond({
-  subsets: ['latin'],
-  variable: '--font-display',
-  display: 'swap',
-  weight: ['400', '500', '600', '700'],
-});
+import { RuntimeRecovery } from '@/components/runtime-recovery';
+import { RenderStabilityGuard } from '@/components/render-stability-guard';
 
 export const metadata = {
-  title: 'Broa do Dia',
-  description: 'Operacao diaria da broa em cinco telas: pedidos, calendario, clientes, produtos e estoque.',
+  title: 'QUEROBROAPP',
+  description: 'Operacao diaria da Broa com pedidos, clientes, produtos e estoque.',
+  icons: {
+    icon: '/broa-mark.svg',
+    shortcut: '/broa-mark.svg',
+    apple: '/broa-mark.svg'
+  }
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="pt-BR">
-      <body className={`${bodyFont.variable} ${displayFont.variable}`}>
+      <body>
+        <RenderStabilityGuard />
+        <RuntimeRecovery />
         <BuilderRuntimeTheme />
         <FeedbackProvider>
           <div className="app-shell">
             <aside className="app-sidebar">
               <div className="app-brand">
-                <h1 className="app-brand__name">Broa do Dia</h1>
+                <div className="app-brand__logo">
+                  <h1 className="app-brand__name">@QUEROBROApp</h1>
+                </div>
               </div>
               <Nav />
             </aside>
             <div className="app-main">
-              <Topbar />
-              <main className="app-content">{children}</main>
+              <main className="app-content">
+                <Topbar />
+                {children}
+              </main>
             </div>
           </div>
         </FeedbackProvider>

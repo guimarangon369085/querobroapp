@@ -1,9 +1,7 @@
-const onlyDigits = (value: string) => value.replace(/\D/g, '');
+import { normalizePhoneNumber } from '@querobroapp/shared';
 
 export function normalizePhone(value?: string | null) {
-  if (!value) return null;
-  const digits = onlyDigits(value).slice(0, 11);
-  return digits.length ? digits : null;
+  return normalizePhoneNumber(value);
 }
 
 export function normalizeText(value?: string | null) {

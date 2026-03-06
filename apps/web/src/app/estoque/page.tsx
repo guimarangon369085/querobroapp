@@ -1,6 +1,15 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent
+} from 'react';
 import type {
   Bom,
   InventoryItem,
@@ -17,8 +26,16 @@ import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll'
 import { formatDecimalInputBR, formatMoneyInputBR, parseLocaleNumber } from '@/lib/format';
 import { useSurfaceMode } from '@/hooks/use-surface-mode';
 import { useTutorialSpotlight } from '@/hooks/use-tutorial-spotlight';
+import { AppIcon } from '@/components/app-icons';
 import { useFeedback } from '@/components/feedback-provider';
 import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
+import { FloatingActionButton } from '@/components/fab';
+import { StockCapacitySection, type StockCapacityEntry } from './stock-capacity-section';
+import {
+  StockWorkflowOverview,
+  type StockWorkflowOverviewKpis,
+  type StockWorkflowStep
+} from './stock-workflow-overview';
 
 const movementTypeOptions: Array<{ value: 'IN' | 'OUT' | 'ADJUST'; label: string }> = [
   { value: 'IN', label: 'Entrada' },
@@ -37,40 +54,17 @@ type BomItemInput = {
   qtyPerUnit?: string;
 };
 
-type OnlinePriceOffer = {
-  supplierName: string;
-  url: string;
-  title: string;
-  price: number;
-  estimatedTotal: number;
-  neededPacks: number;
-  packSize: number;
-  sourceType: 'CURATED' | 'SEARCH';
-  detail: string;
-};
-
-type OnlinePriceRecommendationItem = {
-  ingredientId: number;
-  inventoryItemId: number | null;
-  name: string;
-  unit: string;
+type StockBoardCard = {
+  item: InventoryItem;
+  status: 'critical' | 'attention' | 'ok';
+  balance: number;
+  requiredQty: number;
+  availableQty: number;
   shortageQty: number;
-  requiredQty: number | null;
-  availableQty: number | null;
-  packSize: number;
-  neededPacks: number;
-  query: string;
-  recommendedOffer: OnlinePriceOffer | null;
-  offers: OnlinePriceOffer[];
-  status: 'ok' | 'no-offers' | 'item-not-found';
-  detail: string;
-};
-
-type OnlinePriceRecommendationResponse = {
-  generatedAt: string;
-  date: string;
-  itemCount: number;
-  items: OnlinePriceRecommendationItem[];
+  isMissingNow: boolean;
+  isMissingSoon: boolean;
+  hasPlannedDemand: boolean;
+  breakdownSummary: string;
 };
 
 const TUTORIAL_QUERY_VALUE = 'primeira_vez';
@@ -91,18 +85,6 @@ function formatCurrencyBR(value: number) {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-function sanitizeExternalHttpUrl(url: string) {
-  try {
-    const parsed = new URL((url || '').trim());
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-      return parsed.toString();
-    }
-  } catch {
-    return '#';
-  }
-  return '#';
-}
-
 function inventoryCategoryLabel(category: string) {
   if (category === 'INGREDIENTE') return 'Ingrediente';
   if (category === 'EMBALAGEM_INTERNA') return 'Embalagem interna';
@@ -118,33 +100,6 @@ function orderProductionDateFromCreatedAt(createdAt?: string | null) {
     Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate() + 1)
   );
   return productionDate.toISOString().slice(0, 10);
-}
-
-function parseTimeToMinutes(value: string) {
-  const match = value.match(/^(\d{2}):(\d{2})$/);
-  if (!match) return null;
-  const hour = Number(match[1]);
-  const minute = Number(match[2]);
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
-  return hour * 60 + minute;
-}
-
-function formatMinutesAsDuration(totalMinutes: number) {
-  if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) return '0 min';
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (hours > 0 && minutes > 0) return `${hours}h ${minutes}min`;
-  if (hours > 0) return `${hours}h`;
-  return `${minutes}min`;
-}
-
-function formatMinutesAsClock(totalMinutes: number) {
-  if (!Number.isFinite(totalMinutes)) return '--:--';
-  const normalized = ((Math.trunc(totalMinutes) % 1440) + 1440) % 1440;
-  const hour = Math.floor(normalized / 60);
-  const minute = normalized % 60;
-  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
 function parseSaleUnitCount(label?: string | null) {
@@ -207,15 +162,44 @@ function StockPageContent() {
   const [flavorCombos, setFlavorCombos] = useState<Array<{ code: string; composition: string }>>([]);
   const [flavorComboTotal, setFlavorComboTotal] = useState<number>(0);
   const [flavorComboLoading, setFlavorComboLoading] = useState(false);
-  const [plannerExtraBroas, setPlannerExtraBroas] = useState<string>('0');
-  const [plannerDeadline, setPlannerDeadline] = useState<string>('15:00');
-  const { isOperationMode } = useSurfaceMode('estoque');
-  const [onlinePriceLoading, setOnlinePriceLoading] = useState(false);
-  const [onlinePriceError, setOnlinePriceError] = useState<string | null>(null);
-  const [onlinePriceRecommendations, setOnlinePriceRecommendations] =
-    useState<OnlinePriceRecommendationResponse | null>(null);
-  const onlinePriceSignatureRef = useRef<string>('');
+  const { isOperationMode, setViewMode } = useSurfaceMode('estoque', { defaultMode: 'operation' });
+  const [expandedStockCardId, setExpandedStockCardId] = useState<number | null>(null);
   const { confirm, notifyError, notifySuccess, notifyUndo } = useFeedback();
+  const focusMovement = useCallback(() => {
+    if (isOperationMode) {
+      setViewMode('full');
+      window.setTimeout(() => {
+        scrollToLayoutSlot('movement', {
+          focus: true,
+          focusSelector: 'input, select, textarea, button'
+        });
+      }, 0);
+      return;
+    }
+
+    scrollToLayoutSlot('movement', { focus: true, focusSelector: 'input, select, textarea, button' });
+  }, [isOperationMode, setViewMode]);
+
+  const focusAdvancedSlot = useCallback(
+    (slotId: string, focus = false) => {
+      if (isOperationMode) {
+        setViewMode('full');
+        window.setTimeout(() => {
+          scrollToLayoutSlot(slotId, {
+            focus,
+            focusSelector: focus ? 'input, select, textarea, button' : undefined
+          });
+        }, 0);
+        return;
+      }
+
+      scrollToLayoutSlot(slotId, {
+        focus,
+        focusSelector: focus ? 'input, select, textarea, button' : undefined
+      });
+    },
+    [isOperationMode, setViewMode]
+  );
 
   const load = useCallback(async () => {
     const [productsData, ordersData, itemsData, movementsData, bomsData] = await Promise.all([
@@ -323,17 +307,6 @@ function StockPageContent() {
   useEffect(() => {
     loadFlavorCombinations().catch(console.error);
   }, [loadFlavorCombinations]);
-
-  const syncSupplierCosts = async () => {
-    try {
-      await apiFetch('/receipts/supplier-prices/sync', { method: 'POST' });
-      await load();
-      notifySuccess('Custos sincronizados com as fontes de fornecedor.');
-      scrollToLayoutSlot('packaging');
-    } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Nao foi possivel sincronizar custos.');
-    }
-  };
 
   const parseRequiredNumber = (raw: string | number | null | undefined, fieldLabel: string) => {
     const parsed = parseLocaleNumber(raw);
@@ -654,6 +627,20 @@ function StockPageContent() {
     }
   };
 
+  const handleInteractiveStockCardKeyDown = (
+    event: KeyboardEvent<HTMLDivElement>,
+    action: () => void
+  ) => {
+    if (event.currentTarget !== event.target) return;
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    action();
+  };
+
+  const stopStockCardAction = (event: MouseEvent<HTMLElement>) => {
+    event.stopPropagation();
+  };
+
   const canSaveBom = Boolean(bomProductId) && bomName.trim().length > 0;
 
   const balances = useMemo(() => {
@@ -679,16 +666,6 @@ function StockPageContent() {
   }, [items]);
 
   const itemMap = useMemo(() => new Map(items.map((item) => [item.id!, item])), [items]);
-  const autoReceiptMovements = useMemo(
-    () =>
-      movements.filter(
-        (movement) =>
-          movement.source === 'CUPOM' ||
-          (movement.reason || '').toLowerCase().includes('entrada automatica por cupom')
-      ),
-    [movements]
-  );
-  const latestAutoReceiptMovements = useMemo(() => autoReceiptMovements.slice(0, 8), [autoReceiptMovements]);
 
   const bomCosts = useMemo(() => {
     return (boms as any[]).map((bom) => {
@@ -702,7 +679,12 @@ function StockPageContent() {
     });
   }, [boms, unitCostMap]);
 
-  const capacity = useMemo(() => {
+  const bomCostByBomId = useMemo(
+    () => new Map(bomCosts.map((entry) => [entry.bomId, entry.cost])),
+    [bomCosts]
+  );
+
+  const capacity = useMemo<StockCapacityEntry[]>(() => {
     return boms.map((bom: any) => {
       const perSaleItems = (bom.items || [])
         .map((item: any) => {
@@ -736,21 +718,6 @@ function StockPageContent() {
     });
   }, [boms, balances]);
 
-  const totalCapacityBoxes = useMemo(
-    () => capacity.reduce((sum, entry) => sum + Math.max(0, entry.maxUnits), 0),
-    [capacity]
-  );
-
-  const bomByProductId = useMemo(() => {
-    const map = new Map<number, any>();
-    for (const bom of boms as any[]) {
-      if (!map.has(bom.productId)) {
-        map.set(bom.productId, bom);
-      }
-    }
-    return map;
-  }, [boms]);
-
   const plannedOrders = useMemo(
     () =>
       orders.filter(
@@ -761,32 +728,6 @@ function StockPageContent() {
       ),
     [orders, d1Date]
   );
-
-  const plannedDemand = useMemo(() => {
-    let saleUnits = 0;
-    let broas = 0;
-    let itemsWithoutBom = 0;
-
-    for (const order of plannedOrders) {
-      for (const entry of order.items || []) {
-        const qty = Number(entry.quantity) || 0;
-        if (qty <= 0) continue;
-        saleUnits += qty;
-        const bom = bomByProductId.get(entry.productId);
-        if (!bom) {
-          itemsWithoutBom += 1;
-          continue;
-        }
-        broas += qty * parseSaleUnitCount(bom.saleUnitLabel);
-      }
-    }
-
-    return {
-      saleUnits,
-      broas,
-      itemsWithoutBom
-    };
-  }, [plannedOrders, bomByProductId]);
 
   const d1Shortages = useMemo(() => d1Rows.filter((row) => row.shortageQty > 0), [d1Rows]);
 
@@ -811,81 +752,36 @@ function StockPageContent() {
       });
   }, [d1Shortages, itemMap]);
 
-  const ingredientShortages = useMemo(
-    () => d1ShortagesByCategory.filter((row) => row.category === 'INGREDIENTE'),
-    [d1ShortagesByCategory]
-  );
+  const purchaseCandidates = useMemo(() => {
+    const existingIds = new Set(d1ShortagesByCategory.map((row) => row.ingredientId));
+    const immediateMissingRows = items
+      .filter((item) => !existingIds.has(item.id!) && (balances.get(item.id!) || 0) <= 0)
+      .map((item) => {
+        const balance = balances.get(item.id!) || 0;
+        return {
+          ingredientId: item.id!,
+          name: item.name,
+          unit: item.unit,
+          requiredQty: 0,
+          availableQty: balance,
+          shortageQty: Math.max(Math.abs(balance), 1),
+          category: item.category,
+          breakdown: []
+        };
+      });
 
-  const purchaseAlertItems = useMemo(() => ingredientShortages.slice(0, 3), [ingredientShortages]);
-  const purchaseAlertHiddenCount = Math.max(ingredientShortages.length - purchaseAlertItems.length, 0);
-  const hasImmediatePurchaseAlert = ingredientShortages.length > 0;
-  const ingredientShortageSignature = useMemo(
-    () =>
-      [d1Date, ...ingredientShortages.map((row) => `${row.ingredientId}:${Number(row.shortageQty).toFixed(3)}`)].join(
-        '|'
-      ),
-    [d1Date, ingredientShortages]
-  );
-
-  const onlineRecommendationsByIngredientId = useMemo(() => {
-    const map = new Map<number, OnlinePriceRecommendationItem>();
-    for (const item of onlinePriceRecommendations?.items || []) {
-      map.set(item.ingredientId, item);
-    }
-    return map;
-  }, [onlinePriceRecommendations]);
-
-  const fetchOnlinePriceRecommendations = useCallback(
-    async (force = false) => {
-      if (!ingredientShortages.length) {
-        setOnlinePriceRecommendations(null);
-        setOnlinePriceError(null);
-        onlinePriceSignatureRef.current = '';
-        return;
-      }
-
-      if (!force && onlinePriceSignatureRef.current === ingredientShortageSignature) {
-        return;
-      }
-
-      setOnlinePriceLoading(true);
-      setOnlinePriceError(null);
-      try {
-        const response = await apiFetch<OnlinePriceRecommendationResponse>(
-          '/receipts/supplier-prices/recommend-online',
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              date: d1Date,
-              shortages: ingredientShortages.map((row) => ({
-                ingredientId: row.ingredientId,
-                name: row.name,
-                unit: row.unit,
-                shortageQty: row.shortageQty,
-                requiredQty: row.requiredQty,
-                availableQty: row.availableQty
-              })),
-              maxSourcesPerItem: 3,
-              maxSearchResultsPerItem: 6
-            })
-          }
-        );
-        setOnlinePriceRecommendations(response);
-        onlinePriceSignatureRef.current = ingredientShortageSignature;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Nao foi possivel buscar precos online.';
-        setOnlinePriceError(message);
-      } finally {
-        setOnlinePriceLoading(false);
-      }
-    },
-    [d1Date, ingredientShortageSignature, ingredientShortages]
-  );
-
-  useEffect(() => {
-    if (!hasImmediatePurchaseAlert) return;
-    fetchOnlinePriceRecommendations(false).catch(console.error);
-  }, [fetchOnlinePriceRecommendations, hasImmediatePurchaseAlert]);
+    return [...d1ShortagesByCategory, ...immediateMissingRows]
+      .filter((row) => Number.isFinite(row.shortageQty) && row.shortageQty > 0)
+      .sort((a, b) => {
+        const criticalDelta = Number(b.availableQty <= 0) - Number(a.availableQty <= 0);
+        if (criticalDelta !== 0) return criticalDelta;
+        if (b.shortageQty !== a.shortageQty) return b.shortageQty - a.shortageQty;
+        return a.name.localeCompare(b.name, 'pt-BR');
+      });
+  }, [balances, d1ShortagesByCategory, items]);
+  const purchaseAlertItems = useMemo(() => purchaseCandidates.slice(0, 3), [purchaseCandidates]);
+  const purchaseAlertHiddenCount = Math.max(purchaseCandidates.length - purchaseAlertItems.length, 0);
+  const hasImmediatePurchaseAlert = purchaseCandidates.length > 0;
 
   const d1ShortageSummary = useMemo(() => {
     const ingredients = d1ShortagesByCategory.filter((row) => row.category === 'INGREDIENTE').length;
@@ -898,19 +794,93 @@ function StockPageContent() {
     return { ingredients, internalPackaging, externalPackaging };
   }, [d1ShortagesByCategory]);
 
-  const plannerExtra = useMemo(() => {
-    const parsed = parseLocaleNumber(plannerExtraBroas);
-    if (parsed === null || parsed < 0) return 0;
-    return parsed;
-  }, [plannerExtraBroas]);
+  const d1RowByIngredientId = useMemo(
+    () => new Map(d1Rows.map((row) => [row.ingredientId, row])),
+    [d1Rows]
+  );
 
-  const plannerTargetBroas = Math.max(0, Math.ceil(plannedDemand.broas + plannerExtra));
-  const plannerFornadas = plannerTargetBroas > 0 ? Math.ceil(plannerTargetBroas / 14) : 0;
-  const plannerOvenMinutes = plannerFornadas * 50;
-  const plannerDeadlineMinutes = parseTimeToMinutes(plannerDeadline);
-  const plannerStartMinutes =
-    plannerDeadlineMinutes == null ? null : plannerDeadlineMinutes - plannerOvenMinutes;
-  const plannerNeedsPreviousDay = plannerStartMinutes != null && plannerStartMinutes < 0;
+  const stockBoardCards = useMemo(() => {
+    return items
+      .map((item) => {
+        const balance = balances.get(item.id!) || 0;
+        const row = d1RowByIngredientId.get(item.id!);
+        const requiredQty = row?.requiredQty ?? 0;
+        const availableQty = row?.availableQty ?? balance;
+        const shortageQty = row?.shortageQty ?? 0;
+        const isMissingNow = balance <= 0;
+        const isMissingSoon = shortageQty > 0;
+        const hasPlannedDemand = requiredQty > 0;
+        const status: StockBoardCard['status'] = isMissingNow || isMissingSoon
+          ? 'critical'
+          : hasPlannedDemand
+          ? 'attention'
+          : 'ok';
+        const groupedBreakdown = new Map<string, number>();
+        for (const entry of row?.breakdown || []) {
+          const current = groupedBreakdown.get(entry.productName) || 0;
+          groupedBreakdown.set(entry.productName, current + entry.quantity);
+        }
+
+        return {
+          item,
+          status,
+          balance,
+          requiredQty,
+          availableQty,
+          shortageQty,
+          isMissingNow,
+          isMissingSoon,
+          hasPlannedDemand,
+          breakdownSummary: Array.from(groupedBreakdown.entries())
+            .map(([productName, quantity]) => `${productName}: ${formatQty(quantity)}`)
+            .join(' | ')
+        } satisfies StockBoardCard;
+      })
+      .sort((left, right) => {
+        const statusOrder = { critical: 0, attention: 1, ok: 2 } as const;
+        if (statusOrder[left.status] !== statusOrder[right.status]) {
+          return statusOrder[left.status] - statusOrder[right.status];
+        }
+        if (right.shortageQty !== left.shortageQty) {
+          return right.shortageQty - left.shortageQty;
+        }
+        if (left.item.category !== right.item.category) {
+          return inventoryCategoryLabel(left.item.category).localeCompare(
+            inventoryCategoryLabel(right.item.category),
+            'pt-BR'
+          );
+        }
+        return left.item.name.localeCompare(right.item.name, 'pt-BR');
+      });
+  }, [balances, d1RowByIngredientId, items]);
+
+  const criticalStockCardCount = useMemo(
+    () => stockBoardCards.filter((card) => card.status === 'critical').length,
+    [stockBoardCards]
+  );
+
+  const capacityWarningsCount = useMemo(
+    () =>
+      capacity.filter((entry) => entry.hasNegativeInput || entry.missingQtyDefinitions).length,
+    [capacity]
+  );
+
+  useEffect(() => {
+    if (stockBoardCards.length === 0) {
+      setExpandedStockCardId(null);
+      return;
+    }
+    if (
+      expandedStockCardId != null &&
+      stockBoardCards.some((card) => card.item.id === expandedStockCardId)
+    ) {
+      return;
+    }
+
+    const firstCritical = stockBoardCards.find((card) => card.status === 'critical');
+    setExpandedStockCardId(firstCritical?.item.id ?? stockBoardCards[0]?.item.id ?? null);
+  }, [expandedStockCardId, stockBoardCards]);
+
   const negativeBalanceItems = useMemo(
     () =>
       items.filter((item) => {
@@ -920,7 +890,11 @@ function StockPageContent() {
     [balances, items]
   );
 
-  const inventoryKpis = useMemo(() => {
+  const inventoryKpis = useMemo<StockWorkflowOverviewKpis & {
+    plannedOrders: number;
+    criticalCards: number;
+    negativeBalanceItems: number;
+  }>(() => {
     const totalItems = items.length;
     const ingredients = items.filter((i) => i.category === 'INGREDIENTE').length;
     const packaging = items.filter((i) => i.category !== 'INGREDIENTE').length;
@@ -928,22 +902,120 @@ function StockPageContent() {
       totalItems,
       ingredients,
       packaging,
-      d1Shortages: d1Shortages.length,
       plannedOrders: plannedOrders.length,
-      plannedBroas: plannerTargetBroas,
-      plannedFornadas: plannerFornadas,
-      capacityBoxes: totalCapacityBoxes,
+      criticalCards: criticalStockCardCount,
       negativeBalanceItems: negativeBalanceItems.length
     };
   }, [
-    d1Shortages.length,
+    criticalStockCardCount,
     items,
     negativeBalanceItems.length,
-    plannedOrders.length,
-    plannerFornadas,
-    plannerTargetBroas,
-    totalCapacityBoxes
+    plannedOrders.length
   ]);
+
+  const workflowSteps = useMemo<StockWorkflowStep[]>(
+    () => [
+      {
+        id: 'plan',
+        title: '1. Planejar',
+        summary: `${plannedOrders.length} pedido(s) ativos para ${d1Date}`,
+        detail:
+          d1Shortages.length > 0
+            ? `${d1Shortages.length} item(ns) com falta prevista no D+1.`
+            : 'Sem falta prevista no D+1.',
+        toneClass:
+          d1Shortages.length > 0
+            ? 'border-amber-200 bg-amber-50'
+            : 'border-emerald-200 bg-emerald-50',
+        actionLabel: 'Abrir D+1'
+      },
+      {
+        id: 'buy',
+        title: '2. Comprar',
+        summary:
+          purchaseCandidates.length > 0
+            ? `${purchaseCandidates.length} item(ns) pedem compra ou reposicao`
+            : 'Nenhuma compra urgente agora',
+        detail:
+          purchaseCandidates[0]
+            ? `${purchaseCandidates[0].name}: falta ${formatQty(purchaseCandidates[0].shortageQty)} ${purchaseCandidates[0].unit}.`
+            : 'Sem risco imediato no quadro.',
+        toneClass:
+          purchaseCandidates.length > 0
+            ? 'border-rose-200 bg-rose-50'
+            : 'border-emerald-200 bg-emerald-50',
+        actionLabel: 'Registrar entrada'
+      },
+      {
+        id: 'produce',
+        title: '3. Produzir',
+        summary:
+          criticalStockCardCount > 0
+            ? `${criticalStockCardCount} card(s) critico(s) afetam a producao`
+            : 'Sem bloqueio imediato para produzir',
+        detail:
+          capacityWarningsCount > 0
+            ? `${capacityWarningsCount} ficha(s) tecnica(s) precisam de ajuste para calcular capacidade.`
+            : `${capacity.length} ficha(s) tecnica(s) prontas para consulta de capacidade.`,
+        toneClass:
+          criticalStockCardCount > 0 || capacityWarningsCount > 0
+            ? 'border-amber-200 bg-amber-50'
+            : 'border-white/70 bg-white/80',
+        actionLabel: 'Ver capacidade'
+      },
+      {
+        id: 'check',
+        title: '4. Conferir',
+        summary:
+          negativeBalanceItems.length > 0
+            ? `${negativeBalanceItems.length} item(ns) com saldo negativo`
+            : 'Sem saldo negativo no momento',
+        detail:
+          movements.length > 0
+            ? `${movements.length} movimentacao(oes) registradas para auditoria rapida.`
+            : 'Sem historico de movimentacoes ainda.',
+        toneClass:
+          negativeBalanceItems.length > 0
+            ? 'border-amber-200 bg-amber-50'
+            : 'border-white/70 bg-white/80',
+        actionLabel: negativeBalanceItems.length > 0 ? 'Ver saldos' : 'Ver historico'
+      }
+    ],
+    [
+      capacity.length,
+      capacityWarningsCount,
+      criticalStockCardCount,
+      d1Date,
+      d1Shortages.length,
+      movements.length,
+      negativeBalanceItems.length,
+      plannedOrders.length,
+      purchaseCandidates
+    ]
+  );
+
+  const handleWorkflowStepAction = useCallback(
+    (stepId: StockWorkflowStep['id']) => {
+      if (stepId === 'plan') {
+        focusAdvancedSlot('d1');
+        return;
+      }
+      if (stepId === 'buy') {
+        focusMovement();
+        return;
+      }
+      if (stepId === 'produce') {
+        focusAdvancedSlot('capacity');
+        return;
+      }
+      if (negativeBalanceItems.length > 0) {
+        focusAdvancedSlot('balance');
+        return;
+      }
+      focusAdvancedSlot('movements');
+    },
+    [focusAdvancedSlot, focusMovement, negativeBalanceItems.length]
+  );
 
   const d1BreakdownSummary = (row: ProductionRequirementRow) => {
     const grouped = new Map<string, number>();
@@ -956,317 +1028,269 @@ function StockPageContent() {
       .join(' | ');
   };
 
+  const expandedStockCard =
+    stockBoardCards.find((card) => card.item.id === expandedStockCardId) ?? stockBoardCards[0] ?? null;
+
   return (
+    <>
     <BuilderLayoutProvider page="estoque">
       <section className="grid gap-8">
       <BuilderLayoutItemSlot
         id="header"
         className={isSpotlightSlot('header') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
       >
-      {hasImmediatePurchaseAlert ? (
-        <div className="stock-alert-card" role="alert" aria-live="polite">
-          <div className="stock-alert-card__head">
-            <div>
-              <p className="stock-alert-card__eyebrow">Alerta de compra imediata</p>
-              <p className="stock-alert-card__title">Novos pedidos sem estoque completo</p>
-              <p className="stock-alert-card__subtitle">
-                {plannedOrders.length} pedido(s) na fila para {d1Date} com falta de insumo.
-              </p>
-            </div>
-            <div className="stock-alert-card__kpi">
-              <span>{ingredientShortages.length} item(ns)</span>
-              <small>comprar agora</small>
-            </div>
+      <div className="stock-board-hero">
+        <div className="stock-board-hero__head">
+          <div>
+            <p className="stock-board-hero__eyebrow">Estoque por item</p>
+            <h2 className="stock-board-hero__title">O que comprar agora e o que vai faltar depois</h2>
           </div>
-          <div className="stock-alert-card__list">
+          <div className="stock-board-hero__summary">
+            <strong>{criticalStockCardCount}</strong>
+            <span>card(s) critico(s)</span>
+          </div>
+        </div>
+
+        <div className="stock-board-hero__stats">
+          <span className="stock-board-hero__stat">
+            <strong>{inventoryKpis.totalItems}</strong>
+            itens
+          </span>
+          <span className="stock-board-hero__stat">
+            <strong>{inventoryKpis.plannedOrders}</strong>
+            pedidos ativos
+          </span>
+          <span className="stock-board-hero__stat">
+            <strong>{inventoryKpis.ingredients}</strong>
+            ingredientes
+          </span>
+          <span className="stock-board-hero__stat">
+            <strong>{inventoryKpis.packaging}</strong>
+            embalagens
+          </span>
+        </div>
+
+        <div className="stock-board-hero__actions">
+          <button
+            type="button"
+            className="app-button app-button-primary"
+            onClick={() => {
+              load().catch(console.error);
+              loadD1(d1Date).catch(console.error);
+            }}
+          >
+            <AppIcon name="refresh" className="h-4 w-4" />
+            Atualizar quadro
+          </button>
+          {isOperationMode ? (
+            <button
+              type="button"
+              className="app-button app-button-ghost"
+              onClick={focusMovement}
+            >
+              <AppIcon name="tools" className="h-4 w-4" />
+              Abrir ferramentas
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="app-button app-button-ghost"
+                onClick={focusMovement}
+              >
+                <AppIcon name="plus" className="h-4 w-4" />
+                Registrar entrada manual
+              </button>
+              <button
+                type="button"
+                className="app-button app-button-ghost"
+                onClick={() => focusAdvancedSlot('d1')}
+              >
+                <AppIcon name="spark" className="h-4 w-4" />
+                Ver calculo completo D+1
+              </button>
+              <button
+                type="button"
+                className="app-button app-button-ghost"
+                onClick={() => {
+                  setViewMode('operation');
+                  scrollToLayoutSlot('ops');
+                }}
+              >
+                <AppIcon name="back" className="h-4 w-4" />
+                Voltar para cards
+              </button>
+            </>
+          )}
+        </div>
+        {hasImmediatePurchaseAlert ? (
+          <div className="stock-board-hero__queue" role="alert" aria-live="polite">
             {purchaseAlertItems.map((row) => (
-              <div key={`alert-${row.ingredientId}`} className="stock-alert-card__item">
-                <span className="stock-alert-card__item-name">{row.name}</span>
-                <span className="stock-alert-card__item-qty">
+              <div key={`alert-${row.ingredientId}`} className="stock-board-hero__queue-item">
+                <span className="stock-board-hero__queue-name">{row.name}</span>
+                <span className="stock-board-hero__queue-meta">
                   falta {formatQty(row.shortageQty)} {row.unit}
                 </span>
               </div>
             ))}
             {purchaseAlertHiddenCount > 0 ? (
-              <p className="stock-alert-card__more">
-                +{purchaseAlertHiddenCount} item(ns) no quadro completo.
-              </p>
+              <p className="stock-board-hero__queue-more">+{purchaseAlertHiddenCount} item(ns)</p>
             ) : null}
           </div>
-          <div className="stock-alert-card__online">
-            <div className="stock-alert-card__online-head">
-              <p className="stock-alert-card__online-title">Comparador online automatico</p>
-              <button
-                type="button"
-                className="app-button app-button-ghost stock-alert-card__refresh"
-                onClick={() => fetchOnlinePriceRecommendations(true)}
-                disabled={onlinePriceLoading}
-              >
-                {onlinePriceLoading ? 'Buscando...' : 'Atualizar precos'}
-              </button>
-            </div>
-            {onlinePriceError ? (
-              <p className="stock-alert-card__online-error">{onlinePriceError}</p>
-            ) : null}
-            <div className="stock-alert-card__offers">
-              {purchaseAlertItems.map((row) => {
-                const recommendation = onlineRecommendationsByIngredientId.get(row.ingredientId);
-                const bestOffer = recommendation?.recommendedOffer;
-                return (
-                  <div key={`offer-${row.ingredientId}`} className="stock-alert-card__offer">
-                    <p className="stock-alert-card__offer-name">{row.name}</p>
-                    {bestOffer ? (
-                      <>
-                        <p className="stock-alert-card__offer-line">
-                          Recomendado: <strong>{bestOffer.supplierName}</strong> • {formatCurrencyBR(bestOffer.price)} / pacote
-                        </p>
-                        <p className="stock-alert-card__offer-meta">
-                          {bestOffer.neededPacks} pacote(s) para cobrir falta • total estimado{' '}
-                          {formatCurrencyBR(bestOffer.estimatedTotal)}
-                        </p>
-                        <a
-                          className="stock-alert-card__offer-link"
-                          href={sanitizeExternalHttpUrl(bestOffer.url)}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                        >
-                          Comprar agora
-                        </a>
-                      </>
-                    ) : (
-                      <p className="stock-alert-card__offer-meta">
-                        {onlinePriceLoading
-                          ? 'Buscando ofertas online para este item...'
-                          : 'Sem oferta online confiavel por enquanto.'}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+        ) : (
+          <div className="stock-board-hero__queue stock-board-hero__queue--ok">
+            <p className="stock-board-hero__queue-empty">Nenhum item com falta prevista para a data selecionada.</p>
           </div>
-          <div className="stock-alert-card__actions">
-            <button
-              type="button"
-              className="app-button app-button-primary"
-              onClick={() => scrollToLayoutSlot('ops', { focus: true })}
-            >
-              Ir para compras agora
-            </button>
-            <button
-              type="button"
-              className="app-button app-button-ghost"
-              onClick={() => scrollToLayoutSlot('d1')}
-            >
-              Ver quadro completo
-            </button>
-          </div>
-        </div>
-      ) : null}
+        )}
+      </div>
       {inventoryKpis.negativeBalanceItems > 0 ? (
         <div className="stock-flag stock-flag--warning">
           {inventoryKpis.negativeBalanceItems} item(ns) com saldo negativo precisam de ajuste.
         </div>
       ) : null}
+      <div
+        className={`stock-surface-banner ${
+          isOperationMode ? 'stock-surface-banner--operation' : 'stock-surface-banner--advanced'
+        }`}
+      >
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className={`app-button ${isOperationMode ? 'app-button-primary' : 'app-button-ghost'}`}
+            onClick={() => setViewMode('operation')}
+          >
+            Foco rapido
+          </button>
+          <button
+            type="button"
+            className={`app-button ${isOperationMode ? 'app-button-ghost' : 'app-button-primary'}`}
+            onClick={() => setViewMode('full')}
+          >
+            Ferramentas
+          </button>
+        </div>
+      </div>
       </BuilderLayoutItemSlot>
 
       <BuilderLayoutItemSlot
         id="kpis"
         className={isSpotlightSlot('kpis') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
       >
-      <div className="app-panel flex flex-wrap items-center gap-2 text-sm">
-        <span className="rounded-full border border-white/80 bg-white/70 px-3 py-1 text-neutral-700">
-          {inventoryKpis.plannedOrders} pedidos
-        </span>
-        <span className="rounded-full border border-white/80 bg-white/70 px-3 py-1 text-neutral-700">
-          {inventoryKpis.plannedBroas} broas
-        </span>
-        <span className="rounded-full border border-white/80 bg-white/70 px-3 py-1 text-neutral-700">
-          {inventoryKpis.plannedFornadas} fornadas
-        </span>
-        <span className="rounded-full border border-white/80 bg-white/70 px-3 py-1 text-neutral-700">
-          {inventoryKpis.d1Shortages} faltas D+1
-        </span>
-        <span
-          className={`rounded-full border border-white/80 px-3 py-1 ${inventoryKpis.negativeBalanceItems > 0 ? 'bg-amber-100 text-amber-900' : 'bg-white/70 text-neutral-700'}`}
-        >
-          capacidade {inventoryKpis.capacityBoxes}
-        </span>
-      </div>
+      <StockWorkflowOverview
+        steps={workflowSteps}
+        inventoryKpis={inventoryKpis}
+        onStepAction={handleWorkflowStepAction}
+      />
       </BuilderLayoutItemSlot>
 
       <BuilderLayoutItemSlot
         id="ops"
         className={isSpotlightSlot('ops') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
       >
-      <div className="stock-ops-grid">
-        <div className="app-panel stock-ops-panel stock-ops-panel--production grid gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 className="text-xl font-semibold">Ritmo de fornadas para {d1Date}</h3>
-              <p className="text-sm text-neutral-500">
-                Regra atual: 14 broas por fornada e ciclo de 50min (35 + 15).
-              </p>
-            </div>
-            {plannedDemand.itemsWithoutBom > 0 ? (
-              <p className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-900">
-                {plannedDemand.itemsWithoutBom} item(ns) sem BOM
-              </p>
-            ) : null}
-          </div>
+      <div className="stock-item-board">
+        {stockBoardCards.map((card) => {
+          const isExpanded = expandedStockCard?.item.id === card.item.id;
+          const cardStatusLabel =
+            card.status === 'critical' ? 'Comprar agora' : card.status === 'attention' ? 'Monitorar' : 'OK';
+          const cardStatusDetail = card.isMissingNow
+            ? 'Sem saldo agora'
+            : card.isMissingSoon
+            ? 'Vai faltar para os proximos pedidos'
+            : card.hasPlannedDemand
+            ? 'Tem consumo previsto'
+            : 'Sem risco imediato';
 
-          <div className="flex flex-wrap gap-2 text-sm">
-            <span className="rounded-full border border-white/80 bg-white/70 px-3 py-1 text-neutral-700">
-              {plannedDemand.saleUnits} caixas
-            </span>
-            <span className="rounded-full border border-white/80 bg-white/70 px-3 py-1 text-neutral-700">
-              {formatQty(plannedDemand.broas)} base
-            </span>
-            <span className="rounded-full border border-white/80 bg-white/70 px-3 py-1 text-neutral-700">
-              alvo {plannerTargetBroas}
-            </span>
-            <span className="rounded-full border border-emerald-200 bg-emerald-50/70 px-3 py-1 text-emerald-900">
-              {plannerFornadas} fornadas
-            </span>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-[1fr_1fr_1.2fr]">
-            <label className="text-sm text-neutral-600">
-              Margem extra (broas)
-              <input
-                className="app-input mt-1"
-                type="number"
-                value={plannerExtraBroas}
-                onChange={(event) => setPlannerExtraBroas(event.target.value)}
-                inputMode="numeric"
-                min="0"
-                step="1"
-              />
-            </label>
-            <label className="text-sm text-neutral-600">
-              Hora limite de entrega
-              <input
-                className="app-input mt-1"
-                type="time"
-                value={plannerDeadline}
-                onChange={(event) => setPlannerDeadline(event.target.value)}
-              />
-            </label>
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-3 text-sm text-emerald-900">
-              <p>{formatMinutesAsDuration(plannerOvenMinutes)} de forno</p>
-              <p className="mt-1">
-                Inicio:{' '}
-                {plannerStartMinutes == null
-                  ? '--:--'
-                  : plannerNeedsPreviousDay
-                  ? `dia anterior, ${formatMinutesAsClock(plannerStartMinutes)}`
-                  : formatMinutesAsClock(plannerStartMinutes)}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="app-panel stock-ops-panel stock-ops-panel--shopping grid gap-3">
-          <div className="flex flex-wrap gap-2 text-xs">
-            <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
-              Ingredientes: {d1ShortageSummary.ingredients}
-            </span>
-            <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
-              Emb. interna: {d1ShortageSummary.internalPackaging}
-            </span>
-            <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
-              Emb. externa: {d1ShortageSummary.externalPackaging}
-            </span>
-          </div>
-
-          <div className="grid max-h-[340px] gap-2 overflow-auto pr-1">
-            {d1ShortagesByCategory.length === 0 ? (
-              <p className="text-sm text-emerald-700">Sem faltas para a data selecionada.</p>
-            ) : (
-              d1ShortagesByCategory.map((row) => (
-                <div key={`short-${row.ingredientId}`} className="rounded-xl border border-white/70 bg-white/70 px-3 py-2">
-                  <p className="text-sm font-semibold text-neutral-900">{row.name}</p>
-                  <p className="text-xs text-neutral-600">
-                    {inventoryCategoryLabel(row.category)} • falta {formatQty(row.shortageQty)} {row.unit}
-                  </p>
-                  <p className="text-xs text-neutral-500">
-                    disponivel {formatQty(row.availableQty)} • necessario {formatQty(row.requiredQty)}
-                  </p>
+          return (
+            <div
+              key={card.item.id}
+              className={`stock-item-card stock-item-card--${card.status} ${isExpanded ? 'stock-item-card--expanded' : ''}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => setExpandedStockCardId(card.item.id!)}
+              onKeyDown={(event) =>
+                handleInteractiveStockCardKeyDown(event, () => setExpandedStockCardId(card.item.id!))
+              }
+            >
+              <div className="stock-item-card__head">
+                <div className="stock-item-card__head-main">
+                  <div>
+                    <p className="stock-item-card__category">{inventoryCategoryLabel(card.item.category)}</p>
+                    <h3 className="stock-item-card__title">{card.item.name}</h3>
+                  </div>
+                  <span className="stock-item-card__chevron" aria-hidden="true" />
                 </div>
-              ))
-            )}
-          </div>
+                <span className={`stock-item-card__badge stock-item-card__badge--${card.status}`}>
+                  {cardStatusLabel}
+                </span>
+              </div>
 
-          <div className="app-form-actions">
-            <button
-              type="button"
-              className="app-button app-button-primary"
-              onClick={() => scrollToLayoutSlot('movement', { focus: true })}
-            >
-              Registrar compra/agora
-            </button>
-            <button
-              type="button"
-              className="app-button app-button-ghost"
-              onClick={() => scrollToLayoutSlot('d1')}
-            >
-              Abrir quadro D+1
-            </button>
-          </div>
-        </div>
+              <p className="stock-item-card__status">{cardStatusDetail}</p>
+
+              <div className="stock-item-card__metrics">
+                <div className="stock-item-card__metric">
+                  <span>Saldo</span>
+                  <strong>
+                    {formatQty(card.balance)} {card.item.unit}
+                  </strong>
+                </div>
+                <div className="stock-item-card__metric">
+                  <span>Precisa D+1</span>
+                  <strong>
+                    {formatQty(card.requiredQty)} {card.item.unit}
+                  </strong>
+                </div>
+                <div className="stock-item-card__metric">
+                  <span>Falta</span>
+                  <strong className={card.shortageQty > 0 ? 'text-red-700' : 'text-emerald-700'}>
+                    {formatQty(card.shortageQty)} {card.item.unit}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="stock-item-card__meta">
+                <span>
+                  Pack: {card.item.purchasePackSize > 0 ? `${formatQty(card.item.purchasePackSize)} ${card.item.unit}` : 'nao definido'}
+                </span>
+                <span>
+                  Custo pack:{' '}
+                  {card.item.purchasePackCost && card.item.purchasePackCost > 0
+                    ? formatCurrencyBR(card.item.purchasePackCost)
+                    : 'nao definido'}
+                </span>
+              </div>
+
+              {card.breakdownSummary ? (
+                <p className="stock-item-card__breakdown">{card.breakdownSummary}</p>
+              ) : (
+                <p className="stock-item-card__breakdown stock-item-card__breakdown--muted">
+                  Sem consumo previsto nos proximos pedidos.
+                </p>
+              )}
+
+              <div className="stock-item-card__expand" aria-hidden={!isExpanded}>
+                <div className="stock-item-card__expand-inner">
+                  <div className="stock-item-card__expanded">
+                    <div className="stock-item-card__offer stock-item-card__offer--empty">
+                      <p className="stock-item-card__offer-title">Reposicao externa indisponivel.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
       </BuilderLayoutItemSlot>
 
       {!isOperationMode ? (
-      <BuilderLayoutItemSlot id="capacity">
-      <details className="app-details">
-      <summary>Capacidade por produto</summary>
-      <div className="app-panel mt-3 grid gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-xl font-semibold">Capacidade por produto</h3>
-          <p className="text-sm text-neutral-500">Estimativa de caixas e custo atual por ficha tecnica</p>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          {capacity.map((entry) => (
-            <div
-              key={entry.bom.id}
-              className={`app-panel ${entry.hasNegativeInput || entry.missingQtyDefinitions ? 'stock-capacity-card--warning' : ''}`}
-            >
-              <p className="font-semibold">{entry.bom.name}</p>
-              <p className="text-sm text-neutral-500">
-                Produto: {entry.bom.product?.name || 'Produto'}
-              </p>
-              <p className="text-sm text-neutral-500">
-                Capacidade: {entry.maxUnits} caixas
-              </p>
-              {entry.limitingItemName ? (
-                <p className="text-xs text-neutral-500">Gargalo: {entry.limitingItemName}</p>
-              ) : null}
-              {entry.hasNegativeInput ? (
-                <p className="text-xs font-semibold text-rose-700">Saldo negativo impactando a capacidade.</p>
-              ) : null}
-              {entry.missingQtyDefinitions ? (
-                <p className="text-xs font-semibold text-amber-700">BOM sem quantidades suficientes para calcular capacidade.</p>
-              ) : null}
-              <p className="text-sm text-neutral-500">
-                Custo por caixa: R${' '}
-                {(bomCosts.find((cost) => cost.bomId === entry.bom.id)?.cost ?? 0).toFixed(2)}
-              </p>
-            </div>
-          ))}
-          {capacity.length === 0 && (
-            <div className="app-panel border-dashed text-sm text-neutral-500">
-              Nenhuma BOM cadastrada.
-            </div>
-          )}
-        </div>
-      </div>
-      </details>
-      </BuilderLayoutItemSlot>
-      ) : null}
-
       <BuilderLayoutItemSlot id="d1">
       <div className="app-panel grid gap-4">
+        <div className="grid gap-1">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">1. Planejar</p>
+          <p className="text-sm text-neutral-600">
+            Veja a demanda e as faltas previstas antes de comprar ou produzir.
+          </p>
+        </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span className="text-sm font-semibold text-neutral-700">
             D+1 ({d1Basis === 'deliveryDate' ? 'data de entrega' : 'pedido + 1 dia'})
@@ -1354,9 +1378,17 @@ function StockPageContent() {
         ) : null}
       </div>
       </BuilderLayoutItemSlot>
+      ) : null}
 
+      {!isOperationMode ? (
       <BuilderLayoutItemSlot id="movement">
       <div className="app-panel grid gap-4">
+        <div className="grid gap-1">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">2. Comprar</p>
+          <p className="text-sm text-neutral-600">
+            Registre a entrada quando a compra chegar ou ajuste o saldo manualmente.
+          </p>
+        </div>
         <div className="grid gap-3 md:grid-cols-4">
           <select
             className="app-select"
@@ -1404,6 +1436,19 @@ function StockPageContent() {
         </div>
       </div>
       </BuilderLayoutItemSlot>
+      ) : null}
+
+      {!isOperationMode ? (
+      <BuilderLayoutItemSlot id="capacity">
+      <StockCapacitySection
+        capacity={capacity}
+        bomCostByBomId={bomCostByBomId}
+        selectedBomId={editingBomId}
+        onSelectBom={startEditBom}
+        onCardKeyDown={handleInteractiveStockCardKeyDown}
+      />
+      </BuilderLayoutItemSlot>
+      ) : null}
 
       {!isOperationMode ? (
       <BuilderLayoutItemSlot
@@ -1411,7 +1456,7 @@ function StockPageContent() {
         className={isSpotlightSlot('bom') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
       >
       <details className="app-details">
-      <summary>Fichas tecnicas</summary>
+      <summary>3. Produzir: fichas tecnicas</summary>
       <div className="app-panel mt-3 grid gap-4">
         <div ref={bomSectionRef} className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-semibold">Fichas tecnicas</h3>
@@ -1520,68 +1565,86 @@ function StockPageContent() {
         </div>
 
         <div className="grid gap-3">
-          {boms.map((bom: any) => (
-            <div key={bom.id} className="app-panel">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="font-semibold">{bom.name}</p>
-                  <p className="text-sm text-neutral-500">
-                    Produto: {bom.product?.name || 'Produto'} • {bom.saleUnitLabel || 'Unidade'}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    className="app-button app-button-ghost"
-                    onClick={() => startEditBom(bom)}
-                  >
-                    Editar
-                  </button>
-                  <button
-                    className="app-button app-button-danger"
-                    onClick={() => removeBom(bom.id)}
-                  >
-                    Remover
-                  </button>
-                </div>
-              </div>
-              <div className="mt-3 grid gap-2 text-sm text-neutral-500">
-                {(bom.items || []).map((item: any) => (
-                  <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/60 bg-white/70 px-3 py-2">
-                    <div>
-                      <p className="font-medium text-neutral-800">
-                        {item.item?.name || `Item ${item.itemId}`}
-                      </p>
-                      <p className="text-xs text-neutral-500">
-                        Peso: {item.qtyPerSaleUnit ?? item.qtyPerUnit ?? item.qtyPerRecipe ?? '-'} {item.item?.unit || ''}
-                        {' • '}
-                        Valor: {formatCurrencyBR(item.item?.purchasePackCost ?? 0)}
-                      </p>
+          {boms.map((bom: any) => {
+            const isExpanded = editingBomId === bom.id;
+            return (
+              <div
+                key={bom.id}
+                className={`app-panel app-panel--interactive app-panel--expandable ${
+                  isExpanded ? 'app-panel--expanded' : ''
+                }`}
+                role="button"
+                tabIndex={0}
+                onClick={() => startEditBom(bom)}
+                onKeyDown={(event) =>
+                  handleInteractiveStockCardKeyDown(event, () => startEditBom(bom))
+                }
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-3">
+                      <p className="truncate font-semibold">{bom.name}</p>
+                      <span className="app-panel__chevron" aria-hidden="true" />
                     </div>
-                    {onlineRecommendationsByIngredientId.get(item.itemId)?.recommendedOffer ? (
-                      <a
-                        className="app-button app-button-ghost"
-                        href={sanitizeExternalHttpUrl(
-                          onlineRecommendationsByIngredientId.get(item.itemId)?.recommendedOffer?.url || ''
-                        )}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                      >
-                        Comprar
-                      </a>
-                    ) : null}
+                    <p className="mt-1 text-sm text-neutral-500">
+                      Produto: {bom.product?.name || 'Produto'} • {bom.saleUnitLabel || 'Unidade'}
+                    </p>
                   </div>
-                ))}
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="app-button app-button-ghost"
+                      onClick={(event) => {
+                        stopStockCardAction(event);
+                        startEditBom(bom);
+                      }}
+                    >
+                      Editar
+                    </button>
+                    <button
+                      type="button"
+                      className="app-button app-button-danger"
+                      onClick={(event) => {
+                        stopStockCardAction(event);
+                        void removeBom(bom.id);
+                      }}
+                    >
+                      Remover
+                    </button>
+                  </div>
+                </div>
+                <div className="app-panel__expand" aria-hidden={!isExpanded}>
+                  <div className="app-panel__expand-inner">
+                    <div className="app-panel__expand-surface grid gap-2 text-sm text-neutral-500">
+                      {(bom.items || []).length === 0 ? (
+                        <p>Nenhum item nessa ficha.</p>
+                      ) : (
+                        (bom.items || []).map((item: any) => (
+                          <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/60 bg-white/70 px-3 py-2">
+                            <div>
+                              <p className="font-medium text-neutral-800">
+                                {item.item?.name || `Item ${item.itemId}`}
+                              </p>
+                              <p className="text-xs text-neutral-500">
+                                Peso: {item.qtyPerSaleUnit ?? item.qtyPerUnit ?? item.qtyPerRecipe ?? '-'} {item.item?.unit || ''}
+                                {' • '}
+                                Valor: {formatCurrencyBR(item.item?.purchasePackCost ?? 0)}
+                              </p>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="app-panel">
           <p className="font-semibold text-neutral-900">
             Combinacoes de sabores (7 broas): {flavorComboTotal}
-          </p>
-          <p className="mt-1 text-sm text-neutral-600">
-            Mostrando as primeiras {flavorCombos.length} combinacoes para consulta rapida.
           </p>
           <div className="mt-3 grid gap-2 text-sm text-neutral-700">
             {flavorCombos.length === 0 ? (
@@ -1603,7 +1666,7 @@ function StockPageContent() {
       {!isOperationMode ? (
       <BuilderLayoutItemSlot id="packaging">
       <details className="app-details">
-      <summary>Custos de embalagem</summary>
+      <summary>2. Comprar: custos de embalagem</summary>
       <div className="app-panel mt-3 grid gap-4">
         <h3 className="text-lg font-semibold">Custo de compra por embalagem</h3>
         <div className="grid gap-3 md:grid-cols-3">
@@ -1643,9 +1706,6 @@ function StockPageContent() {
           />
         </div>
         <div className="app-form-actions app-form-actions--mobile-sticky">
-          <button className="app-button app-button-ghost" onClick={syncSupplierCosts}>
-            Sincronizar custos
-          </button>
           <button className="app-button app-button-primary" onClick={updateItem}>
             Atualizar custo
           </button>
@@ -1655,35 +1715,75 @@ function StockPageContent() {
       </BuilderLayoutItemSlot>
       ) : null}
 
+      {!isOperationMode ? (
       <BuilderLayoutItemSlot id="balance">
       <details className="app-details">
-        <summary>Saldo por item</summary>
+        <summary>4. Conferir: saldo por item</summary>
       <div className="mt-3 grid gap-3">
-        {items.map((item) => (
-          <div key={item.id} className="app-panel">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="font-semibold">{item.name}</p>
-              <button
-                className="app-button app-button-danger"
-                onClick={() => removeItem(item.id!)}
-              >
-                Remover
-              </button>
+        {items.map((item) => {
+          const isExpanded = editingItemId === item.id;
+          return (
+            <div
+              key={item.id}
+              className={`app-panel app-panel--interactive app-panel--expandable ${
+                isExpanded ? 'app-panel--expanded' : ''
+              }`}
+              role="button"
+              tabIndex={0}
+              onClick={() => startEditItem(item)}
+              onKeyDown={(event) =>
+                handleInteractiveStockCardKeyDown(event, () => startEditItem(item))
+              }
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-3">
+                    <p className="truncate font-semibold">{item.name}</p>
+                    <span className="app-panel__chevron" aria-hidden="true" />
+                  </div>
+                  <p className="mt-1 text-sm text-neutral-500">
+                    {inventoryCategoryLabel(item.category)} • {balances.get(item.id!) ?? 0} {item.unit}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="app-button app-button-danger"
+                  onClick={(event) => {
+                    stopStockCardAction(event);
+                    void removeItem(item.id!);
+                  }}
+                >
+                  Remover
+                </button>
+              </div>
+              <div className="app-panel__expand" aria-hidden={!isExpanded}>
+                <div className="app-panel__expand-inner">
+                  <div className="app-panel__expand-surface grid gap-2 text-sm text-neutral-600">
+                    <p>Custo unitario: R$ {(unitCostMap.get(item.id!) ?? 0).toFixed(4)}</p>
+                    <p>
+                      Pack: {item.purchasePackSize && item.purchasePackSize > 0 ? `${formatQty(item.purchasePackSize)} ${item.unit}` : 'nao definido'}
+                    </p>
+                    <p>
+                      Custo pack:{' '}
+                      {item.purchasePackCost && item.purchasePackCost > 0
+                        ? formatCurrencyBR(item.purchasePackCost)
+                        : 'nao definido'}
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
-            <p className="text-sm text-neutral-500">
-              {inventoryCategoryLabel(item.category)} • {balances.get(item.id!) ?? 0} {item.unit} • custo unitario R${' '}
-              {(unitCostMap.get(item.id!) ?? 0).toFixed(4)}
-            </p>
-          </div>
-        ))}
+          );
+        })}
       </div>
       </details>
       </BuilderLayoutItemSlot>
+      ) : null}
 
       {!isOperationMode ? (
       <BuilderLayoutItemSlot id="movements">
       <details className="app-details">
-        <summary>Historico de movimentacoes</summary>
+        <summary>4. Conferir: historico de movimentacoes</summary>
       <div className="mt-3 grid gap-3">
         <div className="app-inline-actions">
           <button
@@ -1693,28 +1793,6 @@ function StockPageContent() {
           >
             Limpar todas as movimentacoes
           </button>
-        </div>
-        <div className="app-panel">
-          <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">
-            Entradas automaticas por cupom
-          </p>
-          <p className="mt-1 text-sm text-neutral-700">
-            Itens aplicados: <strong>{autoReceiptMovements.length}</strong>
-          </p>
-          <div className="mt-2 grid gap-1 text-xs text-neutral-600">
-            {latestAutoReceiptMovements.length === 0 ? (
-              <p>Nenhuma entrada automatica registrada ainda.</p>
-            ) : (
-              latestAutoReceiptMovements.map((movement) => (
-                <p key={`auto-${movement.id}`}>
-                  {itemMap.get(movement.itemId)?.name || `Item ${movement.itemId}`} •{' '}
-                  {formatQty(movement.quantity)} {itemMap.get(movement.itemId)?.unit || 'un'} •{' '}
-                  origem: {movement.sourceLabel || 'Cupom fiscal'} •{' '}
-                  custo unitario: R$ {(movement.unitCost || 0).toFixed(4)}
-                </p>
-              ))
-            )}
-          </div>
         </div>
         {movements.map((movement) => (
           <div key={movement.id} className="app-panel text-sm">
@@ -1740,6 +1818,11 @@ function StockPageContent() {
 
       </section>
     </BuilderLayoutProvider>
+    <FloatingActionButton
+      label={isOperationMode ? 'Abrir ferramentas' : 'Nova movimentacao'}
+      onClick={focusMovement}
+    />
+    </>
   );
 }
 

@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  trust:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -36,11 +36,5 @@ jobs:
       - name: Check Prisma schema drift
         run: pnpm check:prisma-drift
 
-      - name: Lint
-        run: pnpm lint
-
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Build (excluding mobile)
-        run: pnpm build:ci
+      - name: Run QA trust gate
+        run: QA_TRUST_INCLUDE_LINT=1 pnpm qa:trust

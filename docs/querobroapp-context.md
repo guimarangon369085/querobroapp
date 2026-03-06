@@ -1,6 +1,6 @@
 # QUEROBROAPP_CONTEXT
 
-Ultima atualizacao: 2026-03-03
+Ultima atualizacao: 2026-03-04
 
 ## Missao do produto
 
@@ -10,8 +10,8 @@ Facilitar a operacao diaria da broa com interface simples, agenda centrada em `P
 
 - Web operacional com navegacao fixa em `Pedidos`, `Clientes`, `Produtos`, `Estoque`.
 - `Pedidos` e a tela-base do app e concentra `Dia`, `Semana` e `Mes`.
-- A visao de `Dia` abre por padrao e cobre `08:00` a `22:59` em grade compacta, com botao flutuante “Novo pedido” e lista completa de pedidos abaixo do calendario; cards de `Semana`/`Mes` abrem `Dia` na mesma data.
-- Demais telas tem CTA flutuante contextual (novo cliente/produto/movimentacao).
+- A visao de `Dia` abre por padrao e cobre `08:00` a `21:59` em grade compacta, com criacao de pedido no painel e lista completa de pedidos abaixo do calendario; cards de `Semana`/`Mes` abrem `Dia` na mesma data.
+- CTAs contextuais por tela: `Pedidos` usa acao `Criar` no painel, `Clientes/Produtos` usam acao inline/sticky e `Estoque` usa botao flutuante `Nova movimentacao`.
 - `/calendario` existe apenas como alias legado com redirect permanente para `/pedidos`.
 - O fluxo local continua funcional de ponta a ponta: pedido manual -> confirmacao -> fila de producao -> baixa real de estoque -> entrega local -> pagamento.
 - Integracoes externas foram removidas da estrutura atual para que a operacao principal evolua sem dependencias de terceiros.
@@ -31,8 +31,8 @@ Facilitar a operacao diaria da broa com interface simples, agenda centrada em `P
 ## Como religar rapido apos reboot
 
 1. Rodar `./scripts/stop-all.sh`.
-2. Se quiser validar do zero, rodar `pnpm cleanup:test-data`.
-3. Rodar `./scripts/dev-all.sh`.
+2. Rodar `./scripts/dev-all.sh`.
+3. Se quiser validar do zero, rodar `pnpm cleanup:test-data` com API/Web ativos.
 4. Manter a janela aberta e abrir `http://127.0.0.1:3000/pedidos`.
 5. Validar `http://127.0.0.1:3001/health`.
 6. Se o browser ja estava aberto, fazer hard refresh.

@@ -8,7 +8,6 @@ type RoleToken = {
 type SecurityRuntimeConfig = {
   enabled: boolean;
   tokensBySecret: Map<string, RoleToken>;
-  receiptsToken: string;
 };
 
 const authRoleSet = new Set<AuthRole>(authRoles);
@@ -23,8 +22,7 @@ function parseBooleanEnv(value: string | undefined, fallback: boolean) {
 
 function parseAuthEnabled() {
   const env = process.env.APP_AUTH_ENABLED;
-  const isDev = (process.env.NODE_ENV || 'development') === 'development';
-  return parseBooleanEnv(env, !isDev);
+  return parseBooleanEnv(env, true);
 }
 
 function parseRoleToken(raw: string, index: number): [string, RoleToken] | null {
@@ -70,8 +68,7 @@ export function getSecurityRuntimeConfig() {
 
   cachedConfig = {
     enabled: parseAuthEnabled(),
-    tokensBySecret: parseAuthTokens(),
-    receiptsToken: (process.env.RECEIPTS_API_TOKEN || '').trim()
+    tokensBySecret: parseAuthTokens()
   };
 
   return cachedConfig;

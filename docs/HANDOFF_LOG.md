@@ -2,6 +2,17 @@
 
 Registro cronologico de handoffs entre canais.
 
+## Como ler este arquivo
+
+- Este arquivo e historico cronologico, nao snapshot atual.
+- Entradas antigas podem conter estados superados por design.
+- Nao use uma entrada isolada como fonte de verdade atual.
+- Verdade atual deve ser lida primeiro em:
+  - `docs/querobroapp-context.md`
+  - `docs/PROJECT_SNAPSHOT.md`
+  - `docs/NEXT_STEP_PLAN.md`
+- Use o handoff apenas para entender a sequencia de decisoes, mudancas e riscos ao longo do tempo.
+
 ## Entrada 001
 
 ### 1) Metadados
@@ -108,6 +119,132 @@ Leia primeiro:
 - docs/querobroapp-context.md
 - docs/NEXT_STEP_PLAN.md
 - docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
+## Entrada 039
+
+### 1) Metadados
+
+- Data/hora: 2026-03-02 02:07 UTC
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `feat/real-local-ops-flow-2026-02-28`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Alinhar o CI do GitHub ao mesmo gate de confianca que passou a valer localmente e versionar a logica do launcher do Codex dentro do repo.
+- Resultado entregue: O workflow principal de CI agora roda `pnpm check:prisma-drift` e `QA_TRUST_INCLUDE_LINT=1 pnpm qa:trust`, em vez de manter passos soltos de lint/typecheck/build. O workflow de teste rapido foi mantido como trilha separada e renomeado para deixar claro que e um check rapido de testes raiz. Alem disso, a logica do `Abrir Codex` passou a existir em `scripts/abrir-codex.command` dentro do repositorio, com o atalho do Desktop virando apenas um wrapper fino.
+- O que ficou pendente: O launcher versionado ja esta pronto no worktree, mas ainda precisa ser commitado para efetivamente entrar no GitHub remoto.
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados nesta wave:
+- `M .github/workflows/ci.yml`
+- `M .github/workflows/basic-test.yml`
+- `A scripts/abrir-codex.command`
+- `M README.md`
+- `M docs/PROJECT_SNAPSHOT.md`
+- `M docs/querobroapp-context.md`
+- `M docs/HANDOFF_LOG.md`
+- Comportamento novo: O CI principal do GitHub passa a usar o mesmo gate de base do fluxo local (`qa:trust` com lint). O workflow `Basic Test` continua existindo como trilha rapida de `pnpm test`, agora com nome mais explicito. O launcher do Codex deixa de depender apenas do Desktop e passa a ter fonte de verdade versionada no repo.
+- Seguranca aplicada: A mudanca reduz divergencia entre o que e considerado “verde” localmente e no GitHub. Tambem move a logica do launcher para dentro do repositório, onde ela pode ser revisada, diffada e auditada.
+- Riscos/regressoes: Como `qa:trust` inclui `pnpm test`, o CI principal agora repete parte do que o workflow rapido ja valida. Isso aumenta redundancia, mas nao quebra o pipeline.
+
+### 4) Validacao
+
+- Comandos executados: `ruby -e 'require "yaml"; [".github/workflows/ci.yml", ".github/workflows/basic-test.yml"].each { |f| YAML.load_file(f) }; puts "yaml-ok"'`; `zsh -n scripts/abrir-codex.command`; `zsh -n '/Users/gui/Desktop/Abrir Codex.command'`; `pnpm session:docs:guard`; `git diff --check`
+- Testes que passaram: O parse dos YAMLs passou (`yaml-ok`); os dois launchers passaram na validacao de sintaxe via `zsh -n`; `session:docs:guard` passou; `git diff --check` passou.
+- Testes nao executados (e motivo): Nao rerodei o GitHub Actions remoto nesta sessao; a validacao ficou em sintaxe local e alinhamento com o gate que ja havia passado localmente.
+
+### 5) Contexto para retomada
+
+- O que esta estavel: O fluxo local e remoto agora compartilham melhor o mesmo criterio de aceitacao. O launcher principal do Codex ja esta versionado no repo em `scripts/abrir-codex.command`.
+- Riscos ou pendencias abertas: O arquivo `scripts/abrir-codex.command` ainda esta novo no worktree e so passa a existir no GitHub depois do commit/push. O `Basic Test` continua redundante em relacao aos testes que `qa:trust` roda no CI principal, mas foi mantido por clareza e como sinal rapido separado.
+- Suposicoes feitas: O objetivo do usuario era reduzir divergencia e nao necessariamente minimizar minutos de CI agora.
+- Comandos atuais de reboot/teste (se houve mudanca): O fluxo local permanece `./scripts/stop-all.sh`, `./scripts/dev-all.sh`, `pnpm qa:browser-smoke`, `pnpm qa:critical-e2e`; no GitHub, o CI principal passa a executar `pnpm check:prisma-drift` seguido de `QA_TRUST_INCLUDE_LINT=1 pnpm qa:trust`.
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/PROJECT_SNAPSHOT.md
+- docs/NEXT_STEP_PLAN.md
+- README.md
+- docs/TEST_RESET_PROTOCOL.md
+- ultimas 80 linhas de docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
+## Entrada 038
+
+### 1) Metadados
+
+- Data/hora: 2026-03-02 01:47 UTC
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `feat/real-local-ops-flow-2026-02-28`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Eliminar ao maximo o risco de repetir a quebra do `next dev` causada por build concorrente do web e registrar isso no historico.
+- Resultado entregue: O web agora aceita dist dir parametrizavel por `NEXT_DIST_DIR`, e os scripts `qa:browser-smoke` e `qa:critical-e2e` passaram a buildar/startar em dist dirs temporarios isolados do Next. Isso evita disputar o `.next` do `next dev`. Tambem corrigi o filtro do browser smoke para ignorar aborts benignos de HMR/RSC quando ele usa um dev server existente, e estabilizei `apps/web/tsconfig.json` para incluir os tipos dos dist dirs de QA sem reescrita surpresa.
+- O que ficou pendente: Ainda nao existe garantia absoluta contra qualquer erro humano futuro, mas o vetor especifico desta quebra foi reduzido no codigo, nos scripts e na documentacao.
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados nesta wave:
+- `M apps/web/next.config.mjs`
+- `M apps/web/tsconfig.json`
+- `M scripts/qa-browser-smoke.sh`
+- `M scripts/qa-critical-e2e.mjs`
+- `M README.md`
+- `M docs/TEST_RESET_PROTOCOL.md`
+- `M docs/querobroapp-context.md`
+- `M docs/PROJECT_SNAPSHOT.md`
+- `M docs/HANDOFF_LOG.md`
+- Comportamento novo: `qa:browser-smoke` pode rodar contra o `next dev` existente sem falhar por aborts benignos de HMR/RSC, e quando precisar subir um web temporario ele usa `.next-qa-browser-smoke`. `qa:critical-e2e` usa `.next-qa-critical-e2e`. O `next dev` local deixa de competir com esses builds temporarios.
+- Seguranca aplicada: A mitigacao saiu do nivel de “lembrar de nao fazer” e foi para o nivel de isolamento tecnico nos scripts de QA. Isso reduz risco operacional mesmo quando a rotina de validacao roda com o ambiente local aberto.
+- Riscos/regressoes: `NEXT_DIST_DIR` agora influencia o `next.config` quando estiver definido. O comportamento esperado e seguro, mas qualquer uso futuro desse env com caminho invalido pode quebrar o build temporario por desenho.
+
+### 4) Validacao
+
+- Comandos executados: `bash -n scripts/qa-browser-smoke.sh`; `QA_BROWSER_EXISTING_WEB_URL=http://127.0.0.1:3999 pnpm qa:browser-smoke`; `./scripts/stop-all.sh`; `pnpm --filter @querobroapp/web build`; `./scripts/dev-all.sh`; `pnpm qa:browser-smoke`; `pnpm qa:critical-e2e`; `QA_TRUST_INCLUDE_LINT=1 QA_TRUST_INCLUDE_BROWSER=1 QA_TRUST_INCLUDE_CRITICAL_E2E=1 pnpm qa:trust`; `pnpm session:docs:guard`; `git diff --check`
+- Testes que passaram: `qa:browser-smoke` passou em dois modos (com web temporario isolado e com `next dev` existente); `qa:critical-e2e` passou; `pnpm --filter @querobroapp/web build` passou; o gate forte `qa:trust` com lint + browser + critical-e2e passou; `session:docs:guard` passou; `git diff --check` passou.
+- Testes nao executados (e motivo): Nao rodei `qa:smoke` isolado porque a cobertura desta rodada ja incluiu `qa:browser-smoke`, `qa:critical-e2e` e `qa:trust`.
+
+### 5) Contexto para retomada
+
+- O que esta estavel: O app local segue online em `http://127.0.0.1:3000/pedidos`; a API segue online em `http://127.0.0.1:3001/health`; os dois validadores de navegador agora estao endurecidos contra o problema que corrompia o `next dev`.
+- Riscos ou pendencias abertas: Ainda vale manter disciplina de nao rodar `next build` manual concorrente ao `next dev` sem necessidade, embora o risco de QA automatizado tenha sido bastante reduzido.
+- Suposicoes feitas: O risco mais importante a eliminar era o causado pelos scripts de QA e pelos builds temporarios, nao qualquer falha possivel do ecossistema Next como um todo.
+- Comandos atuais de reboot/teste (se houve mudanca): `./scripts/stop-all.sh`; `./scripts/dev-all.sh`; `pnpm qa:browser-smoke`; `pnpm qa:critical-e2e`; `QA_TRUST_INCLUDE_LINT=1 QA_TRUST_INCLUDE_BROWSER=1 QA_TRUST_INCLUDE_CRITICAL_E2E=1 pnpm qa:trust`
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/PROJECT_SNAPSHOT.md
+- docs/NEXT_STEP_PLAN.md
+- README.md
+- docs/TEST_RESET_PROTOCOL.md
+- ultimas 80 linhas de docs/HANDOFF_LOG.md
 
 Objetivo da sessao:
 [descreva em 1 linha]
@@ -3245,6 +3382,700 @@ Leia primeiro:
 - docs/querobroapp-context.md
 - docs/NEXT_STEP_PLAN.md
 - docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
+## Entrada 037
+
+### 1) Metadados
+
+- Data/hora: 2026-03-02 00:46 UTC
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `feat/real-local-ops-flow-2026-02-28`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Atualizar a documentacao operacional e de continuidade para que o app possa ser religado apos reboot e testado manualmente sem ambiguidade.
+- Resultado entregue: Os docs vivos agora refletem o estado real do produto: `Pedidos` como entrada unica, `Calendario` e `Builder` apenas como legado, runbook de reboot por `./scripts/dev-all.sh`, checklist manual de teste, e QA atual com `qa:trust`, `qa:browser-smoke` e `qa:critical-e2e`.
+- O que ficou pendente: Ainda existem docs historicos e relatorios antigos no repositorio que citam fases passadas; eles foram preservados como historico e nao devem ser tratados como snapshot atual.
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados nesta wave:
+- `M README.md`
+- `M docs/querobroapp-context.md`
+- `M docs/MEMORY_VAULT.md`
+- `M docs/NEXT_STEP_PLAN.md`
+- `M docs/TEST_RESET_PROTOCOL.md`
+- `M docs/PROJECT_SNAPSHOT.md`
+- `M docs/ARCHITECTURE.md`
+- `M docs/APP_END_TO_END_GUIDE.md`
+- `M docs/BOOTSTRAP_PROMPTS.md`
+- `M docs/HANDOFF_TEMPLATE.md`
+- `M docs/HANDOFF_LOG.md`
+- Comportamento novo: A documentacao principal passa a orientar reboot e validacao manual pelo caminho real (`stop-all` -> `dev-all` -> `/pedidos`), explicita o comportamento local estavel de WhatsApp/Uber e descreve o fluxo atual das 4 telas operacionais.
+- Seguranca aplicada: A atualizacao separa explicitamente fonte de verdade atual (`README`, `context`, `snapshot`, `plan`, `test reset`) de historico (`HANDOFF_LOG`), reduzindo risco de leitura errada em retomadas futuras.
+- Riscos/regressoes: Nenhuma mudanca de codigo de produto foi feita nesta rodada; a mudanca foi documental. O risco remanescente e alguem ainda usar docs historicos antigos como snapshot atual.
+
+### 4) Validacao
+
+- Comandos executados: `git diff --check`; `pnpm session:docs:guard`; `if rg -n 'envio real em etapa futura|8 telas|### Inicio|### Jornada|### Resumo|### Builder|Builder visual para ajustar' README.md docs/querobroapp-context.md docs/MEMORY_VAULT.md docs/NEXT_STEP_PLAN.md docs/TEST_RESET_PROTOCOL.md docs/PROJECT_SNAPSHOT.md docs/ARCHITECTURE.md docs/APP_END_TO_END_GUIDE.md docs/BOOTSTRAP_PROMPTS.md docs/HANDOFF_TEMPLATE.md; then echo 'Frases obsoletas encontradas.'; exit 1; else echo 'Nenhuma frase obsoleta encontrada nos docs vivos.'; fi`
+- Testes que passaram: `git diff --check` passou; `pnpm session:docs:guard` passou; a busca negativa por frases obsoletas nos docs vivos passou.
+- Testes nao executados (e motivo): `pnpm qa:trust` nao foi reexecutado porque esta rodada foi apenas de documentacao, sem mudanca funcional de codigo.
+
+### 5) Contexto para retomada
+
+- O que esta estavel: O runbook principal agora esta concentrado em `README.md` e `docs/TEST_RESET_PROTOCOL.md`; os snapshots de estado foram alinhados ao app atual; o handoff template agora obriga atualizar docs de reboot/teste quando esse fluxo mudar.
+- Riscos ou pendencias abertas: Ainda ha documentos historicos fora do conjunto de docs vivos que mencionam fases antigas; eles devem continuar sendo tratados como referencia historica, nao como fonte de verdade atual.
+- Suposicoes feitas: O objetivo imediato do usuario e reiniciar a maquina e validar o app manualmente, entao a documentacao foi otimizada para esse caminho.
+- Comandos atuais de reboot/teste (se houve mudanca): `./scripts/stop-all.sh`; `./scripts/dev-all.sh`; `pnpm cleanup:test-data` (opcional); `pnpm qa:browser-smoke`; `pnpm qa:critical-e2e`; `QA_TRUST_INCLUDE_LINT=1 QA_TRUST_INCLUDE_SMOKE=1 QA_TRUST_INCLUDE_BROWSER=1 QA_TRUST_INCLUDE_CRITICAL_E2E=1 pnpm qa:trust`
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/PROJECT_SNAPSHOT.md
+- docs/NEXT_STEP_PLAN.md
+- README.md
+- docs/TEST_RESET_PROTOCOL.md
+- ultimas 80 linhas de docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
+## Entrada 038
+
+### 1) Metadados
+
+- Data/hora: 2026-03-02 15:25 UTC
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `feat/real-local-ops-flow-2026-02-28`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Refino rapido de Pedidos (CTA constante, lista completa logo abaixo do calendario) e alinhar branding/tab icon para QUEROBROAPP enquanto mantemos sincronizados docs e testes.
+- Resultado entregue: Botao flutuante “+ Novo pedido” que segue o scroll, toolbar com CTA destacado, painel de lista completa de pedidos sob as visoes Dia/Semana/Mes, sidebar e metadata atualizados para exibir o nome QUEROBROAPP com o icone do app (`/icon.svg`) na aba do browser. Telefone agora usa libphonenumber-js compartilhado para formatar/normalizar qualquer pais (web, mobile, API/WhatsApp). Documentos de contexto e snapshot atualizados para refletir essas mudancas.
+- O que ficou pendente: Nada bloqueante; integrações continuam com o mesmo fallback/flags. Se quiser completar a migração visual, ainda nao há logo final (usamos o icon.svg atual).
+
+### 3) Mudancas tecnicas
+
+- UI: Orders agenda ganhou CTA flutuante e lista completa de pedidos logo abaixo do calendario; toolbar reorganizada; branding no layout para QUEROBROAPP e icone aplicado na aba.
+- Asset: novo `public/icon.svg` usado como favicon e marca lateral.
+- Infra dados: helper compartilhado de telefone com `libphonenumber-js` e uso no web, mobile e API (customers e WhatsApp Flow).
+- Docs: `PROJECT_SNAPSHOT.md` e `querobroapp-context.md` refletem agenda com CTA flutuante/lista e branding novo; HANDOFF_LOG atualizado.
+
+### 4) Validacao
+
+- Testes executados: `pnpm test` (todas as suites raiz passaram, scope 5/6).
+- Outros checks: build do shared (`pnpm --filter @querobroapp/shared build`) durante o ciclo; pnpm install sincronizado.
+
+### 5) Contexto para retomada
+
+- Estado funcional: Pedidos abre com FAB global de novo pedido, toolbar CTA, lista completa abaixo do calendario; telefones aceitam formatos internacionais com country default BR. Branding exibindo icone novo e nome QUEROBROAPP.
+- Riscos/atencao: Nenhum conhecido. Se mudar o icon definitivo, trocar `public/icon.svg` e metadata em `apps/web/src/app/layout.tsx`.
+- Como validar rapido: `./scripts/dev-all.sh` e abrir `http://127.0.0.1:3000/pedidos`; verificar FAB no canto inferior direito e lista completa rolando; criar pedido via FAB e confirmar aparece na lista e no calendario.
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/PROJECT_SNAPSHOT.md
+- docs/NEXT_STEP_PLAN.md
+- README.md
+- docs/TEST_RESET_PROTOCOL.md
+- ultimas 80 linhas de docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
+## Entrada 040 - 2026-03-03 17:30 UTC
+
+### 1) Metadados
+
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `feat/real-local-ops-flow-2026-02-28`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Remover as integracoes externas legadas do codigo ativo, alinhar env/docs e validar que o fluxo interno continua inteiro.
+- Resultado entregue: A base ativa ficou sem WhatsApp, Uber, Alexa, receipts e conectores de terceiros; o app agora roda com operacao 100% interna e documentada assim.
+
+### 3) Mudancas tecnicas
+
+- Backend: removidos modulos/rotas legados de integracao; `deliveries` ficou restrito ao fluxo local interno, com compatibilidade para converter rastreios antigos persistidos.
+- Web: removidas rotas, telas, blocos de UI e chamadas ligadas a integracoes externas; `Pedidos`, `Clientes` e `Estoque` ficaram no fluxo interno puro.
+- Ambiente/docs: `apps/api/.env` foi limpo de variaveis orfas; `README.md`, `docs/MEMORY_VAULT.md`, `docs/querobroapp-context.md`, `docs/PROJECT_SNAPSHOT.md` e `docs/NEXT_STEP_PLAN.md` foram alinhados ao novo estado.
+- CI: varredura em `.github/workflows/ci.yml` e `.github/workflows/basic-test.yml` nao encontrou referencias residuais a integracoes antigas.
+
+### 4) Validacao
+
+- Passaram: `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api typecheck`, `pnpm --filter @querobroapp/web typecheck`, `pnpm qa:smoke`, `pnpm qa:browser-smoke`, `pnpm qa:critical-e2e`.
+- Nota: o `qa:browser-smoke` falhou na primeira tentativa por rastreio legado em `/production/queue`; isso foi corrigido e a reexecucao passou.
+
+### 5) Contexto para retomada
+
+- Estado estavel: fluxo principal validado em `Pedidos`, `Clientes`, `Produtos` e `Estoque`, com entrega local interna e sem dependencias de terceiros.
+- Regra importante: qualquer reintegracao futura deve recomecar do zero, sem reaproveitar contratos antigos por inercia.
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/PROJECT_SNAPSHOT.md
+- docs/NEXT_STEP_PLAN.md
+- README.md
+- docs/TEST_RESET_PROTOCOL.md
+- ultimas 80 linhas de docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+Contexto importante:
+- A base ativa esta sem integracoes externas.
+- O fluxo atual validado e 100% interno.
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
+## Entrada 041 - 2026-03-03 19:16 UTC
+
+### 1) Metadados
+
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `feat/real-local-ops-flow-2026-02-28`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Investigar por que o app travou durante a navegacao, vasculhar inconsistencias/alucinacoes e corrigir o que estivesse realmente quebrado.
+- Resultado entregue: O incidente foi reduzido a um `next dev` local inconsistente (HTML respondendo, mas assets `_next` quebrados), o ambiente foi religado limpo, redirects legados faltantes foram restaurados e docs contraditorias foram alinhadas ao estado real.
+
+### 3) Mudancas tecnicas
+
+- Web runtime: confirmado que o problema principal era operacional no `next dev` local, com bundles `_next` ausentes/intermitentes; `./scripts/stop-all.sh` + `./scripts/dev-all.sh` restauraram um estado limpo e estavel.
+- Web redirects: adicionados redirects permanentes para `/inicio`, `/resumo` e `/whatsapp-flow/:path*` em `apps/web/next.config.mjs`, todos convergindo para `/pedidos`.
+- Navegacao: `apps/web/src/lib/navigation-model.ts` ganhou aliases para `/inicio`, `/resumo` e `/whatsapp-flow`, evitando estado de navegacao legado sem correspondencia.
+- Docs: `docs/MEMORY_VAULT.md`, `docs/querobroapp-context.md` e `docs/PROJECT_SNAPSHOT.md` foram corrigidos para refletir o branding real atual (`broa-mark.svg`/mark vetorial), em vez de afirmar incorretamente uso de `/icon.png`.
+- Docs: `docs/ARCHITECTURE.md` e `docs/APP_END_TO_END_GUIDE.md` deixaram de descrever WhatsApp/Uber/Alexa/receipts como se ainda estivessem ativos no fluxo atual.
+
+### 4) Validacao
+
+- Reproducao real: browser automatizado mostrou erro de console com `Cannot find module './869.js'` e 404 em assets `_next`, confirmando falha real de hidratacao no `next dev` antigo.
+- Passaram apos restart: health da API em `http://127.0.0.1:3001/health`, web em `http://127.0.0.1:3000/pedidos`, e verificacao manual de assets `_next` referenciados pelo HTML com `200`.
+- Passaram: `pnpm qa:browser-smoke` usando o web existente em `http://127.0.0.1:3000` (sem fallback para web temporario).
+- Passou: `pnpm qa:critical-e2e`, com jornada critica concluida e `Pedido #80` validado como `ENTREGUE` e `PAGO` em web temporario isolado (`http://127.0.0.1:3100`).
+- Passou: `pnpm check:prisma-drift` (`Prisma schemas are aligned`).
+
+### 5) Contexto para retomada
+
+- Estado funcional: o ambiente atual esta de pe e o `next dev` existente voltou a servir assets corretamente; a regressao de abertura em rotas legadas mais obvias (`/inicio`, `/resumo`, `/whatsapp-flow/...`) foi neutralizada com redirect para `/pedidos`.
+- Causa mais provavel do travamento relatado: `next dev` local entrou em estado de cache/build inconsistente; o QA de browser anterior podia passar porque o script sobe um web temporario quando detecta esse tipo de quebra no `:3000`.
+- Risco remanescente: ainda existem docs historicas/analiticas fora do conjunto operacional principal que citam modulos ou integracoes removidas; tratar essas referencias como historicas, nao como fonte de verdade.
+- Como validar rapido: manter `./scripts/dev-all.sh` aberto, abrir `http://127.0.0.1:3000/pedidos`, confirmar que os assets carregam normalmente e rodar `pnpm qa:browser-smoke` se houver qualquer suspeita de novo drift no `next dev`.
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/PROJECT_SNAPSHOT.md
+- docs/NEXT_STEP_PLAN.md
+- README.md
+- docs/TEST_RESET_PROTOCOL.md
+- ultimas 80 linhas de docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+Contexto importante:
+- O ultimo incidente real foi um `next dev` local com assets `_next` quebrados.
+- O restart limpo corrigiu o runtime e os redirects legados mais provaveis ja convergem para `/pedidos`.
+- Trate docs operacionais como fonte de verdade; trate docs antigas de integracao como historico.
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
+## Entrada 042 - 2026-03-03 19:16 UTC
+
+### 1) Metadados
+
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `feat/real-local-ops-flow-2026-02-28`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Fechar um gate mais amplo depois da estabilizacao do runtime e reduzir pistas falsas restantes em docs historicas.
+- Resultado entregue: `qa:trust` passou inteiro e os principais relatorios/backlogs antigos agora deixam explicito que referencias a integracoes removidas sao historicas, nao snapshot atual.
+
+### 3) Mudancas tecnicas
+
+- Qualidade: executado `pnpm qa:trust` com sucesso apos a rodada anterior de restart/correcoes.
+- Docs historicas: `docs/OPENAI_DEV_NEWS_2026-02-25_ACTION_REPORT.md`, `docs/BENCHMARK_GAP_MAP_2026-02-12.md`, `docs/MVP_FINANCEIRO_E_D+1.md`, `docs/DELIVERY_BACKLOG.md`, `docs/security_best_practices_report.md` e `docs/REPO_SCRAPE_REPORT.md` ganharam notas explicitas de contexto historico.
+- Docs historicas: trechos que soavam como recomendacao ativa para WhatsApp/receipts/outbox foram suavizados para nao contradizer o estado operacional atual.
+
+### 4) Validacao
+
+- Passou: `pnpm qa:trust`.
+- Resumo do gate: `session docs guard`, `git diff --check`, `typecheck` (5/5), `tests` (3/3), `prepare build ci` e `build ci`.
+- Confirmacao adicional: o build de producao do web completou no fluxo do `qa:trust`, reforcando que a base atual esta coerente alem do `next dev`.
+
+### 5) Contexto para retomada
+
+- Estado estavel: runtime local religado, browser smoke e E2E critico passaram, e agora o gate `qa:trust` tambem passou.
+- Fonte de verdade: docs operacionais principais estao alinhadas; docs de benchmark, backlog, scrape e relatorios de auditoria agora trazem aviso de que podem refletir um estado anterior.
+- Risco remanescente: o worktree continua grande e sujo por causa das mudancas em andamento da branch; ao investigar qualquer regressao, diferenciar problema de runtime local, docs historicas e mudancas reais de codigo.
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/PROJECT_SNAPSHOT.md
+- docs/NEXT_STEP_PLAN.md
+- README.md
+- docs/TEST_RESET_PROTOCOL.md
+- ultimas 80 linhas de docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+Contexto importante:
+- Runtime local e QA amplo estao verdes (`qa:browser-smoke`, `qa:critical-e2e`, `qa:trust`).
+- Relatorios antigos que citam integracoes removidas agora estao marcados como historicos.
+- Se houver novo travamento no web, primeiro suspeitar de `next dev` local incoerente antes de inferir regressao estrutural.
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
+## Entrada 043
+
+### 1) Metadados
+
+- Data/hora: 2026-03-06 10:37 -03
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `feat/real-local-ops-flow-2026-02-28`
+- Commit base (opcional): `590700b`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Registrar handoff automatico no encerramento da sessao.
+- Resultado entregue: Entrada automatica registrada com estado atual do repositorio (150 itens no git status).
+- O que ficou pendente: Reboot real + validacao manual.
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados:
+- ` M .github/workflows/basic-test.yml`
+- ` M .github/workflows/ci.yml`
+- ` M .gitignore`
+- ` M README.md`
+- ` M apps/api/.env.example`
+- ` M apps/api/package.json`
+- ` M apps/api/prisma/schema.prisma`
+- ` M apps/api/prisma/schema.prod.prisma`
+- ` M apps/api/src/app.module.ts`
+- ` M apps/api/src/common/normalize.ts`
+- ` M apps/api/src/main.ts`
+- ` D apps/api/src/modules/alexa/alexa-oauth.service.ts`
+- ` D apps/api/src/modules/alexa/alexa.controller.ts`
+- ` D apps/api/src/modules/alexa/alexa.module.ts`
+- ` D apps/api/src/modules/alexa/alexa.service.ts`
+- ` D apps/api/src/modules/automations/automations.controller.ts`
+- ` D apps/api/src/modules/automations/automations.module.ts`
+- ` D apps/api/src/modules/automations/automations.service.ts`
+- ` M apps/api/src/modules/bom/bom.service.ts`
+- ` M apps/api/src/modules/customers/customers.service.ts`
+- ` M apps/api/src/modules/deliveries/deliveries.controller.ts`
+- ` M apps/api/src/modules/deliveries/deliveries.service.ts`
+- ` M apps/api/src/modules/inventory/inventory.controller.ts`
+- ` M apps/api/src/modules/inventory/inventory.service.ts`
+- ` M apps/api/src/modules/orders/orders.controller.ts`
+- ` M apps/api/src/modules/orders/orders.service.ts`
+- ` M apps/api/src/modules/production/production.controller.ts`
+- ` M apps/api/src/modules/production/production.service.ts`
+- ` D apps/api/src/modules/receipts/receipts.controller.ts`
+- ` D apps/api/src/modules/receipts/receipts.module.ts`
+- ` D apps/api/src/modules/receipts/receipts.service.ts`
+- ` D apps/api/src/modules/voice/voice.controller.ts`
+- ` D apps/api/src/modules/voice/voice.module.ts`
+- ` D apps/api/src/modules/voice/voice.service.ts`
+- ` D apps/api/src/modules/whatsapp/whatsapp.controller.ts`
+- ` D apps/api/src/modules/whatsapp/whatsapp.module.ts`
+- ` D apps/api/src/modules/whatsapp/whatsapp.service.ts`
+- ` M apps/api/src/security/auth.guard.ts`
+- ` M apps/api/src/security/security-config.ts`
+- ` M apps/mobile/package.json`
+- ` M apps/mobile/src/lib/format.ts`
+- ` M apps/web/.env.example`
+- ` M apps/web/.eslintrc.cjs`
+- ` M apps/web/next-env.d.ts`
+- ` M apps/web/next.config.mjs`
+- ` M apps/web/package.json`
+- ` D apps/web/src/app/calendario/page.tsx`
+- ` M apps/web/src/app/clientes/page.tsx`
+- ` M apps/web/src/app/dashboard/page.tsx`
+- ` M apps/web/src/app/estoque/page.tsx`
+- ` M apps/web/src/app/globals.css`
+- ` M apps/web/src/app/hoje/page.tsx`
+- ` M apps/web/src/app/jornada/page.tsx`
+- ` M apps/web/src/app/layout.tsx`
+- ` M apps/web/src/app/page.tsx`
+- ` M apps/web/src/app/produtos/page.tsx`
+- ` D apps/web/src/app/whatsapp-flow/pedido/[sessionId]/page.tsx`
+- ` M apps/web/src/components/flow-dock.tsx`
+- ` M apps/web/src/components/nav.tsx`
+- ` M apps/web/src/components/topbar.tsx`
+- ` D apps/web/src/features/calendar/calendar-board.tsx`
+- ` D apps/web/src/features/calendar/calendar-order-detail-panel.tsx`
+- ` D apps/web/src/features/calendar/calendar-screen.tsx`
+- ` D apps/web/src/features/orders/order-filters.tsx`
+- ` M apps/web/src/features/orders/order-quick-create.tsx`
+- ` M apps/web/src/features/orders/orders-api.ts`
+- ` M apps/web/src/features/orders/orders-model.ts`
+- ` M apps/web/src/features/orders/orders-screen.tsx`
+- ` M apps/web/src/hooks/use-surface-mode.ts`
+- ` M apps/web/src/lib/api.ts`
+- ` M apps/web/src/lib/builder.ts`
+- ` M apps/web/src/lib/format.ts`
+- ` D apps/web/src/lib/googleMaps.ts`
+- ` M apps/web/src/lib/layout-scroll.ts`
+- ` M apps/web/src/lib/navigation-model.ts`
+- ` M apps/web/tsconfig.json`
+- ` D docs/ALEXA_CONNECTION_BENCHMARK.md`
+- ` D docs/ALEXA_DEPLOY_CHECKLIST.md`
+- ` M docs/APP_END_TO_END_GUIDE.md`
+- ` M docs/ARCHITECTURE.md`
+- ` M docs/BENCHMARK_GAP_MAP_2026-02-12.md`
+- ` M docs/DELIVERY_BACKLOG.md`
+- ` M docs/HANDOFF_LOG.md`
+- ` M docs/HANDOFF_TEMPLATE.md`
+- ` D docs/IOS_SHORTCUT_CUPOM.md`
+- ` M docs/MVP_FINANCEIRO_E_D+1.md`
+- ` M docs/NEXT_STEP_PLAN.md`
+- ` M docs/OPENAI_DEV_NEWS_2026-02-25_ACTION_REPORT.md`
+- ` M docs/PROJECT_SNAPSHOT.md`
+- ` M docs/REPO_SCRAPE_REPORT.md`
+- ` M docs/TEST_RESET_PROTOCOL.md`
+- ` D docs/examples/alexa-lambda-bridge.mjs`
+- ` M docs/querobroapp-context.md`
+- ` M docs/security_best_practices_report.md`
+- ` D integrations/alexa/lambda/README.md`
+- ` D integrations/alexa/lambda/index.mjs`
+- ` D integrations/alexa/lambda/package.json`
+- ` D integrations/alexa/skill-package/interactionModels/custom/pt-BR.json`
+- ` D integrations/alexa/skill-package/skill.json.template`
+- ` M package.json`
+- ` M packages/shared/package.json`
+- ` M packages/shared/src/index.ts`
+- ` M pnpm-lock.yaml`
+- ` D scripts/alexa-bridge-setup.sh`
+- ` M scripts/check-session-docs.sh`
+- ` M scripts/cleanup-test-data.mjs`
+- ` M scripts/dev-all.sh`
+- ` M scripts/kill-ports.sh`
+- ` D scripts/package-alexa-lambda.sh`
+- ` M scripts/preflight-local.sh`
+- `AM scripts/qa-browser-smoke.sh`
+- ` M scripts/qa.sh`
+- ` D scripts/receipts-eval.mjs`
+- `A  scripts/refresh-and-start.command`
+- ` M scripts/save-handoff.sh`
+- ` D scripts/setup-receipts-openai.sh`
+- ` D scripts/shortcut-receipts-setup.sh`
+- ` M scripts/stop-all.sh`
+- ` D scripts/test-receipt-image.sh`
+- ` M scripts/wait-web-dev-ready.sh`
+- ` D tests/fixtures/receipts-evals.json`
+- ` D tests/fixtures/receipts/receipt_case_1.png`
+- ` D tests/fixtures/receipts/receipt_case_2.png`
+- ` D tests/fixtures/receipts/receipt_case_3.png`
+- ` M tests/jornada-flow-e2e.test.mjs`
+- `?? apps/api/prisma/migrations/20260302143117_add_customer_deleted_at/`
+- `?? apps/api/prisma/migrations/20260303182300_remove_outbox_after_integration_removal/`
+- `?? apps/api/scripts/`
+- `?? apps/web/public/broa-mark.svg`
+- `?? apps/web/src/app/estoque/stock-capacity-section.tsx`
+- `?? apps/web/src/app/estoque/stock-workflow-overview.tsx`
+- `?? apps/web/src/app/icon.png`
+- `?? apps/web/src/components/app-icons.tsx`
+- `?? apps/web/src/components/fab.tsx`
+- `?? apps/web/src/components/render-stability-guard.tsx`
+- `?? apps/web/src/components/runtime-recovery.tsx`
+- `?? apps/web/src/features/orders/orders-board.tsx`
+- `?? apps/web/src/lib/api-base-url.ts`
+- `?? apps/web/src/lib/customer-autofill.ts`
+- `?? docs/LLM_APP_GUIDE.md`
+- `?? docs/historical-deposits/`
+- `?? packages/shared/src/lib/`
+- `?? public/`
+- `?? scripts/log-worktree-state.sh`
+- `?? scripts/qa-critical-e2e.mjs`
+- `?? scripts/qa-trust.mjs`
+- `?? tests/customer-order-delete-status.test.mjs`
+- `?? tests/lib/`
+- `?? tests/order-mass-prep-automation.test.mjs`
+- `?? tests/order-payment-guardrails.test.mjs`
+- Comportamento novo: Sem alteracao funcional nesta execucao; somente atualizacao documental automatica.
+- Riscos/regressoes: baixo risco; log pode registrar pendencias genericas se o plano nao estiver atualizado.
+
+### 4) Validacao
+
+- Comandos executados: scripts/save-handoff-auto.sh; scripts/save-handoff.sh
+- Testes que passaram: nao aplicavel
+- Testes nao executados (e motivo): nao aplicavel (encerramento documental)
+
+### 5) Contexto para retomada
+
+- Decisoes importantes: Manter bootstrap por documentacao e reduzir dependencia de historico longo no chat.
+- Suposicoes feitas: Repositorio local em ~/querobroapp com docs atualizados.
+- Bloqueios: nenhum
+- Proximo passo recomendado (1 acao objetiva): Reboot real + validacao manual.
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/NEXT_STEP_PLAN.md
+- ultimas 80 linhas de docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
+## Entrada 044
+
+### 1) Metadados
+
+- Data/hora: 2026-03-06 10:43 -03
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `feat/real-local-ops-flow-2026-02-28`
+- Commit base (opcional): `590700b`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Registrar handoff automatico no encerramento da sessao.
+- Resultado entregue: Entrada automatica registrada com estado atual do repositorio (150 itens no git status).
+- O que ficou pendente: Reboot real + validacao manual.
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados:
+- ` M .github/workflows/basic-test.yml`
+- ` M .github/workflows/ci.yml`
+- ` M .gitignore`
+- ` M README.md`
+- ` M apps/api/.env.example`
+- ` M apps/api/package.json`
+- ` M apps/api/prisma/schema.prisma`
+- ` M apps/api/prisma/schema.prod.prisma`
+- ` M apps/api/src/app.module.ts`
+- ` M apps/api/src/common/normalize.ts`
+- ` M apps/api/src/main.ts`
+- ` D apps/api/src/modules/alexa/alexa-oauth.service.ts`
+- ` D apps/api/src/modules/alexa/alexa.controller.ts`
+- ` D apps/api/src/modules/alexa/alexa.module.ts`
+- ` D apps/api/src/modules/alexa/alexa.service.ts`
+- ` D apps/api/src/modules/automations/automations.controller.ts`
+- ` D apps/api/src/modules/automations/automations.module.ts`
+- ` D apps/api/src/modules/automations/automations.service.ts`
+- ` M apps/api/src/modules/bom/bom.service.ts`
+- ` M apps/api/src/modules/customers/customers.service.ts`
+- ` M apps/api/src/modules/deliveries/deliveries.controller.ts`
+- ` M apps/api/src/modules/deliveries/deliveries.service.ts`
+- ` M apps/api/src/modules/inventory/inventory.controller.ts`
+- ` M apps/api/src/modules/inventory/inventory.service.ts`
+- ` M apps/api/src/modules/orders/orders.controller.ts`
+- ` M apps/api/src/modules/orders/orders.service.ts`
+- ` M apps/api/src/modules/production/production.controller.ts`
+- ` M apps/api/src/modules/production/production.service.ts`
+- ` D apps/api/src/modules/receipts/receipts.controller.ts`
+- ` D apps/api/src/modules/receipts/receipts.module.ts`
+- ` D apps/api/src/modules/receipts/receipts.service.ts`
+- ` D apps/api/src/modules/voice/voice.controller.ts`
+- ` D apps/api/src/modules/voice/voice.module.ts`
+- ` D apps/api/src/modules/voice/voice.service.ts`
+- ` D apps/api/src/modules/whatsapp/whatsapp.controller.ts`
+- ` D apps/api/src/modules/whatsapp/whatsapp.module.ts`
+- ` D apps/api/src/modules/whatsapp/whatsapp.service.ts`
+- ` M apps/api/src/security/auth.guard.ts`
+- ` M apps/api/src/security/security-config.ts`
+- ` M apps/mobile/package.json`
+- ` M apps/mobile/src/lib/format.ts`
+- ` M apps/web/.env.example`
+- ` M apps/web/.eslintrc.cjs`
+- ` M apps/web/next.config.mjs`
+- ` M apps/web/package.json`
+- ` D apps/web/src/app/calendario/page.tsx`
+- ` M apps/web/src/app/clientes/page.tsx`
+- ` M apps/web/src/app/dashboard/page.tsx`
+- ` M apps/web/src/app/estoque/page.tsx`
+- ` M apps/web/src/app/globals.css`
+- ` M apps/web/src/app/hoje/page.tsx`
+- ` M apps/web/src/app/jornada/page.tsx`
+- ` M apps/web/src/app/layout.tsx`
+- ` M apps/web/src/app/page.tsx`
+- ` M apps/web/src/app/produtos/page.tsx`
+- ` D apps/web/src/app/whatsapp-flow/pedido/[sessionId]/page.tsx`
+- ` M apps/web/src/components/flow-dock.tsx`
+- ` M apps/web/src/components/nav.tsx`
+- ` M apps/web/src/components/topbar.tsx`
+- ` D apps/web/src/features/calendar/calendar-board.tsx`
+- ` D apps/web/src/features/calendar/calendar-order-detail-panel.tsx`
+- ` D apps/web/src/features/calendar/calendar-screen.tsx`
+- ` D apps/web/src/features/orders/order-filters.tsx`
+- ` M apps/web/src/features/orders/order-quick-create.tsx`
+- ` M apps/web/src/features/orders/orders-api.ts`
+- ` M apps/web/src/features/orders/orders-model.ts`
+- ` M apps/web/src/features/orders/orders-screen.tsx`
+- ` M apps/web/src/hooks/use-surface-mode.ts`
+- ` M apps/web/src/lib/api.ts`
+- ` M apps/web/src/lib/builder.ts`
+- ` M apps/web/src/lib/format.ts`
+- ` D apps/web/src/lib/googleMaps.ts`
+- ` M apps/web/src/lib/layout-scroll.ts`
+- ` M apps/web/src/lib/navigation-model.ts`
+- ` M apps/web/tsconfig.json`
+- ` D docs/ALEXA_CONNECTION_BENCHMARK.md`
+- ` D docs/ALEXA_DEPLOY_CHECKLIST.md`
+- ` M docs/APP_END_TO_END_GUIDE.md`
+- ` M docs/ARCHITECTURE.md`
+- ` M docs/BENCHMARK_GAP_MAP_2026-02-12.md`
+- ` M docs/DELIVERY_BACKLOG.md`
+- ` M docs/HANDOFF_LOG.md`
+- ` M docs/HANDOFF_TEMPLATE.md`
+- ` D docs/IOS_SHORTCUT_CUPOM.md`
+- ` M docs/MVP_FINANCEIRO_E_D+1.md`
+- ` M docs/NEXT_STEP_PLAN.md`
+- ` M docs/OPENAI_DEV_NEWS_2026-02-25_ACTION_REPORT.md`
+- ` M docs/PROJECT_SNAPSHOT.md`
+- ` M docs/REPO_SCRAPE_REPORT.md`
+- ` M docs/TEST_RESET_PROTOCOL.md`
+- ` D docs/examples/alexa-lambda-bridge.mjs`
+- ` M docs/querobroapp-context.md`
+- ` M docs/security_best_practices_report.md`
+- ` D integrations/alexa/lambda/README.md`
+- ` D integrations/alexa/lambda/index.mjs`
+- ` D integrations/alexa/lambda/package.json`
+- ` D integrations/alexa/skill-package/interactionModels/custom/pt-BR.json`
+- ` D integrations/alexa/skill-package/skill.json.template`
+- ` M package.json`
+- ` M packages/shared/package.json`
+- ` M packages/shared/src/index.ts`
+- ` M pnpm-lock.yaml`
+- ` D scripts/alexa-bridge-setup.sh`
+- ` M scripts/check-session-docs.sh`
+- ` M scripts/cleanup-test-data.mjs`
+- ` M scripts/dev-all.sh`
+- ` M scripts/kill-ports.sh`
+- ` D scripts/package-alexa-lambda.sh`
+- ` M scripts/preflight-local.sh`
+- `AM scripts/qa-browser-smoke.sh`
+- ` M scripts/qa.sh`
+- ` D scripts/receipts-eval.mjs`
+- `A  scripts/refresh-and-start.command`
+- ` M scripts/refresh-codex-context.sh`
+- ` M scripts/save-handoff.sh`
+- ` D scripts/setup-receipts-openai.sh`
+- ` D scripts/shortcut-receipts-setup.sh`
+- ` M scripts/stop-all.sh`
+- ` D scripts/test-receipt-image.sh`
+- ` M scripts/wait-web-dev-ready.sh`
+- ` D tests/fixtures/receipts-evals.json`
+- ` D tests/fixtures/receipts/receipt_case_1.png`
+- ` D tests/fixtures/receipts/receipt_case_2.png`
+- ` D tests/fixtures/receipts/receipt_case_3.png`
+- ` M tests/jornada-flow-e2e.test.mjs`
+- `?? apps/api/prisma/migrations/20260302143117_add_customer_deleted_at/`
+- `?? apps/api/prisma/migrations/20260303182300_remove_outbox_after_integration_removal/`
+- `?? apps/api/scripts/`
+- `?? apps/web/public/broa-mark.svg`
+- `?? apps/web/src/app/estoque/stock-capacity-section.tsx`
+- `?? apps/web/src/app/estoque/stock-workflow-overview.tsx`
+- `?? apps/web/src/app/icon.png`
+- `?? apps/web/src/components/app-icons.tsx`
+- `?? apps/web/src/components/fab.tsx`
+- `?? apps/web/src/components/render-stability-guard.tsx`
+- `?? apps/web/src/components/runtime-recovery.tsx`
+- `?? apps/web/src/features/orders/orders-board.tsx`
+- `?? apps/web/src/lib/api-base-url.ts`
+- `?? apps/web/src/lib/customer-autofill.ts`
+- `?? docs/LLM_APP_GUIDE.md`
+- `?? docs/historical-deposits/`
+- `?? packages/shared/src/lib/`
+- `?? public/`
+- `?? scripts/log-worktree-state.sh`
+- `?? scripts/qa-critical-e2e.mjs`
+- `?? scripts/qa-trust.mjs`
+- `?? tests/customer-order-delete-status.test.mjs`
+- `?? tests/lib/`
+- `?? tests/order-mass-prep-automation.test.mjs`
+- `?? tests/order-payment-guardrails.test.mjs`
+- Comportamento novo: Sem alteracao funcional nesta execucao; somente atualizacao documental automatica.
+- Riscos/regressoes: baixo risco; log pode registrar pendencias genericas se o plano nao estiver atualizado.
+
+### 4) Validacao
+
+- Comandos executados: scripts/save-handoff-auto.sh; scripts/save-handoff.sh
+- Testes que passaram: nao aplicavel
+- Testes nao executados (e motivo): nao aplicavel (encerramento documental)
+
+### 5) Contexto para retomada
+
+- Decisoes importantes: Manter bootstrap por documentacao e reduzir dependencia de historico longo no chat.
+- Suposicoes feitas: Repositorio local em ~/querobroapp com docs atualizados.
+- Bloqueios: nenhum
+- Proximo passo recomendado (1 acao objetiva): Reboot real + validacao manual.
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/NEXT_STEP_PLAN.md
+- ultimas 80 linhas de docs/HANDOFF_LOG.md
 
 Objetivo da sessao:
 [descreva em 1 linha]

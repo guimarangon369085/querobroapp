@@ -1,5 +1,5 @@
 module.exports = {
   root: true,
-  extends: ['../../.eslintrc.cjs', 'next/core-web-vitals']
+  extends: ['../../.eslintrc.cjs', 'next/core-web-vitals'],
+  ignorePatterns: ['next-env.d.ts']
 };
-

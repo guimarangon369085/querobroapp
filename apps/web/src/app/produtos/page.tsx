@@ -1,7 +1,15 @@
 'use client';
 
 import Link from 'next/link';
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent
+} from 'react';
 import type { Product } from '@querobroapp/shared';
 import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
@@ -9,6 +17,7 @@ import { formatCurrencyBR, formatMoneyInputBR, parseCurrencyBR, titleCase } from
 import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
 import { useSurfaceMode } from '@/hooks/use-surface-mode';
 import { useTutorialSpotlight } from '@/hooks/use-tutorial-spotlight';
+import { AppIcon } from '@/components/app-icons';
 import { useFeedback } from '@/components/feedback-provider';
 import { FormField } from '@/components/form/FormField';
 import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
@@ -215,6 +224,20 @@ function ProductsPageContent() {
     }
   };
 
+  const handleProductCardKeyDown = (
+    event: KeyboardEvent<HTMLDivElement>,
+    product: Product
+  ) => {
+    if (event.currentTarget !== event.target) return;
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    startEdit(product);
+  };
+
+  const stopProductCardAction = (event: MouseEvent<HTMLElement>) => {
+    event.stopPropagation();
+  };
+
   const filteredProducts = useMemo(() => {
     const query = search.trim().toLowerCase();
     const effectiveFilter = isOperationMode ? 'ATIVOS' : activeFilter;
@@ -231,6 +254,7 @@ function ProductsPageContent() {
   }, [activeFilter, isOperationMode, products, search]);
 
   return (
+    <>
     <BuilderLayoutProvider page="produtos">
       <section className="grid gap-8">
         <BuilderLayoutItemSlot id="load_error">
@@ -271,9 +295,7 @@ function ProductsPageContent() {
                 <option value="ATIVOS">Ativos</option>
                 <option value="INATIVOS">Inativos</option>
               </select>
-            ) : (
-              <span className="text-xs text-neutral-500">Mostrando apenas ativos.</span>
-            )}
+            ) : null}
           </div>
         </BuilderLayoutItemSlot>
 
@@ -325,7 +347,12 @@ function ProductsPageContent() {
 
             {isOperationMode ? null : (
               <details className="app-details">
-                <summary>Campos avancados (categoria, unidade e status)</summary>
+                <summary>
+                  <span className="inline-flex items-center gap-2">
+                    <AppIcon name="tools" className="h-4 w-4" />
+                    Mais
+                  </span>
+                </summary>
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
                   <FormField label="Categoria" hint="Ex: Broas, Sabores, Bebidas">
                     <input
@@ -365,6 +392,7 @@ function ProductsPageContent() {
             )}
             <div className="app-form-actions app-form-actions--mobile-sticky">
               <button className="app-button app-button-primary" type="submit">
+                <AppIcon name={editingId ? 'refresh' : 'plus'} className="h-4 w-4" />
                 {editingId ? 'Atualizar' : 'Criar'}
               </button>
               {editingId && (
@@ -373,6 +401,7 @@ function ProductsPageContent() {
                   type="button"
                   onClick={cancelEdit}
                 >
+                  <AppIcon name="close" className="h-4 w-4" />
                   Cancelar
                 </button>
               )}
@@ -391,33 +420,72 @@ function ProductsPageContent() {
               </div>
             ) : (
               <>
-                {filteredProducts.map((product) => (
-                  <div
-                    key={product.id}
-                    className="app-panel flex flex-wrap items-center justify-between gap-4"
-                  >
-                    <div>
-                      <p className="text-lg font-semibold">{product.name}</p>
-                      <p className="text-sm text-neutral-500">
-                        {product.category || 'Sem categoria'} • {product.unit || 'un'} •{' '}
-                        {formatCurrencyBR(product.price)}
-                      </p>
+                {filteredProducts.map((product) => {
+                  const isExpanded = editingId === product.id;
+                  return (
+                    <div
+                      key={product.id}
+                      className={`app-panel app-panel--interactive app-panel--expandable ${
+                        isExpanded ? 'app-panel--expanded' : ''
+                      }`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => startEdit(product)}
+                      onKeyDown={(event) => handleProductCardKeyDown(event, product)}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-3">
+                            <p className="text-lg font-semibold">{product.name}</p>
+                            <span className="app-panel__chevron" aria-hidden="true" />
+                          </div>
+                          <p className="mt-1 text-sm text-neutral-500">{formatCurrencyBR(product.price)}</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            className="app-button app-button-ghost"
+                            onClick={(event) => {
+                              stopProductCardAction(event);
+                              startEdit(product);
+                            }}
+                          >
+                            <AppIcon name="refresh" className="h-4 w-4" />
+                            Editar
+                          </button>
+                          <Link
+                            className="app-button app-button-ghost"
+                            href={`/estoque?bomProductId=${product.id}`}
+                            onClick={stopProductCardAction}
+                          >
+                            <AppIcon name="tools" className="h-4 w-4" />
+                            Ficha tecnica
+                          </Link>
+                          {!isOperationMode ? (
+                            <button
+                              type="button"
+                              className="app-button app-button-danger"
+                              onClick={(event) => {
+                                stopProductCardAction(event);
+                                void remove(product.id!);
+                              }}
+                            >
+                              <AppIcon name="close" className="h-4 w-4" />
+                              Remover
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="app-panel__expand" aria-hidden={!isExpanded}>
+                        <div className="app-panel__expand-inner">
+                          <div className="app-panel__expand-surface text-sm text-neutral-600">
+                            {product.category || 'Sem categoria'} • {product.unit || 'un'}
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      <button className="app-button app-button-ghost" onClick={() => startEdit(product)}>
-                        Editar
-                      </button>
-                      <Link className="app-button app-button-ghost" href={`/estoque?bomProductId=${product.id}`}>
-                        Ficha tecnica
-                      </Link>
-                      {!isOperationMode ? (
-                        <button className="app-button app-button-danger" onClick={() => remove(product.id!)}>
-                          Remover
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
                 {filteredProducts.length === 0 && (
                   <div className="app-panel border-dashed text-sm text-neutral-500">
                     {products.length === 0
@@ -432,6 +500,7 @@ function ProductsPageContent() {
 
       </section>
     </BuilderLayoutProvider>
+    </>
   );
 }
 

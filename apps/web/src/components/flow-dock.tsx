@@ -9,6 +9,7 @@ import { formatCurrencyBR } from '@/lib/format';
 export function FlowDock() {
   const pathname = usePathname();
   const { flow, error } = useOperationFlow({ refreshIntervalMs: 30000 });
+  const activeIndex = primaryNavItems.findIndex((item) => isActivePath(pathname, item.href));
 
   return (
     <section className="flow-dock" aria-label="Fluxo principal">
@@ -17,8 +18,14 @@ export function FlowDock() {
       </div>
 
       <div className="flow-dock__main">
-        <p className="flow-dock__title">As 5 telas principais concentram toda a operacao.</p>
-        <div className="flow-dock__progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={flow.progressPercent}>
+        <p className="flow-dock__title">As 4 telas principais concentram toda a operacao.</p>
+        <div
+          className="flow-dock__progress"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={flow.progressPercent}
+        >
           <span className="flow-dock__progress-fill" style={{ width: `${flow.progressPercent}%` }} />
         </div>
       </div>
@@ -26,11 +33,16 @@ export function FlowDock() {
       <div className="flow-dock__stepline">
         {primaryNavItems.map((item, index) => {
           const active = isActivePath(pathname, item.href);
+          const stepState = active
+            ? 'flow-dock__stepchip--current'
+            : activeIndex >= 0 && index < activeIndex
+              ? 'flow-dock__stepchip--done'
+              : 'flow-dock__stepchip--locked';
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={`flow-dock__stepchip ${active ? 'flow-dock__stepchip--current' : 'flow-dock__stepchip--done'}`}
+              className={`flow-dock__stepchip ${stepState}`}
               aria-label={`${index + 1}. ${item.label}`}
             >
               <span>{index + 1}</span>
@@ -49,7 +61,7 @@ export function FlowDock() {
 
       <div className="flow-dock__actions">
         <Link href="/pedidos" className="app-primary">
-          Abrir pedidos
+          Abrir agenda
         </Link>
         <span>{formatCurrencyBR(flow.metrics.pendingValue)} pendente</span>
       </div>

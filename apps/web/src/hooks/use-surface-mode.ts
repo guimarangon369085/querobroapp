@@ -22,13 +22,13 @@ function readStoredMode(storageKey: string) {
   return isSurfaceMode(storedMode) ? storedMode : null;
 }
 
-function resolveDefaultMode(options: UseSurfaceModeOptions) {
-  if (options.defaultMode) return options.defaultMode;
+function resolveDefaultMode(breakpointPx: number | undefined, defaultMode: SurfaceMode | undefined) {
+  if (defaultMode) return defaultMode;
   if (
     typeof window !== 'undefined' &&
-    Number.isFinite(options.breakpointPx) &&
-    (options.breakpointPx ?? 0) > 0 &&
-    window.innerWidth <= (options.breakpointPx ?? 0)
+    Number.isFinite(breakpointPx) &&
+    (breakpointPx ?? 0) > 0 &&
+    window.innerWidth <= (breakpointPx ?? 0)
   ) {
     return 'operation' as SurfaceMode;
   }
@@ -36,18 +36,19 @@ function resolveDefaultMode(options: UseSurfaceModeOptions) {
 }
 
 export function useSurfaceMode(pageKey: string, options: UseSurfaceModeOptions = {}) {
+  const { breakpointPx, defaultMode, storagePrefix } = options;
   const storageKey = useMemo(
-    () => `${options.storagePrefix ?? DEFAULT_STORAGE_PREFIX}:${pageKey}`,
-    [pageKey, options.storagePrefix]
+    () => `${storagePrefix ?? DEFAULT_STORAGE_PREFIX}:${pageKey}`,
+    [pageKey, storagePrefix]
   );
   const [viewMode, setViewMode] = useState<SurfaceMode>(() => {
-    return readStoredMode(storageKey) ?? resolveDefaultMode(options);
+    return readStoredMode(storageKey) ?? resolveDefaultMode(breakpointPx, defaultMode);
   });
 
   useEffect(() => {
     const storedMode = readStoredMode(storageKey);
-    setViewMode(storedMode ?? resolveDefaultMode(options));
-  }, [storageKey, options.breakpointPx, options.defaultMode]);
+    setViewMode(storedMode ?? resolveDefaultMode(breakpointPx, defaultMode));
+  }, [storageKey, breakpointPx, defaultMode]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;

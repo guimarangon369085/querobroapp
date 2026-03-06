@@ -51,7 +51,7 @@ type ProductionBatchAllocation = {
 
 type ProductionBatchRecord = {
   id: string;
-  triggerSource: 'ALEXA' | 'MANUAL';
+  triggerSource: 'MANUAL';
   triggerLabel: string;
   requestedTimerMinutes: number | null;
   bakeTimerMinutes: number;
@@ -77,7 +77,6 @@ type ProductionQueueRow = {
   totalBroas: number;
   producedBroas: number;
   remainingBroas: number;
-  waitingAlexaTrigger: boolean;
 };
 
 type ProductionBoardResponse = {
@@ -340,8 +339,7 @@ export class ProductionService {
         status: order.status,
         totalBroas,
         producedBroas,
-        remainingBroas,
-        waitingAlexaTrigger: order.status === 'CONFIRMADO' && remainingBroas > 0
+        remainingBroas
       });
     }
 
@@ -363,6 +361,22 @@ export class ProductionService {
     const now = Date.now();
 
     for (const batch of state.batches) {
+      const validLinkedOrderIds = batch.linkedOrderIds.filter((orderId) => orderById.has(orderId));
+      if (validLinkedOrderIds.length !== batch.linkedOrderIds.length) {
+        const validOrderIdSet = new Set(validLinkedOrderIds);
+        batch.linkedOrderIds = validLinkedOrderIds;
+        batch.allocations = batch.allocations.filter((entry) => validOrderIdSet.has(entry.orderId));
+        changed = true;
+      }
+
+      if (batch.linkedOrderIds.length === 0) {
+        if (batch.status !== 'DELIVERED') {
+          batch.status = 'DELIVERED';
+          changed = true;
+        }
+        continue;
+      }
+
       if (batch.status === 'BAKING' && new Date(batch.readyAt).getTime() <= now) {
         batch.status = 'READY';
         changed = true;
@@ -397,7 +411,7 @@ export class ProductionService {
         }
 
         for (const orderId of readyOrderIds) {
-          await this.deliveriesService.dispatchOrderToUber(orderId);
+          await this.deliveriesService.startOrderDelivery(orderId);
         }
 
         batch.status = 'DISPATCHED';
@@ -626,6 +640,14 @@ export class ProductionService {
     const now = new Date();
     const readyAt = new Date(now.getTime() + OVEN_BAKE_TIMER_MINUTES * 60_000);
     const touchedOrderIds = Array.from(new Set(allocations.map((entry) => entry.orderId)));
+    const triggerLabel =
+      typeof payload.triggerLabel === 'string' ? payload.triggerLabel.trim() : '';
+    const requestedTimerMinutes =
+      typeof payload.requestedTimerMinutes === 'number' &&
+      Number.isFinite(payload.requestedTimerMinutes) &&
+      payload.requestedTimerMinutes > 0
+        ? Math.round(payload.requestedTimerMinutes)
+        : null;
 
     await this.prisma.$transaction(async (tx) => {
       for (const allocation of allocations) {
@@ -667,12 +689,9 @@ export class ProductionService {
 
     runtime.batches.unshift({
       id: batchId,
-      triggerSource: payload.triggerSource === 'ALEXA' ? 'ALEXA' : 'MANUAL',
-      triggerLabel: (payload.triggerLabel || '').trim() || 'Inicio manual da fornada',
-      requestedTimerMinutes:
-        Number.isFinite(payload.requestedTimerMinutes) && (payload.requestedTimerMinutes || 0) > 0
-          ? Math.round(payload.requestedTimerMinutes as number)
-          : null,
+      triggerSource: 'MANUAL',
+      triggerLabel: triggerLabel || 'Inicio manual da fornada',
+      requestedTimerMinutes,
       bakeTimerMinutes: OVEN_BAKE_TIMER_MINUTES,
       ovenCapacityBroas: OVEN_CAPACITY_BROAS,
       startedAt: now.toISOString(),

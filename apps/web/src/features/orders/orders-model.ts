@@ -1,13 +1,4 @@
-import type { Order, OrderItem, Payment } from '@querobroapp/shared';
-
-export const orderStatuses = [
-  'ABERTO',
-  'CONFIRMADO',
-  'EM_PREPARACAO',
-  'PRONTO',
-  'ENTREGUE',
-  'CANCELADO'
-] as const;
+import type { Customer, Order, OrderItem, Payment } from '@querobroapp/shared';
 
 export const paymentMethods = ['pix', 'dinheiro', 'cartao', 'transferencia'] as const;
 
@@ -20,30 +11,39 @@ export const nextStatusByCurrent: Record<string, string | null> = {
   CANCELADO: null
 };
 
-export type FinancialFilter = 'TODOS' | 'PENDENTE' | 'PARCIAL' | 'PAGO';
-
 export type OrderView = Order & {
   items?: OrderItem[];
+  customer?: Customer | null;
   payments?: Payment[];
   amountPaid?: number;
   balanceDue?: number;
   paymentStatus?: 'PENDENTE' | 'PARCIAL' | 'PAGO';
 };
 
-export type UberDirectReadiness = {
-  provider: 'UBER_DIRECT';
-  flow: 'SERVER_TO_SERVER';
-  iframeSupported: false;
+export type MassPrepEvent = {
+  version: 1;
+  id: string;
+  eventName: 'FAZER MASSA';
+  orderId: number;
+  startsAt: string;
+  endsAt: string;
+  durationMinutes: number;
+  massRecipes: number;
+  status: 'INGREDIENTES' | 'PREPARO' | 'PRONTA';
+  createdAt: string;
+};
+
+export type DeliveryReadiness = {
+  provider: 'LOCAL';
+  mode: 'INTERNAL';
   ready: boolean;
+  reason: string;
   missingRequirements: string[];
-  missingConfiguration: string[];
-  manualHandoffUrl: string;
   draft: {
     orderId: number;
     customerName: string;
     customerPhone: string;
     dropoffAddress: string;
-    pickupAddress: string;
     orderTotal: number;
     scheduledAt: string;
     manifestSummary: string;
@@ -55,40 +55,18 @@ export type UberDirectReadiness = {
   };
 };
 
-export type UberDirectQuote = {
-  provider: 'UBER_DIRECT';
-  flow: 'SERVER_TO_SERVER';
-  iframeSupported: false;
-  quoteCreated: true;
-  requestedAt: string;
-  manualHandoffUrl: string;
-  draft: UberDirectReadiness['draft'];
-  quote: {
-    providerQuoteId: string;
-    fee: number;
-    currencyCode: string;
-    expiresAt: string;
-    pickupDurationSeconds: number | null;
-    dropoffEta: string;
-  };
-};
-
 export type DeliveryTracking = {
   orderId: number;
-  provider: 'UBER_DIRECT' | 'LOCAL_SIMULATED';
-  mode: 'LIVE' | 'SIMULATED';
+  provider: 'LOCAL';
+  mode: 'INTERNAL';
   status: 'PENDING_REQUIREMENTS' | 'REQUESTED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'FAILED';
   createdAt: string;
   updatedAt: string;
-  providerDeliveryId: string;
-  providerOrderId?: string | null;
-  providerQuoteId: string | null;
-  trackingUrl: string;
+  trackingId: string;
   pickupEta: string | null;
   dropoffEta: string | null;
-  lastProviderError: string | null;
-  lastWebhookEventId?: string | null;
-  draft: UberDirectReadiness['draft'];
+  lastError: string | null;
+  draft: DeliveryReadiness['draft'];
 };
 
 export type ProductionBatchAllocation = {
@@ -102,7 +80,7 @@ export type ProductionBatchAllocation = {
 
 export type ProductionBatch = {
   id: string;
-  triggerSource: 'ALEXA' | 'MANUAL';
+  triggerSource: 'MANUAL';
   triggerLabel: string;
   requestedTimerMinutes: number | null;
   bakeTimerMinutes: number;
@@ -129,7 +107,6 @@ export type ProductionBoard = {
     totalBroas: number;
     producedBroas: number;
     remainingBroas: number;
-    waitingAlexaTrigger: boolean;
   }>;
   recentBatches: ProductionBatch[];
 };

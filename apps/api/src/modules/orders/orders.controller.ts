@@ -14,6 +14,11 @@ export class OrdersController {
     return this.service.list();
   }
 
+  @Get('mass-prep-events')
+  listMassPrepEvents() {
+    return this.service.listMassPrepEvents();
+  }
+
   @Get(':id')
   get(@Param('id') id: string) {
     return this.service.get(parseWithSchema(idSchema, id));
@@ -29,6 +34,17 @@ export class OrdersController {
     return this.service.update(parseWithSchema(idSchema, id), body);
   }
 
+  @Delete(':id/mass-prep-event')
+  async removeMassPrepEvent(@Param('id') id: string) {
+    await this.service.removeMassPrepEvent(parseWithSchema(idSchema, id));
+    return { ok: true };
+  }
+
+  @Patch(':id/mass-prep-event/status')
+  updateMassPrepEventStatus(@Param('id') id: string, @Body() body: unknown) {
+    return this.service.updateMassPrepEventStatus(parseWithSchema(idSchema, id), body);
+  }
+
   @Delete(':id')
   async remove(@Param('id') id: string) {
     await this.service.remove(parseWithSchema(idSchema, id));
@@ -38,6 +54,11 @@ export class OrdersController {
   @Post(':id/items')
   addItem(@Param('id') id: string, @Body() body: unknown) {
     return this.service.addItem(parseWithSchema(idSchema, id), body);
+  }
+
+  @Put(':id/items')
+  replaceItems(@Param('id') id: string, @Body() body: unknown) {
+    return this.service.replaceItems(parseWithSchema(idSchema, id), body);
   }
 
   @Delete(':id/items/:itemId')

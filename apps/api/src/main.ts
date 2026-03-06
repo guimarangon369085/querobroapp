@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { Prisma } from '@prisma/client';
 import { NestFactory } from '@nestjs/core';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -8,14 +9,141 @@ import { AppModule } from './app.module.js';
 import { UPLOADS_DIR } from './modules/runtime-config/runtime-config.service.js';
 import { ZodExceptionFilter } from './common/filters/zod-exception.filter.js';
 import { getSecurityRuntimeConfig } from './security/security-config.js';
+import { PrismaService } from './prisma.service.js';
+
+type ErrorLike = {
+  name?: unknown;
+  message?: unknown;
+  code?: unknown;
+  status?: unknown;
+  statusCode?: unknown;
+};
+
+function sanitizeLogText(value: string, fallback: string) {
+  const compact = value.replace(/\s+/g, ' ').trim();
+  if (!compact) return fallback;
+  return compact.slice(0, 320);
+}
+
+function serializeExceptionForLog(error: unknown) {
+  if (error instanceof Error) {
+    const maybeError = error as ErrorLike;
+    const code = maybeError.code;
+    const status = maybeError.statusCode ?? maybeError.status;
+    return {
+      errorName: sanitizeLogText(error.name || 'Error', 'Error'),
+      errorMessage: sanitizeLogText(error.message || '', 'Unhandled error'),
+      ...(typeof code === 'string' || typeof code === 'number' ? { errorCode: String(code) } : {}),
+      ...(typeof status === 'number' ? { statusCode: status } : {})
+    };
+  }
+
+  if (error && typeof error === 'object') {
+    const maybeError = error as ErrorLike;
+    const name = typeof maybeError.name === 'string' ? maybeError.name : 'NonErrorThrow';
+    const message = typeof maybeError.message === 'string' ? maybeError.message : '';
+    const code = maybeError.code;
+    const status = maybeError.statusCode ?? maybeError.status;
+    return {
+      errorName: sanitizeLogText(name, 'NonErrorThrow'),
+      errorMessage: sanitizeLogText(message, 'Unhandled non-error rejection'),
+      ...(typeof code === 'string' || typeof code === 'number' ? { errorCode: String(code) } : {}),
+      ...(typeof status === 'number' ? { statusCode: status } : {})
+    };
+  }
+
+  return {
+    errorName: 'NonErrorThrow',
+    errorMessage: sanitizeLogText(String(error ?? ''), 'Unhandled non-error rejection')
+  };
+}
+
+function logProcessException(event: string, error: unknown) {
+  console.error(
+    JSON.stringify({
+      event,
+      loggedAt: new Date().toISOString(),
+      ...serializeExceptionForLog(error)
+    })
+  );
+}
+
+function normalizeHost(host: string | undefined) {
+  return (host || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^\[(.+)\]$/, '$1');
+}
+
+function resolveListenHost() {
+  return normalizeHost(process.env.HOST) || '127.0.0.1';
+}
+
+function isLoopbackHost(host: string) {
+  const normalized = normalizeHost(host);
+  return (
+    normalized === 'localhost' ||
+    normalized === '::1' ||
+    normalized === '::ffff:127.0.0.1' ||
+    normalized === '127.0.0.1' ||
+    normalized.startsWith('127.')
+  );
+}
+
+function isPublicBindHost(host: string) {
+  return !isLoopbackHost(host);
+}
 
 process.on('unhandledRejection', (reason) => {
-  console.error('UnhandledRejection:', reason);
+  logProcessException('unhandled_rejection', reason);
 });
 
 process.on('uncaughtException', (error) => {
-  console.error('UncaughtException:', error);
+  logProcessException('uncaught_exception', error);
 });
+
+function isMissingCustomerDeletedAtColumnError(
+  value: unknown
+): value is Prisma.PrismaClientKnownRequestError {
+  if (!(value instanceof Prisma.PrismaClientKnownRequestError)) {
+    return false;
+  }
+  return (
+    value.code === 'P2022' &&
+    typeof value.message === 'string' &&
+    value.message.includes('Customer.deletedAt')
+  );
+}
+
+function resolveDeletedAtColumnType() {
+  const dbUrl = (process.env.DATABASE_URL || '').toLowerCase();
+  if (dbUrl.startsWith('file:')) {
+    return 'DATETIME';
+  }
+  if (dbUrl.startsWith('postgres://') || dbUrl.startsWith('postgresql://')) {
+    return 'TIMESTAMP';
+  }
+  return 'TIMESTAMP';
+}
+
+async function ensureCustomerDeletedAtColumn() {
+  const prisma = new PrismaService();
+  try {
+    await prisma.$connect();
+    await prisma.customer.findFirst({ where: { deletedAt: null }, take: 1 });
+  } catch (error) {
+    if (!isMissingCustomerDeletedAtColumnError(error)) {
+      throw error;
+    }
+    const columnType = resolveDeletedAtColumnType();
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "Customer" ADD COLUMN "deletedAt" ${columnType}`
+    );
+    console.log('Customer.deletedAt column added automatically.');
+  } finally {
+    await prisma.$disconnect();
+  }
+}
 
 function ensureDatabaseUrl() {
   const isDev = (process.env.NODE_ENV || 'development') === 'development';
@@ -44,6 +172,21 @@ function parseAllowedOrigins() {
   return new Set([...defaults, ...fromEnv]);
 }
 
+function isLoopbackOrigin(origin: string) {
+  try {
+    const parsed = new URL(origin);
+    const hostname = parsed.hostname.trim().toLowerCase();
+    return (
+      hostname === '127.0.0.1' ||
+      hostname === 'localhost' ||
+      hostname === '::1' ||
+      hostname === '[::1]'
+    );
+  } catch {
+    return false;
+  }
+}
+
 type RequestLike = {
   headers: Record<string, string | string[] | undefined>;
   method: string;
@@ -66,12 +209,32 @@ type ResponseLike = {
 async function bootstrap() {
   ensureDatabaseUrl();
   const isProd = (process.env.NODE_ENV || 'development') === 'production';
+  const host = resolveListenHost();
+  const port = process.env.PORT ? Number(process.env.PORT) : 3001;
+  if (!isProd) {
+    await ensureCustomerDeletedAtColumn();
+  }
   const securityConfig = getSecurityRuntimeConfig();
   const allowUnsafeAuthInProd = parseBooleanEnv(process.env.APP_ALLOW_UNSAFE_AUTH_IN_PROD, false);
+  const allowUnsafeAuthOnPublicHost = parseBooleanEnv(
+    process.env.APP_ALLOW_UNSAFE_AUTH_ON_PUBLIC_HOST,
+    false
+  );
 
   if (isProd && !securityConfig.enabled && !allowUnsafeAuthInProd) {
     throw new Error(
       'NODE_ENV=production exige APP_AUTH_ENABLED=true. Use APP_ALLOW_UNSAFE_AUTH_IN_PROD=true apenas para excecoes temporarias.'
+    );
+  }
+
+  if (
+    !securityConfig.enabled &&
+    isPublicBindHost(host) &&
+    !allowUnsafeAuthOnPublicHost &&
+    !(isProd && allowUnsafeAuthInProd)
+  ) {
+    throw new Error(
+      `Inicializacao bloqueada: APP_AUTH_ENABLED=false com HOST=${host} exporia a API sem autenticacao. Use HOST loopback (127.0.0.1/localhost) ou defina APP_ALLOW_UNSAFE_AUTH_ON_PUBLIC_HOST=true conscientemente.`
     );
   }
 
@@ -127,7 +290,7 @@ async function bootstrap() {
   const allowedOrigins = parseAllowedOrigins();
   app.enableCors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.has(origin)) {
+      if (!origin || allowedOrigins.has(origin) || isLoopbackOrigin(origin)) {
         return callback(null, true);
       }
       return callback(new Error(`CORS blocked for origin: ${origin}`));
@@ -154,13 +317,11 @@ async function bootstrap() {
     SwaggerModule.setup('docs', app, document);
   }
 
-  const port = process.env.PORT ? Number(process.env.PORT) : 3001;
-  const host = process.env.HOST || '0.0.0.0';
   await app.listen(port, host);
   console.log(`API Nest rodando em http://${host}:${port}`);
 }
 
 bootstrap().catch((err) => {
-  console.error('Bootstrap error:', err);
+  logProcessException('bootstrap_error', err);
   process.exit(1);
 });

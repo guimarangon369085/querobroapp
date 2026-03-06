@@ -14,8 +14,6 @@ export const OrderPaymentStatusEnum = z.enum(['PENDENTE', 'PARCIAL', 'PAGO']);
 
 export const StockMovementTypeEnum = z.enum(['IN', 'OUT', 'ADJUST']);
 export const InventoryCategoryEnum = z.enum(['INGREDIENTE', 'EMBALAGEM_INTERNA', 'EMBALAGEM_EXTERNA']);
-export const OutboxChannelEnum = z.enum(['whatsapp']);
-export const OutboxStatusEnum = z.enum(['PENDING', 'SENT', 'FAILED']);
 
 export const CustomerSchema = z.object({
   id: z.number().int().positive().optional(),
@@ -36,6 +34,7 @@ export const CustomerSchema = z.object({
   lat: z.number().optional().nullable(),
   lng: z.number().optional().nullable(),
   deliveryNotes: z.string().optional().nullable(),
+  deletedAt: z.string().optional().nullable(),
   createdAt: z.string().optional().nullable()
 });
 
@@ -135,18 +134,6 @@ export const BomItemSchema = z.object({
   qtyPerUnit: z.number().nonnegative().optional().nullable()
 });
 
-export const OutboxMessageSchema = z.object({
-  id: z.number().int().positive().optional(),
-  messageId: z.string().min(1),
-  channel: OutboxChannelEnum.default('whatsapp'),
-  to: z.string().min(1),
-  template: z.string().min(1),
-  payload: z.unknown(),
-  status: OutboxStatusEnum.default('PENDING'),
-  createdAt: z.string().optional().nullable(),
-  sentAt: z.string().optional().nullable()
-});
-
 export const ProductionRequirementBreakdownSchema = z.object({
   productId: z.number().int().positive(),
   productName: z.string(),
@@ -180,28 +167,7 @@ export const ProductionRequirementsResponseSchema = z.object({
   warnings: z.array(ProductionRequirementWarningSchema)
 });
 
-export const ReceiptOfficialItemEnum = z.enum([
-  'FARINHA DE TRIGO',
-  'FUBÁ DE CANJICA',
-  'AÇÚCAR',
-  'MANTEIGA',
-  'LEITE',
-  'OVOS',
-  'GOIABADA',
-  'DOCE DE LEITE',
-  'QUEIJO DO SERRO',
-  'REQUEIJÃO DE CORTE',
-  'SACOLA',
-  'CAIXA DE PLÁSTICO',
-  'PAPEL MANTEIGA'
-]);
-
-export const BuilderReceiptQuantityModeEnum = z.enum(['PURCHASE_PACK', 'BASE_UNIT']);
-export const BuilderReceiptPromptPersonalityEnum = z.enum([
-  'PADRAO_OPERACIONAL',
-  'CONSERVADOR',
-  'AGIL'
-]);
+export * from './lib/phone.js';
 
 const HexColorSchema = z.string().regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
 
@@ -265,370 +231,6 @@ export const BuilderHomeSchema = z.object({
     ])
 });
 
-export const BuilderReceiptStockRuleSchema = z.object({
-  officialItem: ReceiptOfficialItemEnum,
-  inventoryItemName: z.string().min(1).max(120),
-  enabled: z.boolean().default(true),
-  quantityMultiplier: z.number().positive().max(100).default(1),
-  quantityMode: BuilderReceiptQuantityModeEnum.default('PURCHASE_PACK'),
-  purchasePackCostMultiplier: z.number().positive().max(100).default(1),
-  applyPriceToInventoryCost: z.boolean().default(true),
-  sourceLabel: z.string().trim().max(120).default('')
-});
-
-export const BuilderSupplierPriceSourceSchema = z.object({
-  id: z.string().min(1).max(64),
-  officialItem: ReceiptOfficialItemEnum,
-  inventoryItemName: z.string().min(1).max(120),
-  supplierName: z.string().trim().min(1).max(120),
-  url: z
-    .string()
-    .url()
-    .max(500)
-    .refine((value) => /^https?:\/\//i.test(value.trim()), {
-      message: 'A URL do fornecedor deve usar http:// ou https://'
-    }),
-  priceXPath: z.string().trim().max(400).default(''),
-  enabled: z.boolean().default(true),
-  fallbackPrice: z.number().positive().optional().nullable(),
-  applyToInventoryCost: z.boolean().default(true)
-});
-
-export const BuilderIntegrationsSchema = z.object({
-  shortcutsEnabled: z.boolean().default(true),
-  shortcutsWebhookUrl: z.string().max(300).default(''),
-  shortcutsNotes: z.string().max(500).default(''),
-  receiptsPrompt: z.string().max(3000).default(''),
-  receiptsPromptPersonality: BuilderReceiptPromptPersonalityEnum.default('PADRAO_OPERACIONAL'),
-  receiptsContextHints: z.string().max(1200).default(''),
-  receiptsContextCompactionEnabled: z.boolean().default(true),
-  receiptsContextCompactionMaxChars: z.coerce.number().int().min(300).max(6000).default(1200),
-  receiptsModelOverride: z.string().trim().max(120).default(''),
-  receiptsPromptCacheEnabled: z.boolean().default(true),
-  receiptsPromptCacheTtlMinutes: z.coerce.number().int().min(1).max(1440).default(90),
-  receiptsSeparator: z.string().min(1).max(4).default(';'),
-  receiptsAutoIngestEnabled: z.boolean().default(true),
-  supplierPricesEnabled: z.boolean().default(true),
-  receiptStockRules: z.array(BuilderReceiptStockRuleSchema).max(30).default([
-    {
-      officialItem: 'FARINHA DE TRIGO',
-      inventoryItemName: 'FARINHA DE TRIGO',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'FUBÁ DE CANJICA',
-      inventoryItemName: 'FUBÁ DE CANJICA',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'AÇÚCAR',
-      inventoryItemName: 'AÇÚCAR',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'MANTEIGA',
-      inventoryItemName: 'MANTEIGA',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'LEITE',
-      inventoryItemName: 'LEITE',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'OVOS',
-      inventoryItemName: 'OVOS',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'GOIABADA',
-      inventoryItemName: 'GOIABADA',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'DOCE DE LEITE',
-      inventoryItemName: 'DOCE DE LEITE',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'QUEIJO DO SERRO',
-      inventoryItemName: 'QUEIJO DO SERRO',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'REQUEIJÃO DE CORTE',
-      inventoryItemName: 'REQUEIJÃO DE CORTE',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'SACOLA',
-      inventoryItemName: 'SACOLA',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'CAIXA DE PLÁSTICO',
-      inventoryItemName: 'CAIXA DE PLÁSTICO',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'PAPEL MANTEIGA',
-      inventoryItemName: 'PAPEL MANTEIGA',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    }
-  ]),
-  supplierPriceSources: z.array(BuilderSupplierPriceSourceSchema).max(40).default([
-    {
-      id: 'src-trigo-pao',
-      officialItem: 'FARINHA DE TRIGO',
-      inventoryItemName: 'FARINHA DE TRIGO',
-      supplierName: 'Pao de Acucar',
-      url: 'https://www.paodeacucar.com/produto/23692/farinha-de-trigo-tipo-1-tradicional-qualita-pacote-1kg',
-      priceXPath:
-        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p',
-      enabled: true,
-      fallbackPrice: 6.49,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-canjica-superab',
-      officialItem: 'FUBÁ DE CANJICA',
-      inventoryItemName: 'FUBÁ DE CANJICA',
-      supplierName: 'SuperAB',
-      url: 'https://superabconline.com.br/p/d/2593871/fuba-canjica-rocinha-1kg',
-      priceXPath:
-        '/html/body/app-root/app-layout/app-layout-default/div/app-detalhes-produto-page/div/app-detalhes-produto/div/app-detalhes-produto-pagina-desktop-default/div/div/div[2]/div[3]/div[1]',
-      enabled: true,
-      fallbackPrice: 6,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-acucar-pao',
-      officialItem: 'AÇÚCAR',
-      inventoryItemName: 'AÇÚCAR',
-      supplierName: 'Pao de Acucar',
-      url: 'https://www.paodeacucar.com/produto/74215/acucar-refinado-uniao-pacote-1kg',
-      priceXPath:
-        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p',
-      enabled: true,
-      fallbackPrice: 5.69,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-manteiga-pao',
-      officialItem: 'MANTEIGA',
-      inventoryItemName: 'MANTEIGA',
-      supplierName: 'Pao de Acucar',
-      url: 'https://www.paodeacucar.com/produto/53023/manteiga-com-sal-batavo-200g',
-      priceXPath:
-        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p',
-      enabled: true,
-      fallbackPrice: 12.79,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-leite-pao',
-      officialItem: 'LEITE',
-      inventoryItemName: 'LEITE',
-      supplierName: 'Pao de Acucar',
-      url: 'https://www.paodeacucar.com/produto/164887/leite-uht-integral-qualita-caixa-com-tampa-1l',
-      priceXPath:
-        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p[1]',
-      enabled: true,
-      fallbackPrice: 4.19,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-ovos-pao',
-      officialItem: 'OVOS',
-      inventoryItemName: 'OVOS',
-      supplierName: 'Pao de Acucar',
-      url: 'https://www.paodeacucar.com/produto/1636359/ovos-vermelhos-qualita-livre-de-gaiola-bandeja-20-unidades',
-      priceXPath:
-        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p[1]',
-      enabled: true,
-      fallbackPrice: 23.9,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-goiabada-pao',
-      officialItem: 'GOIABADA',
-      inventoryItemName: 'GOIABADA',
-      supplierName: 'Pao de Acucar',
-      url: 'https://www.paodeacucar.com/produto/93418/goiabada-corte-qualita-pacote-300g',
-      priceXPath:
-        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p',
-      enabled: true,
-      fallbackPrice: 5.99,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-doce-pao',
-      officialItem: 'DOCE DE LEITE',
-      inventoryItemName: 'DOCE DE LEITE',
-      supplierName: 'Pao de Acucar',
-      url: 'https://www.paodeacucar.com/produto/354500/doce-de-leite-tradicional-portao-do-cambui-pacote-200g',
-      priceXPath:
-        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p',
-      enabled: true,
-      fallbackPrice: 20.99,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-queijo-pao',
-      officialItem: 'QUEIJO DO SERRO',
-      inventoryItemName: 'QUEIJO DO SERRO',
-      supplierName: 'Pao de Acucar',
-      url: 'https://www.paodeacucar.com/produto/443109/queijo-minas-meia-cura-do-serro-500g',
-      priceXPath:
-        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div/p',
-      enabled: true,
-      fallbackPrice: 46.95,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-requeijao-trela',
-      officialItem: 'REQUEIJÃO DE CORTE',
-      inventoryItemName: 'REQUEIJÃO DE CORTE',
-      supplierName: 'Trela',
-      url: 'https://trela.com.br/produto/requeijao-com-raspas-de-queijo-240g-5844',
-      priceXPath: '/html/body/div[1]/main/div/div[3]/div[1]/p',
-      enabled: true,
-      fallbackPrice: 30.9,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-sacola-fornecedor',
-      officialItem: 'SACOLA',
-      inventoryItemName: 'SACOLA',
-      supplierName: 'Fornecedor.net',
-      url: 'https://www.fornecedornet.com.br/papel-e-papelao/papel/sacolas-de-papel/sacola-kraft-natural-23-5x17x28cm-pacote-com-10-unidades',
-      priceXPath: '/html/body/div[2]/div[2]/div/div[4]/div[2]/ul[2]/li[1]/h2/span',
-      enabled: true,
-      fallbackPrice: 17.88,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-caixa-fornecedor',
-      officialItem: 'CAIXA DE PLÁSTICO',
-      inventoryItemName: 'CAIXA DE PLÁSTICO',
-      supplierName: 'Fornecedor.net',
-      url: 'https://www.fornecedornet.com.br/ga-20-rocambole-alto-galvanotek-caixa-100-unidades',
-      priceXPath: '/html/body/div[2]/div[2]/div/div[4]/div[2]/ul[2]/li[1]/h2/span',
-      enabled: true,
-      fallbackPrice: 86.65,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-papel-pao',
-      officialItem: 'PAPEL MANTEIGA',
-      inventoryItemName: 'PAPEL MANTEIGA',
-      supplierName: 'Pao de Acucar',
-      url: 'https://www.paodeacucar.com/produto/108699/papel-manteiga-qualita-30cm-x-7,5m',
-      priceXPath:
-        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p[1]',
-      enabled: true,
-      fallbackPrice: 10.29,
-      applyToInventoryCost: true
-    }
-  ]),
-  salePrices: z
-    .object({
-      completa: z
-        .object({
-          T: z.number().nonnegative().default(40),
-          G: z.number().nonnegative().default(50),
-          Q: z.number().nonnegative().default(52),
-          R: z.number().nonnegative().default(52),
-          D: z.number().nonnegative().default(52)
-        })
-        .default({}),
-      mista: z
-        .object({
-          T: z.number().nonnegative().default(0),
-          G: z.number().nonnegative().default(45),
-          Q: z.number().nonnegative().default(47),
-          R: z.number().nonnegative().default(47),
-          D: z.number().nonnegative().default(47)
-        })
-        .default({}),
-      sabores: z
-        .object({
-          T: z.number().nonnegative().default(52),
-          G: z.number().nonnegative().default(52),
-          Q: z.number().nonnegative().default(52),
-          R: z.number().nonnegative().default(52),
-          D: z.number().nonnegative().default(52)
-        })
-        .default({})
-    })
-    .default({})
-});
-
 export const BuilderLayoutPageKeyEnum = z.enum([
   'dashboard',
   'produtos',
@@ -675,8 +277,8 @@ export const BuilderLayoutsSchema = z.object({
     { id: 'header', label: 'Cabecalho da pagina', kind: 'slot', visible: true, order: 0 },
     { id: 'load_error', label: 'Aviso de carga', kind: 'slot', visible: true, order: 1 },
     { id: 'kpis', label: 'KPIs de pedidos', kind: 'slot', visible: true, order: 2 },
-    { id: 'new_order', label: 'Criacao de pedido', kind: 'slot', visible: true, order: 3 },
-    { id: 'list', label: 'Lista de pedidos', kind: 'slot', visible: true, order: 4 },
+    { id: 'list', label: 'Lista de pedidos', kind: 'slot', visible: true, order: 3 },
+    { id: 'new_order', label: 'Criacao de pedido', kind: 'slot', visible: true, order: 4 },
     { id: 'detail', label: 'Detalhe do pedido', kind: 'slot', visible: true, order: 5 }
   ]),
   estoque: BuilderPageLayoutSchema.default([
@@ -709,7 +311,6 @@ export const BuilderConfigSchema = z.object({
   theme: BuilderThemeSchema.default({}),
   forms: BuilderFormsSchema.default({}),
   home: BuilderHomeSchema.default({}),
-  integrations: BuilderIntegrationsSchema.default({}),
   layouts: BuilderLayoutsSchema.default({})
 });
 
@@ -718,19 +319,16 @@ export const BuilderConfigPatchSchema = z
     theme: BuilderThemeSchema.partial().optional(),
     forms: BuilderFormsSchema.partial().optional(),
     home: BuilderHomeSchema.partial().optional(),
-    integrations: BuilderIntegrationsSchema.partial().optional(),
     layouts: BuilderLayoutsPatchSchema.optional()
   })
   .strict();
 
-export const BuilderBlockKeyEnum = z.enum(['theme', 'forms', 'home', 'integrations', 'layout']);
+export const BuilderBlockKeyEnum = z.enum(['theme', 'forms', 'home', 'layout']);
 
 export type OrderStatus = z.infer<typeof OrderStatusEnum>;
 export type PaymentStatus = z.infer<typeof PaymentStatusEnum>;
 export type OrderPaymentStatus = z.infer<typeof OrderPaymentStatusEnum>;
 export type StockMovementType = z.infer<typeof StockMovementTypeEnum>;
-export type OutboxChannel = z.infer<typeof OutboxChannelEnum>;
-export type OutboxStatus = z.infer<typeof OutboxStatusEnum>;
 
 export type Customer = z.infer<typeof CustomerSchema>;
 export type Product = z.infer<typeof ProductSchema>;
@@ -743,21 +341,14 @@ export type InventoryItem = z.infer<typeof InventoryItemSchema>;
 export type InventoryMovement = z.infer<typeof InventoryMovementSchema>;
 export type Bom = z.infer<typeof BomSchema>;
 export type BomItem = z.infer<typeof BomItemSchema>;
-export type OutboxMessage = z.infer<typeof OutboxMessageSchema>;
 export type ProductionRequirementBreakdown = z.infer<typeof ProductionRequirementBreakdownSchema>;
 export type ProductionRequirementRow = z.infer<typeof ProductionRequirementRowSchema>;
 export type ProductionRequirementWarning = z.infer<typeof ProductionRequirementWarningSchema>;
 export type ProductionRequirementsResponse = z.infer<typeof ProductionRequirementsResponseSchema>;
-export type ReceiptOfficialItem = z.infer<typeof ReceiptOfficialItemEnum>;
 export type BuilderTheme = z.infer<typeof BuilderThemeSchema>;
 export type BuilderForms = z.infer<typeof BuilderFormsSchema>;
 export type BuilderHomeImage = z.infer<typeof BuilderHomeImageSchema>;
 export type BuilderHome = z.infer<typeof BuilderHomeSchema>;
-export type BuilderReceiptQuantityMode = z.infer<typeof BuilderReceiptQuantityModeEnum>;
-export type BuilderReceiptPromptPersonality = z.infer<typeof BuilderReceiptPromptPersonalityEnum>;
-export type BuilderReceiptStockRule = z.infer<typeof BuilderReceiptStockRuleSchema>;
-export type BuilderSupplierPriceSource = z.infer<typeof BuilderSupplierPriceSourceSchema>;
-export type BuilderIntegrations = z.infer<typeof BuilderIntegrationsSchema>;
 export type BuilderLayoutPageKey = z.infer<typeof BuilderLayoutPageKeyEnum>;
 export type BuilderLayoutItem = z.infer<typeof BuilderLayoutItemSchema>;
 export type BuilderLayouts = z.infer<typeof BuilderLayoutsSchema>;

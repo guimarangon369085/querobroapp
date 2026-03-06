@@ -17,6 +17,7 @@ fi
 API_PID=""
 WEB_PID=""
 SHUTDOWN_DONE=0
+API_AUTH_ENABLED="${APP_AUTH_ENABLED:-false}"
 
 wait_for_http() {
   local name="$1"
@@ -37,6 +38,77 @@ wait_for_http() {
   return 1
 }
 
+collect_descendants_postorder() {
+  local parent_pid="$1"
+  local child_pid
+
+  if ! command -v pgrep >/dev/null 2>&1; then
+    return 0
+  fi
+
+  while IFS= read -r child_pid; do
+    [ -z "$child_pid" ] && continue
+    collect_descendants_postorder "$child_pid"
+    printf '%s\n' "$child_pid"
+  done < <(pgrep -P "$parent_pid" 2>/dev/null || true)
+}
+
+signal_process_tree() {
+  local pid="$1"
+  local signal_name="$2"
+  local child_pid
+
+  [ -z "$pid" ] && return 0
+  if ! kill -0 "$pid" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  while IFS= read -r child_pid; do
+    [ -z "$child_pid" ] && continue
+    kill "-${signal_name}" "$child_pid" >/dev/null 2>&1 || true
+  done < <(collect_descendants_postorder "$pid")
+
+  kill "-${signal_name}" "$pid" >/dev/null 2>&1 || true
+}
+
+wait_for_pid_exit() {
+  local pid="$1"
+  local attempts="${2:-30}"
+  local delay="${3:-0.25}"
+  local i=1
+
+  [ -z "$pid" ] && return 0
+  while [ "$i" -le "$attempts" ]; do
+    if ! kill -0 "$pid" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep "$delay"
+    i=$((i + 1))
+  done
+
+  return 1
+}
+
+terminate_managed_process() {
+  local pid="$1"
+  local label="$2"
+
+  [ -z "$pid" ] && return 0
+  if ! kill -0 "$pid" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "Encerrando ${label} (PID ${pid}) com TERM..."
+  signal_process_tree "$pid" TERM
+  if wait_for_pid_exit "$pid"; then
+    return 0
+  fi
+
+  echo "${label} (PID ${pid}) nao encerrou no tempo; escalando para KILL..."
+  signal_process_tree "$pid" KILL
+  wait_for_pid_exit "$pid" 20 0.25 || true
+}
+
 cleanup() {
   local exit_code=$?
 
@@ -48,21 +120,8 @@ cleanup() {
   echo
   echo "Encerrando ambiente QUEROBROAPP..."
 
-  if [ -n "$API_PID" ] && kill -0 "$API_PID" >/dev/null 2>&1; then
-    kill "$API_PID" >/dev/null 2>&1 || true
-  fi
-  if [ -n "$WEB_PID" ] && kill -0 "$WEB_PID" >/dev/null 2>&1; then
-    kill "$WEB_PID" >/dev/null 2>&1 || true
-  fi
-
-  sleep 1
-
-  if [ -n "$API_PID" ] && kill -0 "$API_PID" >/dev/null 2>&1; then
-    kill -9 "$API_PID" >/dev/null 2>&1 || true
-  fi
-  if [ -n "$WEB_PID" ] && kill -0 "$WEB_PID" >/dev/null 2>&1; then
-    kill -9 "$WEB_PID" >/dev/null 2>&1 || true
-  fi
+  terminate_managed_process "$WEB_PID" "WEB"
+  terminate_managed_process "$API_PID" "API"
 
   ./scripts/kill-ports.sh >/dev/null 2>&1 || true
   echo "Ambiente finalizado."
@@ -78,7 +137,7 @@ trap cleanup EXIT INT TERM HUP
 "$PNPM_BIN" --filter @querobroapp/api prisma:migrate:dev
 
 # Start API and Web in background and keep this shell alive as lifecycle owner.
-"$PNPM_BIN" --filter @querobroapp/api dev > /tmp/querobroapp-api.log 2>&1 &
+APP_AUTH_ENABLED="$API_AUTH_ENABLED" "$PNPM_BIN" --filter @querobroapp/api dev > /tmp/querobroapp-api.log 2>&1 &
 API_PID=$!
 
 "$PNPM_BIN" --filter @querobroapp/web dev > /tmp/querobroapp-web.log 2>&1 &

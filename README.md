@@ -1,113 +1,163 @@
 # QUEROBROAPP
 
-QUEROBROAPP e um sistema para organizar vendas, producao e estoque de broas.
-A regra do produto e simples: complexidade no backend, tela clara para operacao do dia a dia.
+QUEROBROAPP e um ERP operacional para a rotina diaria da broa.
+O principio atual do produto e simples: `Pedidos` concentra a agenda do dia; o backend segura a complexidade.
 
-## O que ja funciona
+## Estado atual verificado
 
-- Cadastro de produtos e sabores.
-- Cadastro de clientes com telefone e endereco.
-- Criacao de pedidos com itens, desconto e status.
-- Pagamento parcial ou total com saldo automatico.
-- Controle de estoque com movimentos manuais e consumo por ficha tecnica (BOM).
-- Quadro D+1 para planejar faltas de insumos no proximo dia.
-- Outbox de WhatsApp (fundacao pronta, envio real em etapa futura).
-- Builder visual para ajustar layout, tema e regras sem alterar codigo.
+- Web operacional com 4 telas reais: `Pedidos`, `Clientes`, `Produtos`, `Estoque`.
+- `Pedidos` e a entrada principal e concentra as visoes `Dia`, `Semana` e `Mes`.
+- `/calendario` existe apenas como redirect legado para `/pedidos`.
+- `Builder` nao faz mais parte da operacao: `/builder` redireciona para `/pedidos`.
+- Todas as integracoes externas foram removidas da base atual; a operacao validada hoje e 100% interna.
+- O processo de QA hoje ja tem gate unico, smoke de navegador e E2E critico.
 
-## Fluxo diario (simples)
+## Fluxo principal do produto
 
-1. `Produtos`: cadastre o que voce vende.
+1. `Produtos`: cadastre o que voce vende e mantenha a ficha tecnica.
 2. `Clientes`: salve contato e endereco.
-3. `Pedidos`: monte o pedido e avance status.
-4. `Estoque`: veja D+1, lance movimentos e confira saldo.
+3. `Pedidos`: crie, acompanhe, produza, entregue e receba.
+4. `Estoque`: confira saldo, D+1, compras e consumo real.
 
-## Arquitetura do projeto
+## Reiniciar a maquina e voltar a testar
 
-- `apps/api`: NestJS + Prisma (API principal).
-- `apps/web`: Next.js (ERP web).
-- `apps/mobile`: Expo (app mobile).
-- `packages/shared`: contratos Zod/TypeScript usados por web, api e mobile.
-- `packages/ui`: componentes compartilhados.
-
-## Subir localmente
-
-### 1) Instalar
+### Primeira vez nesta maquina
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
 cp .env.example .env
 cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.example apps/web/.env
 cp apps/mobile/.env.example apps/mobile/.env
-```
-
-### 2) Preparar banco dev (SQLite)
-
-```bash
 pnpm --filter @querobroapp/api prisma:generate:dev
 pnpm --filter @querobroapp/api prisma:migrate:dev
 pnpm --filter @querobroapp/api prisma:seed
 ```
 
-### 3) Rodar
+### Reboot operacional padrao
 
 ```bash
-pnpm dev
+./scripts/stop-all.sh
+./scripts/dev-all.sh
 ```
+
+Notas:
+
+- `./scripts/dev-all.sh` sobe API + Web, limpa cache dev do web, roda migrate dev e abre `http://127.0.0.1:3000/pedidos`.
+- Mantenha essa janela aberta. Fechar a janela encerra API e Web.
+- Se quiser partir de estado limpo para validacao manual, rode com API/Web ativos (em outro terminal):
+
+```bash
+pnpm cleanup:test-data
+```
+
+- Atalho para reboot + limpeza executavel em um comando: `./scripts/refresh-and-start.command`.
+
+### Alternativa em 2 terminais
+
+Terminal 1:
+
+```bash
+pnpm --filter @querobroapp/api dev
+```
+
+Terminal 2:
+
+```bash
+pnpm --filter @querobroapp/web dev
+```
+
+Observacao:
+
+- `pnpm dev` na raiz usa `turbo` e sobe mais coisa do que o necessario para validar o web. Para teste manual do produto, prefira `./scripts/dev-all.sh`.
 
 ## URLs locais
 
-- Web: `http://127.0.0.1:3000`
-- API Health: `http://127.0.0.1:3001/health`
-- Swagger (quando habilitado): `http://127.0.0.1:3001/docs`
-- Builder: `http://127.0.0.1:3000/builder`
+- Web: `http://127.0.0.1:3000/pedidos`
+- API health: `http://127.0.0.1:3001/health`
+- Runtime config (read-only): `http://127.0.0.1:3001/runtime-config`
+- Alias legado de runtime config: `http://127.0.0.1:3001/builder/config`
 
-## Seguranca (resumo)
+## Checklist manual apos reboot
 
-- Em dev, auth pode ficar desativada por padrao.
-- Em producao, a API exige auth ativa (`APP_AUTH_ENABLED=true`) por padrao.
-- Swagger em producao fica bloqueado por padrao.
-- Existem scripts para scan de segredos, policy gate e hardening local/GitHub.
+1. Abra `http://127.0.0.1:3000/pedidos`.
+2. Confirme que a tela abre em `Dia`.
+3. Clique em um card qualquer no calendario de `Semana` ou `Mes` e confirme que ele abre a visao `Dia`, mesmo vazio.
+4. Crie ou edite um produto em `Produtos`.
+5. Crie ou edite um cliente em `Clientes`.
+6. Volte a `Pedidos`, crie um pedido e avance o status.
+7. Registre um pagamento.
+8. Abra `Estoque` e confira saldo e quadro D+1.
+
+Se o navegador estava aberto antes do reboot, faca um hard refresh. Isso evita bundle antigo do `next dev` em memoria.
+
+## QA automatizado
+
+Baseline:
+
+```bash
+pnpm qa:trust
+```
+
+Gate forte completo:
+
+```bash
+QA_TRUST_INCLUDE_LINT=1 \
+QA_TRUST_INCLUDE_SMOKE=1 \
+QA_TRUST_INCLUDE_BROWSER=1 \
+QA_TRUST_INCLUDE_CRITICAL_E2E=1 \
+pnpm qa:trust
+```
+
+Comandos avulsos:
+
+```bash
+pnpm qa:smoke
+pnpm qa:browser-smoke
+pnpm qa:critical-e2e
+pnpm check:prisma-drift
+```
+
+O gate `qa:trust` hoje valida:
+
+1. `session:docs:guard`
+2. `git diff --check`
+3. `typecheck`
+4. `test`
+5. `build:ci`
+
+E, por flag, adiciona `lint`, `qa:smoke`, `qa:browser-smoke` e `qa:critical-e2e`.
+
+Nota importante:
+
+- `qa:browser-smoke` e `qa:critical-e2e` agora usam dist dirs temporarios isolados do Next. Isso reduz o risco de corromper o `.next` do `next dev` enquanto o ambiente local estiver aberto.
+- O CI principal do GitHub agora roda `pnpm check:prisma-drift` + `QA_TRUST_INCLUDE_LINT=1 pnpm qa:trust`, para alinhar o gate remoto ao processo local.
+- Os fluxos `qa:browser-smoke` e `qa:critical-e2e` usam o wrapper Playwright em `$HOME/.codex/skills/playwright/scripts/playwright_cli.sh`; valide esse prerequisito em uma maquina nova antes do gate completo.
+
+## Integracoes externas
+
+- WhatsApp, Uber, Alexa, receipts e conectores de fornecedores foram removidos da estrutura atual.
+- Qualquer reintegracao futura deve recomecar do zero, so depois de a operacao principal estar 100% consolidada.
 
 ## Scripts principais
 
 ```bash
-pnpm dev
+./scripts/dev-all.sh
+./scripts/stop-all.sh
+./scripts/preflight-local.sh
 pnpm lint
 pnpm typecheck
 pnpm test
-pnpm check:prisma-drift
-pnpm security:secrets
-pnpm security:policy:diff
-pnpm qa:smoke
+pnpm qa:trust
+pnpm qa:browser-smoke
+pnpm qa:critical-e2e
 ```
 
-## Endpoints principais da API
+## Fontes de verdade
 
-- `products`: CRUD + `GET /products/:id/bom`
-- `customers`: CRUD
-- `orders`: CRUD + itens + status + `mark-paid`
-- `payments`: list/create/delete + `mark-paid`
-- `inventory-items` e `inventory-movements`
-- `boms` + bootstrap + combinacoes de sabores
-- `production/requirements` (D+1)
-- `receipts/*` (parse, ingest, notificacao, sync de custo)
-- `builder/*` (config e imagens)
-- `whatsapp/outbox`
-
-## Mapa rapido para devs
-
-- API bootstrap/env/security: `apps/api/src/main.ts`
-- Modulos API: `apps/api/src/modules`
-- Schema Prisma: `apps/api/prisma/schema.prisma`
-- Telas web: `apps/web/src/app`
-- Contratos compartilhados: `packages/shared/src/index.ts`
-
-## Documentacao recomendada
-
-- Visao tecnica: `docs/PROJECT_SNAPSHOT.md`
-- Arquitetura: `docs/ARCHITECTURE.md`
-- Proximos passos: `docs/NEXT_STEP_PLAN.md`
-- Backlog: `docs/DELIVERY_BACKLOG.md`
-- Seguranca de segredos: `docs/SECRETS_SECURITY_PROCEDURE.md`
-- Atalho iOS de cupom: `docs/IOS_SHORTCUT_CUPOM.md`
+- Estado tecnico: `docs/PROJECT_SNAPSHOT.md`
+- Contexto atual: `docs/querobroapp-context.md`
+- Plano atual: `docs/NEXT_STEP_PLAN.md`
+- Reboot e limpeza: `docs/TEST_RESET_PROTOCOL.md`
+- Continuidade entre sessoes: `docs/MEMORY_VAULT.md`
+- Historico cronologico: `docs/HANDOFF_LOG.md`

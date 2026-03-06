@@ -27,6 +27,7 @@ model Customer {
   lng           Float?
   deliveryNotes String?
   createdAt     DateTime @default(now())
+  deletedAt     DateTime?
   orders        Order[]
 
   @@index([name])
@@ -65,7 +66,6 @@ model Order {
   payments           Payment[]
   stockMovements     StockMovement[]
   inventoryMovements InventoryMovement[]
-  outboxMessages     OutboxMessage[]
 
   @@index([customerId])
   @@index([status])
@@ -174,25 +174,6 @@ model BomItem {
 
   @@index([bomId])
   @@index([itemId])
-}
-
-model OutboxMessage {
-  id        Int       @id @default(autoincrement())
-  messageId String    @unique
-  channel   String    @default("whatsapp")
-  to        String
-  template  String
-  payload   String
-  status    String    @default("PENDING")
-  orderId   Int?
-  createdAt DateTime  @default(now())
-  sentAt    DateTime?
-  order     Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
-
-  @@index([status])
-  @@index([channel, status])
-  @@index([createdAt])
-  @@index([orderId])
 }
 
 model IdempotencyRecord {

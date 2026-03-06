@@ -50,16 +50,21 @@ async function main() {
   const summary = {
     removedOrders: 0,
     removedCustomers: 0,
+    removedBoms: 0,
+    removedProducts: 0,
     skippedCustomersWithOrders: 0,
+    skippedProductsWithReferences: 0,
     errors: []
   };
 
   console.log(`[cleanup-test-data] API: ${baseUrl}`);
   console.log(`[cleanup-test-data] Tags: ${tags.join(', ')}`);
 
-  const [orders, customers] = await Promise.all([
+  const [orders, customers, products, boms] = await Promise.all([
     apiRequest(baseUrl, '/orders'),
-    apiRequest(baseUrl, '/customers')
+    apiRequest(baseUrl, '/customers'),
+    apiRequest(baseUrl, '/products'),
+    apiRequest(baseUrl, '/boms')
   ]);
 
   const taggedCustomerIds = new Set(
@@ -112,12 +117,63 @@ async function main() {
     }
   }
 
+  const taggedProductIds = new Set(
+    products
+      .filter((product) => hasAnyTag(product.name, tags) || hasAnyTag(product.category, tags))
+      .map((product) => product.id)
+      .filter((id) => Number.isFinite(id))
+  );
+
+  const bomIdsToDelete = boms
+    .filter((bom) => {
+      if (!Number.isFinite(bom.id)) return false;
+      return taggedProductIds.has(bom.productId) || hasAnyTag(bom.name, tags);
+    })
+    .map((bom) => bom.id)
+    .sort((a, b) => b - a);
+
+  for (const bomId of bomIdsToDelete) {
+    try {
+      await apiRequest(baseUrl, `/boms/${bomId}`, { method: 'DELETE' });
+      summary.removedBoms += 1;
+    } catch (error) {
+      summary.errors.push(`ficha tecnica #${bomId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const refreshedProducts = await apiRequest(baseUrl, '/products');
+  const productIdsToDelete = refreshedProducts
+    .filter((product) => {
+      if (!Number.isFinite(product.id)) return false;
+      return hasAnyTag(product.name, tags) || hasAnyTag(product.category, tags);
+    })
+    .map((product) => product.id)
+    .sort((a, b) => b - a);
+
+  for (const productId of productIdsToDelete) {
+    try {
+      const result = await apiRequest(baseUrl, `/products/${productId}`, { method: 'DELETE' });
+      if (result?.archived && !result?.deleted) {
+        summary.skippedProductsWithReferences += 1;
+        continue;
+      }
+      summary.removedProducts += 1;
+    } catch (error) {
+      summary.errors.push(`produto #${productId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   console.log(
-    `[cleanup-test-data] Removidos: ${summary.removedOrders} pedido(s), ${summary.removedCustomers} cliente(s).`
+    `[cleanup-test-data] Removidos: ${summary.removedOrders} pedido(s), ${summary.removedCustomers} cliente(s), ${summary.removedBoms} ficha(s) tecnica(s), ${summary.removedProducts} produto(s).`
   );
   if (summary.skippedCustomersWithOrders > 0) {
     console.log(
       `[cleanup-test-data] Clientes com pedidos ainda vinculados (nao removidos): ${summary.skippedCustomersWithOrders}.`
+    );
+  }
+  if (summary.skippedProductsWithReferences > 0) {
+    console.log(
+      `[cleanup-test-data] Produtos arquivados por ainda terem vinculos (nao removidos): ${summary.skippedProductsWithReferences}.`
     );
   }
 

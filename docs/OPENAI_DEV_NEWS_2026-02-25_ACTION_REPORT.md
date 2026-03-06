@@ -1,5 +1,7 @@
 # OPENAI_DEV_NEWS_2026-02-25_ACTION_REPORT
 
+> Nota historica: este relatorio foi gerado antes da remocao das integracoes externas da base ativa. Se ele citar `receipts`, `voice`, `automations` ou modulos afins, trate isso como contexto de epoca, nao como snapshot atual do projeto.
+
 Data do email analisado: 2026-02-25 (OpenAI Dev News: Codex app, tips from OpenAI devs)
 
 ## Objetivo

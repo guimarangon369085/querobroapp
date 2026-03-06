@@ -30,9 +30,12 @@
     ]
   },
   "include": [
+    ".next-qa-browser-smoke/types/**/*.ts",
+    ".next-qa-critical-e2e/types/**/*.ts",
+    ".next-qa-trust/types/**/*.ts",
+    ".next/types/**/*.ts",
     "next-env.d.ts",
-    "src",
-    ".next/types/**/*.ts"
+    "src"
   ],
   "exclude": [
     "node_modules"

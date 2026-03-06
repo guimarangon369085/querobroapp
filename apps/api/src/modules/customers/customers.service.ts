@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, Inject, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service.js';
 import { CustomerSchema } from '@querobroapp/shared';
 import { normalizePhone, normalizeTitle, normalizeText } from '../../common/normalize.js';
@@ -8,7 +8,10 @@ export class CustomersService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   list() {
-    return this.prisma.customer.findMany({ orderBy: { id: 'desc' } });
+    return this.prisma.customer.findMany({
+      where: { deletedAt: null },
+      orderBy: { id: 'desc' }
+    });
   }
 
   async get(id: number) {
@@ -77,11 +80,14 @@ export class CustomersService {
   }
 
   async remove(id: number) {
-    await this.get(id);
-    const ordersCount = await this.prisma.order.count({ where: { customerId: id } });
-    if (ordersCount > 0) {
-      throw new ConflictException('Cliente possui pedidos vinculados.');
+    const customer = await this.prisma.customer.findUnique({ where: { id } });
+    if (!customer) throw new NotFoundException('Cliente nao encontrado');
+    if (customer.deletedAt) {
+      return;
     }
-    await this.prisma.customer.delete({ where: { id } });
+    await this.prisma.customer.update({
+      where: { id },
+      data: { deletedAt: new Date() }
+    });
   }
 }

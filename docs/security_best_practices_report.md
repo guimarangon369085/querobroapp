@@ -1,5 +1,7 @@
 # Security Best Practices Report
 
+> Nota historica: este relatorio foi gerado antes da remocao de modulos como `receipts`, `voice` e `automations`. Findings que citam esses caminhos continuam uteis como registro de auditoria, mas nao descrevem a superficie operacional atual.
+
 Data: 2026-02-25
 Escopo: `apps/api`, `apps/web`, dependencias do workspace e fluxo operacional (navegacao/interacoes)
 

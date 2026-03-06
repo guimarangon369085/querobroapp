@@ -1,11 +1,6 @@
 import { BuilderConfigSchema, type BuilderConfig } from '@querobroapp/shared';
-
-const devDefaultBaseUrl = 'http://127.0.0.1:3001';
+import { getApiBaseUrl } from '@/lib/api-base-url';
 const runtimeConfigPaths = ['/runtime-config', '/builder/config'];
-
-export function getApiBaseUrl() {
-  return (process.env.NEXT_PUBLIC_API_URL || devDefaultBaseUrl).trim() || devDefaultBaseUrl;
-}
 
 export function resolveBuilderImageSrc(src: string) {
   if (/^https?:\/\//i.test(src)) return src;

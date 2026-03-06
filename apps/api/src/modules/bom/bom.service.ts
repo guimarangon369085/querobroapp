@@ -51,7 +51,8 @@ type BroaFlavorPreset = {
   legacyNames?: string[];
 };
 
-const BROA_SALE_UNIT_LABEL = 'Caixa com 7 broas';
+const BROA_BOX_UNITS = 7;
+const BROA_SALE_UNIT_LABEL = `Caixa com ${BROA_BOX_UNITS} unidades`;
 const BROA_YIELD_UNITS = 12;
 
 const BROA_ITEM_PRESETS: BroaItemPreset[] = [
@@ -328,7 +329,7 @@ export class BomService {
       itemIdByName.set(preset.name, current.id);
     }
 
-    const flavorPriceMap: Record<BroaFlavorPreset['code'], number> = {
+    const flavorBoxPriceMap: Record<BroaFlavorPreset['code'], number> = {
       T: 40,
       G: 50,
       Q: 52,
@@ -362,8 +363,8 @@ export class BomService {
           data: {
             name: flavor.productName,
             category: 'Sabores',
-            unit: 'cx',
-            price: flavorPriceMap[flavor.code],
+            unit: 'unidade',
+            price: flavorBoxPriceMap[flavor.code] / BROA_BOX_UNITS,
             active: true
           }
         });
@@ -381,8 +382,8 @@ export class BomService {
         where: { id: product.id },
         data: {
           category: 'Sabores',
-          unit: 'cx',
-          price: flavorPriceMap[flavor.code],
+          unit: 'unidade',
+          price: flavorBoxPriceMap[flavor.code] / BROA_BOX_UNITS,
           active: true
         }
       });
