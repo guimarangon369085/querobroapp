@@ -27,6 +27,12 @@ export const primaryNavItems: AppNavItem[] = [
     icon: 'clientes'
   },
   {
+    href: '/produtos',
+    label: 'Produtos',
+    title: 'Produtos',
+    icon: 'produtos'
+  },
+  {
     href: '/estoque',
     label: 'Estoque',
     title: 'Estoque',
@@ -47,8 +53,7 @@ const pathAliases = new Map<string, string>([
   ['/caixa', '/pedidos'],
   ['/base', '/clientes'],
   ['/builder', '/pedidos'],
-  ['/whatsapp-flow', '/pedidos'],
-  ['/produtos', '/estoque']
+  ['/whatsapp-flow', '/pedidos']
 ]);
 
 function pickItems(hrefs: string[]) {
@@ -61,7 +66,7 @@ export const navSections: AppNavSection[] = [
   {
     id: 'principal',
     label: 'Principal',
-    items: pickItems(['/pedidos', '/clientes', '/estoque'])
+    items: pickItems(['/pedidos', '/clientes', '/produtos', '/estoque'])
   }
 ];
 

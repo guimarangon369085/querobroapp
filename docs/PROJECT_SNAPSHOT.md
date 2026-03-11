@@ -13,6 +13,7 @@ Ultima atualizacao: 2026-03-11
 - API cobre pedido, pagamento, estoque, BOM, D+1, producao e entrega local interna.
 - O processo de qualidade atual inclui `qa:trust`, `qa:browser-smoke`, `qa:critical-e2e`, drift check e testes raiz.
 - Gate operacional de religamento foi validado em 2026-03-11 com `stop-all -> dev-all`, health da API e execucao de smoke + E2E critico.
+- `Produtos` voltou a existir como superficie web real em 2026-03-11, com navegacao propria e atalho para ficha tecnica em `Estoque`.
 
 ## O que um usuario consegue fazer hoje
 
@@ -53,6 +54,7 @@ Ultima atualizacao: 2026-03-11
 - `pnpm check:prisma-drift`: guard de drift dev/prod.
 - Os flows de QA que sobem um web temporario agora usam dist dirs dedicados do Next, para nao disputar o `.next` do `next dev`.
 - O workflow principal de CI no GitHub agora roda `check:prisma-drift` e `qa:trust` com lint habilitado.
+- O browser smoke voltou a exigir `/produtos` como rota real, evitando regressao silenciosa para redirect em `Estoque`.
 
 ## Validacao operacional mais recente
 
