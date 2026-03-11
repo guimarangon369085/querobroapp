@@ -3,6 +3,12 @@ import { PrismaService } from '../../prisma.service.js';
 import { parseLocaleNumber } from '../../common/normalize.js';
 import { parseWithSchema } from '../../common/validation.js';
 import { z } from 'zod';
+import {
+  MASS_READY_BROAS_PER_RECIPE,
+  ORDER_BOX_UNITS,
+  ORDER_PAPER_BAG_BOX_CAPACITY,
+  ORDER_PAPER_MANTEIGA_CM_PER_BOX
+} from '../inventory/inventory-formulas.js';
 
 const nullableNonNegativeNumberInputSchema = z.preprocess((value) => {
   if (value == null || value === '') return null;
@@ -51,9 +57,9 @@ type BroaFlavorPreset = {
   legacyNames?: string[];
 };
 
-const BROA_BOX_UNITS = 7;
-const BROA_SALE_UNIT_LABEL = `Caixa com ${BROA_BOX_UNITS} unidades`;
-const BROA_YIELD_UNITS = 12;
+const BROA_SALE_UNIT_LABEL = `Caixa com ${ORDER_BOX_UNITS} broas`;
+const BROA_YIELD_UNITS = MASS_READY_BROAS_PER_RECIPE;
+const BROA_BOXES_PER_RECIPE = BROA_YIELD_UNITS / ORDER_BOX_UNITS;
 
 const BROA_ITEM_PRESETS: BroaItemPreset[] = [
   {
@@ -62,9 +68,9 @@ const BROA_ITEM_PRESETS: BroaItemPreset[] = [
     unit: 'g',
     purchasePackSize: 1000,
     purchasePackCost: 6.49,
-    qtyPerRecipe: 60,
-    qtyPerSaleUnit: 35,
-    qtyPerUnit: 5
+    qtyPerRecipe: 130,
+    qtyPerSaleUnit: 130 / BROA_BOXES_PER_RECIPE,
+    qtyPerUnit: 130 / MASS_READY_BROAS_PER_RECIPE
   },
   {
     name: 'FUBÁ DE CANJICA',
@@ -72,9 +78,9 @@ const BROA_ITEM_PRESETS: BroaItemPreset[] = [
     unit: 'g',
     purchasePackSize: 1000,
     purchasePackCost: 6,
-    qtyPerRecipe: 60,
-    qtyPerSaleUnit: 35,
-    qtyPerUnit: 5
+    qtyPerRecipe: 130,
+    qtyPerSaleUnit: 130 / BROA_BOXES_PER_RECIPE,
+    qtyPerUnit: 130 / MASS_READY_BROAS_PER_RECIPE
   },
   {
     name: 'AÇÚCAR',
@@ -82,19 +88,19 @@ const BROA_ITEM_PRESETS: BroaItemPreset[] = [
     unit: 'g',
     purchasePackSize: 1000,
     purchasePackCost: 5.69,
-    qtyPerRecipe: 60,
-    qtyPerSaleUnit: 35,
-    qtyPerUnit: 5
+    qtyPerRecipe: 120,
+    qtyPerSaleUnit: 120 / BROA_BOXES_PER_RECIPE,
+    qtyPerUnit: 120 / MASS_READY_BROAS_PER_RECIPE
   },
   {
     name: 'MANTEIGA',
     category: 'INGREDIENTE',
     unit: 'g',
-    purchasePackSize: 200,
-    purchasePackCost: 12.79,
-    qtyPerRecipe: 75,
-    qtyPerSaleUnit: 43.75,
-    qtyPerUnit: 6.25
+    purchasePackSize: 500,
+    purchasePackCost: 24.9,
+    qtyPerRecipe: 150,
+    qtyPerSaleUnit: 150 / BROA_BOXES_PER_RECIPE,
+    qtyPerUnit: 150 / MASS_READY_BROAS_PER_RECIPE
   },
   {
     name: 'LEITE',
@@ -102,9 +108,9 @@ const BROA_ITEM_PRESETS: BroaItemPreset[] = [
     unit: 'ml',
     purchasePackSize: 1000,
     purchasePackCost: 4.19,
-    qtyPerRecipe: 60,
-    qtyPerSaleUnit: 35,
-    qtyPerUnit: 5
+    qtyPerRecipe: 240,
+    qtyPerSaleUnit: 240 / BROA_BOXES_PER_RECIPE,
+    qtyPerUnit: 240 / MASS_READY_BROAS_PER_RECIPE
   },
   {
     name: 'OVOS',
@@ -112,9 +118,9 @@ const BROA_ITEM_PRESETS: BroaItemPreset[] = [
     unit: 'uni',
     purchasePackSize: 20,
     purchasePackCost: 23.9,
-    qtyPerRecipe: 3,
-    qtyPerSaleUnit: 1.75,
-    qtyPerUnit: 0.25
+    qtyPerRecipe: 6,
+    qtyPerSaleUnit: 6 / BROA_BOXES_PER_RECIPE,
+    qtyPerUnit: 6 / MASS_READY_BROAS_PER_RECIPE
   },
   {
     name: 'GOIABADA',
@@ -122,7 +128,7 @@ const BROA_ITEM_PRESETS: BroaItemPreset[] = [
     unit: 'g',
     purchasePackSize: 300,
     purchasePackCost: 5.99,
-    qtyPerRecipe: 60,
+    qtyPerRecipe: 70,
     qtyPerSaleUnit: 35,
     qtyPerUnit: 5
   },
@@ -130,19 +136,19 @@ const BROA_ITEM_PRESETS: BroaItemPreset[] = [
     name: 'DOCE DE LEITE',
     category: 'INGREDIENTE',
     unit: 'g',
-    purchasePackSize: 200,
-    purchasePackCost: 20.99,
-    qtyPerRecipe: 96,
-    qtyPerSaleUnit: 56,
-    qtyPerUnit: 8
+    purchasePackSize: 1000,
+    purchasePackCost: 24,
+    qtyPerRecipe: 70,
+    qtyPerSaleUnit: 35,
+    qtyPerUnit: 5
   },
   {
     name: 'QUEIJO DO SERRO',
     category: 'INGREDIENTE',
     unit: 'g',
-    purchasePackSize: 500,
-    purchasePackCost: 46.95,
-    qtyPerRecipe: 60,
+    purchasePackSize: 1000,
+    purchasePackCost: 35,
+    qtyPerRecipe: 70,
     qtyPerSaleUnit: 35,
     qtyPerUnit: 5
   },
@@ -150,9 +156,9 @@ const BROA_ITEM_PRESETS: BroaItemPreset[] = [
     name: 'REQUEIJÃO DE CORTE',
     category: 'INGREDIENTE',
     unit: 'g',
-    purchasePackSize: 240,
-    purchasePackCost: 30.9,
-    qtyPerRecipe: 60,
+    purchasePackSize: 1000,
+    purchasePackCost: 38,
+    qtyPerRecipe: 70,
     qtyPerSaleUnit: 35,
     qtyPerUnit: 5
   },
@@ -162,9 +168,9 @@ const BROA_ITEM_PRESETS: BroaItemPreset[] = [
     unit: 'uni',
     purchasePackSize: 10,
     purchasePackCost: 17.88,
-    qtyPerRecipe: 1.7,
-    qtyPerSaleUnit: 1,
-    qtyPerUnit: 0.14
+    qtyPerRecipe: BROA_BOXES_PER_RECIPE / ORDER_PAPER_BAG_BOX_CAPACITY,
+    qtyPerSaleUnit: 1 / ORDER_PAPER_BAG_BOX_CAPACITY,
+    qtyPerUnit: 1 / (ORDER_PAPER_BAG_BOX_CAPACITY * ORDER_BOX_UNITS)
   },
   {
     name: 'CAIXA DE PLÁSTICO',
@@ -172,9 +178,9 @@ const BROA_ITEM_PRESETS: BroaItemPreset[] = [
     unit: 'uni',
     purchasePackSize: 100,
     purchasePackCost: 86.65,
-    qtyPerRecipe: 1.7,
+    qtyPerRecipe: MASS_READY_BROAS_PER_RECIPE / ORDER_BOX_UNITS,
     qtyPerSaleUnit: 1,
-    qtyPerUnit: 0.14
+    qtyPerUnit: 1 / ORDER_BOX_UNITS
   },
   {
     name: 'PAPEL MANTEIGA',
@@ -182,9 +188,9 @@ const BROA_ITEM_PRESETS: BroaItemPreset[] = [
     unit: 'cm',
     purchasePackSize: 7000,
     purchasePackCost: 10.29,
-    qtyPerRecipe: 27.4,
-    qtyPerSaleUnit: 16,
-    qtyPerUnit: 2.29
+    qtyPerRecipe: ORDER_PAPER_MANTEIGA_CM_PER_BOX * (MASS_READY_BROAS_PER_RECIPE / ORDER_BOX_UNITS),
+    qtyPerSaleUnit: ORDER_PAPER_MANTEIGA_CM_PER_BOX,
+    qtyPerUnit: ORDER_PAPER_MANTEIGA_CM_PER_BOX / ORDER_BOX_UNITS
   }
 ];
 
@@ -340,6 +346,9 @@ export class BomService {
     let createdProducts = 0;
     let updatedBoms = 0;
     let createdBoms = 0;
+    let archivedProducts = 0;
+    let deletedProducts = 0;
+    const officialProductIds = new Set<number>();
 
     const baseItemNames = [
       'FARINHA DE TRIGO',
@@ -364,7 +373,7 @@ export class BomService {
             name: flavor.productName,
             category: 'Sabores',
             unit: 'unidade',
-            price: flavorBoxPriceMap[flavor.code] / BROA_BOX_UNITS,
+            price: flavorBoxPriceMap[flavor.code] / ORDER_BOX_UNITS,
             active: true
           }
         });
@@ -383,10 +392,11 @@ export class BomService {
         data: {
           category: 'Sabores',
           unit: 'unidade',
-          price: flavorBoxPriceMap[flavor.code] / BROA_BOX_UNITS,
+          price: flavorBoxPriceMap[flavor.code] / ORDER_BOX_UNITS,
           active: true
         }
       });
+      officialProductIds.add(product.id);
 
       const bomItemsPreset = [...baseItemNames];
       if (flavor.fillingItemName) {
@@ -454,12 +464,44 @@ export class BomService {
       updatedBoms += 1;
     }
 
+    const allProducts = await this.prisma.product.findMany({
+      select: { id: true, name: true, active: true },
+      orderBy: { id: 'asc' }
+    });
+
+    for (const product of allProducts) {
+      if (officialProductIds.has(product.id)) continue;
+
+      const [orderItemsCount, stockMovementsCount, bomsCount] = await Promise.all([
+        this.prisma.orderItem.count({ where: { productId: product.id } }),
+        this.prisma.stockMovement.count({ where: { productId: product.id } }),
+        this.prisma.bom.count({ where: { productId: product.id } })
+      ]);
+
+      const hasUsage = orderItemsCount > 0 || stockMovementsCount > 0 || bomsCount > 0;
+      if (hasUsage) {
+        if (product.active) {
+          await this.prisma.product.update({
+            where: { id: product.id },
+            data: { active: false }
+          });
+          archivedProducts += 1;
+        }
+        continue;
+      }
+
+      await this.prisma.product.delete({ where: { id: product.id } });
+      deletedProducts += 1;
+    }
+
     return {
       createdItems,
       updatedItems,
       createdProducts,
       createdBoms,
-      updatedBoms
+      updatedBoms,
+      archivedProducts,
+      deletedProducts
     };
   }
 

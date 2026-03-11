@@ -20,7 +20,6 @@ export const CustomerSchema = z.object({
   name: z.string().min(1),
   firstName: z.string().optional().nullable(),
   lastName: z.string().optional().nullable(),
-  email: z.string().email().optional().nullable(),
   phone: z.string().optional().nullable(),
   address: z.string().optional().nullable(),
   addressLine1: z.string().optional().nullable(),
@@ -115,6 +114,29 @@ export const InventoryMovementSchema = z.object({
   sourceLabel: z.string().min(1).max(140).optional().nullable(),
   unitCost: z.number().nonnegative().optional().nullable(),
   createdAt: z.string().optional().nullable()
+});
+
+export const InventoryOverviewItemSchema = InventoryItemSchema.extend({
+  balance: z.number(),
+  rawItemIds: z.array(z.number().int().positive()).default([])
+});
+
+export const InventoryMassSummarySchema = z.object({
+  itemId: z.number().int().positive().nullable(),
+  name: z.string(),
+  recipesAvailable: z.number(),
+  broasAvailable: z.number(),
+  recipesPossibleFromIngredients: z.number().nonnegative(),
+  broasPossibleFromIngredients: z.number().nonnegative(),
+  totalPotentialRecipes: z.number(),
+  totalPotentialBroas: z.number(),
+  limitingIngredientName: z.string().nullable()
+});
+
+export const InventoryOverviewResponseSchema = z.object({
+  items: z.array(InventoryOverviewItemSchema),
+  mass: InventoryMassSummarySchema,
+  generatedAt: z.string()
 });
 
 export const BomSchema = z.object({
@@ -269,8 +291,8 @@ export const BuilderLayoutsSchema = z.object({
   ]),
   clientes: BuilderPageLayoutSchema.default([
     { id: 'header', label: 'Cabecalho da pagina', kind: 'slot', visible: true, order: 0 },
-    { id: 'kpis_search', label: 'KPI e busca', kind: 'slot', visible: true, order: 1 },
-    { id: 'form', label: 'Formulario de cliente', kind: 'slot', visible: true, order: 2 },
+    { id: 'form', label: 'Formulario de cliente', kind: 'slot', visible: true, order: 1 },
+    { id: 'kpis_search', label: 'KPI e busca', kind: 'slot', visible: true, order: 2 },
     { id: 'list', label: 'Lista de clientes', kind: 'slot', visible: true, order: 3 }
   ]),
   pedidos: BuilderPageLayoutSchema.default([
@@ -339,6 +361,9 @@ export type StockMovement = z.infer<typeof StockMovementSchema>;
 export type InventoryCategory = z.infer<typeof InventoryCategoryEnum>;
 export type InventoryItem = z.infer<typeof InventoryItemSchema>;
 export type InventoryMovement = z.infer<typeof InventoryMovementSchema>;
+export type InventoryOverviewItem = z.infer<typeof InventoryOverviewItemSchema>;
+export type InventoryMassSummary = z.infer<typeof InventoryMassSummarySchema>;
+export type InventoryOverviewResponse = z.infer<typeof InventoryOverviewResponseSchema>;
 export type Bom = z.infer<typeof BomSchema>;
 export type BomItem = z.infer<typeof BomItemSchema>;
 export type ProductionRequirementBreakdown = z.infer<typeof ProductionRequirementBreakdownSchema>;

@@ -29,7 +29,7 @@ export type MassPrepEvent = {
   endsAt: string;
   durationMinutes: number;
   massRecipes: number;
-  status: 'INGREDIENTES' | 'PREPARO' | 'PRONTA';
+  status: 'INGREDIENTES' | 'PREPARO' | 'NO_FORNO' | 'PRONTA';
   createdAt: string;
 };
 

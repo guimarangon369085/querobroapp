@@ -9,7 +9,7 @@ import { RenderStabilityGuard } from '@/components/render-stability-guard';
 
 export const metadata = {
   title: 'QUEROBROAPP',
-  description: 'Operacao diaria da Broa com pedidos, clientes, produtos e estoque.',
+  description: 'Operacao diaria da Broa com pedidos, clientes e estoque.',
   icons: {
     icon: '/broa-mark.svg',
     shortcut: '/broa-mark.svg',

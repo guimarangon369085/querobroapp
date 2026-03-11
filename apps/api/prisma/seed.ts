@@ -138,7 +138,7 @@ async function ensureInventoryItems() {
       name: 'Manteiga',
       category: 'INGREDIENTE',
       unit: 'g',
-      purchasePackSize: 200,
+      purchasePackSize: 500,
       purchasePackCost: 0
     },
     {
@@ -159,28 +159,28 @@ async function ensureInventoryItems() {
       name: 'Goiabada',
       category: 'INGREDIENTE',
       unit: 'g',
-      purchasePackSize: 300,
+      purchasePackSize: 1000,
       purchasePackCost: 0
     },
     {
       name: 'Doce de leite',
       category: 'INGREDIENTE',
       unit: 'g',
-      purchasePackSize: 200,
+      purchasePackSize: 1000,
       purchasePackCost: 0
     },
     {
       name: 'Queijo do serro',
       category: 'INGREDIENTE',
       unit: 'g',
-      purchasePackSize: 500,
+      purchasePackSize: 1000,
       purchasePackCost: 0
     },
     {
       name: 'Requeijao de corte',
       category: 'INGREDIENTE',
       unit: 'g',
-      purchasePackSize: 240,
+      purchasePackSize: 1000,
       purchasePackCost: 0
     },
     {
@@ -242,7 +242,7 @@ async function ensureBroaBoms(broaProductId: number | undefined, inventoryMap: M
     { name: 'Broa Goiabada (G)', filling: 'Goiabada', qtyPerSaleUnit: 35 },
     { name: 'Broa Queijo do Serro (S)', filling: 'Queijo do serro', qtyPerSaleUnit: 35 },
     { name: 'Broa Requeijao (R)', filling: 'Requeijao de corte', qtyPerSaleUnit: 35 },
-    { name: 'Broa Doce de Leite (D)', filling: 'Doce de leite', qtyPerSaleUnit: 56 }
+    { name: 'Broa Doce de Leite (D)', filling: 'Doce de leite', qtyPerSaleUnit: 35 }
   ];
 
   for (const bomDef of bomDefs) {
@@ -256,27 +256,27 @@ async function ensureBroaBoms(broaProductId: number | undefined, inventoryMap: M
         productId: broaProductId,
         name: bomDef.name,
         saleUnitLabel: 'Caixa com 7 broas',
-        yieldUnits: 12
+        yieldUnits: 21
       }
     });
 
     const baseItems = [
-      { name: 'Farinha de trigo', qtyPerRecipe: 60, qtyPerSaleUnit: 35, qtyPerUnit: 5 },
-      { name: 'Fuba de canjica', qtyPerRecipe: 60, qtyPerSaleUnit: 35, qtyPerUnit: 5 },
-      { name: 'Acucar', qtyPerRecipe: 60, qtyPerSaleUnit: 35, qtyPerUnit: 5 },
-      { name: 'Manteiga', qtyPerRecipe: 75, qtyPerSaleUnit: 43.75, qtyPerUnit: 6.25 },
-      { name: 'Leite', qtyPerRecipe: 60, qtyPerSaleUnit: 35, qtyPerUnit: 5 },
-      { name: 'Ovos', qtyPerRecipe: 3, qtyPerSaleUnit: 1.75, qtyPerUnit: 0.25 },
-      { name: 'Sacola', qtyPerRecipe: 1.7, qtyPerSaleUnit: 1, qtyPerUnit: 0.14 },
-      { name: 'Caixa de plastico', qtyPerRecipe: 1.7, qtyPerSaleUnit: 1, qtyPerUnit: 0.14 },
-      { name: 'Papel manteiga', qtyPerRecipe: 27.4, qtyPerSaleUnit: 16, qtyPerUnit: 2.29 }
+      { name: 'Farinha de trigo', qtyPerRecipe: 130, qtyPerSaleUnit: 130 / 3, qtyPerUnit: 130 / 21 },
+      { name: 'Fuba de canjica', qtyPerRecipe: 130, qtyPerSaleUnit: 130 / 3, qtyPerUnit: 130 / 21 },
+      { name: 'Acucar', qtyPerRecipe: 120, qtyPerSaleUnit: 40, qtyPerUnit: 120 / 21 },
+      { name: 'Manteiga', qtyPerRecipe: 150, qtyPerSaleUnit: 50, qtyPerUnit: 150 / 21 },
+      { name: 'Leite', qtyPerRecipe: 240, qtyPerSaleUnit: 80, qtyPerUnit: 240 / 21 },
+      { name: 'Ovos', qtyPerRecipe: 6, qtyPerSaleUnit: 2, qtyPerUnit: 6 / 21 },
+      { name: 'Sacola', qtyPerRecipe: 1.5, qtyPerSaleUnit: 0.5, qtyPerUnit: 1 / 14 },
+      { name: 'Caixa de plastico', qtyPerRecipe: 3, qtyPerSaleUnit: 1, qtyPerUnit: 1 / 7 },
+      { name: 'Papel manteiga', qtyPerRecipe: 48, qtyPerSaleUnit: 16, qtyPerUnit: 16 / 7 }
     ];
 
     const items = [...baseItems];
     if (bomDef.filling) {
       items.push({
         name: bomDef.filling,
-        qtyPerRecipe: bomDef.qtyPerSaleUnit ? (bomDef.qtyPerSaleUnit * 12) / 7 : 60,
+        qtyPerRecipe: bomDef.qtyPerSaleUnit ? (bomDef.qtyPerSaleUnit * 21) / 7 : 105,
         qtyPerSaleUnit: bomDef.qtyPerSaleUnit ?? 35,
         qtyPerUnit: bomDef.qtyPerSaleUnit ? bomDef.qtyPerSaleUnit / 7 : 5
       });

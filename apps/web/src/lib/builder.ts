@@ -39,7 +39,9 @@ export async function fetchBuilderConfigClient(): Promise<BuilderConfig> {
 
   let lastStatus = 0;
   for (const endpoint of runtimeConfigPaths) {
-    const response = await fetch(`${baseUrl}${endpoint}`, { method: 'GET' }).catch(() => null);
+    const response = await fetch(`${baseUrl}${endpoint}`, { method: 'GET', cache: 'no-store' }).catch(
+      () => null
+    );
     if (!response) continue;
     if (!response.ok) {
       lastStatus = response.status;

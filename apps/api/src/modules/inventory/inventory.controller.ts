@@ -14,6 +14,11 @@ export class InventoryController {
     return this.service.listItems();
   }
 
+  @Get('inventory-overview')
+  overview() {
+    return this.service.overview();
+  }
+
   @Post('inventory-items')
   createItem(@Body() body: unknown) {
     return this.service.createItem(body);
@@ -22,6 +27,11 @@ export class InventoryController {
   @Put('inventory-items/:id')
   updateItem(@Param('id') id: string, @Body() body: unknown) {
     return this.service.updateItem(parseWithSchema(idSchema, id), body);
+  }
+
+  @Post('inventory-items/:id/effective-balance')
+  adjustEffectiveBalance(@Param('id') id: string, @Body() body: unknown) {
+    return this.service.adjustEffectiveBalance(parseWithSchema(idSchema, id), body);
   }
 
   @Delete('inventory-items/:id')

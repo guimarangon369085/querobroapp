@@ -199,7 +199,7 @@ test(
           method: 'POST',
           body: {
             name: config.canonicalName,
-            category: 'INGREDIENTE',
+            category: config.category || 'INGREDIENTE',
             unit: config.unit,
             purchasePackSize: config.purchasePackSize,
             purchasePackCost: config.purchasePackCost
@@ -225,6 +225,30 @@ test(
       unit: 'g',
       purchasePackSize: 1000,
       purchasePackCost: 19
+    });
+    const plasticBoxItem = await ensureInventoryItem({
+      canonicalName: 'CAIXA DE PLASTICO',
+      aliases: ['CAIXA DE PLASTICO', 'CAIXA DE PLÁSTICO'],
+      category: 'EMBALAGEM_INTERNA',
+      unit: 'uni',
+      purchasePackSize: 100,
+      purchasePackCost: 86.65
+    });
+    const paperBagItem = await ensureInventoryItem({
+      canonicalName: 'SACOLA',
+      aliases: ['SACOLA'],
+      category: 'EMBALAGEM_EXTERNA',
+      unit: 'uni',
+      purchasePackSize: 10,
+      purchasePackCost: 17.88
+    });
+    const butterPaperItem = await ensureInventoryItem({
+      canonicalName: 'PAPEL MANTEIGA',
+      aliases: ['PAPEL MANTEIGA'],
+      category: 'EMBALAGEM_INTERNA',
+      unit: 'cm',
+      purchasePackSize: 7000,
+      purchasePackCost: 10.29
     });
 
     for (const ingredient of recipeIngredients) {
@@ -291,7 +315,7 @@ test(
         movement.type === 'OUT'
     );
     assert.ok(massReadyConsumptionMovement, 'Consumo de MASSA PRONTA do pedido nao encontrado');
-    assert.equal(Number(massReadyConsumptionMovement.quantity), 0.25);
+    assert.ok(Math.abs(Number(massReadyConsumptionMovement.quantity) - 1 / 3) <= 0.0001);
 
     const fillingMovement = orderMovementsAfterCreate.find(
       (movement) =>
@@ -301,6 +325,33 @@ test(
     );
     assert.ok(fillingMovement, 'Consumo de recheio (ORDER_FILLING) nao encontrado');
     assert.equal(Number(fillingMovement.quantity), 15);
+
+    const plasticBoxMovement = orderMovementsAfterCreate.find(
+      (movement) =>
+        movement.itemId === plasticBoxItem.id &&
+        movement.source === 'ORDER_PACKAGING' &&
+        movement.type === 'OUT'
+    );
+    assert.ok(plasticBoxMovement, 'Reserva de caixa de plastico nao encontrada');
+    assert.equal(Number(plasticBoxMovement.quantity), 1);
+
+    const paperBagMovement = orderMovementsAfterCreate.find(
+      (movement) =>
+        movement.itemId === paperBagItem.id &&
+        movement.source === 'ORDER_PACKAGING' &&
+        movement.type === 'OUT'
+    );
+    assert.ok(paperBagMovement, 'Reserva de sacola nao encontrada');
+    assert.equal(Number(paperBagMovement.quantity), 1);
+
+    const butterPaperMovement = orderMovementsAfterCreate.find(
+      (movement) =>
+        movement.itemId === butterPaperItem.id &&
+        movement.source === 'ORDER_PACKAGING' &&
+        movement.type === 'OUT'
+    );
+    assert.ok(butterPaperMovement, 'Reserva de papel manteiga nao encontrada');
+    assert.equal(Number(butterPaperMovement.quantity), 16);
 
     const blockedTransition = await requestExpectError(
       apiUrl,
@@ -333,6 +384,7 @@ test(
       body: { status: 'PREPARO' }
     });
     assert.equal(eventInPreparo.status, 'PREPARO');
+    assert.equal(eventInPreparo.massRecipes, 2);
 
     const movementsAfterPreparo = (await request(apiUrl, '/inventory-movements')).filter(
       (movement) => movement.orderId === order.id
@@ -343,7 +395,7 @@ test(
           movement.itemId === massReadyItem.id &&
           movement.source === 'MASS_PREP' &&
           movement.type === 'IN' &&
-          Number(movement.quantity) === 1
+          Number(movement.quantity) === 2
       ),
       'Entrada de MASSA PRONTA do PREPARO nao encontrada'
     );
@@ -364,7 +416,17 @@ test(
     });
 
     const eventsAfterOven = await request(apiUrl, '/orders/mass-prep-events');
-    const eventReady = eventsAfterOven.find((event) => event.id === createdMassPrepEvent.id);
+    const eventInOven = eventsAfterOven.find((event) => event.id === createdMassPrepEvent.id);
+    assert.ok(eventInOven, 'Evento FAZER MASSA deveria continuar existente');
+    assert.equal(eventInOven.status, 'NO_FORNO');
+
+    await request(apiUrl, `/orders/${order.id}/status`, {
+      method: 'PATCH',
+      body: { status: 'PRONTO' }
+    });
+
+    const eventsAfterReady = await request(apiUrl, '/orders/mass-prep-events');
+    const eventReady = eventsAfterReady.find((event) => event.id === createdMassPrepEvent.id);
     assert.ok(eventReady, 'Evento FAZER MASSA deveria continuar existente');
     assert.equal(eventReady.status, 'PRONTA');
   }

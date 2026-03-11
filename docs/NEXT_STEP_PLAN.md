@@ -1,25 +1,19 @@
 # NEXT_STEP_PLAN
 
-Ultima atualizacao: 2026-03-03
+Ultima atualizacao: 2026-03-11
 
 ## Objetivo da fase atual
 
-Permitir reboot e validacao manual sem ambiguidade, mantendo `Pedidos` como agenda unica do dia e consolidando o fluxo operacional real.
+Consolidar UX operacional em `Estoque` e `Pedidos` sobre um ambiente local ja validado em ciclo completo de religamento.
+
+## Gate operacional (concluido em 2026-03-11)
+
+- Ciclo executado: `./scripts/stop-all.sh` -> `./scripts/dev-all.sh`.
+- API validada em `http://127.0.0.1:3001/health`.
+- QA executado antes e apos religamento: `pnpm qa:browser-smoke` e `pnpm qa:critical-e2e`.
+- Resultado: gates verdes e jornada critica concluindo pedido como `ENTREGUE` e `PAGO`.
 
 ## Prioridade 1 (agora)
-
-### Rodada manual apos reboot
-
-- Reiniciar a maquina e subir o ambiente com `./scripts/dev-all.sh`.
-- Validar `Pedidos`, `Clientes`, `Produtos` e `Estoque` no navegador.
-- Confirmar que o browser abre em `http://127.0.0.1:3000/pedidos`.
-- Confirmar health da API e ausencia de erro de CORS ou bundle stale.
-- Registrar qualquer friccao real encontrada e corrigir no mesmo ciclo.
-
-Criterio de pronto:
-- o usuario consegue religar a maquina e testar sozinho sem depender de ajuste manual escondido.
-
-## Prioridade 2 (agora)
 
 ### UX operacional em Estoque
 
@@ -31,7 +25,7 @@ Criterio de pronto:
 Criterio de pronto:
 - operador decide o plano do dia em menos de 5 minutos.
 
-## Prioridade 3 (agora)
+## Prioridade 2 (agora)
 
 ### Refino final de Pedidos como agenda do dia
 
@@ -43,7 +37,7 @@ Criterio de pronto:
 Criterio de pronto:
 - operador navega o dia, cria pedido e atualiza status sem friccao nem ambiguidades.
 
-## Prioridade 4 (proxima)
+## Prioridade 3 (agora)
 
 ### Robustez do nucleo e cobertura
 
@@ -57,13 +51,12 @@ Criterio de pronto:
 
 ## Ordem de execucao
 
-1. Reboot real + validacao manual.
-2. UX de estoque.
-3. Refino final de pedidos.
-4. Hardening extra do nucleo e dos testes.
+1. UX de estoque.
+2. Refino final de pedidos.
+3. Hardening extra do nucleo e dos testes.
 
 ## Riscos de nao fazer
 
-- O ambiente pode parecer instavel mesmo quando o codigo esta correto.
 - Interface continua exigindo interacoes demais em tarefas recorrentes.
 - Mudancas de backend ou uma reintegracao futura podem quebrar fluxo sem cobertura suficiente.
+- Defasagem documental pode reintroduzir incerteza operacional entre sessoes.

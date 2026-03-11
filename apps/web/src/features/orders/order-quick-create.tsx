@@ -29,6 +29,11 @@ type OrderQuickCreateProps = {
   customerOptions: SelectOption[];
   productsForCards: Product[];
   customerSearch: string;
+  restoredFromLastOrder?: {
+    orderId: number;
+    customerName: string;
+    referenceLabel: string;
+  } | null;
   newOrderScheduledAt: string;
   newOrderDiscount: string;
   newOrderNotes: string;
@@ -36,6 +41,7 @@ type OrderQuickCreateProps = {
   draftTotalUnits: number;
   virtualBoxRemainingUnits: number;
   canCreateOrder: boolean;
+  isCreatingOrder: boolean;
   orderError: string | null;
   draftTotal: number;
   productMap: Map<number, Product>;
@@ -234,7 +240,7 @@ function resolveVirtualBoxOfficialName(parts: VirtualBoxPart[]) {
     return `Caixa de ${normalizedParts[0].productName}`;
   }
 
-  return 'Caixa Composta';
+  return 'Caixa Sabores';
 }
 
 function resolveFlavorShortcutProductIds(products: Product[]) {
@@ -323,6 +329,7 @@ export function OrderQuickCreate({
   customerOptions,
   productsForCards,
   customerSearch,
+  restoredFromLastOrder,
   newOrderScheduledAt,
   newOrderDiscount,
   newOrderNotes,
@@ -330,6 +337,7 @@ export function OrderQuickCreate({
   draftTotalUnits,
   virtualBoxRemainingUnits,
   canCreateOrder,
+  isCreatingOrder,
   orderError,
   draftTotal,
   productMap,
@@ -516,6 +524,24 @@ export function OrderQuickCreate({
         </FormField>
       </div>
 
+      {restoredFromLastOrder ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <div className="flex items-start gap-3">
+            <AppIcon name="refresh" className="mt-0.5 h-5 w-5 shrink-0" />
+            <div className="min-w-0">
+              <p className="font-semibold">Pedido base carregado do histórico do cliente.</p>
+              <p className="mt-1 text-xs opacity-80">
+                {restoredFromLastOrder.customerName} • pedido #{restoredFromLastOrder.orderId}
+                {restoredFromLastOrder.referenceLabel ? ` • ${restoredFromLastOrder.referenceLabel}` : ''}
+              </p>
+              <p className="mt-1 text-xs opacity-80">
+                Revise os itens e confirme em Criar para gerar o novo pedido.
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <details className="app-details">
         <summary>
           <span className="inline-flex items-center gap-2">
@@ -688,9 +714,9 @@ export function OrderQuickCreate({
         <button
           className="order-quick-create__submit app-button app-button-primary w-full md:w-auto disabled:cursor-not-allowed disabled:opacity-60"
           onClick={onCreateOrder}
-          disabled={!canCreateOrder}
+          disabled={!canCreateOrder || isCreatingOrder}
         >
-          Criar
+          {isCreatingOrder ? 'Criando...' : 'Criar'}
         </button>
       </div>
 
@@ -742,15 +768,6 @@ export function OrderQuickCreate({
               ) : null}
             </div>
           ) : null}
-          <div className="flex flex-wrap items-center justify-between rounded-lg bg-white/70 px-3 py-2 text-sm">
-            <span>Sub</span>
-          </div>
-          <div className="flex flex-wrap items-center justify-between rounded-lg bg-white/70 px-3 py-2 text-sm">
-            <span>Desc.</span>
-          </div>
-          <div className="flex flex-wrap items-center justify-between rounded-lg bg-white/90 px-3 py-2 text-sm">
-            <span>Total</span>
-          </div>
         </div>
       ) : null}
       {orderError ? <p className="text-xs text-red-600">{orderError}</p> : null}

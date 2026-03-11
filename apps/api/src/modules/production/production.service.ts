@@ -9,6 +9,22 @@ import type {
 } from '@querobroapp/shared';
 import { PrismaService } from '../../prisma.service.js';
 import { DeliveriesService } from '../deliveries/deliveries.service.js';
+import {
+  buildOfficialBroaFlavorSummary,
+  computeBroaPaperBagCount,
+  computeBroaPackagingPlan,
+  isMassPrepIngredientName,
+  isOrderFillingIngredientName,
+  isPackagingIngredientName,
+  MASS_READY_ITEM_NAME,
+  MASS_READY_BROAS_PER_RECIPE,
+  massPrepRecipeIngredients,
+  OVEN_CAPACITY_BROAS,
+  orderFillingIngredientsByFlavorCode,
+  resolveOfficialBroaFlavorCodeFromProductName,
+  resolveInventoryFamilyKey,
+  resolvePlannedMassPrepRecipes
+} from '../inventory/inventory-formulas.js';
 
 type OrderWithItems = Prisma.OrderGetPayload<{
   include: {
@@ -90,7 +106,6 @@ type ProductionBoardResponse = {
   recentBatches: ProductionBatchRecord[];
 };
 
-const OVEN_CAPACITY_BROAS = 14;
 const OVEN_BAKE_TIMER_MINUTES = 50;
 
 @Injectable()
@@ -162,6 +177,23 @@ export class ProductionService {
     return null;
   }
 
+  private perBroaQty(
+    bom: BomWithItems,
+    bomItem: BomWithItems['items'][number]
+  ): number | null {
+    if (bomItem.qtyPerUnit != null) return bomItem.qtyPerUnit;
+
+    const perSale = this.perSaleQty(bom, bomItem);
+    const unitsPerSale = this.parseSaleUnits(bom.saleUnitLabel);
+    if (perSale != null && unitsPerSale > 0) {
+      return perSale / unitsPerSale;
+    }
+    if (bomItem.qtyPerRecipe != null && bom.yieldUnits && bom.yieldUnits > 0) {
+      return bomItem.qtyPerRecipe / bom.yieldUnits;
+    }
+    return null;
+  }
+
   private orderTargetDate(order: Pick<OrderWithItems, 'createdAt' | 'scheduledAt'>) {
     if (order.scheduledAt) {
       const scheduled = new Date(order.scheduledAt);
@@ -198,6 +230,32 @@ export class ProductionService {
       }
     }
     return map;
+  }
+
+  private buildEffectiveBalanceByItemId(
+    items: Array<{ id: number; name: string }>,
+    balanceByItem: Map<number, number>
+  ) {
+    const itemIdsByFamilyKey = new Map<string, number[]>();
+    for (const item of items) {
+      const familyKey = resolveInventoryFamilyKey(item.name);
+      const current = itemIdsByFamilyKey.get(familyKey) || [];
+      current.push(item.id);
+      itemIdsByFamilyKey.set(familyKey, current);
+    }
+
+    const effectiveBalanceByItemId = new Map<number, number>();
+    for (const itemIds of itemIdsByFamilyKey.values()) {
+      const familyBalance = itemIds.reduce(
+        (sum, itemId) => this.toQty(sum + (balanceByItem.get(itemId) || 0)),
+        0
+      );
+      for (const itemId of itemIds) {
+        effectiveBalanceByItemId.set(itemId, familyBalance);
+      }
+    }
+
+    return effectiveBalanceByItemId;
   }
 
   private async loadProductionRuntime() {
@@ -305,8 +363,56 @@ export class ProductionService {
   }
 
   private totalBroasForItem(item: OrderWithItems['items'][number], bom?: BomWithItems) {
-    const unitsPerSale = this.parseSaleUnits(bom?.saleUnitLabel);
-    return this.toQty(item.quantity * unitsPerSale);
+    void bom;
+    return this.toQty(Math.max(Math.floor(item.quantity || 0), 0));
+  }
+
+  private isOfficialBroaItem(item: Pick<OrderWithItems['items'][number], 'product'>) {
+    return Boolean(resolveOfficialBroaFlavorCodeFromProductName(item.product?.name));
+  }
+
+  private shouldConsumeOnBatch(
+    orderItem: Pick<OrderWithItems['items'][number], 'product'>,
+    bomItem: BomWithItems['items'][number]
+  ) {
+    const itemName = bomItem.item?.name || '';
+    if (isMassPrepIngredientName(itemName) || isOrderFillingIngredientName(itemName)) {
+      return false;
+    }
+
+    if (this.isOfficialBroaItem(orderItem) && isPackagingIngredientName(itemName)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private appendRequirementRow(
+    byIngredient: Map<number, RequirementAccumulator>,
+    entry: {
+      ingredientId: number;
+      name: string;
+      unit: string;
+      requiredQty: number;
+      breakdown?: ProductionRequirementBreakdown;
+    }
+  ) {
+    const current = byIngredient.get(entry.ingredientId);
+    if (!current) {
+      byIngredient.set(entry.ingredientId, {
+        ingredientId: entry.ingredientId,
+        name: entry.name,
+        unit: entry.unit,
+        requiredQty: this.toQty(entry.requiredQty),
+        breakdown: entry.breakdown ? [entry.breakdown] : []
+      });
+      return;
+    }
+
+    current.requiredQty = this.toQty(current.requiredQty + entry.requiredQty);
+    if (entry.breakdown) {
+      current.breakdown.push(entry.breakdown);
+    }
   }
 
   private buildQueueRows(
@@ -445,7 +551,7 @@ export class ProductionService {
   async requirements(date?: string): Promise<ProductionRequirementsResponse> {
     const targetDate = this.parseDateParam(date);
 
-    const [orders, boms, movements] = await Promise.all([
+    const [orders, boms, items, movements] = await Promise.all([
       this.prisma.order.findMany({
         where: { status: { not: 'CANCELADO' } },
         include: { items: { include: { product: true } } },
@@ -454,12 +560,17 @@ export class ProductionService {
         include: { product: true, items: { include: { item: true } } },
         orderBy: { id: 'asc' },
       }),
+      this.prisma.inventoryItem.findMany({
+        select: { id: true, name: true, unit: true },
+        orderBy: { id: 'asc' }
+      }),
       this.prisma.inventoryMovement.findMany({
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       }),
     ]);
 
     const availableByItem = this.buildAvailableQtyMap(movements);
+    const effectiveAvailableByItem = this.buildEffectiveBalanceByItemId(items, availableByItem);
     const bomByProductId = new Map<number, BomWithItems>();
     for (const bom of boms) {
       if (!bomByProductId.has(bom.productId)) {
@@ -469,14 +580,89 @@ export class ProductionService {
 
     const warnings: ProductionRequirementWarning[] = [];
     const byIngredient = new Map<number, RequirementAccumulator>();
+    const itemByFamilyKey = new Map<string, { id: number; name: string; unit: string }>();
+    for (const item of items) {
+      const familyKey = resolveInventoryFamilyKey(item.name);
+      if (!itemByFamilyKey.has(familyKey)) {
+        itemByFamilyKey.set(familyKey, item);
+      }
+    }
 
     let basis: 'deliveryDate' | 'createdAtPlus1' = 'createdAtPlus1';
+    const targetOrderIds = new Set<number>();
+    const plasticBoxesByCustomerId = new Map<number, number>();
+    let requiredMassRecipes = 0;
 
     for (const order of orders) {
       const orderTarget = this.orderTargetDate(order);
       if (orderTarget.date !== targetDate) continue;
+      targetOrderIds.add(order.id);
       if (orderTarget.basis === 'deliveryDate') {
         basis = 'deliveryDate';
+      }
+
+      const productNameById = new Map(
+        order.items.map((item) => [item.productId, item.product?.name || `Produto ${item.productId}`])
+      );
+      const broaSummary = buildOfficialBroaFlavorSummary(
+        order.items.map((item) => ({
+          productId: item.productId,
+          quantity: item.quantity
+        })),
+        productNameById
+      );
+      requiredMassRecipes = this.toQty(
+        requiredMassRecipes + broaSummary.totalBroas / MASS_READY_BROAS_PER_RECIPE
+      );
+
+      if (broaSummary.totalBroas > 0) {
+        const packagingPlan = computeBroaPackagingPlan(broaSummary.totalBroas);
+        const plasticBoxItem =
+          itemByFamilyKey.get(resolveInventoryFamilyKey('CAIXA DE PLÁSTICO')) || null;
+        const butterPaperItem =
+          itemByFamilyKey.get(resolveInventoryFamilyKey('PAPEL MANTEIGA')) || null;
+
+        if (plasticBoxItem && packagingPlan.plasticBoxes > 0) {
+          this.appendRequirementRow(byIngredient, {
+            ingredientId: plasticBoxItem.id,
+            name: plasticBoxItem.name,
+            unit: plasticBoxItem.unit,
+            requiredQty: packagingPlan.plasticBoxes
+          });
+        }
+
+        if (packagingPlan.plasticBoxes > 0) {
+          const currentCustomerBoxes = plasticBoxesByCustomerId.get(order.customerId) || 0;
+          plasticBoxesByCustomerId.set(
+            order.customerId,
+            this.toQty(currentCustomerBoxes + packagingPlan.plasticBoxes)
+          );
+        }
+
+        if (butterPaperItem && packagingPlan.paperButterCm > 0) {
+          this.appendRequirementRow(byIngredient, {
+            ingredientId: butterPaperItem.id,
+            name: butterPaperItem.name,
+            unit: butterPaperItem.unit,
+            requiredQty: packagingPlan.paperButterCm
+          });
+        }
+
+        for (const code of ['G', 'D', 'Q', 'R'] as const) {
+          const broasQty = broaSummary.flavorCounts[code] || 0;
+          if (broasQty <= 0) continue;
+          const definition = orderFillingIngredientsByFlavorCode[code];
+          const fillingItem =
+            itemByFamilyKey.get(resolveInventoryFamilyKey(definition.canonicalName)) || null;
+          if (!fillingItem) continue;
+
+          this.appendRequirementRow(byIngredient, {
+            ingredientId: fillingItem.id,
+            name: fillingItem.name,
+            unit: fillingItem.unit,
+            requiredQty: this.toQty(broasQty * (definition.qtyPerUnit ?? 0))
+          });
+        }
       }
 
       for (const item of order.items) {
@@ -493,8 +679,19 @@ export class ProductionService {
         }
 
         for (const bomItem of bom.items) {
-          const perSale = this.perSaleQty(bom, bomItem);
-          if (perSale == null) {
+          const isOfficialBroaItem = this.isOfficialBroaItem(item);
+          const itemName = bomItem.item?.name || '';
+          if (
+            isOfficialBroaItem &&
+            (isMassPrepIngredientName(itemName) ||
+              isOrderFillingIngredientName(itemName) ||
+              isPackagingIngredientName(itemName))
+          ) {
+            continue;
+          }
+
+          const perBroa = this.perBroaQty(bom, bomItem);
+          if (perBroa == null) {
             warnings.push({
               type: 'BOM_ITEM_MISSING_QTY',
               orderId: order.id,
@@ -505,7 +702,7 @@ export class ProductionService {
             continue;
           }
 
-          const requiredQty = this.toQty(perSale * item.quantity);
+          const requiredQty = this.toQty(perBroa * item.quantity);
           const breakdownItem: ProductionRequirementBreakdown = {
             productId: item.productId,
             productName: item.product?.name || `Produto ${item.productId}`,
@@ -513,28 +710,116 @@ export class ProductionService {
             orderItemId: item.id,
             quantity: requiredQty,
           };
-
-          const current = byIngredient.get(bomItem.itemId);
-          if (!current) {
-            byIngredient.set(bomItem.itemId, {
-              ingredientId: bomItem.itemId,
-              name: bomItem.item?.name || `Insumo ${bomItem.itemId}`,
-              unit: bomItem.item?.unit || 'un',
-              requiredQty,
-              breakdown: [breakdownItem],
-            });
-            continue;
-          }
-
-          current.requiredQty = this.toQty(current.requiredQty + requiredQty);
-          current.breakdown.push(breakdownItem);
+          this.appendRequirementRow(byIngredient, {
+            ingredientId: bomItem.itemId,
+            name: bomItem.item?.name || `Insumo ${bomItem.itemId}`,
+            unit: bomItem.item?.unit || 'un',
+            requiredQty,
+            breakdown: breakdownItem
+          });
         }
+      }
+    }
+
+    const paperBagItem = itemByFamilyKey.get(resolveInventoryFamilyKey('SACOLA')) || null;
+    if (paperBagItem) {
+      for (const totalPlasticBoxes of plasticBoxesByCustomerId.values()) {
+        const paperBagsRequired = computeBroaPaperBagCount(totalPlasticBoxes);
+        if (paperBagsRequired <= 0) continue;
+        this.appendRequirementRow(byIngredient, {
+          ingredientId: paperBagItem.id,
+          name: paperBagItem.name,
+          unit: paperBagItem.unit,
+          requiredQty: paperBagsRequired
+        });
+      }
+    }
+
+    const restoredOrderReservationByItem = new Map<number, number>();
+    for (const movement of movements) {
+      if (!movement.orderId || !targetOrderIds.has(movement.orderId)) continue;
+      if (
+        movement.source !== 'ORDER_FILLING' &&
+        movement.source !== 'ORDER_PACKAGING' &&
+        movement.source !== 'MASS_READY'
+      ) {
+        continue;
+      }
+
+      const current = restoredOrderReservationByItem.get(movement.itemId) || 0;
+      if (movement.type === 'OUT') {
+        restoredOrderReservationByItem.set(
+          movement.itemId,
+          this.toQty(current + movement.quantity)
+        );
+      } else if (movement.type === 'IN') {
+        restoredOrderReservationByItem.set(
+          movement.itemId,
+          this.toQty(current - movement.quantity)
+        );
+      }
+    }
+    const effectiveRestoredReservationByItem = this.buildEffectiveBalanceByItemId(
+      items,
+      restoredOrderReservationByItem
+    );
+
+    const massReadyItem = itemByFamilyKey.get(resolveInventoryFamilyKey(MASS_READY_ITEM_NAME)) || null;
+    const availableMassRecipes = massReadyItem
+      ? this.toQty(
+          (effectiveAvailableByItem.get(massReadyItem.id) || 0) +
+            (effectiveRestoredReservationByItem.get(massReadyItem.id) || 0)
+        )
+      : 0;
+    const missingMassRecipes = this.toQty(
+      Math.max(requiredMassRecipes - availableMassRecipes, 0)
+    );
+    let possibleMassPrepRecipesFromIngredients = Number.POSITIVE_INFINITY;
+    for (const ingredient of massPrepRecipeIngredients) {
+      const ingredientItem =
+        itemByFamilyKey.get(resolveInventoryFamilyKey(ingredient.canonicalName)) || null;
+      const availableQty = ingredientItem
+        ? this.toQty(
+            (effectiveAvailableByItem.get(ingredientItem.id) || 0) +
+              (effectiveRestoredReservationByItem.get(ingredientItem.id) || 0)
+          )
+        : 0;
+      const possibleForIngredient = ingredient.qtyPerRecipe
+        ? Math.floor(availableQty / ingredient.qtyPerRecipe)
+        : 0;
+      possibleMassPrepRecipesFromIngredients = Math.min(
+        possibleMassPrepRecipesFromIngredients,
+        possibleForIngredient
+      );
+    }
+    const plannedMassRecipes = resolvePlannedMassPrepRecipes(
+      missingMassRecipes,
+      Number.isFinite(possibleMassPrepRecipesFromIngredients)
+        ? possibleMassPrepRecipesFromIngredients
+        : 0
+    );
+
+    if (plannedMassRecipes > 0) {
+      for (const ingredient of massPrepRecipeIngredients) {
+        const ingredientItem =
+          itemByFamilyKey.get(resolveInventoryFamilyKey(ingredient.canonicalName)) || null;
+        if (!ingredientItem) continue;
+
+        this.appendRequirementRow(byIngredient, {
+          ingredientId: ingredientItem.id,
+          name: ingredientItem.name,
+          unit: ingredientItem.unit,
+          requiredQty: this.toQty(ingredient.qtyPerRecipe * plannedMassRecipes)
+        });
       }
     }
 
     const rows: ProductionRequirementRow[] = Array.from(byIngredient.values())
       .map((entry) => {
-        const availableQty = this.toQty(availableByItem.get(entry.ingredientId) || 0);
+        const availableQty = this.toQty(
+          (effectiveAvailableByItem.get(entry.ingredientId) || 0) +
+            (effectiveRestoredReservationByItem.get(entry.ingredientId) || 0)
+        );
         const requiredQty = this.toQty(entry.requiredQty);
         const shortageQty = this.toQty(Math.max(0, requiredQty - availableQty));
         return {
@@ -656,12 +941,11 @@ export class ProductionService {
         if (!order || !item) continue;
         const bom = bomByProductId.get(allocation.productId);
         if (!bom) continue;
-        const unitsPerSale = this.parseSaleUnits(bom.saleUnitLabel);
 
         for (const bomItem of bom.items) {
-          const perSale = this.perSaleQty(bom, bomItem);
-          if (perSale == null) continue;
-          const perBroa = perSale / unitsPerSale;
+          if (!this.shouldConsumeOnBatch(item, bomItem)) continue;
+          const perBroa = this.perBroaQty(bom, bomItem);
+          if (perBroa == null) continue;
           const quantity = this.toQty(perBroa * allocation.broasPlanned);
           if (quantity <= 0) continue;
 

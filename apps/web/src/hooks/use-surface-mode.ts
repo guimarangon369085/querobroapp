@@ -42,7 +42,9 @@ export function useSurfaceMode(pageKey: string, options: UseSurfaceModeOptions =
     [pageKey, storagePrefix]
   );
   const [viewMode, setViewMode] = useState<SurfaceMode>(() => {
-    return readStoredMode(storageKey) ?? resolveDefaultMode(breakpointPx, defaultMode);
+    // Keep first render deterministic between SSR and client hydration.
+    // Persisted mode is applied after mount to avoid hydration mismatch.
+    return defaultMode ?? 'full';
   });
 
   useEffect(() => {

@@ -12,9 +12,10 @@ import {
 } from 'react';
 import type {
   Bom,
-  InventoryItem,
   InventoryMovement,
-  Order,
+  InventoryMassSummary,
+  InventoryOverviewItem,
+  InventoryOverviewResponse,
   Product,
   ProductionRequirementRow,
   ProductionRequirementWarning,
@@ -26,22 +27,23 @@ import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll'
 import { formatDecimalInputBR, formatMoneyInputBR, parseLocaleNumber } from '@/lib/format';
 import { useSurfaceMode } from '@/hooks/use-surface-mode';
 import { useTutorialSpotlight } from '@/hooks/use-tutorial-spotlight';
-import { AppIcon } from '@/components/app-icons';
 import { useFeedback } from '@/components/feedback-provider';
 import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
-import { FloatingActionButton } from '@/components/fab';
 import { StockCapacitySection, type StockCapacityEntry } from './stock-capacity-section';
-import {
-  StockWorkflowOverview,
-  type StockWorkflowOverviewKpis,
-  type StockWorkflowStep
-} from './stock-workflow-overview';
 
 const movementTypeOptions: Array<{ value: 'IN' | 'OUT' | 'ADJUST'; label: string }> = [
   { value: 'IN', label: 'Entrada' },
   { value: 'OUT', label: 'Saida' },
   { value: 'ADJUST', label: 'Ajuste de saldo' }
 ];
+
+const OFFICIAL_BROAS = [
+  { code: 'T', name: 'Broa Tradicional (T)', boxPrice: 40 },
+  { code: 'G', name: 'Broa Goiabada (G)', boxPrice: 50 },
+  { code: 'D', name: 'Broa Doce de Leite (D)', boxPrice: 52 },
+  { code: 'Q', name: 'Broa Queijo do Serro (Q)', boxPrice: 52 },
+  { code: 'R', name: 'Broa Requeijão de corte (R)', boxPrice: 52 }
+] as const;
 
 function movementTypeLabel(value: string) {
   return movementTypeOptions.find((entry) => entry.value === value)?.label || value;
@@ -55,16 +57,8 @@ type BomItemInput = {
 };
 
 type StockBoardCard = {
-  item: InventoryItem;
-  status: 'critical' | 'attention' | 'ok';
+  item: InventoryOverviewItem;
   balance: number;
-  requiredQty: number;
-  availableQty: number;
-  shortageQty: number;
-  isMissingNow: boolean;
-  isMissingSoon: boolean;
-  hasPlannedDemand: boolean;
-  breakdownSummary: string;
 };
 
 const TUTORIAL_QUERY_VALUE = 'primeira_vez';
@@ -80,6 +74,15 @@ function formatQty(value: number) {
   return Number(value).toLocaleString('pt-BR', { maximumFractionDigits: 4 });
 }
 
+function roundInventoryQty(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.round((value + Number.EPSILON) * 10000) / 10000;
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function formatCurrencyBR(value: number) {
   if (!Number.isFinite(value)) return 'R$ 0,00';
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -92,14 +95,13 @@ function inventoryCategoryLabel(category: string) {
   return category;
 }
 
-function orderProductionDateFromCreatedAt(createdAt?: string | null) {
-  if (!createdAt) return '';
-  const base = new Date(createdAt);
-  if (Number.isNaN(base.getTime())) return '';
-  const productionDate = new Date(
-    Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate() + 1)
-  );
-  return productionDate.toISOString().slice(0, 10);
+function normalizeLookupText(value?: string | null) {
+  return (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
 }
 
 function parseSaleUnitCount(label?: string | null) {
@@ -128,6 +130,18 @@ function resolveBomItemQtyPerSale(
   return null;
 }
 
+const EMPTY_MASS_SUMMARY: InventoryMassSummary = {
+  itemId: null,
+  name: 'MASSA PRONTA',
+  recipesAvailable: 0,
+  broasAvailable: 0,
+  recipesPossibleFromIngredients: 0,
+  broasPossibleFromIngredients: 0,
+  totalPotentialRecipes: 0,
+  totalPotentialBroas: 0,
+  limitingIngredientName: null
+};
+
 function StockPageContent() {
   const searchParams = useSearchParams();
   const { isSpotlightSlot } = useTutorialSpotlight(searchParams, TUTORIAL_QUERY_VALUE);
@@ -135,8 +149,8 @@ function StockPageContent() {
   const openedBomProductIdRef = useRef<number | null>(null);
 
   const [products, setProducts] = useState<Product[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [items, setItems] = useState<InventoryItem[]>([]);
+  const [items, setItems] = useState<InventoryOverviewItem[]>([]);
+  const [massSummary, setMassSummary] = useState<InventoryMassSummary>(EMPTY_MASS_SUMMARY);
   const [movements, setMovements] = useState<InventoryMovement[]>([]);
   const [boms, setBoms] = useState<Bom[]>([]);
   const [itemId, setItemId] = useState<number | ''>('');
@@ -151,7 +165,7 @@ function StockPageContent() {
   const [bomProductId, setBomProductId] = useState<number | ''>('');
   const [bomName, setBomName] = useState<string>('');
   const [bomSaleUnitLabel, setBomSaleUnitLabel] = useState<string>('Caixa com 7 broas');
-  const [bomYieldUnits, setBomYieldUnits] = useState<string>('12');
+  const [bomYieldUnits, setBomYieldUnits] = useState<string>('21');
   const [bomItems, setBomItems] = useState<BomItemInput[]>([]);
   const [d1Date, setD1Date] = useState<string>(defaultTomorrowDate());
   const [d1Rows, setD1Rows] = useState<ProductionRequirementRow[]>([]);
@@ -159,65 +173,85 @@ function StockPageContent() {
   const [d1Basis, setD1Basis] = useState<'deliveryDate' | 'createdAtPlus1'>('createdAtPlus1');
   const [d1Loading, setD1Loading] = useState(false);
   const [d1Error, setD1Error] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [flavorCombos, setFlavorCombos] = useState<Array<{ code: string; composition: string }>>([]);
   const [flavorComboTotal, setFlavorComboTotal] = useState<number>(0);
   const [flavorComboLoading, setFlavorComboLoading] = useState(false);
-  const { isOperationMode, setViewMode } = useSurfaceMode('estoque', { defaultMode: 'operation' });
-  const [expandedStockCardId, setExpandedStockCardId] = useState<number | null>(null);
+  const [stockCardBalanceByItemId, setStockCardBalanceByItemId] = useState<Record<number, string>>({});
+  const [stockCardErrorByItemId, setStockCardErrorByItemId] = useState<Record<number, string>>({});
+  const [stockCardSavingItemId, setStockCardSavingItemId] = useState<number | null>(null);
+  const { isOperationMode } = useSurfaceMode('estoque', { defaultMode: 'operation' });
   const { confirm, notifyError, notifySuccess, notifyUndo } = useFeedback();
-  const focusMovement = useCallback(() => {
-    if (isOperationMode) {
-      setViewMode('full');
-      window.setTimeout(() => {
-        scrollToLayoutSlot('movement', {
-          focus: true,
-          focusSelector: 'input, select, textarea, button'
-        });
-      }, 0);
-      return;
-    }
-
-    scrollToLayoutSlot('movement', { focus: true, focusSelector: 'input, select, textarea, button' });
-  }, [isOperationMode, setViewMode]);
-
-  const focusAdvancedSlot = useCallback(
-    (slotId: string, focus = false) => {
-      if (isOperationMode) {
-        setViewMode('full');
-        window.setTimeout(() => {
-          scrollToLayoutSlot(slotId, {
-            focus,
-            focusSelector: focus ? 'input, select, textarea, button' : undefined
-          });
-        }, 0);
-        return;
-      }
-
-      scrollToLayoutSlot(slotId, {
-        focus,
-        focusSelector: focus ? 'input, select, textarea, button' : undefined
-      });
-    },
-    [isOperationMode, setViewMode]
-  );
 
   const load = useCallback(async () => {
-    const [productsData, ordersData, itemsData, movementsData, bomsData] = await Promise.all([
-      apiFetch<Product[]>('/products'),
-      apiFetch<Order[]>('/orders'),
-      apiFetch<InventoryItem[]>('/inventory-items'),
-      apiFetch<InventoryMovement[]>('/inventory-movements'),
-      apiFetch<any[]>('/boms')
-    ]);
-    setProducts(productsData);
-    setOrders(ordersData);
-    setItems(itemsData);
-    setMovements(movementsData);
-    setBoms(bomsData as Bom[]);
+    const fetchWithRetry = async <T,>(path: string, attempts = 2): Promise<T> => {
+      let lastError: unknown = null;
+      for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        try {
+          return await apiFetch<T>(path);
+        } catch (error) {
+          lastError = error;
+          if (attempt < attempts) {
+            await wait(250);
+          }
+        }
+      }
+      throw lastError instanceof Error ? lastError : new Error(`Falha ao carregar ${path}.`);
+    };
+
+    try {
+      const [overviewData, movementsData] = await Promise.all([
+        fetchWithRetry<InventoryOverviewResponse>('/inventory-overview'),
+        fetchWithRetry<InventoryMovement[]>('/inventory-movements')
+      ]);
+
+      setItems(overviewData.items || []);
+      setMassSummary(overviewData.mass || EMPTY_MASS_SUMMARY);
+      setMovements(movementsData);
+
+      try {
+        const [productsData, bomsData] = await Promise.all([
+          fetchWithRetry<Product[]>('/products'),
+          fetchWithRetry<any[]>('/boms')
+        ]);
+        const officialOrderByName = new Map(
+          OFFICIAL_BROAS.map((broa, index) => [normalizeLookupText(broa.name), index])
+        );
+        const officialProducts = productsData
+          .filter((product) => officialOrderByName.has(normalizeLookupText(product.name)))
+          .sort((left, right) => {
+            const leftOrder = officialOrderByName.get(normalizeLookupText(left.name)) ?? 99;
+            const rightOrder = officialOrderByName.get(normalizeLookupText(right.name)) ?? 99;
+            return leftOrder - rightOrder;
+          });
+        const officialProductIds = new Set(
+          officialProducts.map((product) => product.id).filter(Boolean) as number[]
+        );
+        const officialBoms = (bomsData as Bom[]).filter((bom) =>
+          officialProductIds.has(bom.productId)
+        );
+
+        setProducts(officialProducts);
+        setBoms(officialBoms);
+        setLoadError(null);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Falha ao recarregar produtos/BOM.';
+        setLoadError(
+          `Estoque atualizado, mas o catalogo auxiliar nao recarregou agora. ${message}`
+        );
+      }
+
+      return true;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Nao foi possivel atualizar a tela de estoque.';
+      setLoadError(message);
+      return false;
+    }
   }, []);
 
   useEffect(() => {
-    load().catch(console.error);
+    void load();
   }, [load]);
 
   useEffect(() => {
@@ -225,7 +259,6 @@ function StockPageContent() {
     if (!focus) return;
 
     const allowed = new Set([
-      'header',
       'kpis',
       'ops',
       'capacity',
@@ -264,14 +297,14 @@ function StockPageContent() {
   }, []);
 
   useEffect(() => {
-    loadD1(d1Date).catch(console.error);
+    void loadD1(d1Date);
   }, [d1Date, loadD1]);
 
   useEffect(() => {
     const refreshMs = 30_000;
     const intervalId = window.setInterval(() => {
-      load().catch(console.error);
-      loadD1(d1Date).catch(console.error);
+      void load();
+      void loadD1(d1Date);
     }, refreshMs);
 
     return () => window.clearInterval(intervalId);
@@ -305,7 +338,7 @@ function StockPageContent() {
   }, [notifyError]);
 
   useEffect(() => {
-    loadFlavorCombinations().catch(console.error);
+    void loadFlavorCombinations();
   }, [loadFlavorCombinations]);
 
   const parseRequiredNumber = (raw: string | number | null | undefined, fieldLabel: string) => {
@@ -432,7 +465,7 @@ function StockPageContent() {
     }
   };
 
-  const startEditItem = (item: InventoryItem) => {
+  const startEditItem = (item: InventoryOverviewItem) => {
     setEditingItemId(item.id!);
     setPackSize(String(item.purchasePackSize ?? 0));
     setPackCost(String(item.purchasePackCost ?? 0));
@@ -518,10 +551,15 @@ function StockPageContent() {
     if (openedBomProductIdRef.current === parsed) return;
     openedBomProductIdRef.current = parsed;
 
-    openBomForProduct(parsed)
+    void openBomForProduct(parsed)
       .then(() => load())
-      .catch(console.error);
-  }, [searchParams, openBomForProduct, load]);
+      .catch((error) => {
+        openedBomProductIdRef.current = null;
+        notifyError(
+          error instanceof Error ? error.message : 'Nao foi possivel abrir a ficha tecnica.'
+        );
+      });
+  }, [searchParams, openBomForProduct, load, notifyError]);
 
   const addBomItem = () => {
     setBomItems((prev) => [...prev, { itemId: '', qtyPerRecipe: '', qtyPerSaleUnit: '', qtyPerUnit: '' }]);
@@ -643,16 +681,75 @@ function StockPageContent() {
 
   const canSaveBom = Boolean(bomProductId) && bomName.trim().length > 0;
 
-  const balances = useMemo(() => {
-    const balance = new Map<number, number>();
-    for (const movement of movements) {
-      const current = balance.get(movement.itemId) || 0;
-      if (movement.type === 'IN') balance.set(movement.itemId, current + movement.quantity);
-      if (movement.type === 'OUT') balance.set(movement.itemId, current - movement.quantity);
-      if (movement.type === 'ADJUST') balance.set(movement.itemId, movement.quantity);
+  const effectiveBalanceByItemId = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const item of items) {
+      map.set(item.id!, roundInventoryQty(item.balance || 0));
+      for (const rawItemId of item.rawItemIds || []) {
+        map.set(rawItemId, roundInventoryQty(item.balance || 0));
+      }
     }
-    return balance;
-  }, [movements]);
+    return map;
+  }, [items]);
+
+  const saveStockCardBalance = useCallback(
+    async (item: InventoryOverviewItem, options?: { silent?: boolean }) => {
+      if (!item.id) return;
+      const rawValue = stockCardBalanceByItemId[item.id];
+      const parsedValue = parseLocaleNumber(rawValue);
+      if (parsedValue == null || !Number.isFinite(parsedValue)) {
+        setStockCardErrorByItemId((current) => ({
+          ...current,
+          [item.id!]: 'Informe um saldo valido.'
+        }));
+        return;
+      }
+
+      const currentBalance = roundInventoryQty(item.balance || 0);
+      const normalizedNext = roundInventoryQty(parsedValue);
+      if (Math.abs(currentBalance - normalizedNext) < 0.0001) {
+        setStockCardBalanceByItemId((current) => ({
+          ...current,
+          [item.id!]: formatQty(currentBalance)
+        }));
+        setStockCardErrorByItemId((current) => ({
+          ...current,
+          [item.id!]: ''
+        }));
+        return;
+      }
+
+      setStockCardSavingItemId(item.id);
+      setStockCardErrorByItemId((current) => ({
+        ...current,
+        [item.id!]: ''
+      }));
+
+      try {
+        await apiFetch(`/inventory-items/${item.id}/effective-balance`, {
+          method: 'POST',
+          body: JSON.stringify({
+            quantity: normalizedNext,
+            reason: 'Ajuste efetivo via Estoque'
+          })
+        });
+        await load();
+        if (!options?.silent) {
+          notifySuccess('Saldo ajustado no estoque.');
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Nao foi possivel salvar o saldo deste item.';
+        setStockCardErrorByItemId((current) => ({
+          ...current,
+          [item.id!]: message
+        }));
+        notifyError(message);
+      } finally {
+        setStockCardSavingItemId(null);
+      }
+    },
+    [load, notifyError, notifySuccess, stockCardBalanceByItemId]
+  );
 
   const unitCostMap = useMemo(() => {
     const map = new Map<number, number>();
@@ -665,7 +762,16 @@ function StockPageContent() {
     return map;
   }, [items]);
 
-  const itemMap = useMemo(() => new Map(items.map((item) => [item.id!, item])), [items]);
+  const itemMap = useMemo(() => {
+    const map = new Map<number, InventoryOverviewItem>();
+    for (const item of items) {
+      map.set(item.id!, item);
+      for (const rawItemId of item.rawItemIds || []) {
+        map.set(rawItemId, item);
+      }
+    }
+    return map;
+  }, [items]);
 
   const bomCosts = useMemo(() => {
     return (boms as any[]).map((bom) => {
@@ -698,7 +804,7 @@ function StockPageContent() {
       let hasNegativeInput = false;
 
       for (const item of perSaleItems) {
-        const balance = balances.get(item.itemId) || 0;
+        const balance = effectiveBalanceByItemId.get(item.itemId) || 0;
         if (balance < 0) hasNegativeInput = true;
         const currentCapacity = balance / item.perSaleQty;
         if (currentCapacity < maxUnits) {
@@ -716,18 +822,7 @@ function StockPageContent() {
         limitingItemName
       };
     });
-  }, [boms, balances]);
-
-  const plannedOrders = useMemo(
-    () =>
-      orders.filter(
-        (order) =>
-          order.status !== 'CANCELADO' &&
-          order.status !== 'ENTREGUE' &&
-          orderProductionDateFromCreatedAt(order.createdAt) === d1Date
-      ),
-    [orders, d1Date]
-  );
+  }, [boms, effectiveBalanceByItemId]);
 
   const d1Shortages = useMemo(() => d1Rows.filter((row) => row.shortageQty > 0), [d1Rows]);
 
@@ -752,37 +847,6 @@ function StockPageContent() {
       });
   }, [d1Shortages, itemMap]);
 
-  const purchaseCandidates = useMemo(() => {
-    const existingIds = new Set(d1ShortagesByCategory.map((row) => row.ingredientId));
-    const immediateMissingRows = items
-      .filter((item) => !existingIds.has(item.id!) && (balances.get(item.id!) || 0) <= 0)
-      .map((item) => {
-        const balance = balances.get(item.id!) || 0;
-        return {
-          ingredientId: item.id!,
-          name: item.name,
-          unit: item.unit,
-          requiredQty: 0,
-          availableQty: balance,
-          shortageQty: Math.max(Math.abs(balance), 1),
-          category: item.category,
-          breakdown: []
-        };
-      });
-
-    return [...d1ShortagesByCategory, ...immediateMissingRows]
-      .filter((row) => Number.isFinite(row.shortageQty) && row.shortageQty > 0)
-      .sort((a, b) => {
-        const criticalDelta = Number(b.availableQty <= 0) - Number(a.availableQty <= 0);
-        if (criticalDelta !== 0) return criticalDelta;
-        if (b.shortageQty !== a.shortageQty) return b.shortageQty - a.shortageQty;
-        return a.name.localeCompare(b.name, 'pt-BR');
-      });
-  }, [balances, d1ShortagesByCategory, items]);
-  const purchaseAlertItems = useMemo(() => purchaseCandidates.slice(0, 3), [purchaseCandidates]);
-  const purchaseAlertHiddenCount = Math.max(purchaseCandidates.length - purchaseAlertItems.length, 0);
-  const hasImmediatePurchaseAlert = purchaseCandidates.length > 0;
-
   const d1ShortageSummary = useMemo(() => {
     const ingredients = d1ShortagesByCategory.filter((row) => row.category === 'INGREDIENTE').length;
     const internalPackaging = d1ShortagesByCategory.filter(
@@ -794,228 +858,23 @@ function StockPageContent() {
     return { ingredients, internalPackaging, externalPackaging };
   }, [d1ShortagesByCategory]);
 
-  const d1RowByIngredientId = useMemo(
-    () => new Map(d1Rows.map((row) => [row.ingredientId, row])),
-    [d1Rows]
-  );
-
   const stockBoardCards = useMemo(() => {
     return items
       .map((item) => {
-        const balance = balances.get(item.id!) || 0;
-        const row = d1RowByIngredientId.get(item.id!);
-        const requiredQty = row?.requiredQty ?? 0;
-        const availableQty = row?.availableQty ?? balance;
-        const shortageQty = row?.shortageQty ?? 0;
-        const isMissingNow = balance <= 0;
-        const isMissingSoon = shortageQty > 0;
-        const hasPlannedDemand = requiredQty > 0;
-        const status: StockBoardCard['status'] = isMissingNow || isMissingSoon
-          ? 'critical'
-          : hasPlannedDemand
-          ? 'attention'
-          : 'ok';
-        const groupedBreakdown = new Map<string, number>();
-        for (const entry of row?.breakdown || []) {
-          const current = groupedBreakdown.get(entry.productName) || 0;
-          groupedBreakdown.set(entry.productName, current + entry.quantity);
-        }
-
         return {
           item,
-          status,
-          balance,
-          requiredQty,
-          availableQty,
-          shortageQty,
-          isMissingNow,
-          isMissingSoon,
-          hasPlannedDemand,
-          breakdownSummary: Array.from(groupedBreakdown.entries())
-            .map(([productName, quantity]) => `${productName}: ${formatQty(quantity)}`)
-            .join(' | ')
+          balance: roundInventoryQty(item.balance || 0),
         } satisfies StockBoardCard;
       })
-      .sort((left, right) => {
-        const statusOrder = { critical: 0, attention: 1, ok: 2 } as const;
-        if (statusOrder[left.status] !== statusOrder[right.status]) {
-          return statusOrder[left.status] - statusOrder[right.status];
-        }
-        if (right.shortageQty !== left.shortageQty) {
-          return right.shortageQty - left.shortageQty;
-        }
-        if (left.item.category !== right.item.category) {
-          return inventoryCategoryLabel(left.item.category).localeCompare(
-            inventoryCategoryLabel(right.item.category),
-            'pt-BR'
-          );
-        }
-        return left.item.name.localeCompare(right.item.name, 'pt-BR');
-      });
-  }, [balances, d1RowByIngredientId, items]);
-
-  const criticalStockCardCount = useMemo(
-    () => stockBoardCards.filter((card) => card.status === 'critical').length,
-    [stockBoardCards]
-  );
-
-  const capacityWarningsCount = useMemo(
-    () =>
-      capacity.filter((entry) => entry.hasNegativeInput || entry.missingQtyDefinitions).length,
-    [capacity]
-  );
+      .sort((left, right) => left.item.name.localeCompare(right.item.name, 'pt-BR'));
+  }, [items]);
 
   useEffect(() => {
-    if (stockBoardCards.length === 0) {
-      setExpandedStockCardId(null);
-      return;
-    }
-    if (
-      expandedStockCardId != null &&
-      stockBoardCards.some((card) => card.item.id === expandedStockCardId)
-    ) {
-      return;
-    }
-
-    const firstCritical = stockBoardCards.find((card) => card.status === 'critical');
-    setExpandedStockCardId(firstCritical?.item.id ?? stockBoardCards[0]?.item.id ?? null);
-  }, [expandedStockCardId, stockBoardCards]);
-
-  const negativeBalanceItems = useMemo(
-    () =>
-      items.filter((item) => {
-        const current = balances.get(item.id!) || 0;
-        return current < 0;
-      }),
-    [balances, items]
-  );
-
-  const inventoryKpis = useMemo<StockWorkflowOverviewKpis & {
-    plannedOrders: number;
-    criticalCards: number;
-    negativeBalanceItems: number;
-  }>(() => {
-    const totalItems = items.length;
-    const ingredients = items.filter((i) => i.category === 'INGREDIENTE').length;
-    const packaging = items.filter((i) => i.category !== 'INGREDIENTE').length;
-    return {
-      totalItems,
-      ingredients,
-      packaging,
-      plannedOrders: plannedOrders.length,
-      criticalCards: criticalStockCardCount,
-      negativeBalanceItems: negativeBalanceItems.length
-    };
-  }, [
-    criticalStockCardCount,
-    items,
-    negativeBalanceItems.length,
-    plannedOrders.length
-  ]);
-
-  const workflowSteps = useMemo<StockWorkflowStep[]>(
-    () => [
-      {
-        id: 'plan',
-        title: '1. Planejar',
-        summary: `${plannedOrders.length} pedido(s) ativos para ${d1Date}`,
-        detail:
-          d1Shortages.length > 0
-            ? `${d1Shortages.length} item(ns) com falta prevista no D+1.`
-            : 'Sem falta prevista no D+1.',
-        toneClass:
-          d1Shortages.length > 0
-            ? 'border-amber-200 bg-amber-50'
-            : 'border-emerald-200 bg-emerald-50',
-        actionLabel: 'Abrir D+1'
-      },
-      {
-        id: 'buy',
-        title: '2. Comprar',
-        summary:
-          purchaseCandidates.length > 0
-            ? `${purchaseCandidates.length} item(ns) pedem compra ou reposicao`
-            : 'Nenhuma compra urgente agora',
-        detail:
-          purchaseCandidates[0]
-            ? `${purchaseCandidates[0].name}: falta ${formatQty(purchaseCandidates[0].shortageQty)} ${purchaseCandidates[0].unit}.`
-            : 'Sem risco imediato no quadro.',
-        toneClass:
-          purchaseCandidates.length > 0
-            ? 'border-rose-200 bg-rose-50'
-            : 'border-emerald-200 bg-emerald-50',
-        actionLabel: 'Registrar entrada'
-      },
-      {
-        id: 'produce',
-        title: '3. Produzir',
-        summary:
-          criticalStockCardCount > 0
-            ? `${criticalStockCardCount} card(s) critico(s) afetam a producao`
-            : 'Sem bloqueio imediato para produzir',
-        detail:
-          capacityWarningsCount > 0
-            ? `${capacityWarningsCount} ficha(s) tecnica(s) precisam de ajuste para calcular capacidade.`
-            : `${capacity.length} ficha(s) tecnica(s) prontas para consulta de capacidade.`,
-        toneClass:
-          criticalStockCardCount > 0 || capacityWarningsCount > 0
-            ? 'border-amber-200 bg-amber-50'
-            : 'border-white/70 bg-white/80',
-        actionLabel: 'Ver capacidade'
-      },
-      {
-        id: 'check',
-        title: '4. Conferir',
-        summary:
-          negativeBalanceItems.length > 0
-            ? `${negativeBalanceItems.length} item(ns) com saldo negativo`
-            : 'Sem saldo negativo no momento',
-        detail:
-          movements.length > 0
-            ? `${movements.length} movimentacao(oes) registradas para auditoria rapida.`
-            : 'Sem historico de movimentacoes ainda.',
-        toneClass:
-          negativeBalanceItems.length > 0
-            ? 'border-amber-200 bg-amber-50'
-            : 'border-white/70 bg-white/80',
-        actionLabel: negativeBalanceItems.length > 0 ? 'Ver saldos' : 'Ver historico'
-      }
-    ],
-    [
-      capacity.length,
-      capacityWarningsCount,
-      criticalStockCardCount,
-      d1Date,
-      d1Shortages.length,
-      movements.length,
-      negativeBalanceItems.length,
-      plannedOrders.length,
-      purchaseCandidates
-    ]
-  );
-
-  const handleWorkflowStepAction = useCallback(
-    (stepId: StockWorkflowStep['id']) => {
-      if (stepId === 'plan') {
-        focusAdvancedSlot('d1');
-        return;
-      }
-      if (stepId === 'buy') {
-        focusMovement();
-        return;
-      }
-      if (stepId === 'produce') {
-        focusAdvancedSlot('capacity');
-        return;
-      }
-      if (negativeBalanceItems.length > 0) {
-        focusAdvancedSlot('balance');
-        return;
-      }
-      focusAdvancedSlot('movements');
-    },
-    [focusAdvancedSlot, focusMovement, negativeBalanceItems.length]
-  );
+    setStockCardBalanceByItemId(
+      Object.fromEntries(stockBoardCards.map((card) => [card.item.id!, formatQty(card.balance)]))
+    );
+    setStockCardErrorByItemId({});
+  }, [stockBoardCards]);
 
   const d1BreakdownSummary = (row: ProductionRequirementRow) => {
     const grouped = new Map<string, number>();
@@ -1028,255 +887,94 @@ function StockPageContent() {
       .join(' | ');
   };
 
-  const expandedStockCard =
-    stockBoardCards.find((card) => card.item.id === expandedStockCardId) ?? stockBoardCards[0] ?? null;
-
   return (
     <>
     <BuilderLayoutProvider page="estoque">
       <section className="grid gap-8">
       <BuilderLayoutItemSlot
-        id="header"
-        className={isSpotlightSlot('header') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
-      >
-      <div className="stock-board-hero">
-        <div className="stock-board-hero__head">
-          <div>
-            <p className="stock-board-hero__eyebrow">Estoque por item</p>
-            <h2 className="stock-board-hero__title">O que comprar agora e o que vai faltar depois</h2>
-          </div>
-          <div className="stock-board-hero__summary">
-            <strong>{criticalStockCardCount}</strong>
-            <span>card(s) critico(s)</span>
-          </div>
-        </div>
-
-        <div className="stock-board-hero__stats">
-          <span className="stock-board-hero__stat">
-            <strong>{inventoryKpis.totalItems}</strong>
-            itens
-          </span>
-          <span className="stock-board-hero__stat">
-            <strong>{inventoryKpis.plannedOrders}</strong>
-            pedidos ativos
-          </span>
-          <span className="stock-board-hero__stat">
-            <strong>{inventoryKpis.ingredients}</strong>
-            ingredientes
-          </span>
-          <span className="stock-board-hero__stat">
-            <strong>{inventoryKpis.packaging}</strong>
-            embalagens
-          </span>
-        </div>
-
-        <div className="stock-board-hero__actions">
-          <button
-            type="button"
-            className="app-button app-button-primary"
-            onClick={() => {
-              load().catch(console.error);
-              loadD1(d1Date).catch(console.error);
-            }}
-          >
-            <AppIcon name="refresh" className="h-4 w-4" />
-            Atualizar quadro
-          </button>
-          {isOperationMode ? (
-            <button
-              type="button"
-              className="app-button app-button-ghost"
-              onClick={focusMovement}
-            >
-              <AppIcon name="tools" className="h-4 w-4" />
-              Abrir ferramentas
-            </button>
-          ) : (
-            <>
-              <button
-                type="button"
-                className="app-button app-button-ghost"
-                onClick={focusMovement}
-              >
-                <AppIcon name="plus" className="h-4 w-4" />
-                Registrar entrada manual
-              </button>
-              <button
-                type="button"
-                className="app-button app-button-ghost"
-                onClick={() => focusAdvancedSlot('d1')}
-              >
-                <AppIcon name="spark" className="h-4 w-4" />
-                Ver calculo completo D+1
-              </button>
-              <button
-                type="button"
-                className="app-button app-button-ghost"
-                onClick={() => {
-                  setViewMode('operation');
-                  scrollToLayoutSlot('ops');
-                }}
-              >
-                <AppIcon name="back" className="h-4 w-4" />
-                Voltar para cards
-              </button>
-            </>
-          )}
-        </div>
-        {hasImmediatePurchaseAlert ? (
-          <div className="stock-board-hero__queue" role="alert" aria-live="polite">
-            {purchaseAlertItems.map((row) => (
-              <div key={`alert-${row.ingredientId}`} className="stock-board-hero__queue-item">
-                <span className="stock-board-hero__queue-name">{row.name}</span>
-                <span className="stock-board-hero__queue-meta">
-                  falta {formatQty(row.shortageQty)} {row.unit}
-                </span>
-              </div>
-            ))}
-            {purchaseAlertHiddenCount > 0 ? (
-              <p className="stock-board-hero__queue-more">+{purchaseAlertHiddenCount} item(ns)</p>
-            ) : null}
-          </div>
-        ) : (
-          <div className="stock-board-hero__queue stock-board-hero__queue--ok">
-            <p className="stock-board-hero__queue-empty">Nenhum item com falta prevista para a data selecionada.</p>
-          </div>
-        )}
-      </div>
-      {inventoryKpis.negativeBalanceItems > 0 ? (
-        <div className="stock-flag stock-flag--warning">
-          {inventoryKpis.negativeBalanceItems} item(ns) com saldo negativo precisam de ajuste.
-        </div>
-      ) : null}
-      <div
-        className={`stock-surface-banner ${
-          isOperationMode ? 'stock-surface-banner--operation' : 'stock-surface-banner--advanced'
-        }`}
-      >
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            className={`app-button ${isOperationMode ? 'app-button-primary' : 'app-button-ghost'}`}
-            onClick={() => setViewMode('operation')}
-          >
-            Foco rapido
-          </button>
-          <button
-            type="button"
-            className={`app-button ${isOperationMode ? 'app-button-ghost' : 'app-button-primary'}`}
-            onClick={() => setViewMode('full')}
-          >
-            Ferramentas
-          </button>
-        </div>
-      </div>
-      </BuilderLayoutItemSlot>
-
-      <BuilderLayoutItemSlot
-        id="kpis"
-        className={isSpotlightSlot('kpis') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
-      >
-      <StockWorkflowOverview
-        steps={workflowSteps}
-        inventoryKpis={inventoryKpis}
-        onStepAction={handleWorkflowStepAction}
-      />
-      </BuilderLayoutItemSlot>
-
-      <BuilderLayoutItemSlot
         id="ops"
         className={isSpotlightSlot('ops') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
       >
-      <div className="stock-item-board">
+      <div className="app-panel mb-4 grid gap-3">
+        <div className="grid gap-1">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
+            Base de massa
+          </p>
+          <p className="text-sm text-neutral-700">
+            Estoque efetivo consolidado com os aliases canônicos do backend.
+          </p>
+        </div>
+        {loadError ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {loadError}
+          </div>
+        ) : null}
+        <div className="flex flex-wrap gap-2 text-xs">
+          <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
+            Disponivel agora: {formatQty(massSummary.recipesAvailable)} receita(s) •{' '}
+            {formatQty(massSummary.broasAvailable)} broa(s)
+          </span>
+          <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
+            Possivel pelos ingredientes: {formatQty(massSummary.recipesPossibleFromIngredients)} receita(s) •{' '}
+            {formatQty(massSummary.broasPossibleFromIngredients)} broa(s)
+          </span>
+          <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
+            Potencial total: {formatQty(massSummary.totalPotentialRecipes)} receita(s) •{' '}
+            {formatQty(massSummary.totalPotentialBroas)} broa(s)
+          </span>
+          {massSummary.limitingIngredientName ? (
+            <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-amber-900">
+              Gargalo da massa: {massSummary.limitingIngredientName}
+            </span>
+          ) : null}
+        </div>
+      </div>
+      <div className="mass-prep-stock-grid">
         {stockBoardCards.map((card) => {
-          const isExpanded = expandedStockCard?.item.id === card.item.id;
-          const cardStatusLabel =
-            card.status === 'critical' ? 'Comprar agora' : card.status === 'attention' ? 'Monitorar' : 'OK';
-          const cardStatusDetail = card.isMissingNow
-            ? 'Sem saldo agora'
-            : card.isMissingSoon
-            ? 'Vai faltar para os proximos pedidos'
-            : card.hasPlannedDemand
-            ? 'Tem consumo previsto'
-            : 'Sem risco imediato';
+          const itemId = card.item.id!;
+          const editValue = stockCardBalanceByItemId[itemId] ?? formatQty(card.balance);
+          const itemError = stockCardErrorByItemId[itemId];
+          const isSavingItem = stockCardSavingItemId === itemId;
 
           return (
-            <div
-              key={card.item.id}
-              className={`stock-item-card stock-item-card--${card.status} ${isExpanded ? 'stock-item-card--expanded' : ''}`}
-              role="button"
-              tabIndex={0}
-              onClick={() => setExpandedStockCardId(card.item.id!)}
-              onKeyDown={(event) =>
-                handleInteractiveStockCardKeyDown(event, () => setExpandedStockCardId(card.item.id!))
-              }
-            >
-              <div className="stock-item-card__head">
-                <div className="stock-item-card__head-main">
-                  <div>
-                    <p className="stock-item-card__category">{inventoryCategoryLabel(card.item.category)}</p>
-                    <h3 className="stock-item-card__title">{card.item.name}</h3>
-                  </div>
-                  <span className="stock-item-card__chevron" aria-hidden="true" />
-                </div>
-                <span className={`stock-item-card__badge stock-item-card__badge--${card.status}`}>
-                  {cardStatusLabel}
-                </span>
-              </div>
-
-              <p className="stock-item-card__status">{cardStatusDetail}</p>
-
-              <div className="stock-item-card__metrics">
-                <div className="stock-item-card__metric">
-                  <span>Saldo</span>
-                  <strong>
-                    {formatQty(card.balance)} {card.item.unit}
-                  </strong>
-                </div>
-                <div className="stock-item-card__metric">
-                  <span>Precisa D+1</span>
-                  <strong>
-                    {formatQty(card.requiredQty)} {card.item.unit}
-                  </strong>
-                </div>
-                <div className="stock-item-card__metric">
-                  <span>Falta</span>
-                  <strong className={card.shortageQty > 0 ? 'text-red-700' : 'text-emerald-700'}>
-                    {formatQty(card.shortageQty)} {card.item.unit}
-                  </strong>
-                </div>
-              </div>
-
-              <div className="stock-item-card__meta">
-                <span>
-                  Pack: {card.item.purchasePackSize > 0 ? `${formatQty(card.item.purchasePackSize)} ${card.item.unit}` : 'nao definido'}
-                </span>
-                <span>
-                  Custo pack:{' '}
-                  {card.item.purchasePackCost && card.item.purchasePackCost > 0
-                    ? formatCurrencyBR(card.item.purchasePackCost)
-                    : 'nao definido'}
-                </span>
-              </div>
-
-              {card.breakdownSummary ? (
-                <p className="stock-item-card__breakdown">{card.breakdownSummary}</p>
-              ) : (
-                <p className="stock-item-card__breakdown stock-item-card__breakdown--muted">
-                  Sem consumo previsto nos proximos pedidos.
-                </p>
-              )}
-
-              <div className="stock-item-card__expand" aria-hidden={!isExpanded}>
-                <div className="stock-item-card__expand-inner">
-                  <div className="stock-item-card__expanded">
-                    <div className="stock-item-card__offer stock-item-card__offer--empty">
-                      <p className="stock-item-card__offer-title">Reposicao externa indisponivel.</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <article key={`stock-card-${itemId}`} className="mass-prep-stock-card">
+              <p className="mass-prep-stock-card__category">{inventoryCategoryLabel(card.item.category)}</p>
+              <h4 className="mass-prep-stock-card__name">{card.item.name}</h4>
+              <p className="mass-prep-stock-card__balance">
+                Saldo atual: {formatQty(card.balance)} {card.item.unit}
+              </p>
+              <label className="mass-prep-stock-card__edit-label">
+                Ajustar saldo ({card.item.unit})
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  className="app-input mass-prep-stock-card__input"
+                  value={editValue}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setStockCardBalanceByItemId((current) => ({
+                      ...current,
+                      [itemId]: nextValue
+                    }));
+                    setStockCardErrorByItemId((current) => ({
+                      ...current,
+                      [itemId]: ''
+                    }));
+                  }}
+                  onBlur={() => {
+                    void saveStockCardBalance(card.item, { silent: true });
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter') return;
+                    event.preventDefault();
+                    void saveStockCardBalance(card.item, { silent: true });
+                  }}
+                  placeholder="0"
+                  disabled={isSavingItem}
+                />
+              </label>
+              {itemError ? <p className="mass-prep-stock-card__error">{itemError}</p> : null}
+            </article>
           );
         })}
       </div>
@@ -1500,7 +1198,7 @@ function StockPageContent() {
             />
             <input
               className="app-input"
-              placeholder="Rendimento (caixas por receita)"
+              placeholder="Rendimento (broas por receita)"
               value={bomYieldUnits}
               onChange={(e) => setBomYieldUnits(e.target.value)}
             />
@@ -1742,7 +1440,7 @@ function StockPageContent() {
                     <span className="app-panel__chevron" aria-hidden="true" />
                   </div>
                   <p className="mt-1 text-sm text-neutral-500">
-                    {inventoryCategoryLabel(item.category)} • {balances.get(item.id!) ?? 0} {item.unit}
+                    {inventoryCategoryLabel(item.category)} • {formatQty(item.balance || 0)} {item.unit}
                   </p>
                 </div>
                 <button
@@ -1818,10 +1516,6 @@ function StockPageContent() {
 
       </section>
     </BuilderLayoutProvider>
-    <FloatingActionButton
-      label={isOperationMode ? 'Abrir ferramentas' : 'Nova movimentacao'}
-      onClick={focusMovement}
-    />
     </>
   );
 }

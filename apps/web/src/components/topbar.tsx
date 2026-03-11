@@ -6,7 +6,7 @@ import { resolveNavItem } from '@/lib/navigation-model';
 export function Topbar() {
   const pathname = usePathname();
   const route = resolveNavItem(pathname);
-  if (route.href === '/pedidos') return null;
+  if (route.href === '/pedidos' || route.href === '/clientes') return null;
 
   return (
     <header className="app-topbar">

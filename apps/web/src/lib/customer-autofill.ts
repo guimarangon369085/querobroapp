@@ -14,8 +14,31 @@ export type CustomerAutofillPatch = Partial<
     | 'neighborhood'
     | 'postalCode'
     | 'state'
+    | 'placeId'
+    | 'lat'
+    | 'lng'
   >
 >;
+
+export type GooglePlaceAddressComponentLike = {
+  long_name?: string;
+  short_name?: string;
+  types?: string[];
+};
+
+export type GooglePlaceGeometryLike = {
+  location?: {
+    lat?: () => number;
+    lng?: () => number;
+  };
+};
+
+export type GooglePlaceResultLike = {
+  place_id?: string;
+  formatted_address?: string;
+  address_components?: GooglePlaceAddressComponentLike[];
+  geometry?: GooglePlaceGeometryLike;
+};
 
 const POSTAL_CODE_PATTERN = /\b\d{5}-?\d{3}\b/;
 const STATE_PATTERN = /^[A-Za-z]{2}$/;
@@ -61,7 +84,6 @@ export function buildCustomerAddressAutofill(address?: string | null): CustomerA
   const normalized = compactWhitespace(address || '');
   const fallback: CustomerAutofillPatch = {
     addressLine1: '',
-    addressLine2: '',
     neighborhood: '',
     city: '',
     state: '',
@@ -117,29 +139,76 @@ export function buildCustomerAddressAutofill(address?: string | null): CustomerA
   }
 
   let neighborhood = '';
-  let neighborhoodIndex = -1;
   if (cityIndex > 1) {
     const candidate = normalizedSegments[cityIndex - 1];
     if (!looksLikeComplement(candidate)) {
       neighborhood = normalizeSegment(candidate);
-      neighborhoodIndex = cityIndex - 1;
     }
   }
 
-  const complementEnd =
-    neighborhoodIndex >= 0 ? neighborhoodIndex : cityIndex > 0 ? cityIndex : normalizedSegments.length;
-  const addressLine2 = normalizeSegment(
-    normalizedSegments.slice(1, Math.max(1, complementEnd)).join(', ')
-  );
-
   return {
     addressLine1,
-    addressLine2,
     neighborhood,
     city,
     state,
     postalCode
   };
+}
+
+function getAddressComponent(
+  components: GooglePlaceAddressComponentLike[] | undefined,
+  types: string[]
+) {
+  if (!components || components.length === 0) return null;
+  return components.find((component) => (component.types || []).some((type) => types.includes(type))) || null;
+}
+
+function normalizeGoogleAddressComponent(
+  components: GooglePlaceAddressComponentLike[] | undefined,
+  types: string[],
+  mode: 'short' | 'long' = 'long'
+) {
+  const component = getAddressComponent(components, types);
+  if (!component) return '';
+  const rawValue = mode === 'short' ? component.short_name : component.long_name;
+  return normalizeSegment(rawValue);
+}
+
+export function buildCustomerAddressAutofillFromGooglePlace(
+  place?: GooglePlaceResultLike | null
+): CustomerAutofillPatch {
+  if (!place) return {};
+
+  const components = place.address_components || [];
+  const street = normalizeGoogleAddressComponent(components, ['route']);
+  const streetNumber = normalizeGoogleAddressComponent(components, ['street_number'], 'short');
+  const neighborhood = normalizeGoogleAddressComponent(components, ['sublocality_level_1', 'neighborhood']);
+  const city = normalizeGoogleAddressComponent(components, ['locality', 'administrative_area_level_2']);
+  const state = normalizeGoogleAddressComponent(components, ['administrative_area_level_1'], 'short').toUpperCase();
+  const postalCode = formatPostalCodeBR(
+    normalizeGoogleAddressComponent(components, ['postal_code'], 'short')
+  );
+  const country = normalizeGoogleAddressComponent(components, ['country']);
+
+  const addressLine1 = [street, streetNumber].filter(Boolean).join(', ');
+  const lat = place.geometry?.location?.lat?.();
+  const lng = place.geometry?.location?.lng?.();
+
+  const patch: CustomerAutofillPatch = {
+    addressLine1,
+    neighborhood,
+    city,
+    state,
+    postalCode,
+    country,
+    placeId: place.place_id || '',
+    ...(Number.isFinite(lat) ? { lat } : {}),
+    ...(Number.isFinite(lng) ? { lng } : {})
+  };
+
+  const addressFromSummary = buildCustomerAddressSummary(patch);
+  patch.address = compactWhitespace(place.formatted_address || '') || addressFromSummary || '';
+  return patch;
 }
 
 export function buildCustomerAddressSummary(values: CustomerAutofillPatch) {
@@ -184,10 +253,6 @@ export async function lookupPostalCodeAutofill(
     postalCode: formatPostalCodeBR(payload.cep || digits),
     country: 'Brasil'
   };
-
-  if (payload.complemento) {
-    patch.addressLine2 = normalizeSegment(payload.complemento);
-  }
 
   const address = buildCustomerAddressSummary(patch);
   if (address) {

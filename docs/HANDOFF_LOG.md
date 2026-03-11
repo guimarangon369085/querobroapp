@@ -4082,3 +4082,167 @@ Objetivo da sessao:
 
 No fim, registrar nova entrada no HANDOFF_LOG.
 ```
+
+## Entrada 045
+
+### 1) Metadados
+
+- Data/hora: 2026-03-06 14:28 -03
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `feat/real-local-ops-flow-2026-02-28`
+- Commit base (opcional): `3c9b47b`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Registrar handoff automatico no encerramento da sessao.
+- Resultado entregue: Entrada automatica registrada com estado atual do repositorio (21 itens no git status).
+- O que ficou pendente: Reboot real + validacao manual.
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados:
+- ` M apps/api/src/modules/bom/bom.service.ts`
+- ` M apps/api/src/modules/customers/customers.service.ts`
+- ` M apps/api/src/modules/orders/orders.service.ts`
+- ` M apps/web/.env.example`
+- ` M apps/web/src/app/clientes/page.tsx`
+- ` M apps/web/src/app/estoque/page.tsx`
+- ` M apps/web/src/app/globals.css`
+- ` M apps/web/src/app/layout.tsx`
+- ` M apps/web/src/app/produtos/page.tsx`
+- ` M apps/web/src/components/app-icons.tsx`
+- ` M apps/web/src/components/nav.tsx`
+- ` M apps/web/src/components/topbar.tsx`
+- ` M apps/web/src/features/orders/order-quick-create.tsx`
+- ` M apps/web/src/features/orders/orders-model.ts`
+- ` M apps/web/src/features/orders/orders-screen.tsx`
+- ` M apps/web/src/hooks/use-surface-mode.ts`
+- ` M apps/web/src/lib/builder.ts`
+- ` M apps/web/src/lib/customer-autofill.ts`
+- ` M apps/web/src/lib/navigation-model.ts`
+- ` M packages/shared/src/index.ts`
+- `?? apps/web/src/lib/google-places.ts`
+- Comportamento novo: Sem alteracao funcional nesta execucao; somente atualizacao documental automatica.
+- Riscos/regressoes: baixo risco; log pode registrar pendencias genericas se o plano nao estiver atualizado.
+
+### 4) Validacao
+
+- Comandos executados: scripts/save-handoff-auto.sh; scripts/save-handoff.sh
+- Testes que passaram: nao aplicavel
+- Testes nao executados (e motivo): nao aplicavel (encerramento documental)
+
+### 5) Contexto para retomada
+
+- Decisoes importantes: Manter bootstrap por documentacao e reduzir dependencia de historico longo no chat.
+- Suposicoes feitas: Repositorio local em ~/querobroapp com docs atualizados.
+- Bloqueios: nenhum
+- Proximo passo recomendado (1 acao objetiva): Reboot real + validacao manual.
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/NEXT_STEP_PLAN.md
+- ultimas 80 linhas de docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
+## Entrada 046
+
+### 1) Metadados
+
+- Data/hora: 2026-03-11 15:21 -03
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `feat/real-local-ops-flow-2026-02-28`
+- Commit base (opcional): `3c9b47b`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Fechar riscos ativos de estabilidade, regressao e defasagem documental.
+- Resultado entregue: Riscos operacionais validados com reboot local, QA smoke/E2E e gate qa:trust verde.
+- O que ficou pendente: Sem pendencia critica; proximo foco volta para UX de Estoque e refino de Pedidos.
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados:
+- ` M apps/api/prisma/seed.ts`
+- ` M apps/api/src/modules/bom/bom.service.ts`
+- ` M apps/api/src/modules/customers/customers.service.ts`
+- ` M apps/api/src/modules/inventory/inventory.controller.ts`
+- ` M apps/api/src/modules/inventory/inventory.service.ts`
+- ` M apps/api/src/modules/orders/orders.service.ts`
+- ` M apps/api/src/modules/production/production.service.ts`
+- ` M apps/web/.env.example`
+- ` M apps/web/next-env.d.ts`
+- ` M apps/web/src/app/clientes/page.tsx`
+- ` M apps/web/src/app/estoque/page.tsx`
+- ` M apps/web/src/app/globals.css`
+- ` M apps/web/src/app/layout.tsx`
+- ` M apps/web/src/app/produtos/page.tsx`
+- ` M apps/web/src/components/app-icons.tsx`
+- ` M apps/web/src/components/nav.tsx`
+- ` M apps/web/src/components/topbar.tsx`
+- ` M apps/web/src/features/orders/order-quick-create.tsx`
+- ` M apps/web/src/features/orders/orders-model.ts`
+- ` M apps/web/src/features/orders/orders-screen.tsx`
+- ` M apps/web/src/hooks/use-surface-mode.ts`
+- ` M apps/web/src/lib/builder.ts`
+- ` M apps/web/src/lib/customer-autofill.ts`
+- ` M apps/web/src/lib/navigation-model.ts`
+- ` M docs/HANDOFF_LOG.md`
+- ` M docs/NEXT_STEP_PLAN.md`
+- ` M docs/PROJECT_SNAPSHOT.md`
+- ` M package.json`
+- ` M packages/shared/src/index.ts`
+- ` M scripts/qa-browser-smoke.sh`
+- ` M scripts/qa-critical-e2e.mjs`
+- ` M tests/order-mass-prep-automation.test.mjs`
+- `?? apps/api/src/modules/inventory/inventory-formulas.ts`
+- `?? apps/web/src/lib/google-places.ts`
+- `?? tests/inventory-overview-effective-balance.test.mjs`
+- `?? tests/mass-prep-batch-priority.test.mjs`
+- `?? tests/order-packaging-grouping.test.mjs`
+- `?? tests/production-broa-operational-rules.test.mjs`
+- `?? tests/production-quantity-semantics.test.mjs`
+- Comportamento novo: Ambiente religado e validado; fluxo critico e trust gate aprovados na mesma sessao.
+- Riscos/regressoes: baixo risco apos gates verdes; manter vigilancia de cobertura de dominio ao evoluir regras.
+
+### 4) Validacao
+
+- Comandos executados: scripts/stop-all.sh; scripts/dev-all.sh; pnpm qa:browser-smoke; pnpm qa:critical-e2e; pnpm qa:trust
+- Testes que passaram: qa:browser-smoke; qa:critical-e2e; qa:trust
+- Testes nao executados (e motivo): reboot fisico de maquina nao executado; mitigado por ciclo stop/start completo e validacao automatizada
+
+### 5) Contexto para retomada
+
+- Decisoes importantes: Fixar testes raiz em modo sequencial para evitar interferencia de estado no SQLite compartilhado durante o qa:trust.
+- Suposicoes feitas: Repositorio local em /Users/gui/querobroapp com servicos e scripts operacionais.
+- Bloqueios: nenhum
+- Proximo passo recomendado (1 acao objetiva): Retomar melhorias de UX em Estoque com validacao desktop/mobile.
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/NEXT_STEP_PLAN.md
+- ultimas 80 linhas de docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```

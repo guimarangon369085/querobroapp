@@ -411,25 +411,26 @@ async function runCriticalFlow() {
     `
       await page.goto(${JSON.stringify(`${webUrl}/produtos`)}, { waitUntil: 'domcontentloaded' });
       try { await page.waitForLoadState('networkidle', { timeout: 5000 }); } catch {}
-      await page.getByRole('button', { name: 'Sabor', exact: true }).click();
-      await page.getByPlaceholder('Nome do produto').fill(${JSON.stringify(productName)});
-      const priceField = page.getByPlaceholder('0,00').first();
-      await priceField.fill('12,50');
-      await page.getByRole('button', { name: 'Criar', exact: true }).click();
-      await page.getByText(${JSON.stringify(productName)}, { exact: false }).first().waitFor({ state: 'visible', timeout: 10000 });
+      await page.getByText('Base de massa', { exact: false }).first().waitFor({ state: 'visible', timeout: 10000 });
     `,
-    'Criar produto'
+    'Validar rota produtos'
   );
-  pwSnapshot('critical-e2e-produtos');
-  assertConsoleClean('critical-e2e-produtos');
-  assertNetworkClean('critical-e2e-produtos');
+  pwSnapshot('critical-e2e-produtos-route');
+  assertConsoleClean('critical-e2e-produtos-route');
+  assertNetworkClean('critical-e2e-produtos-route');
 
-  const products = await apiRequest('/products');
-  const createdProduct = [...products]
-    .filter((entry) => String(entry.name || '').includes(suffix))
-    .sort((left, right) => (right.id || 0) - (left.id || 0))[0];
+  const createdProduct = await apiRequest('/products', {
+    method: 'POST',
+    body: {
+      name: productName,
+      category: 'Sabores',
+      unit: 'un',
+      price: 12.5,
+      active: true
+    }
+  });
   if (!createdProduct?.id) {
-    throw new Error(`Produto criado no browser nao encontrado na API: ${productName}`);
+    throw new Error(`Produto criado via API sem id: ${productName}`);
   }
 
   await apiRequest('/boms', {

@@ -390,6 +390,21 @@ assert_page_contains() {
   fi
 }
 
+assert_path_contains() {
+  local route_name="$1"
+  local expected_path_fragment="$2"
+  local evaluation
+
+  evaluation="$("$PWCLI" eval "window.location.pathname.includes('${expected_path_fragment}')")"
+  printf '%s\n' "$evaluation" >"$OUTPUT_DIR/${route_name}-path-contains.txt"
+
+  if ! printf '%s\n' "$evaluation" | grep -q '^true$'; then
+    echo "Browser smoke: a rota ${route_name} nao redirecionou para o path esperado: ${expected_path_fragment}"
+    printf '%s\n' "$evaluation"
+    exit 1
+  fi
+}
+
 open_or_navigate() {
   local url="$1"
 
@@ -406,12 +421,18 @@ check_route() {
   local route_name="$1"
   local route_path="$2"
   local expected_text="$3"
+  local expected_path_fragment="${4:-}"
 
   echo "Browser smoke: validando ${route_name} (${route_path})"
   open_or_navigate "${WEB_URL}${route_path}"
   "$PWCLI" run-code "await page.waitForLoadState('domcontentloaded'); try { await page.waitForLoadState('networkidle', { timeout: 3000 }); } catch {} await page.waitForTimeout(400);" >/dev/null
   "$PWCLI" snapshot >"$OUTPUT_DIR/${route_name}-snapshot.md"
-  assert_page_contains "$route_name" "$expected_text"
+  if [[ -n "$expected_text" ]]; then
+    assert_page_contains "$route_name" "$expected_text"
+  fi
+  if [[ -n "$expected_path_fragment" ]]; then
+    assert_path_contains "$route_name" "$expected_path_fragment"
+  fi
   assert_console_clean "$route_name"
   assert_network_clean "$route_name"
 }
@@ -423,7 +444,7 @@ ensure_web_server
 
 check_route "pedidos" "/pedidos" "Agenda"
 check_route "clientes" "/clientes" "Clientes"
-check_route "produtos" "/produtos" "Produtos"
-check_route "estoque" "/estoque" "Estoque"
+check_route "produtos" "/produtos" "" "/estoque"
+check_route "estoque" "/estoque" "" "/estoque"
 
 echo "QA Browser Smoke OK (${WEB_URL})"

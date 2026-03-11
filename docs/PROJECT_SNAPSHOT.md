@@ -1,6 +1,6 @@
 # PROJECT_SNAPSHOT
 
-Ultima atualizacao: 2026-03-04
+Ultima atualizacao: 2026-03-11
 
 ## Estado atual
 
@@ -12,6 +12,7 @@ Ultima atualizacao: 2026-03-04
 - Marca lateral usa o mark vetorial interno e favicon/shortcut usam `broa-mark.svg`, com o nome QUEROBROAPP.
 - API cobre pedido, pagamento, estoque, BOM, D+1, producao e entrega local interna.
 - O processo de qualidade atual inclui `qa:trust`, `qa:browser-smoke`, `qa:critical-e2e`, drift check e testes raiz.
+- Gate operacional de religamento foi validado em 2026-03-11 com `stop-all -> dev-all`, health da API e execucao de smoke + E2E critico.
 
 ## O que um usuario consegue fazer hoje
 
@@ -53,6 +54,13 @@ Ultima atualizacao: 2026-03-04
 - Os flows de QA que sobem um web temporario agora usam dist dirs dedicados do Next, para nao disputar o `.next` do `next dev`.
 - O workflow principal de CI no GitHub agora roda `check:prisma-drift` e `qa:trust` com lint habilitado.
 
+## Validacao operacional mais recente
+
+- Data: 2026-03-11
+- Ciclo executado: `./scripts/stop-all.sh` -> `./scripts/dev-all.sh` -> `curl http://127.0.0.1:3001/health`
+- QA executado antes e apos religamento: `pnpm qa:browser-smoke` e `pnpm qa:critical-e2e`
+- Resultado: todos os gates passaram, incluindo jornada critica finalizando pedido como `ENTREGUE` e `PAGO`.
+
 ## Gaps abertos
 
 1. Integracoes externas foram removidas e devem ser replanejadas do zero quando a operacao principal estiver consolidada.
@@ -66,7 +74,8 @@ Ultima atualizacao: 2026-03-04
 2. `./scripts/dev-all.sh`
 3. Abrir `http://127.0.0.1:3000/pedidos`
 4. Validar `http://127.0.0.1:3001/health`
-5. Rodar `pnpm qa:browser-smoke` se quiser uma confirmacao automatizada rapida
+5. Rodar `pnpm qa:browser-smoke`
+6. Rodar `pnpm qa:critical-e2e`
 
 ## Arquivos chave
 

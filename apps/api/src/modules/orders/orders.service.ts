@@ -4,6 +4,24 @@ import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
 import { OrderItemSchema, OrderSchema, OrderStatusEnum } from '@querobroapp/shared';
 import { z } from 'zod';
+import {
+  addInventoryLookupItem,
+  buildOfficialBroaFlavorSummary,
+  buildInventoryItemLookup,
+  computeBroaPaperBagCount,
+  computeBroaPackagingPlan,
+  findInventoryByAliases,
+  MASS_PREP_DEFAULT_BATCH_RECIPES,
+  MASS_READY_BROAS_PER_RECIPE,
+  MASS_READY_ITEM_NAME,
+  massPrepRecipeIngredients,
+  ORDER_BOX_UNITS,
+  orderFillingIngredientsByFlavorCode,
+  resolveExecutableMassPrepRecipes,
+  resolveInventoryDefinition,
+  resolveInventoryFamilyItemIds,
+  resolvePlannedMassPrepRecipes
+} from '../inventory/inventory-formulas.js';
 
 const updateSchema = OrderSchema.partial().omit({ id: true, createdAt: true, items: true });
 const replaceItemsSchema = z.object({
@@ -26,10 +44,6 @@ const statusTransitions: Record<string, string[]> = {
 const MASS_PREP_EVENT_SCOPE = 'MASS_PREP_EVENT';
 const MASS_PREP_EVENT_NAME = 'FAZER MASSA';
 const MASS_PREP_EVENT_DURATION_MINUTES = 60;
-const MASS_READY_ITEM_NAME = 'MASSA PRONTA';
-const MASS_READY_BROAS_PER_RECIPE = 28;
-const ORDER_BOX_UNITS = 7;
-const FILLING_GRAMS_PER_BROA = 5;
 const ORDER_BOX_PRICE_CUSTOM = 52;
 const ORDER_BOX_PRICE_TRADITIONAL = 40;
 const ORDER_BOX_PRICE_MIXED_GOIABADA = 45;
@@ -39,12 +53,18 @@ const MASS_PREP_SOURCE = 'MASS_PREP';
 const MASS_PREP_SOURCE_LABEL_PREFIX = 'ORDER_';
 const ORDER_FORMULA_SOURCE_MASS_READY = 'MASS_READY';
 const ORDER_FORMULA_SOURCE_FILLING = 'ORDER_FILLING';
-const ORDER_FORMULA_SOURCES = [ORDER_FORMULA_SOURCE_MASS_READY, ORDER_FORMULA_SOURCE_FILLING] as const;
+const ORDER_FORMULA_SOURCE_PACKAGING = 'ORDER_PACKAGING';
+const ORDER_FORMULA_SOURCES = [
+  ORDER_FORMULA_SOURCE_MASS_READY,
+  ORDER_FORMULA_SOURCE_FILLING,
+  ORDER_FORMULA_SOURCE_PACKAGING
+] as const;
 
-const massPrepEventStatusSchema = z.enum(['INGREDIENTES', 'PREPARO', 'PRONTA']);
+const massPrepEventStatusSchema = z.enum(['INGREDIENTES', 'PREPARO', 'NO_FORNO', 'PRONTA']);
 const massPrepEventStatusTransitions: Record<z.infer<typeof massPrepEventStatusSchema>, z.infer<typeof massPrepEventStatusSchema>[]> = {
   INGREDIENTES: ['PREPARO'],
-  PREPARO: ['PRONTA'],
+  PREPARO: ['NO_FORNO'],
+  NO_FORNO: ['PRONTA'],
   PRONTA: []
 };
 
@@ -60,88 +80,6 @@ const massPrepEventSchema = z.object({
   status: massPrepEventStatusSchema.default('INGREDIENTES'),
   createdAt: z.string().datetime()
 });
-
-const massPrepRecipeIngredients = [
-  {
-    canonicalName: 'LEITE',
-    aliases: ['LEITE'],
-    unit: 'ml',
-    qtyPerRecipe: 480,
-    purchasePackSize: 1000,
-    purchasePackCost: 4.19
-  },
-  {
-    canonicalName: 'MANTEIGA COM SAL',
-    aliases: ['MANTEIGA COM SAL', 'MANTEIGA'],
-    unit: 'g',
-    qtyPerRecipe: 300,
-    purchasePackSize: 500,
-    purchasePackCost: 24.9
-  },
-  {
-    canonicalName: 'ACUCAR',
-    aliases: ['ACUCAR', 'AÇÚCAR'],
-    unit: 'g',
-    qtyPerRecipe: 240,
-    purchasePackSize: 1000,
-    purchasePackCost: 5.69
-  },
-  {
-    canonicalName: 'FARINHA DE TRIGO',
-    aliases: ['FARINHA DE TRIGO'],
-    unit: 'g',
-    qtyPerRecipe: 260,
-    purchasePackSize: 1000,
-    purchasePackCost: 6.49
-  },
-  {
-    canonicalName: 'FUBA DE CANJICA',
-    aliases: ['FUBA DE CANJICA', 'FUBÁ DE CANJICA'],
-    unit: 'g',
-    qtyPerRecipe: 260,
-    purchasePackSize: 1000,
-    purchasePackCost: 6
-  },
-  {
-    canonicalName: 'OVOS',
-    aliases: ['OVOS'],
-    unit: 'uni',
-    qtyPerRecipe: 12,
-    purchasePackSize: 20,
-    purchasePackCost: 23.9
-  }
-] as const;
-
-const orderFillingIngredientsByFlavorCode = {
-  G: {
-    canonicalName: 'GOIABADA',
-    aliases: ['GOIABADA'],
-    unit: 'g',
-    purchasePackSize: 1000,
-    purchasePackCost: 19
-  },
-  D: {
-    canonicalName: 'DOCE DE LEITE',
-    aliases: ['DOCE DE LEITE'],
-    unit: 'g',
-    purchasePackSize: 1000,
-    purchasePackCost: 24
-  },
-  Q: {
-    canonicalName: 'QUEIJO',
-    aliases: ['QUEIJO'],
-    unit: 'g',
-    purchasePackSize: 1000,
-    purchasePackCost: 35
-  },
-  R: {
-    canonicalName: 'REQUEIJAO DE CORTE',
-    aliases: ['REQUEIJAO DE CORTE', 'REQUEIJÃO DE CORTE'],
-    unit: 'g',
-    purchasePackSize: 1000,
-    purchasePackCost: 38
-  }
-} as const;
 
 const massPrepEventStatusPayloadSchema = z.object({
   status: massPrepEventStatusSchema
@@ -185,54 +123,8 @@ export class OrdersService {
     return Math.round((value + Number.EPSILON) * 10000) / 10000;
   }
 
-  private normalizeLookup(value: string) {
-    return value
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .toUpperCase();
-  }
-
   private massPrepEventIdemKey(orderId: number) {
     return `ORDER_${orderId}`;
-  }
-
-  private buildInventoryItemLookup(
-    items: Array<{
-      id: number;
-      name: string;
-      category: string;
-      unit: string;
-      purchasePackSize: number;
-      purchasePackCost: number;
-      createdAt: Date;
-    }>
-  ) {
-    const byName = new Map<string, (typeof items)[number]>();
-    for (const item of items) {
-      byName.set(this.normalizeLookup(item.name), item);
-    }
-    return byName;
-  }
-
-  private findInventoryByAliases(
-    byName: Map<string, {
-      id: number;
-      name: string;
-      category: string;
-      unit: string;
-      purchasePackSize: number;
-      purchasePackCost: number;
-      createdAt: Date;
-    }>,
-    aliases: readonly string[]
-  ) {
-    for (const alias of aliases) {
-      const candidate = byName.get(this.normalizeLookup(alias));
-      if (candidate) return candidate;
-    }
-    return null;
   }
 
   private inventoryBalanceFromMovements(
@@ -256,6 +148,34 @@ export class OrdersService {
 
   private massPrepEventDate(order: Pick<OrderWithRelations, 'scheduledAt' | 'createdAt'>) {
     return order.scheduledAt ? new Date(order.scheduledAt) : new Date(order.createdAt);
+  }
+
+  private formatDate(value: Date) {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  private orderTargetDate(order: Pick<OrderWithRelations, 'createdAt' | 'scheduledAt'>) {
+    if (order.scheduledAt) {
+      const scheduled = new Date(order.scheduledAt);
+      if (!Number.isNaN(scheduled.getTime())) {
+        return {
+          date: this.formatDate(scheduled),
+          basis: 'deliveryDate' as const
+        };
+      }
+    }
+
+    const base = new Date(order.createdAt);
+    const productionDate = new Date(base);
+    productionDate.setHours(0, 0, 0, 0);
+    productionDate.setDate(productionDate.getDate() + 1);
+    return {
+      date: this.formatDate(productionDate),
+      basis: 'createdAtPlus1' as const
+    };
   }
 
   private async saveMassPrepEvent(tx: TransactionClient, event: MassPrepEvent) {
@@ -312,10 +232,6 @@ export class OrdersService {
     return null;
   }
 
-  private orderBroasFromItems(items: Array<{ quantity: number }>) {
-    return items.reduce((sum, item) => sum + Math.max(Math.floor(item.quantity || 0), 0), 0);
-  }
-
   private buildFlavorSummaryFromItems(
     items: Array<{ productId: number; quantity: number }>,
     productNameById: Map<number, string>
@@ -339,6 +255,13 @@ export class OrdersService {
     }
 
     return { totalUnits, flavorCounts };
+  }
+
+  private buildOfficialBroaSummaryFromItems(
+    items: Array<{ productId: number; quantity: number }>,
+    productNameById: Map<number, string>
+  ) {
+    return buildOfficialBroaFlavorSummary(items, productNameById);
   }
 
   private calculateSubtotalFromFlavorSummary(params: {
@@ -439,45 +362,82 @@ export class OrdersService {
 
   private async ensureInventoryItemByAliases(
     tx: TransactionClient,
-    inventoryByLookup: Map<string, InventoryLookupItem>,
+    inventoryByLookup: Map<string, InventoryLookupItem[]>,
     params: {
       canonicalName: string;
       aliases: readonly string[];
+      category?: string;
       unit: string;
       purchasePackSize: number;
       purchasePackCost: number;
     }
   ) {
-    const found = this.findInventoryByAliases(inventoryByLookup, params.aliases);
+    const found = findInventoryByAliases(inventoryByLookup, params);
     if (found) return found;
 
     const created = await tx.inventoryItem.create({
       data: {
         name: params.canonicalName,
-        category: 'INGREDIENTE',
+        category: params.category || 'INGREDIENTE',
         unit: params.unit,
         purchasePackSize: params.purchasePackSize,
         purchasePackCost: params.purchasePackCost
       }
     });
-    inventoryByLookup.set(this.normalizeLookup(created.name), created);
+    addInventoryLookupItem(inventoryByLookup, created);
     return created;
   }
 
-  private async loadInventoryBalance(
+  private async loadInventoryFamilyBalance(
     tx: TransactionClient,
-    itemId: number,
+    itemIds: number[],
     where?: Prisma.InventoryMovementWhereInput
   ) {
+    if (itemIds.length === 0) return 0;
     const movements = await tx.inventoryMovement.findMany({
       where: {
-        itemId,
+        itemId: { in: itemIds },
         ...(where || {})
       },
-      select: { type: true, quantity: true },
+      select: { itemId: true, type: true, quantity: true },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
     });
-    return this.inventoryBalanceFromMovements(movements);
+
+    const balanceByItem = new Map<number, number>();
+    for (const movement of movements) {
+      const current = balanceByItem.get(movement.itemId) || 0;
+      if (movement.type === 'IN') {
+        balanceByItem.set(movement.itemId, this.toQty(current + movement.quantity));
+      } else if (movement.type === 'OUT') {
+        balanceByItem.set(movement.itemId, this.toQty(current - movement.quantity));
+      } else if (movement.type === 'ADJUST') {
+        balanceByItem.set(movement.itemId, this.toQty(movement.quantity));
+      }
+    }
+
+    return this.toQty(
+      Array.from(balanceByItem.values()).reduce((sum, value) => this.toQty(sum + value), 0)
+    );
+  }
+
+  private async resolveMassPrepRecipesPossibleFromIngredients(tx: TransactionClient) {
+    const inventoryItems = await tx.inventoryItem.findMany({ orderBy: { id: 'asc' } });
+    let possibleRecipes = Number.POSITIVE_INFINITY;
+
+    for (const ingredient of massPrepRecipeIngredients) {
+      const availableQty = this.toQty(
+        await this.loadInventoryFamilyBalance(
+          tx,
+          resolveInventoryFamilyItemIds(inventoryItems, ingredient)
+        )
+      );
+      const possibleForIngredient = ingredient.qtyPerRecipe
+        ? Math.floor(availableQty / ingredient.qtyPerRecipe)
+        : 0;
+      possibleRecipes = Math.min(possibleRecipes, possibleForIngredient);
+    }
+
+    return Number.isFinite(possibleRecipes) ? Math.max(possibleRecipes, 0) : 0;
   }
 
   private async getMassPrepEventRecord(tx: TransactionClient, orderId: number) {
@@ -509,19 +469,122 @@ export class OrdersService {
       where: { id: { in: productIds } },
       select: { id: true, name: true }
     });
-    const productById = new Map(products.map((product) => [product.id, product]));
+    const productNameById = new Map(products.map((product) => [product.id, product.name]));
+    const summary = this.buildOfficialBroaSummaryFromItems(items, productNameById);
 
-    for (const item of items) {
-      const quantity = Math.max(Math.floor(item.quantity || 0), 0);
-      if (quantity <= 0) continue;
-      const flavorCode = this.resolveOrderFlavorCodeFromProductName(
-        productById.get(item.productId)?.name
-      );
-      if (!flavorCode || flavorCode === 'T') continue;
-      byFlavorCode[flavorCode] += quantity;
+    for (const code of ['G', 'D', 'Q', 'R'] as const) {
+      byFlavorCode[code] = summary.flavorCounts[code] || 0;
     }
 
     return byFlavorCode;
+  }
+
+  private async clearOrderFormulaArtifacts(tx: TransactionClient, orderId: number) {
+    await tx.inventoryMovement.deleteMany({
+      where: {
+        orderId,
+        source: { in: [...ORDER_FORMULA_SOURCES] }
+      }
+    });
+  }
+
+  private async clearMassPrepEventArtifact(tx: TransactionClient, orderId: number) {
+    await tx.idempotencyRecord.deleteMany({
+      where: {
+        scope: MASS_PREP_EVENT_SCOPE,
+        idemKey: this.massPrepEventIdemKey(orderId)
+      }
+    });
+  }
+
+  private async syncPaperBagReservationsForCustomerDateGroup(
+    tx: TransactionClient,
+    params: { customerId: number; targetDate: string }
+  ) {
+    const candidateOrders = await tx.order.findMany({
+      where: {
+        customerId: params.customerId,
+        status: { not: 'CANCELADO' }
+      },
+      include: {
+        items: {
+          include: {
+            product: true
+          }
+        }
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
+    });
+
+    const groupedOrders = candidateOrders.filter(
+      (order) => this.orderTargetDate(order).date === params.targetDate
+    );
+    if (groupedOrders.length === 0) return;
+
+    const packagingByOrder = groupedOrders.map((order) => {
+      const productNameById = new Map(
+        order.items.map((item) => [item.productId, item.product?.name || `Produto ${item.productId}`])
+      );
+      const broaSummary = this.buildOfficialBroaSummaryFromItems(order.items || [], productNameById);
+      return {
+        order,
+        packagingPlan: computeBroaPackagingPlan(broaSummary.totalBroas)
+      };
+    });
+
+    const inventoryItems = await tx.inventoryItem.findMany({ orderBy: { id: 'asc' } });
+    const inventoryByLookup = buildInventoryItemLookup(inventoryItems);
+    const paperBagDefinition = resolveInventoryDefinition('SACOLA');
+    if (!paperBagDefinition) return;
+
+    const paperBagItemIds = resolveInventoryFamilyItemIds(inventoryItems, paperBagDefinition);
+    if (paperBagItemIds.length > 0) {
+      await tx.inventoryMovement.deleteMany({
+        where: {
+          orderId: { in: groupedOrders.map((order) => order.id) },
+          itemId: { in: paperBagItemIds },
+          source: ORDER_FORMULA_SOURCE_PACKAGING
+        }
+      });
+    }
+
+    const totalPlasticBoxes = packagingByOrder.reduce(
+      (sum, entry) => this.toQty(sum + entry.packagingPlan.plasticBoxes),
+      0
+    );
+    if (totalPlasticBoxes <= 0) return;
+
+    const paperBagItem = await this.ensureInventoryItemByAliases(tx, inventoryByLookup, {
+      canonicalName: paperBagDefinition.canonicalName,
+      aliases: paperBagDefinition.aliases,
+      category: paperBagDefinition.category,
+      unit: paperBagDefinition.unit,
+      purchasePackSize: paperBagDefinition.purchasePackSize,
+      purchasePackCost: paperBagDefinition.purchasePackCost
+    });
+
+    let accumulatedBoxes = 0;
+    for (const entry of packagingByOrder) {
+      const nextAccumulatedBoxes = accumulatedBoxes + entry.packagingPlan.plasticBoxes;
+      const paperBagsForOrder =
+        computeBroaPaperBagCount(nextAccumulatedBoxes) -
+        computeBroaPaperBagCount(accumulatedBoxes);
+      accumulatedBoxes = nextAccumulatedBoxes;
+
+      if (paperBagsForOrder <= 0) continue;
+
+      await tx.inventoryMovement.create({
+        data: {
+          itemId: paperBagItem.id,
+          orderId: entry.order.id,
+          type: 'OUT',
+          quantity: paperBagsForOrder,
+          reason: `Reserva de embalagem por pedido (${paperBagsForOrder} sacola(s))`,
+          source: ORDER_FORMULA_SOURCE_PACKAGING,
+          sourceLabel: this.orderFormulaSourceLabel(entry.order.id)
+        }
+      });
+    }
   }
 
   private async syncOrderFormulaInventory(
@@ -529,20 +592,31 @@ export class OrdersService {
     order: Pick<OrderWithRelations, 'id' | 'items'>
   ) {
     const inventoryItems = await tx.inventoryItem.findMany({ orderBy: { id: 'asc' } });
-    const inventoryByLookup = this.buildInventoryItemLookup(inventoryItems);
+    const inventoryByLookup = buildInventoryItemLookup(inventoryItems);
     const sourceLabel = this.orderFormulaSourceLabel(order.id);
+    const productIds = Array.from(new Set((order.items || []).map((item) => item.productId)));
+    const products = productIds.length
+      ? await tx.product.findMany({
+          where: { id: { in: productIds } },
+          select: { id: true, name: true }
+        })
+      : [];
+    const productNameById = new Map(products.map((product) => [product.id, product.name]));
 
     const massReadyItem = await this.ensureInventoryItemByAliases(tx, inventoryByLookup, {
       canonicalName: MASS_READY_ITEM_NAME,
       aliases: [MASS_READY_ITEM_NAME],
+      category: 'INGREDIENTE',
       unit: 'receita',
       purchasePackSize: 1,
       purchasePackCost: 0
     });
 
-    const totalBroas = this.orderBroasFromItems(order.items || []);
+    const broaSummary = this.buildOfficialBroaSummaryFromItems(order.items || [], productNameById);
+    const totalBroas = broaSummary.totalBroas;
     const massReadyRecipes = this.toQty(totalBroas / MASS_READY_BROAS_PER_RECIPE);
     const fillingBroasByCode = await this.resolveOrderFillingBroasByFlavorCode(tx, order.items || []);
+    const packagingPlan = computeBroaPackagingPlan(totalBroas);
 
     await tx.inventoryMovement.deleteMany({
       where: {
@@ -567,12 +641,13 @@ export class OrdersService {
 
     for (const [code, broasQty] of Object.entries(fillingBroasByCode) as Array<[FillingFlavorCode, number]>) {
       const definition = orderFillingIngredientsByFlavorCode[code];
-      const fillingQty = this.toQty(Math.max(broasQty, 0) * FILLING_GRAMS_PER_BROA);
+      const fillingQty = this.toQty(Math.max(broasQty, 0) * (definition.qtyPerUnit ?? 0));
       if (fillingQty <= 0) continue;
 
       const item = await this.ensureInventoryItemByAliases(tx, inventoryByLookup, {
         canonicalName: definition.canonicalName,
         aliases: definition.aliases,
+        category: definition.category,
         unit: definition.unit,
         purchasePackSize: definition.purchasePackSize,
         purchasePackCost: definition.purchasePackCost
@@ -586,6 +661,53 @@ export class OrdersService {
           quantity: fillingQty,
           reason: `Consumo de recheio por pedido (${definition.canonicalName})`,
           source: ORDER_FORMULA_SOURCE_FILLING,
+          sourceLabel
+        }
+      });
+    }
+
+    const plasticBoxDefinition = resolveInventoryDefinition('CAIXA DE PLÁSTICO');
+    const butterPaperDefinition = resolveInventoryDefinition('PAPEL MANTEIGA');
+
+    const packagingMovements = [
+      plasticBoxDefinition && packagingPlan.plasticBoxes > 0
+        ? {
+            definition: plasticBoxDefinition,
+            quantity: packagingPlan.plasticBoxes,
+            reason: `Reserva de embalagem por pedido (${packagingPlan.plasticBoxes} caixa(s) plastica(s))`
+          }
+        : null,
+      butterPaperDefinition && packagingPlan.paperButterCm > 0
+        ? {
+            definition: butterPaperDefinition,
+            quantity: packagingPlan.paperButterCm,
+            reason: `Reserva de embalagem por pedido (${packagingPlan.paperButterCm} cm de papel manteiga)`
+          }
+        : null
+    ].filter(Boolean) as Array<{
+      definition: NonNullable<ReturnType<typeof resolveInventoryDefinition>>;
+      quantity: number;
+      reason: string;
+    }>;
+
+    for (const packagingMovement of packagingMovements) {
+      const item = await this.ensureInventoryItemByAliases(tx, inventoryByLookup, {
+        canonicalName: packagingMovement.definition.canonicalName,
+        aliases: packagingMovement.definition.aliases,
+        category: packagingMovement.definition.category,
+        unit: packagingMovement.definition.unit,
+        purchasePackSize: packagingMovement.definition.purchasePackSize,
+        purchasePackCost: packagingMovement.definition.purchasePackCost
+      });
+
+      await tx.inventoryMovement.create({
+        data: {
+          itemId: item.id,
+          orderId: order.id,
+          type: 'OUT',
+          quantity: packagingMovement.quantity,
+          reason: packagingMovement.reason,
+          source: ORDER_FORMULA_SOURCE_PACKAGING,
           sourceLabel
         }
       });
@@ -625,7 +747,14 @@ export class OrdersService {
       this.toQty(requiredMassRecipes - availableMassReadyExcludingOrderFormula),
       0
     );
-    const recipesToPrepare = missingMassRecipes > 0 ? Math.max(Math.ceil(missingMassRecipes), 1) : 0;
+    const possibleRecipesFromIngredients =
+      missingMassRecipes > 0
+        ? await this.resolveMassPrepRecipesPossibleFromIngredients(tx)
+        : 0;
+    const recipesToPrepare = resolvePlannedMassPrepRecipes(
+      missingMassRecipes,
+      possibleRecipesFromIngredients
+    );
 
     if (!existingEvent) {
       if (recipesToPrepare <= 0) return null;
@@ -675,10 +804,14 @@ export class OrdersService {
 
   private async syncOrderInventoryAndMassPrepEvent(
     tx: TransactionClient,
-    order: Pick<OrderWithRelations, 'id' | 'scheduledAt' | 'createdAt' | 'items'>
+    order: Pick<OrderWithRelations, 'id' | 'customerId' | 'scheduledAt' | 'createdAt' | 'items'>
   ) {
     const formula = await this.syncOrderFormulaInventory(tx, order);
     await this.syncMassPrepEventForOrder(tx, order, formula.massReadyItem.id, formula.requiredMassRecipes);
+    await this.syncPaperBagReservationsForCustomerDateGroup(tx, {
+      customerId: order.customerId,
+      targetDate: this.orderTargetDate(order).date
+    });
   }
 
   private async syncMassPrepEventScheduleAndCoverage(
@@ -686,16 +819,26 @@ export class OrdersService {
     order: Pick<OrderWithRelations, 'id' | 'scheduledAt' | 'createdAt' | 'items'>
   ) {
     const inventoryItems = await tx.inventoryItem.findMany({ orderBy: { id: 'asc' } });
-    const inventoryByLookup = this.buildInventoryItemLookup(inventoryItems);
+    const inventoryByLookup = buildInventoryItemLookup(inventoryItems);
+    const productIds = Array.from(new Set((order.items || []).map((item) => item.productId)));
+    const products = productIds.length
+      ? await tx.product.findMany({
+          where: { id: { in: productIds } },
+          select: { id: true, name: true }
+        })
+      : [];
+    const productNameById = new Map(products.map((product) => [product.id, product.name]));
     const massReadyItem = await this.ensureInventoryItemByAliases(tx, inventoryByLookup, {
       canonicalName: MASS_READY_ITEM_NAME,
       aliases: [MASS_READY_ITEM_NAME],
+      category: 'INGREDIENTE',
       unit: 'receita',
       purchasePackSize: 1,
       purchasePackCost: 0
     });
+    const broaSummary = this.buildOfficialBroaSummaryFromItems(order.items || [], productNameById);
     const requiredMassRecipes = this.toQty(
-      this.orderBroasFromItems(order.items || []) / MASS_READY_BROAS_PER_RECIPE
+      broaSummary.totalBroas / MASS_READY_BROAS_PER_RECIPE
     );
     await this.syncMassPrepEventForOrder(tx, order, massReadyItem.id, requiredMassRecipes);
   }
@@ -704,18 +847,19 @@ export class OrdersService {
     tx: TransactionClient,
     event: Pick<MassPrepEvent, 'orderId' | 'massRecipes'>
   ) {
-    const recipes = Math.max(Math.floor(event.massRecipes || 0), 0);
-    if (recipes <= 0) {
+    const plannedRecipes = Math.max(Math.floor(event.massRecipes || 0), 0);
+    if (plannedRecipes <= 0) {
       throw new BadRequestException('Evento FAZER MASSA sem receitas para preparar.');
     }
 
     const inventoryItems = await tx.inventoryItem.findMany({ orderBy: { id: 'asc' } });
-    const inventoryByLookup = this.buildInventoryItemLookup(inventoryItems);
+    const inventoryByLookup = buildInventoryItemLookup(inventoryItems);
     const sourceLabel = this.orderFormulaSourceLabel(event.orderId);
 
     const massReadyItem = await this.ensureInventoryItemByAliases(tx, inventoryByLookup, {
       canonicalName: MASS_READY_ITEM_NAME,
       aliases: [MASS_READY_ITEM_NAME],
+      category: 'INGREDIENTE',
       unit: 'receita',
       purchasePackSize: 1,
       purchasePackCost: 0
@@ -723,38 +867,50 @@ export class OrdersService {
 
     const plan: Array<{
       item: InventoryLookupItem;
-      requiredQty: number;
+      qtyPerRecipe: number;
       availableQty: number;
       displayName: string;
       unit: string;
     }> = [];
-    const missingIngredients: string[] = [];
+    let possibleRecipesFromIngredients = Number.POSITIVE_INFINITY;
 
     for (const ingredient of massPrepRecipeIngredients) {
       const item = await this.ensureInventoryItemByAliases(tx, inventoryByLookup, {
         canonicalName: ingredient.canonicalName,
         aliases: ingredient.aliases,
+        category: ingredient.category,
         unit: ingredient.unit,
         purchasePackSize: ingredient.purchasePackSize,
         purchasePackCost: ingredient.purchasePackCost
       });
-      const requiredQty = this.toQty(ingredient.qtyPerRecipe * recipes);
-      const availableQty = this.toQty(await this.loadInventoryBalance(tx, item.id));
-      if (availableQty + 0.00001 < requiredQty) {
-        missingIngredients.push(
-          `${ingredient.canonicalName}: disponivel ${availableQty} ${ingredient.unit}, necessario ${requiredQty} ${ingredient.unit}`
-        );
-      }
+      const availableQty = this.toQty(
+        await this.loadInventoryFamilyBalance(
+          tx,
+          resolveInventoryFamilyItemIds(inventoryItems, ingredient)
+        )
+      );
+      const possibleForIngredient = ingredient.qtyPerRecipe
+        ? Math.floor(availableQty / ingredient.qtyPerRecipe)
+        : 0;
+      possibleRecipesFromIngredients = Math.min(possibleRecipesFromIngredients, possibleForIngredient);
       plan.push({
         item,
-        requiredQty,
+        qtyPerRecipe: ingredient.qtyPerRecipe,
         availableQty,
         displayName: ingredient.canonicalName,
         unit: ingredient.unit
       });
     }
 
-    if (missingIngredients.length > 0) {
+    const recipes = resolveExecutableMassPrepRecipes(
+      MASS_PREP_DEFAULT_BATCH_RECIPES,
+      Number.isFinite(possibleRecipesFromIngredients) ? possibleRecipesFromIngredients : 0
+    );
+    if (recipes <= 0) {
+      const missingIngredients = plan.map(
+        (ingredient) =>
+          `${ingredient.displayName}: disponivel ${ingredient.availableQty} ${ingredient.unit}, necessario ${ingredient.qtyPerRecipe} ${ingredient.unit}`
+      );
       throw new BadRequestException(
         `Nao ha insumos suficientes para iniciar PREPARO. ${missingIngredients.join(' | ')}`
       );
@@ -766,7 +922,7 @@ export class OrdersService {
           itemId: ingredient.item.id,
           orderId: event.orderId,
           type: 'OUT',
-          quantity: ingredient.requiredQty,
+          quantity: this.toQty(ingredient.qtyPerRecipe * recipes),
           reason: `Consumo de insumos para MASSA PRONTA (${recipes} receita(s))`,
           source: MASS_PREP_SOURCE,
           sourceLabel
@@ -785,18 +941,35 @@ export class OrdersService {
         sourceLabel
       }
     });
+
+    return recipes;
   }
 
-  private async markMassPrepEventReadyOnOrderOven(
+  private async syncMassPrepEventStatusFromOrderStatus(
     tx: TransactionClient,
-    orderId: number
+    orderId: number,
+    orderStatus: string
   ) {
     const event = await this.getMassPrepEvent(tx, orderId);
-    if (!event || event.status !== 'PREPARO') return null;
+    if (!event) return null;
+
+    let nextStatus = event.status;
+
+    if (orderStatus === 'EM_PREPARACAO' && event.status === 'PREPARO') {
+      nextStatus = 'NO_FORNO';
+    }
+
+    if ((orderStatus === 'PRONTO' || orderStatus === 'ENTREGUE') && event.status !== 'PRONTA') {
+      nextStatus = 'PRONTA';
+    }
+
+    if (nextStatus === event.status) {
+      return event;
+    }
 
     const updatedEvent = massPrepEventSchema.parse({
       ...event,
-      status: 'PRONTA'
+      status: nextStatus
     });
     await this.saveMassPrepEvent(tx, updatedEvent);
     return updatedEvent;
@@ -965,7 +1138,10 @@ export class OrdersService {
     const data = massPrepEventStatusPayloadSchema.parse(payload ?? {});
 
     return this.prisma.$transaction(async (tx) => {
-      const order = await tx.order.findUnique({ where: { id: orderId }, select: { id: true } });
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        select: { id: true, status: true }
+      });
       if (!order) throw new NotFoundException('Pedido nao encontrado');
 
       const event = await this.getMassPrepEvent(tx, orderId);
@@ -982,15 +1158,44 @@ export class OrdersService {
         throw new BadRequestException(`Transicao invalida: ${event.status} -> ${data.status}`);
       }
 
+      let preparedRecipes = event.massRecipes;
       if (event.status === 'INGREDIENTES' && data.status === 'PREPARO') {
-        await this.prepareMassForEvent(tx, event);
+        preparedRecipes = await this.prepareMassForEvent(tx, event);
       }
 
       const updated = massPrepEventSchema.parse({
         ...event,
+        massRecipes: preparedRecipes,
         status: data.status
       });
       await this.saveMassPrepEvent(tx, updated);
+
+      if (data.status === 'NO_FORNO' && order.status !== 'EM_PREPARACAO') {
+        const allowedOrderStatuses = statusTransitions[order.status] || [];
+        if (!allowedOrderStatuses.includes('EM_PREPARACAO')) {
+          throw new BadRequestException(
+            `Pedido nao pode sincronizar para NO FORNO a partir de ${order.status}.`
+          );
+        }
+        await tx.order.update({
+          where: { id: order.id },
+          data: { status: 'EM_PREPARACAO' }
+        });
+      }
+
+      if (data.status === 'PRONTA' && order.status !== 'PRONTO') {
+        const allowedOrderStatuses = statusTransitions[order.status] || [];
+        if (!allowedOrderStatuses.includes('PRONTO')) {
+          throw new BadRequestException(
+            `Pedido nao pode sincronizar para PRONTO a partir de ${order.status}.`
+          );
+        }
+        await tx.order.update({
+          where: { id: order.id },
+          data: { status: 'PRONTO' }
+        });
+      }
+
       return updated;
     });
   }
@@ -1062,6 +1267,7 @@ export class OrdersService {
         include: { items: true, customer: true, payments: true }
       });
       if (!existing) throw new NotFoundException('Pedido nao encontrado');
+      const previousTargetDate = this.orderTargetDate(existing).date;
 
       const nextScheduledAt = Object.prototype.hasOwnProperty.call(data, 'scheduledAt')
         ? this.parseOptionalDateTime(data.scheduledAt)
@@ -1091,7 +1297,14 @@ export class OrdersService {
         include: { items: true, customer: true, payments: true }
       });
 
-      await this.syncMassPrepEventScheduleAndCoverage(tx, updated);
+      await this.syncOrderInventoryAndMassPrepEvent(tx, updated);
+      const nextTargetDate = this.orderTargetDate(updated).date;
+      if (nextTargetDate !== previousTargetDate) {
+        await this.syncPaperBagReservationsForCustomerDateGroup(tx, {
+          customerId: updated.customerId,
+          targetDate: previousTargetDate
+        });
+      }
       return this.withFinancial(updated);
     });
   }
@@ -1100,21 +1313,14 @@ export class OrdersService {
     await this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({ where: { id } });
       if (!order) throw new NotFoundException('Pedido nao encontrado');
+      const targetDate = this.orderTargetDate(order).date;
 
-      await tx.inventoryMovement.deleteMany({
-        where: {
-          orderId: id,
-          source: {
-            in: [...ORDER_FORMULA_SOURCES, 'MASS_READY']
-          }
-        }
-      });
+      await this.clearOrderFormulaArtifacts(tx, id);
       await tx.order.delete({ where: { id } });
-      await tx.idempotencyRecord.deleteMany({
-        where: {
-          scope: MASS_PREP_EVENT_SCOPE,
-          idemKey: this.massPrepEventIdemKey(id)
-        }
+      await this.clearMassPrepEventArtifact(tx, id);
+      await this.syncPaperBagReservationsForCustomerDateGroup(tx, {
+        customerId: order.customerId,
+        targetDate
       });
     });
   }
@@ -1285,8 +1491,16 @@ export class OrdersService {
         data: { status },
         include: { items: true, customer: true, payments: true }
       });
-      if (status === 'EM_PREPARACAO') {
-        await this.markMassPrepEventReadyOnOrderOven(tx, orderId);
+      if (status === 'CANCELADO') {
+        await this.clearOrderFormulaArtifacts(tx, orderId);
+        await this.clearMassPrepEventArtifact(tx, orderId);
+        await this.syncPaperBagReservationsForCustomerDateGroup(tx, {
+          customerId: updatedOrder.customerId,
+          targetDate: this.orderTargetDate(updatedOrder).date
+        });
+      }
+      if (status === 'EM_PREPARACAO' || status === 'PRONTO' || status === 'ENTREGUE') {
+        await this.syncMassPrepEventStatusFromOrderStatus(tx, orderId, status);
       }
       return this.withFinancial(updatedOrder);
     });

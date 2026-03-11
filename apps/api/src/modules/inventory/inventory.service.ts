@@ -4,6 +4,19 @@ import { InventoryCategoryEnum, StockMovementTypeEnum } from '@querobroapp/share
 import { parseLocaleNumber } from '../../common/normalize.js';
 import { parseWithSchema } from '../../common/validation.js';
 import { z } from 'zod';
+import {
+  addInventoryLookupItem,
+  buildInventoryItemLookup,
+  findInventoryByAliases,
+  MASS_READY_BROAS_PER_RECIPE,
+  MASS_READY_ITEM_NAME,
+  massPrepRecipeIngredients,
+  pickInventoryFamilyRepresentative,
+  resolveExecutableMassPrepRecipes,
+  resolveInventoryDefinition,
+  resolveInventoryFamilyItemIds,
+  resolveInventoryFamilyKey
+} from './inventory-formulas.js';
 
 const nonNegativeNumberInputSchema = z.preprocess((value) => {
   const parsed = parseLocaleNumber(value as string | number | null | undefined);
@@ -48,64 +61,17 @@ const inventoryMovementCreateSchema = z.object({
   unitCost: optionalNullableNonNegativeNumberInputSchema
 });
 
-const MASS_READY_ITEM_NAME = 'MASSA PRONTA';
 const MASS_PREP_SOURCE = 'MASS_PREP';
 const MASS_PREP_SOURCE_LABEL = 'MANUAL_POPUP';
 
-const massPrepRecipeIngredients = [
-  {
-    canonicalName: 'LEITE',
-    aliases: ['LEITE'],
-    unit: 'ml',
-    qtyPerRecipe: 480,
-    purchasePackSize: 1000,
-    purchasePackCost: 4.19
-  },
-  {
-    canonicalName: 'MANTEIGA COM SAL',
-    aliases: ['MANTEIGA COM SAL', 'MANTEIGA'],
-    unit: 'g',
-    qtyPerRecipe: 300,
-    purchasePackSize: 500,
-    purchasePackCost: 24.9
-  },
-  {
-    canonicalName: 'ACUCAR',
-    aliases: ['ACUCAR', 'AÇÚCAR'],
-    unit: 'g',
-    qtyPerRecipe: 240,
-    purchasePackSize: 1000,
-    purchasePackCost: 5.69
-  },
-  {
-    canonicalName: 'FARINHA DE TRIGO',
-    aliases: ['FARINHA DE TRIGO'],
-    unit: 'g',
-    qtyPerRecipe: 260,
-    purchasePackSize: 1000,
-    purchasePackCost: 6.49
-  },
-  {
-    canonicalName: 'FUBA DE CANJICA',
-    aliases: ['FUBA DE CANJICA', 'FUBÁ DE CANJICA'],
-    unit: 'g',
-    qtyPerRecipe: 260,
-    purchasePackSize: 1000,
-    purchasePackCost: 6
-  },
-  {
-    canonicalName: 'OVOS',
-    aliases: ['OVOS'],
-    unit: 'uni',
-    qtyPerRecipe: 12,
-    purchasePackSize: 20,
-    purchasePackCost: 23.9
-  }
-] as const;
-
 const prepareMassReadySchema = z.object({
-  recipes: z.coerce.number().int().positive().max(500),
+  recipes: z.coerce.number().int().positive().max(2),
   orderId: z.coerce.number().int().positive().optional().nullable(),
+  reason: z.string().trim().optional().nullable()
+});
+
+const setEffectiveBalanceSchema = z.object({
+  quantity: nonNegativeNumberInputSchema,
   reason: z.string().trim().optional().nullable()
 });
 
@@ -128,34 +94,6 @@ export class InventoryService {
     return Math.round((value + Number.EPSILON) * 10000) / 10000;
   }
 
-  private normalizeLookup(value: string) {
-    return value
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .toUpperCase();
-  }
-
-  private buildInventoryItemLookup(items: InventoryItemLookupEntry[]) {
-    const byName = new Map<string, InventoryItemLookupEntry>();
-    for (const item of items) {
-      byName.set(this.normalizeLookup(item.name), item);
-    }
-    return byName;
-  }
-
-  private findInventoryByAliases(
-    byName: Map<string, InventoryItemLookupEntry>,
-    aliases: readonly string[]
-  ) {
-    for (const alias of aliases) {
-      const candidate = byName.get(this.normalizeLookup(alias));
-      if (candidate) return candidate;
-    }
-    return null;
-  }
-
   private inventoryBalanceFromMovements(
     movements: Array<{
       type: string;
@@ -175,8 +113,170 @@ export class InventoryService {
     return balance;
   }
 
+  private buildBalanceByItemId(
+    movements: Array<{
+      itemId: number;
+      type: string;
+      quantity: number;
+    }>
+  ) {
+    const balanceByItem = new Map<number, number>();
+
+    for (const movement of movements) {
+      const current = balanceByItem.get(movement.itemId) || 0;
+      if (movement.type === 'IN') {
+        balanceByItem.set(movement.itemId, this.toQty(current + movement.quantity));
+      } else if (movement.type === 'OUT') {
+        balanceByItem.set(movement.itemId, this.toQty(current - movement.quantity));
+      } else if (movement.type === 'ADJUST') {
+        balanceByItem.set(movement.itemId, this.toQty(movement.quantity));
+      }
+    }
+
+    return balanceByItem;
+  }
+
+  private buildEffectiveBalanceByItemId(
+    items: InventoryItemLookupEntry[],
+    balanceByItem: Map<number, number>
+  ) {
+    const itemIdsByFamilyKey = new Map<string, number[]>();
+    for (const item of items) {
+      const familyKey = resolveInventoryFamilyKey(item.name);
+      const current = itemIdsByFamilyKey.get(familyKey) || [];
+      current.push(item.id);
+      itemIdsByFamilyKey.set(familyKey, current);
+    }
+
+    const effectiveBalanceByItemId = new Map<number, number>();
+    for (const itemIds of itemIdsByFamilyKey.values()) {
+      const familyBalance = itemIds.reduce(
+        (sum, itemId) => this.toQty(sum + (balanceByItem.get(itemId) || 0)),
+        0
+      );
+      for (const itemId of itemIds) {
+        effectiveBalanceByItemId.set(itemId, familyBalance);
+      }
+    }
+
+    return effectiveBalanceByItemId;
+  }
+
+  private buildInventoryOverviewPayload(
+    items: InventoryItemLookupEntry[],
+    movements: Array<{
+      itemId: number;
+      type: string;
+      quantity: number;
+    }>
+  ) {
+    const balanceByItem = this.buildBalanceByItemId(movements);
+    const groupedByFamily = new Map<string, InventoryItemLookupEntry[]>();
+
+    for (const item of items) {
+      const familyKey = resolveInventoryFamilyKey(item.name);
+      const current = groupedByFamily.get(familyKey) || [];
+      current.push(item);
+      groupedByFamily.set(familyKey, current);
+    }
+
+    const overviewItems = Array.from(groupedByFamily.entries())
+      .map(([_familyKey, familyItems]) => {
+        const definition = resolveInventoryDefinition(familyItems[0]?.name || null);
+        const representative = pickInventoryFamilyRepresentative(
+          familyItems,
+          definition?.canonicalName || familyItems[0]?.name || ''
+        );
+        if (!representative) return null;
+
+        const balance = familyItems.reduce(
+          (sum, item) => this.toQty(sum + (balanceByItem.get(item.id) || 0)),
+          0
+        );
+
+        return {
+          id: representative.id,
+          name: definition?.canonicalName || representative.name,
+          category: definition?.category || representative.category,
+          unit: definition?.unit || representative.unit,
+          purchasePackSize:
+            representative.purchasePackSize || definition?.purchasePackSize || 0,
+          purchasePackCost:
+            representative.purchasePackCost || definition?.purchasePackCost || 0,
+          createdAt: representative.createdAt,
+          balance: this.toQty(balance),
+          rawItemIds: familyItems.map((item) => item.id).sort((left, right) => left - right)
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => left!.name.localeCompare(right!.name, 'pt-BR'));
+
+    const overviewByFamilyKey = new Map(
+      overviewItems.map((item) => [familyKeyFromDisplayName(item!.name), item!])
+    );
+
+    let recipesPossibleFromIngredients = Infinity;
+    let limitingIngredientName: string | null = null;
+
+    for (const ingredient of massPrepRecipeIngredients) {
+      const overviewItem = overviewByFamilyKey.get(
+        familyKeyFromDisplayName(ingredient.canonicalName)
+      );
+      const availableQty = overviewItem?.balance || 0;
+      const possibleRecipes = ingredient.qtyPerRecipe
+        ? Math.floor(availableQty / ingredient.qtyPerRecipe)
+        : 0;
+
+      if (possibleRecipes < recipesPossibleFromIngredients) {
+        recipesPossibleFromIngredients = possibleRecipes;
+        limitingIngredientName = ingredient.canonicalName;
+      }
+    }
+
+    if (!Number.isFinite(recipesPossibleFromIngredients)) {
+      recipesPossibleFromIngredients = 0;
+      limitingIngredientName = null;
+    }
+
+    const massReadyItem =
+      overviewByFamilyKey.get(familyKeyFromDisplayName(MASS_READY_ITEM_NAME)) || null;
+    const recipesAvailable = this.toQty(massReadyItem?.balance || 0);
+    const broasAvailable = this.toQty(recipesAvailable * MASS_READY_BROAS_PER_RECIPE);
+    const broasPossibleFromIngredients = this.toQty(
+      recipesPossibleFromIngredients * MASS_READY_BROAS_PER_RECIPE
+    );
+
+    return {
+      items: overviewItems,
+      mass: {
+        itemId: massReadyItem?.id || null,
+        name: MASS_READY_ITEM_NAME,
+        recipesAvailable,
+        broasAvailable,
+        recipesPossibleFromIngredients,
+        broasPossibleFromIngredients,
+        totalPotentialRecipes: this.toQty(recipesAvailable + recipesPossibleFromIngredients),
+        totalPotentialBroas: this.toQty(broasAvailable + broasPossibleFromIngredients),
+        limitingIngredientName
+      },
+      generatedAt: new Date().toISOString()
+    };
+  }
+
   listItems() {
     return this.prisma.inventoryItem.findMany({ orderBy: { id: 'asc' } });
+  }
+
+  async overview() {
+    const [items, movements] = await Promise.all([
+      this.prisma.inventoryItem.findMany({ orderBy: { id: 'asc' } }),
+      this.prisma.inventoryMovement.findMany({
+        select: { itemId: true, type: true, quantity: true },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
+      })
+    ]);
+
+    return this.buildInventoryOverviewPayload(items, movements);
   }
 
   createItem(payload: unknown) {
@@ -229,14 +329,83 @@ export class InventoryService {
     return this.prisma.inventoryMovement.create({ data });
   }
 
+  async adjustEffectiveBalance(id: number, payload: unknown) {
+    const data = parseWithSchema(setEffectiveBalanceSchema, payload ?? {});
+
+    return this.prisma.$transaction(async (tx) => {
+      const items = await tx.inventoryItem.findMany({ orderBy: { id: 'asc' } });
+      const targetItem = items.find((item) => item.id === id);
+      if (!targetItem) throw new NotFoundException('Item nao encontrado');
+
+      const familyDefinition = resolveInventoryDefinition(targetItem.name);
+      const familyItemIds = familyDefinition
+        ? resolveInventoryFamilyItemIds(items, familyDefinition)
+        : items
+            .filter((item) => resolveInventoryFamilyKey(item.name) === resolveInventoryFamilyKey(targetItem.name))
+            .map((item) => item.id);
+
+      const familyItems = items.filter((item) => familyItemIds.includes(item.id));
+      const representative =
+        pickInventoryFamilyRepresentative(
+          familyItems,
+          familyDefinition?.canonicalName || targetItem.name
+        ) || targetItem;
+
+      const movements = await tx.inventoryMovement.findMany({
+        where: { itemId: { in: familyItemIds } },
+        select: { itemId: true, type: true, quantity: true },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
+      });
+      const balanceByItem = this.buildBalanceByItemId(movements);
+      const effectiveBalanceByItemId = this.buildEffectiveBalanceByItemId(items, balanceByItem);
+      const currentEffectiveBalance = this.toQty(
+        effectiveBalanceByItemId.get(representative.id) || 0
+      );
+      const desiredEffectiveBalance = this.toQty(data.quantity);
+      const delta = this.toQty(desiredEffectiveBalance - currentEffectiveBalance);
+
+      if (Math.abs(delta) < 0.0001) {
+        return {
+          ok: true,
+          itemId: representative.id,
+          effectiveBalance: currentEffectiveBalance,
+          appliedType: 'NONE',
+          appliedQuantity: 0
+        };
+      }
+
+      await tx.inventoryMovement.create({
+        data: {
+          itemId: representative.id,
+          type: delta > 0 ? 'IN' : 'OUT',
+          quantity: Math.abs(delta),
+          reason:
+            data.reason?.trim() ||
+            `Ajuste efetivo via Estoque (${familyDefinition?.canonicalName || representative.name})`
+        }
+      });
+
+      return {
+        ok: true,
+        itemId: representative.id,
+        effectiveBalance: desiredEffectiveBalance,
+        appliedType: delta > 0 ? 'IN' : 'OUT',
+        appliedQuantity: Math.abs(delta)
+      };
+    });
+  }
+
   async prepareMassReady(payload: unknown) {
     const data = parseWithSchema(prepareMassReadySchema, payload ?? {});
 
     return this.prisma.$transaction(async (tx) => {
       const inventoryItems = await tx.inventoryItem.findMany({ orderBy: { id: 'asc' } });
-      const inventoryByLookup = this.buildInventoryItemLookup(inventoryItems);
+      const inventoryByLookup = buildInventoryItemLookup(inventoryItems);
 
-      let massReadyItem = this.findInventoryByAliases(inventoryByLookup, [MASS_READY_ITEM_NAME]);
+      let massReadyItem = findInventoryByAliases(inventoryByLookup, {
+        canonicalName: MASS_READY_ITEM_NAME,
+        aliases: [MASS_READY_ITEM_NAME]
+      });
       if (!massReadyItem) {
         massReadyItem = await tx.inventoryItem.create({
           data: {
@@ -247,19 +416,20 @@ export class InventoryService {
             purchasePackCost: 0
           }
         });
-        inventoryByLookup.set(this.normalizeLookup(massReadyItem.name), massReadyItem);
+        addInventoryLookupItem(inventoryByLookup, massReadyItem);
       }
 
       const ingredientPlan: Array<{
         item: InventoryItemLookupEntry;
-        requiredQty: number;
+        qtyPerRecipe: number;
         availableQty: number;
         canonicalName: string;
         unit: string;
       }> = [];
+      let possibleRecipesFromIngredients = Number.POSITIVE_INFINITY;
 
       for (const ingredient of massPrepRecipeIngredients) {
-        let item = this.findInventoryByAliases(inventoryByLookup, ingredient.aliases);
+        let item = findInventoryByAliases(inventoryByLookup, ingredient);
         if (!item) {
           item = await tx.inventoryItem.create({
             data: {
@@ -270,35 +440,57 @@ export class InventoryService {
               purchasePackCost: ingredient.purchasePackCost
             }
           });
-          inventoryByLookup.set(this.normalizeLookup(item.name), item);
+          addInventoryLookupItem(inventoryByLookup, item);
         }
 
         const movements = await tx.inventoryMovement.findMany({
-          where: { itemId: item.id },
-          select: { type: true, quantity: true },
+          where: {
+            itemId: {
+              in: resolveInventoryFamilyItemIds(inventoryItems, ingredient)
+            }
+          },
+          select: { itemId: true, type: true, quantity: true },
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
         });
-        const availableQty = this.inventoryBalanceFromMovements(movements);
-        const requiredQty = this.toQty(ingredient.qtyPerRecipe * data.recipes);
-        if (availableQty + 0.00001 < requiredQty) {
-          throw new BadRequestException(
-            `Estoque insuficiente para ${ingredient.canonicalName}. Disponivel ${this.toQty(availableQty)} ${ingredient.unit}; necessario ${requiredQty} ${ingredient.unit}.`
-          );
-        }
+        const availableQty = this.toQty(
+          Array.from(this.buildBalanceByItemId(movements).values()).reduce(
+            (sum, value) => this.toQty(sum + value),
+            0
+          )
+        );
+        const possibleForIngredient = ingredient.qtyPerRecipe
+          ? Math.floor(availableQty / ingredient.qtyPerRecipe)
+          : 0;
+        possibleRecipesFromIngredients = Math.min(possibleRecipesFromIngredients, possibleForIngredient);
 
         ingredientPlan.push({
           item,
-          requiredQty,
+          qtyPerRecipe: ingredient.qtyPerRecipe,
           availableQty: this.toQty(availableQty),
           canonicalName: ingredient.canonicalName,
           unit: ingredient.unit
         });
       }
 
+      const recipesPrepared = resolveExecutableMassPrepRecipes(
+        data.recipes,
+        Number.isFinite(possibleRecipesFromIngredients) ? possibleRecipesFromIngredients : 0
+      );
+      if (recipesPrepared <= 0) {
+        const missingIngredients = ingredientPlan.map(
+          (ingredient) =>
+            `${ingredient.canonicalName}: disponivel ${this.toQty(ingredient.availableQty)} ${ingredient.unit}; necessario ${ingredient.qtyPerRecipe} ${ingredient.unit}.`
+        );
+        throw new BadRequestException(
+          `Estoque insuficiente para preparar MASSA PRONTA. ${missingIngredients.join(' | ')}`
+        );
+      }
+
       const consumptionReason =
-        data.reason?.trim() || `Consumo de insumos para MASSA PRONTA (${data.recipes} receita(s))`;
+        data.reason?.trim() ||
+        `Consumo de insumos para MASSA PRONTA (${recipesPrepared} receita(s))`;
       const replenishmentReason =
-        data.reason?.trim() || `Reposicao manual de MASSA PRONTA (${data.recipes} receita(s))`;
+        data.reason?.trim() || `Reposicao manual de MASSA PRONTA (${recipesPrepared} receita(s))`;
 
       for (const ingredient of ingredientPlan) {
         await tx.inventoryMovement.create({
@@ -306,7 +498,7 @@ export class InventoryService {
             itemId: ingredient.item.id,
             orderId: data.orderId ?? null,
             type: 'OUT',
-            quantity: ingredient.requiredQty,
+            quantity: this.toQty(ingredient.qtyPerRecipe * recipesPrepared),
             reason: consumptionReason,
             source: MASS_PREP_SOURCE,
             sourceLabel: MASS_PREP_SOURCE_LABEL
@@ -319,7 +511,7 @@ export class InventoryService {
           itemId: massReadyItem.id,
           orderId: data.orderId ?? null,
           type: 'IN',
-          quantity: data.recipes,
+          quantity: recipesPrepared,
           reason: replenishmentReason,
           source: MASS_PREP_SOURCE,
           sourceLabel: MASS_PREP_SOURCE_LABEL
@@ -328,12 +520,12 @@ export class InventoryService {
 
       return {
         ok: true,
-        recipesPrepared: data.recipes,
+        recipesPrepared,
         massReadyItemId: massReadyItem.id,
         consumedIngredients: ingredientPlan.map((ingredient) => ({
           itemId: ingredient.item.id,
           name: ingredient.item.name,
-          requiredQty: ingredient.requiredQty,
+          requiredQty: this.toQty(ingredient.qtyPerRecipe * recipesPrepared),
           availableQty: ingredient.availableQty,
           unit: ingredient.unit
         }))
@@ -359,4 +551,8 @@ export class InventoryService {
       totalDeleted: inventoryResult.count + stockResult.count
     };
   }
+}
+
+function familyKeyFromDisplayName(value: string) {
+  return resolveInventoryFamilyKey(value);
 }
