@@ -17,6 +17,10 @@ import {
   resolveInventoryFamilyItemIds,
   resolveInventoryFamilyKey
 } from './inventory-formulas.js';
+import {
+  INVENTORY_PRICE_SOURCE_DEFINITIONS,
+  fetchInventorySourcePrice
+} from './inventory-price-sources.js';
 
 const nonNegativeNumberInputSchema = z.preprocess((value) => {
   const parsed = parseLocaleNumber(value as string | number | null | undefined);
@@ -85,6 +89,25 @@ type InventoryItemLookupEntry = {
   createdAt: Date;
 };
 
+type InventoryPriceSyncItemResult = {
+  id: number;
+  name: string;
+  purchasePackSize: number;
+  previousCost: number;
+  nextCost: number;
+};
+
+type InventoryPriceSyncSourceResult = {
+  canonicalName: string;
+  sourceName: string;
+  sourceUrl: string;
+  sourcePackSize: number;
+  sourcePrice: number;
+  status: 'UPDATED' | 'FALLBACK' | 'SKIPPED';
+  message: string;
+  updatedItems: InventoryPriceSyncItemResult[];
+};
+
 @Injectable()
 export class InventoryService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
@@ -92,6 +115,11 @@ export class InventoryService {
   private toQty(value: number) {
     if (!Number.isFinite(value)) return 0;
     return Math.round((value + Number.EPSILON) * 10000) / 10000;
+  }
+
+  private roundMoney(value: number) {
+    if (!Number.isFinite(value)) return 0;
+    return Math.round((value + Number.EPSILON) * 100) / 100;
   }
 
   private inventoryBalanceFromMovements(
@@ -313,6 +341,83 @@ export class InventoryService {
       include: { item: true },
       orderBy: { id: 'desc' }
     });
+  }
+
+  async refreshPurchaseCosts() {
+    const items = await this.prisma.inventoryItem.findMany({
+      orderBy: [{ id: 'asc' }]
+    });
+
+    const results: InventoryPriceSyncSourceResult[] = [];
+
+    for (const definition of INVENTORY_PRICE_SOURCE_DEFINITIONS) {
+      const familyKey = resolveInventoryFamilyKey(definition.canonicalName);
+      const matchingItems = items.filter((item) => resolveInventoryFamilyKey(item.name) === familyKey);
+
+      if (matchingItems.length === 0) {
+        results.push({
+          canonicalName: definition.canonicalName,
+          sourceName: definition.sourceName,
+          sourceUrl: definition.url,
+          sourcePackSize: definition.sourcePackSize,
+          sourcePrice: definition.fallbackPrice,
+          status: 'SKIPPED',
+          message: 'Nenhum item correspondente foi encontrado no estoque.',
+          updatedItems: []
+        });
+        continue;
+      }
+
+      const fetched = await fetchInventorySourcePrice(definition);
+      const sourceUnitCost = fetched.price / definition.sourcePackSize;
+      const updatedItems: InventoryPriceSyncItemResult[] = [];
+
+      for (const item of matchingItems) {
+        const nextCost = this.roundMoney(sourceUnitCost * item.purchasePackSize);
+        if (Math.abs((item.purchasePackCost || 0) - nextCost) >= 0.01) {
+          await this.prisma.inventoryItem.update({
+            where: { id: item.id },
+            data: { purchasePackCost: nextCost }
+          });
+        }
+
+        updatedItems.push({
+          id: item.id,
+          name: item.name,
+          purchasePackSize: item.purchasePackSize,
+          previousCost: this.roundMoney(item.purchasePackCost || 0),
+          nextCost
+        });
+      }
+
+      results.push({
+        canonicalName: definition.canonicalName,
+        sourceName: fetched.sourceName,
+        sourceUrl: fetched.sourceUrl,
+        sourcePackSize: fetched.sourcePackSize,
+        sourcePrice: fetched.price,
+        status: fetched.status === 'LIVE' ? 'UPDATED' : 'FALLBACK',
+        message: fetched.message,
+        updatedItems
+      });
+    }
+
+    const updatedItemCount = results.reduce((sum, entry) => sum + entry.updatedItems.length, 0);
+    const updatedSourceCount = results.filter((entry) => entry.status === 'UPDATED').length;
+    const fallbackSourceCount = results.filter((entry) => entry.status === 'FALLBACK').length;
+    const skippedSourceCount = results.filter((entry) => entry.status === 'SKIPPED').length;
+
+    return {
+      updatedAt: new Date().toISOString(),
+      totals: {
+        sources: results.length,
+        updatedSourceCount,
+        fallbackSourceCount,
+        skippedSourceCount,
+        updatedItemCount
+      },
+      results
+    };
   }
 
   async createMovement(payload: unknown) {
@@ -540,15 +645,12 @@ export class InventoryService {
   }
 
   async clearAllMovements() {
-    const [inventoryResult, stockResult] = await this.prisma.$transaction([
-      this.prisma.inventoryMovement.deleteMany({}),
-      this.prisma.stockMovement.deleteMany({})
-    ]);
+    const inventoryResult = await this.prisma.inventoryMovement.deleteMany({});
 
     return {
       inventoryMovementsDeleted: inventoryResult.count,
-      stockMovementsDeleted: stockResult.count,
-      totalDeleted: inventoryResult.count + stockResult.count
+      stockMovementsDeleted: 0,
+      totalDeleted: inventoryResult.count
     };
   }
 }

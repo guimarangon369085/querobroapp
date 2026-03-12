@@ -14,11 +14,11 @@ export function FlowDock() {
   return (
     <section className="flow-dock" aria-label="Fluxo principal">
       <div className="flow-dock__head">
-        <p className="flow-dock__eyebrow">Acesso rapido</p>
+        <p className="flow-dock__eyebrow">Fluxo</p>
       </div>
 
       <div className="flow-dock__main">
-        <p className="flow-dock__title">As 4 telas principais concentram toda a operacao.</p>
+        <p className="flow-dock__title">4 telas do dia.</p>
         <div
           className="flow-dock__progress"
           role="progressbar"
@@ -53,7 +53,7 @@ export function FlowDock() {
       </div>
 
       <div className="flow-dock__meta">
-        <span>{flow.metrics.openOrders} abertos</span>
+        <span>{flow.metrics.openOrders} em aberto</span>
         <span>{flow.metrics.deliveredOrders} entregues</span>
         <span>{flow.metrics.customers} clientes</span>
         <span>{flow.metrics.products} produtos</span>
@@ -61,14 +61,14 @@ export function FlowDock() {
 
       <div className="flow-dock__actions">
         <Link href="/pedidos" className="app-primary">
-          Abrir agenda
+          Pedidos
         </Link>
-        <span>{formatCurrencyBR(flow.metrics.pendingValue)} pendente</span>
+        <span>{formatCurrencyBR(flow.metrics.pendingValue)} PIX pendente</span>
       </div>
 
       {error ? (
         <details className="flow-dock__error">
-          <summary>Detalhe tecnico</summary>
+          <summary>Falha</summary>
           <p>{error}</p>
         </details>
       ) : null}

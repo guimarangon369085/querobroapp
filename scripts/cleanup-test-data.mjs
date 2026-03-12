@@ -63,7 +63,7 @@ async function main() {
   const [orders, customers, products, boms] = await Promise.all([
     apiRequest(baseUrl, '/orders'),
     apiRequest(baseUrl, '/customers'),
-    apiRequest(baseUrl, '/products'),
+    apiRequest(baseUrl, '/inventory-products'),
     apiRequest(baseUrl, '/boms')
   ]);
 
@@ -141,7 +141,7 @@ async function main() {
     }
   }
 
-  const refreshedProducts = await apiRequest(baseUrl, '/products');
+  const refreshedProducts = await apiRequest(baseUrl, '/inventory-products');
   const productIdsToDelete = refreshedProducts
     .filter((product) => {
       if (!Number.isFinite(product.id)) return false;
@@ -152,7 +152,7 @@ async function main() {
 
   for (const productId of productIdsToDelete) {
     try {
-      const result = await apiRequest(baseUrl, `/products/${productId}`, { method: 'DELETE' });
+      const result = await apiRequest(baseUrl, `/inventory-products/${productId}`, { method: 'DELETE' });
       if (result?.archived && !result?.deleted) {
         summary.skippedProductsWithReferences += 1;
         continue;

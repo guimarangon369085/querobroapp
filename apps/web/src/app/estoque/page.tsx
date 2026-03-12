@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type FormEvent,
   type KeyboardEvent,
   type MouseEvent
 } from 'react';
@@ -45,6 +46,21 @@ const OFFICIAL_BROAS = [
   { code: 'R', name: 'Broa Requeijão de corte (R)', boxPrice: 52 }
 ] as const;
 
+const EMPTY_PRODUCT_FORM: Pick<Product, 'name' | 'category' | 'unit' | 'active'> = {
+  name: '',
+  category: 'Sabores',
+  unit: 'unidade',
+  active: true
+};
+
+const OFFICIAL_BROA_ORDER_BY_NAME = new Map(
+  OFFICIAL_BROAS.map((broa, index) => [normalizeLookupText(broa.name), index])
+);
+
+function isTechnicalCatalogProduct(product: Product) {
+  return normalizeLookupText(product.category || '') !== 'HISTORICO';
+}
+
 function movementTypeLabel(value: string) {
   return movementTypeOptions.find((entry) => entry.value === value)?.label || value;
 }
@@ -54,6 +70,37 @@ type BomItemInput = {
   qtyPerRecipe?: string;
   qtyPerSaleUnit?: string;
   qtyPerUnit?: string;
+};
+
+type PurchaseCostRefreshItemResult = {
+  id: number;
+  name: string;
+  purchasePackSize: number;
+  previousCost: number;
+  nextCost: number;
+};
+
+type PurchaseCostRefreshResult = {
+  canonicalName: string;
+  sourceName: string;
+  sourceUrl: string;
+  sourcePackSize: number;
+  sourcePrice: number;
+  status: 'UPDATED' | 'FALLBACK' | 'SKIPPED';
+  message: string;
+  updatedItems: PurchaseCostRefreshItemResult[];
+};
+
+type PurchaseCostRefreshResponse = {
+  updatedAt: string;
+  totals: {
+    sources: number;
+    updatedSourceCount: number;
+    fallbackSourceCount: number;
+    skippedSourceCount: number;
+    updatedItemCount: number;
+  };
+  results: PurchaseCostRefreshResult[];
 };
 
 type StockBoardCard = {
@@ -142,10 +189,35 @@ const EMPTY_MASS_SUMMARY: InventoryMassSummary = {
   limitingIngredientName: null
 };
 
+function compareStockProducts(left: Product, right: Product) {
+  const leftOrder = OFFICIAL_BROA_ORDER_BY_NAME.get(normalizeLookupText(left.name)) ?? 99;
+  const rightOrder = OFFICIAL_BROA_ORDER_BY_NAME.get(normalizeLookupText(right.name)) ?? 99;
+  if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+  if (left.active !== right.active) return left.active ? -1 : 1;
+  return left.name.localeCompare(right.name, 'pt-BR');
+}
+
+function compareStockBoms(
+  left: Bom & { product?: Product | null },
+  right: Bom & { product?: Product | null }
+) {
+  const leftName = left.product?.name || left.name || '';
+  const rightName = right.product?.name || right.name || '';
+  const leftOrder = OFFICIAL_BROA_ORDER_BY_NAME.get(normalizeLookupText(leftName)) ?? 99;
+  const rightOrder = OFFICIAL_BROA_ORDER_BY_NAME.get(normalizeLookupText(rightName)) ?? 99;
+  if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+  return leftName.localeCompare(rightName, 'pt-BR');
+}
+
 function StockPageContent() {
   const searchParams = useSearchParams();
   const { isSpotlightSlot } = useTutorialSpotlight(searchParams, TUTORIAL_QUERY_VALUE);
   const bomSectionRef = useRef<HTMLDivElement | null>(null);
+  const technicalCatalogDetailsRef = useRef<HTMLDetailsElement | null>(null);
+  const productCatalogDetailsRef = useRef<HTMLDetailsElement | null>(null);
+  const bomCatalogDetailsRef = useRef<HTMLDetailsElement | null>(null);
+  const inventoryItemsDetailsRef = useRef<HTMLDetailsElement | null>(null);
+  const stockCardPendingActionIdsRef = useRef<Set<number>>(new Set());
   const openedBomProductIdRef = useRef<number | null>(null);
 
   const [products, setProducts] = useState<Product[]>([]);
@@ -153,13 +225,14 @@ function StockPageContent() {
   const [massSummary, setMassSummary] = useState<InventoryMassSummary>(EMPTY_MASS_SUMMARY);
   const [movements, setMovements] = useState<InventoryMovement[]>([]);
   const [boms, setBoms] = useState<Bom[]>([]);
-  const [itemId, setItemId] = useState<number | ''>('');
-  const [quantity, setQuantity] = useState<string>('1');
-  const [type, setType] = useState<string>('IN');
-  const [reason, setReason] = useState<string>('');
   const [editingItemId, setEditingItemId] = useState<number | ''>('');
   const [packSize, setPackSize] = useState<string>('0');
   const [packCost, setPackCost] = useState<string>('0');
+  const [editingProductId, setEditingProductId] = useState<number | null>(null);
+  const [productForm, setProductForm] = useState<Pick<Product, 'name' | 'category' | 'unit' | 'active'>>(
+    EMPTY_PRODUCT_FORM
+  );
+  const [productPriceInput, setProductPriceInput] = useState<string>('0,00');
 
   const [editingBomId, setEditingBomId] = useState<number | null>(null);
   const [bomProductId, setBomProductId] = useState<number | ''>('');
@@ -174,14 +247,15 @@ function StockPageContent() {
   const [d1Loading, setD1Loading] = useState(false);
   const [d1Error, setD1Error] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [flavorCombos, setFlavorCombos] = useState<Array<{ code: string; composition: string }>>([]);
-  const [flavorComboTotal, setFlavorComboTotal] = useState<number>(0);
-  const [flavorComboLoading, setFlavorComboLoading] = useState(false);
+  const [showInactiveTechnicalEntries, setShowInactiveTechnicalEntries] = useState(false);
   const [stockCardBalanceByItemId, setStockCardBalanceByItemId] = useState<Record<number, string>>({});
   const [stockCardErrorByItemId, setStockCardErrorByItemId] = useState<Record<number, string>>({});
   const [stockCardSavingItemId, setStockCardSavingItemId] = useState<number | null>(null);
+  const [isRefreshingPurchaseCosts, setIsRefreshingPurchaseCosts] = useState(false);
+  const [purchaseCostRefreshResponse, setPurchaseCostRefreshResponse] =
+    useState<PurchaseCostRefreshResponse | null>(null);
   const { isOperationMode } = useSurfaceMode('estoque', { defaultMode: 'operation' });
-  const { confirm, notifyError, notifySuccess, notifyUndo } = useFeedback();
+  const { confirm, notifyError, notifyInfo, notifySuccess, notifyUndo } = useFeedback();
 
   const load = useCallback(async () => {
     const fetchWithRetry = async <T,>(path: string, attempts = 2): Promise<T> => {
@@ -211,34 +285,16 @@ function StockPageContent() {
 
       try {
         const [productsData, bomsData] = await Promise.all([
-          fetchWithRetry<Product[]>('/products'),
-          fetchWithRetry<any[]>('/boms')
+          fetchWithRetry<Product[]>('/inventory-products'),
+          fetchWithRetry<Array<Bom & { product?: Product | null }>>('/boms')
         ]);
-        const officialOrderByName = new Map(
-          OFFICIAL_BROAS.map((broa, index) => [normalizeLookupText(broa.name), index])
-        );
-        const officialProducts = productsData
-          .filter((product) => officialOrderByName.has(normalizeLookupText(product.name)))
-          .sort((left, right) => {
-            const leftOrder = officialOrderByName.get(normalizeLookupText(left.name)) ?? 99;
-            const rightOrder = officialOrderByName.get(normalizeLookupText(right.name)) ?? 99;
-            return leftOrder - rightOrder;
-          });
-        const officialProductIds = new Set(
-          officialProducts.map((product) => product.id).filter(Boolean) as number[]
-        );
-        const officialBoms = (bomsData as Bom[]).filter((bom) =>
-          officialProductIds.has(bom.productId)
-        );
 
-        setProducts(officialProducts);
-        setBoms(officialBoms);
+        setProducts([...productsData].sort(compareStockProducts));
+        setBoms([...bomsData].sort(compareStockBoms));
         setLoadError(null);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Falha ao recarregar produtos/BOM.';
-        setLoadError(
-          `Estoque atualizado, mas o catalogo auxiliar nao recarregou agora. ${message}`
-        );
+        setLoadError(`Estoque atualizado, mas o catalogo tecnico nao recarregou agora. ${message}`);
       }
 
       return true;
@@ -270,6 +326,26 @@ function StockPageContent() {
       'movements'
     ]);
     if (!allowed.has(focus)) return;
+
+    if (focus === 'bom') {
+      if (technicalCatalogDetailsRef.current) technicalCatalogDetailsRef.current.open = true;
+      if (bomCatalogDetailsRef.current) bomCatalogDetailsRef.current.open = true;
+      scrollToLayoutSlot('bom', {
+        focus: true,
+        focusSelector: 'summary, button, input, select, textarea'
+      });
+      return;
+    }
+
+    if (focus === 'packaging' || focus === 'balance') {
+      if (technicalCatalogDetailsRef.current) technicalCatalogDetailsRef.current.open = true;
+      if (inventoryItemsDetailsRef.current) inventoryItemsDetailsRef.current.open = true;
+      scrollToLayoutSlot(focus, {
+        focus: true,
+        focusSelector: 'summary, button, input, select, textarea'
+      });
+      return;
+    }
 
     scrollToLayoutSlot(focus, {
       focus: focus === 'movement' || focus === 'bom' || focus === 'packaging' || focus === 'ops',
@@ -310,37 +386,6 @@ function StockPageContent() {
     return () => window.clearInterval(intervalId);
   }, [d1Date, load, loadD1]);
 
-  const applyBroaPreset = async () => {
-    try {
-      await apiFetch('/boms/bootstrap/broa', { method: 'POST' });
-      await load();
-      notifySuccess('Padrao Broa aplicado: insumos, custos e fichas tecnicas atualizados.');
-      scrollToLayoutSlot('bom');
-    } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Nao foi possivel aplicar o padrao Broa.');
-    }
-  };
-
-  const loadFlavorCombinations = useCallback(async () => {
-    setFlavorComboLoading(true);
-    try {
-      const data = await apiFetch<{
-        totalCombinations: number;
-        combinations: Array<{ code: string; composition: string }>;
-      }>('/boms/flavor-combinations?units=7');
-      setFlavorComboTotal(data.totalCombinations || 0);
-      setFlavorCombos((data.combinations || []).slice(0, 80));
-    } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Nao foi possivel carregar combinacoes.');
-    } finally {
-      setFlavorComboLoading(false);
-    }
-  }, [notifyError]);
-
-  useEffect(() => {
-    void loadFlavorCombinations();
-  }, [loadFlavorCombinations]);
-
   const parseRequiredNumber = (raw: string | number | null | undefined, fieldLabel: string) => {
     const parsed = parseLocaleNumber(raw);
     if (parsed === null || parsed < 0) {
@@ -366,37 +411,6 @@ function StockPageContent() {
       return undefined;
     }
     return parsed;
-  };
-
-  const createMovement = async () => {
-    if (!itemId) return;
-    const parsedQty = parseRequiredNumber(quantity, 'Quantidade');
-    if (parsedQty === null) return;
-    if (parsedQty <= 0) {
-      notifyError('Quantidade deve ser maior que zero.');
-      return;
-    }
-
-    try {
-      await apiFetch('/inventory-movements', {
-        method: 'POST',
-        body: JSON.stringify({
-          itemId: Number(itemId),
-          quantity: parsedQty,
-          type,
-          reason
-        })
-      });
-      setItemId('');
-      setQuantity('1');
-      setType('IN');
-      setReason('');
-      await load();
-      notifySuccess('Movimentacao registrada com sucesso.');
-      scrollToLayoutSlot('movements');
-    } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Nao foi possivel registrar a movimentacao.');
-    }
   };
 
   const removeMovement = async (id: number) => {
@@ -501,6 +515,29 @@ function StockPageContent() {
     }
   };
 
+  const refreshPurchaseCosts = async () => {
+    if (isRefreshingPurchaseCosts) return;
+    setIsRefreshingPurchaseCosts(true);
+    try {
+      const result = await apiFetch<PurchaseCostRefreshResponse>('/inventory-items/refresh-purchase-costs', {
+        method: 'POST'
+      });
+      setPurchaseCostRefreshResponse(result);
+      await load();
+
+      notifySuccess(
+        `Precos atualizados: ${result.totals.updatedSourceCount} online, ${result.totals.fallbackSourceCount} manual.`
+      );
+      if (result.totals.skippedSourceCount > 0) {
+        notifyInfo(`${result.totals.skippedSourceCount} fonte(s) ficaram sem item correspondente no estoque.`);
+      }
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel atualizar os precos online.');
+    } finally {
+      setIsRefreshingPurchaseCosts(false);
+    }
+  };
+
   const removeItem = async (id: number) => {
     const accepted = await confirm({
       title: 'Remover item do estoque?',
@@ -519,7 +556,121 @@ function StockPageContent() {
     }
   };
 
+  const resetProductForm = useCallback(() => {
+    setEditingProductId(null);
+    setProductForm(EMPTY_PRODUCT_FORM);
+    setProductPriceInput('0,00');
+  }, []);
+
+  const startEditProduct = useCallback((product: Product) => {
+    if (technicalCatalogDetailsRef.current) technicalCatalogDetailsRef.current.open = true;
+    if (productCatalogDetailsRef.current) productCatalogDetailsRef.current.open = true;
+    setEditingProductId(product.id ?? null);
+    setProductForm({
+      name: product.name,
+      category: product.category ?? 'Sabores',
+      unit: product.unit ?? 'unidade',
+      active: product.active
+    });
+    setProductPriceInput(formatMoneyInputBR(product.price ?? 0) || '0,00');
+    scrollToLayoutSlot('bom', { focus: true, focusSelector: 'input, select, textarea, button' });
+    bomSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
+
+  const saveProduct = async (event?: FormEvent) => {
+    event?.preventDefault();
+
+    if (!productForm.name || productForm.name.trim().length < 2) {
+      notifyError('Informe um nome valido para o produto.');
+      return;
+    }
+
+    const parsedPrice = parseRequiredNumber(productPriceInput, 'Preco de venda');
+    if (parsedPrice === null) return;
+
+    const payload = {
+      name: productForm.name.trim(),
+      category: productForm.category?.trim() || '',
+      unit: productForm.unit?.trim() || 'unidade',
+      active: productForm.active,
+      price: Math.round(parsedPrice * 100) / 100
+    };
+
+    try {
+      if (editingProductId) {
+        await apiFetch(`/inventory-products/${editingProductId}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload)
+        });
+      } else {
+        await apiFetch('/inventory-products', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+      }
+
+      resetProductForm();
+      await load();
+      notifySuccess(editingProductId ? 'Produto atualizado dentro do Estoque.' : 'Produto criado dentro do Estoque.');
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel salvar o produto.');
+    }
+  };
+
+  const removeProduct = async (id: number) => {
+    const productToRestore = products.find((entry) => entry.id === id);
+    const accepted = await confirm({
+      title: 'Remover produto do catalogo?',
+      description:
+        'Se houver pedidos, movimentos ou ficha vinculada, o produto sera apenas desativado para nao interferir na operacao.',
+      confirmLabel: 'Remover',
+      cancelLabel: 'Cancelar',
+      danger: true
+    });
+    if (!accepted) return;
+
+    try {
+      const result = await apiFetch<{ archived?: boolean; deleted?: boolean }>(
+        `/inventory-products/${id}`,
+        {
+          method: 'DELETE'
+        }
+      );
+
+      if (result?.archived) {
+        if (editingProductId === id) resetProductForm();
+        notifyInfo('Produto desativado porque ja participa de pedidos, movimentos ou ficha tecnica.');
+      } else if (result?.deleted) {
+        if (editingProductId === id) resetProductForm();
+        if (productToRestore) {
+          notifyUndo(`Produto ${productToRestore.name} removido do catalogo.`, async () => {
+            await apiFetch('/inventory-products', {
+              method: 'POST',
+              body: JSON.stringify({
+                name: productToRestore.name,
+                category: productToRestore.category ?? '',
+                unit: productToRestore.unit ?? 'unidade',
+                price: productToRestore.price ?? 0,
+                active: productToRestore.active ?? true
+              })
+            });
+            await load();
+            notifySuccess('Produto restaurado com sucesso.');
+          });
+        } else {
+          notifySuccess('Produto removido do catalogo.');
+        }
+      }
+
+      await load();
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel remover o produto.');
+    }
+  };
+
   const startEditBom = useCallback((bom: any, shouldScroll = true) => {
+    if (technicalCatalogDetailsRef.current) technicalCatalogDetailsRef.current.open = true;
+    if (bomCatalogDetailsRef.current) bomCatalogDetailsRef.current.open = true;
     setEditingBomId(bom.id);
     setBomProductId(bom.productId);
     setBomName(bom.name || '');
@@ -538,10 +689,56 @@ function StockPageContent() {
     }
   }, []);
 
-  const openBomForProduct = useCallback(async (productId: number) => {
-    const bom = await apiFetch<any>(`/products/${productId}/bom`);
-    startEditBom(bom, true);
-  }, [startEditBom]);
+  const startBomForProduct = useCallback((productId: number, shouldScroll = true) => {
+    const product = products.find((entry) => entry.id === productId);
+    if (!product) {
+      throw new Error('Produto nao encontrado.');
+    }
+
+    const existingBom = boms.find((entry) => entry.productId === productId);
+    if (existingBom) {
+      startEditBom(existingBom, shouldScroll);
+      return;
+    }
+
+    if (technicalCatalogDetailsRef.current) technicalCatalogDetailsRef.current.open = true;
+    if (bomCatalogDetailsRef.current) bomCatalogDetailsRef.current.open = true;
+    setEditingBomId(null);
+    setBomProductId(product.id ?? '');
+    setBomName(product.name || '');
+    setBomSaleUnitLabel('Caixa com 7 broas');
+    setBomYieldUnits('');
+    setBomItems([]);
+    if (shouldScroll) {
+      scrollToLayoutSlot('bom', { focus: true, focusSelector: 'input, select, textarea, button' });
+      bomSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [boms, products, startEditBom]);
+
+  const openTechnicalCatalog = useCallback((section: 'product' | 'bom' | 'items' = 'product') => {
+    if (technicalCatalogDetailsRef.current) {
+      technicalCatalogDetailsRef.current.open = true;
+    }
+
+    if (section === 'product' && productCatalogDetailsRef.current) {
+      productCatalogDetailsRef.current.open = true;
+    }
+    if (section === 'bom' && bomCatalogDetailsRef.current) {
+      bomCatalogDetailsRef.current.open = true;
+    }
+    if (section === 'items' && inventoryItemsDetailsRef.current) {
+      inventoryItemsDetailsRef.current.open = true;
+    }
+
+    const slotId = section === 'items' ? 'packaging' : 'bom';
+    scrollToLayoutSlot(slotId, {
+      focus: true,
+      focusSelector: 'summary, button, input, select, textarea'
+    });
+    if (section !== 'items') {
+      bomSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, []);
 
   useEffect(() => {
     const raw = searchParams.get('bomProductId') || searchParams.get('productId');
@@ -551,15 +748,13 @@ function StockPageContent() {
     if (openedBomProductIdRef.current === parsed) return;
     openedBomProductIdRef.current = parsed;
 
-    void openBomForProduct(parsed)
-      .then(() => load())
-      .catch((error) => {
-        openedBomProductIdRef.current = null;
-        notifyError(
-          error instanceof Error ? error.message : 'Nao foi possivel abrir a ficha tecnica.'
-        );
-      });
-  }, [searchParams, openBomForProduct, load, notifyError]);
+    try {
+      startBomForProduct(parsed, true);
+    } catch (error) {
+      openedBomProductIdRef.current = null;
+      notifyError(error instanceof Error ? error.message : 'Nao foi possivel abrir a ficha tecnica.');
+    }
+  }, [searchParams, startBomForProduct, notifyError]);
 
   const addBomItem = () => {
     setBomItems((prev) => [...prev, { itemId: '', qtyPerRecipe: '', qtyPerSaleUnit: '', qtyPerUnit: '' }]);
@@ -693,8 +888,10 @@ function StockPageContent() {
   }, [items]);
 
   const saveStockCardBalance = useCallback(
-    async (item: InventoryOverviewItem, options?: { silent?: boolean }) => {
+    async (item: InventoryOverviewItem) => {
       if (!item.id) return;
+      if (stockCardPendingActionIdsRef.current.has(item.id)) return;
+
       const rawValue = stockCardBalanceByItemId[item.id];
       const parsedValue = parseLocaleNumber(rawValue);
       if (parsedValue == null || !Number.isFinite(parsedValue)) {
@@ -719,24 +916,54 @@ function StockPageContent() {
         return;
       }
 
-      setStockCardSavingItemId(item.id);
-      setStockCardErrorByItemId((current) => ({
-        ...current,
-        [item.id!]: ''
-      }));
+      const unitLabel = item.unit || 'un';
+      const delta = roundInventoryQty(normalizedNext - currentBalance);
+      const deltaAbs = roundInventoryQty(Math.abs(delta));
+      const movementLabel = delta > 0 ? 'entrada' : 'saida';
 
+      stockCardPendingActionIdsRef.current.add(item.id);
       try {
+        const accepted = await confirm({
+          title: delta > 0 ? 'Confirmar entrada automatica?' : 'Confirmar saida automatica?',
+          description: `Saldo atual: ${formatQty(currentBalance)} ${unitLabel}. Novo saldo: ${formatQty(
+            normalizedNext
+          )} ${unitLabel}. Isso vai registrar ${movementLabel} de ${formatQty(deltaAbs)} ${unitLabel} em ${
+            item.name
+          }.`,
+          confirmLabel: delta > 0 ? 'Confirmar entrada' : 'Confirmar saida',
+          cancelLabel: 'Cancelar'
+        });
+        if (!accepted) {
+          setStockCardBalanceByItemId((current) => ({
+            ...current,
+            [item.id!]: formatQty(currentBalance)
+          }));
+          setStockCardErrorByItemId((current) => ({
+            ...current,
+            [item.id!]: ''
+          }));
+          return;
+        }
+
+        setStockCardSavingItemId(item.id);
+        setStockCardErrorByItemId((current) => ({
+          ...current,
+          [item.id!]: ''
+        }));
+
         await apiFetch(`/inventory-items/${item.id}/effective-balance`, {
           method: 'POST',
           body: JSON.stringify({
             quantity: normalizedNext,
-            reason: 'Ajuste efetivo via Estoque'
+            reason: `Ajuste manual via card Estoque (${formatQty(currentBalance)} -> ${formatQty(
+              normalizedNext
+            )} ${unitLabel})`
           })
         });
         await load();
-        if (!options?.silent) {
-          notifySuccess('Saldo ajustado no estoque.');
-        }
+        notifySuccess(
+          `${delta > 0 ? 'Entrada' : 'Saida'} registrada automaticamente: ${formatQty(deltaAbs)} ${unitLabel} em ${item.name}.`
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Nao foi possivel salvar o saldo deste item.';
         setStockCardErrorByItemId((current) => ({
@@ -745,10 +972,11 @@ function StockPageContent() {
         }));
         notifyError(message);
       } finally {
+        stockCardPendingActionIdsRef.current.delete(item.id);
         setStockCardSavingItemId(null);
       }
     },
-    [load, notifyError, notifySuccess, stockCardBalanceByItemId]
+    [confirm, load, notifyError, notifySuccess, stockCardBalanceByItemId]
   );
 
   const unitCostMap = useMemo(() => {
@@ -773,8 +1001,37 @@ function StockPageContent() {
     return map;
   }, [items]);
 
+  const activeProducts = useMemo(
+    () => products.filter((product) => product.active && isTechnicalCatalogProduct(product)),
+    [products]
+  );
+
+  const inactiveProducts = useMemo(
+    () => products.filter((product) => !product.active && isTechnicalCatalogProduct(product)),
+    [products]
+  );
+
+  const activeProductIds = useMemo(
+    () => new Set(activeProducts.map((product) => product.id).filter(Boolean) as number[]),
+    [activeProducts]
+  );
+
+  const activeBoms = useMemo(
+    () =>
+      boms.filter((bom: any) =>
+        Boolean(bom.product?.active) || activeProductIds.has(bom.productId)
+      ),
+    [activeProductIds, boms]
+  );
+
+  const inactiveBomsCount = Math.max(0, boms.length - activeBoms.length);
+  const visibleProducts = showInactiveTechnicalEntries
+    ? products.filter((product) => isTechnicalCatalogProduct(product))
+    : activeProducts;
+  const visibleBoms = showInactiveTechnicalEntries ? boms : activeBoms;
+
   const bomCosts = useMemo(() => {
-    return (boms as any[]).map((bom) => {
+    return (visibleBoms as any[]).map((bom) => {
       let cost = 0;
       for (const item of bom.items || []) {
         const perSale = resolveBomItemQtyPerSale(bom, item);
@@ -783,7 +1040,7 @@ function StockPageContent() {
       }
       return { bomId: bom.id, cost };
     });
-  }, [boms, unitCostMap]);
+  }, [unitCostMap, visibleBoms]);
 
   const bomCostByBomId = useMemo(
     () => new Map(bomCosts.map((entry) => [entry.bomId, entry.cost])),
@@ -791,7 +1048,7 @@ function StockPageContent() {
   );
 
   const capacity = useMemo<StockCapacityEntry[]>(() => {
-    return boms.map((bom: any) => {
+    return visibleBoms.map((bom: any) => {
       const perSaleItems = (bom.items || [])
         .map((item: any) => {
           const perSaleQty = resolveBomItemQtyPerSale(bom, item);
@@ -822,7 +1079,7 @@ function StockPageContent() {
         limitingItemName
       };
     });
-  }, [boms, effectiveBalanceByItemId]);
+  }, [effectiveBalanceByItemId, visibleBoms]);
 
   const d1Shortages = useMemo(() => d1Rows.filter((row) => row.shortageQty > 0), [d1Rows]);
 
@@ -869,6 +1126,15 @@ function StockPageContent() {
       .sort((left, right) => left.item.name.localeCompare(right.item.name, 'pt-BR'));
   }, [items]);
 
+  const recentMovements = useMemo(() => movements.slice(0, 6), [movements]);
+
+  const impactedOrdersCount = useMemo(
+    () => new Set(d1Warnings.map((warning) => warning.orderId)).size,
+    [d1Warnings]
+  );
+
+  const hasD1Attention = d1Shortages.length > 0 || d1Warnings.length > 0;
+
   useEffect(() => {
     setStockCardBalanceByItemId(
       Object.fromEntries(stockBoardCards.map((card) => [card.item.id!, formatQty(card.balance)]))
@@ -889,633 +1155,954 @@ function StockPageContent() {
 
   return (
     <>
-    <BuilderLayoutProvider page="estoque">
-      <section className="grid gap-8">
-      <BuilderLayoutItemSlot
-        id="ops"
-        className={isSpotlightSlot('ops') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
-      >
-      <div className="app-panel mb-4 grid gap-3">
-        <div className="grid gap-1">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
-            Base de massa
-          </p>
-          <p className="text-sm text-neutral-700">
-            Estoque efetivo consolidado com os aliases canônicos do backend.
-          </p>
-        </div>
-        {loadError ? (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            {loadError}
-          </div>
-        ) : null}
-        <div className="flex flex-wrap gap-2 text-xs">
-          <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
-            Disponivel agora: {formatQty(massSummary.recipesAvailable)} receita(s) •{' '}
-            {formatQty(massSummary.broasAvailable)} broa(s)
-          </span>
-          <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
-            Possivel pelos ingredientes: {formatQty(massSummary.recipesPossibleFromIngredients)} receita(s) •{' '}
-            {formatQty(massSummary.broasPossibleFromIngredients)} broa(s)
-          </span>
-          <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
-            Potencial total: {formatQty(massSummary.totalPotentialRecipes)} receita(s) •{' '}
-            {formatQty(massSummary.totalPotentialBroas)} broa(s)
-          </span>
-          {massSummary.limitingIngredientName ? (
-            <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-amber-900">
-              Gargalo da massa: {massSummary.limitingIngredientName}
-            </span>
-          ) : null}
-        </div>
-      </div>
-      <div className="mass-prep-stock-grid">
-        {stockBoardCards.map((card) => {
-          const itemId = card.item.id!;
-          const editValue = stockCardBalanceByItemId[itemId] ?? formatQty(card.balance);
-          const itemError = stockCardErrorByItemId[itemId];
-          const isSavingItem = stockCardSavingItemId === itemId;
-
-          return (
-            <article key={`stock-card-${itemId}`} className="mass-prep-stock-card">
-              <p className="mass-prep-stock-card__category">{inventoryCategoryLabel(card.item.category)}</p>
-              <h4 className="mass-prep-stock-card__name">{card.item.name}</h4>
-              <p className="mass-prep-stock-card__balance">
-                Saldo atual: {formatQty(card.balance)} {card.item.unit}
-              </p>
-              <label className="mass-prep-stock-card__edit-label">
-                Ajustar saldo ({card.item.unit})
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  className="app-input mass-prep-stock-card__input"
-                  value={editValue}
-                  onChange={(event) => {
-                    const nextValue = event.target.value;
-                    setStockCardBalanceByItemId((current) => ({
-                      ...current,
-                      [itemId]: nextValue
-                    }));
-                    setStockCardErrorByItemId((current) => ({
-                      ...current,
-                      [itemId]: ''
-                    }));
-                  }}
-                  onBlur={() => {
-                    void saveStockCardBalance(card.item, { silent: true });
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key !== 'Enter') return;
-                    event.preventDefault();
-                    void saveStockCardBalance(card.item, { silent: true });
-                  }}
-                  placeholder="0"
-                  disabled={isSavingItem}
-                />
-              </label>
-              {itemError ? <p className="mass-prep-stock-card__error">{itemError}</p> : null}
-            </article>
-          );
-        })}
-      </div>
-      </BuilderLayoutItemSlot>
-
-      {!isOperationMode ? (
-      <BuilderLayoutItemSlot id="d1">
-      <div className="app-panel grid gap-4">
-        <div className="grid gap-1">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">1. Planejar</p>
-          <p className="text-sm text-neutral-600">
-            Veja a demanda e as faltas previstas antes de comprar ou produzir.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="text-sm font-semibold text-neutral-700">
-            D+1 ({d1Basis === 'deliveryDate' ? 'data de entrega' : 'pedido + 1 dia'})
-          </span>
-          <div className="flex flex-wrap items-end gap-2">
-            <label className="text-sm text-neutral-600">
-              Data
-              <input
-                className="app-input mt-1"
-                type="date"
-                value={d1Date}
-                onChange={(e) => setD1Date(e.target.value)}
-              />
-            </label>
-            <button className="app-button app-button-ghost" onClick={() => loadD1(d1Date)}>
-              Atualizar
-            </button>
-          </div>
-        </div>
-
-        {d1Error ? <p className="text-sm text-red-700">{d1Error}</p> : null}
-        {d1Loading ? <p className="text-sm text-neutral-500">Calculando D+1...</p> : null}
-
-        <div className="flex flex-wrap gap-2 text-xs">
-          <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
-            Itens em falta: {d1Shortages.length}
-          </span>
-          <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
-            Ingredientes: {d1ShortageSummary.ingredients}
-          </span>
-          <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
-            Embalagens: {d1ShortageSummary.internalPackaging + d1ShortageSummary.externalPackaging}
-          </span>
-        </div>
-
-        <div className="overflow-x-auto rounded-lg border border-white/60 bg-white/70">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="border-b border-white/70 text-left text-xs uppercase tracking-[0.18em] text-neutral-500">
-                <th className="px-3 py-2">Insumo</th>
-                <th className="px-3 py-2">Unidade</th>
-                <th className="px-3 py-2">Necessario</th>
-                <th className="px-3 py-2">Disponivel</th>
-                <th className="px-3 py-2">Falta</th>
-                <th className="px-3 py-2">Por produto</th>
-              </tr>
-            </thead>
-            <tbody>
-              {d1Rows.map((row) => (
-                <tr key={row.ingredientId} className="border-b border-white/50 align-top">
-                  <td className="px-3 py-2 font-medium text-neutral-800">{row.name}</td>
-                  <td className="px-3 py-2 text-neutral-600">{row.unit}</td>
-                  <td className="px-3 py-2 text-neutral-700">{formatQty(row.requiredQty)}</td>
-                  <td className="px-3 py-2 text-neutral-700">{formatQty(row.availableQty)}</td>
-                  <td className={`px-3 py-2 font-semibold ${row.shortageQty > 0 ? 'text-red-700' : 'text-emerald-700'}`}>
-                    {formatQty(row.shortageQty)}
-                  </td>
-                  <td className="px-3 py-2 text-xs text-neutral-600">
-                    {row.breakdown?.length ? d1BreakdownSummary(row) : '-'}
-                  </td>
-                </tr>
-              ))}
-              {!d1Loading && d1Rows.length === 0 && (
-                <tr>
-                  <td className="px-3 py-3 text-sm text-neutral-500" colSpan={6}>
-                    Sem necessidades calculadas para a data selecionada.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {d1Warnings.length > 0 ? (
-          <details className="app-details">
-            <summary>Alertas de BOM ({d1Warnings.length})</summary>
-            <div className="mt-3 grid gap-2">
-              {d1Warnings.map((warning, index) => (
-                <div key={`${warning.orderId}-${warning.productId}-${index}`} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                  Pedido #{warning.orderId} • {warning.productName}: {warning.message}
+      <BuilderLayoutProvider page="estoque">
+        <section className="grid gap-8">
+          <BuilderLayoutItemSlot
+            id="ops"
+            className={isSpotlightSlot('ops') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
+          >
+            <div className="app-panel grid gap-5">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="grid gap-1">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
+                    1. Resumo do dia
+                  </p>
+                  <h2 className="text-xl font-semibold text-neutral-900">
+                    Operacao do estoque sem ruido tecnico
+                  </h2>
+                  <p className="text-sm text-neutral-700">
+                    Entradas, faltas e capacidade ficam na frente. Catalogo, fichas e custos
+                    avancados ficam no final.
+                  </p>
                 </div>
-              ))}
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="app-button app-button-primary"
+                    onClick={() =>
+                      scrollToLayoutSlot('movement', {
+                        focus: true,
+                        focusSelector: 'input, button'
+                      })
+                    }
+                  >
+                    Ajustar saldos
+                  </button>
+                  <button
+                    type="button"
+                    className="app-button app-button-ghost"
+                    onClick={() =>
+                      scrollToLayoutSlot('d1', {
+                        focus: true,
+                        focusSelector: 'input, button, summary'
+                      })
+                    }
+                  >
+                    Ver faltas
+                  </button>
+                  <button
+                    type="button"
+                    className="app-button app-button-ghost"
+                    onClick={() =>
+                      scrollToLayoutSlot('capacity', {
+                        focus: true,
+                        focusSelector: 'summary, button'
+                      })
+                    }
+                  >
+                    Ver capacidade
+                  </button>
+                  <button
+                    type="button"
+                    className="app-button app-button-ghost"
+                    onClick={() => openTechnicalCatalog('product')}
+                  >
+                    Abrir catalogo tecnico
+                  </button>
+                </div>
+              </div>
+
+              {loadError ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  {loadError}
+                </div>
+              ) : null}
+
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-2xl border border-white/70 bg-white/75 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                    Massa pronta
+                  </p>
+                  <p className="mt-2 text-lg font-semibold text-neutral-900">
+                    {formatQty(massSummary.recipesAvailable)} receita(s)
+                  </p>
+                  <p className="text-sm text-neutral-600">
+                    {formatQty(massSummary.broasAvailable)} broa(s) disponiveis agora
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-white/70 bg-white/75 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                    Potencial total
+                  </p>
+                  <p className="mt-2 text-lg font-semibold text-neutral-900">
+                    {formatQty(massSummary.totalPotentialRecipes)} receita(s)
+                  </p>
+                  <p className="text-sm text-neutral-600">
+                    {formatQty(massSummary.totalPotentialBroas)} broa(s) somando massa pronta e ingredientes
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-white/70 bg-white/75 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                    Alertas D+1
+                  </p>
+                  <p className="mt-2 text-lg font-semibold text-neutral-900">
+                    {d1Shortages.length} item(ns) em falta
+                  </p>
+                  <p className="text-sm text-neutral-600">
+                    {impactedOrdersCount} pedido(s) com alerta de ficha tecnica
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-white/70 bg-white/75 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                    Catalogo ativo
+                  </p>
+                  <p className="mt-2 text-lg font-semibold text-neutral-900">
+                    {activeProducts.length} produto(s)
+                  </p>
+                  <p className="text-sm text-neutral-600">
+                    {activeBoms.length} ficha(s) ativa(s) no Estoque
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
+                  Possivel pelos ingredientes: {formatQty(massSummary.recipesPossibleFromIngredients)} receita(s)
+                </span>
+                {massSummary.limitingIngredientName ? (
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-amber-900">
+                    Gargalo atual: {massSummary.limitingIngredientName}
+                  </span>
+                ) : null}
+                {recentMovements[0] ? (
+                  <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
+                    Ultimo movimento: {itemMap.get(recentMovements[0].itemId)?.name || `Item ${recentMovements[0].itemId}`}
+                  </span>
+                ) : null}
+              </div>
             </div>
-          </details>
-        ) : null}
-      </div>
-      </BuilderLayoutItemSlot>
-      ) : null}
+          </BuilderLayoutItemSlot>
 
-      {!isOperationMode ? (
-      <BuilderLayoutItemSlot id="movement">
-      <div className="app-panel grid gap-4">
-        <div className="grid gap-1">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">2. Comprar</p>
-          <p className="text-sm text-neutral-600">
-            Registre a entrada quando a compra chegar ou ajuste o saldo manualmente.
-          </p>
-        </div>
-        <div className="grid gap-3 md:grid-cols-4">
-          <select
-            className="app-select"
-            value={itemId}
-            onChange={(e) => setItemId(e.target.value ? Number(e.target.value) : '')}
-          >
-            <option value="">Selecione o item</option>
-            {items.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-          <select
-            className="app-select"
-            value={type}
-            onChange={(e) => setType(e.target.value)}
-          >
-            {movementTypeOptions.map((movement) => (
-              <option key={movement.value} value={movement.value}>
-                {movement.label}
-              </option>
-            ))}
-          </select>
-          <input
-            className="app-input"
-            type="number"
-            value={quantity}
-            onChange={(e) => setQuantity(e.target.value)}
-            onBlur={() => setQuantity(formatDecimalInputBR(quantity, { maxFractionDigits: 4 }) || '')}
-            inputMode="decimal"
-            placeholder="Quantidade"
-          />
-          <input
-            className="app-input"
-            placeholder="Observacao (opcional)"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-          />
-        </div>
-        <div className="app-form-actions app-form-actions--mobile-sticky">
-          <button className="app-button app-button-primary" onClick={createMovement}>
-            Salvar movimentacao
-          </button>
-        </div>
-      </div>
-      </BuilderLayoutItemSlot>
-      ) : null}
+          <BuilderLayoutItemSlot id="movement">
+            <div className="app-panel grid gap-4">
+              <div className="grid gap-1">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
+                  2. Ajuste rapido de saldos
+                </p>
+                <p className="text-sm text-neutral-600">
+                  Edite o saldo direto no card. O sistema confirma e registra automaticamente so a diferenca.
+                </p>
+              </div>
 
-      {!isOperationMode ? (
-      <BuilderLayoutItemSlot id="capacity">
-      <StockCapacitySection
-        capacity={capacity}
-        bomCostByBomId={bomCostByBomId}
-        selectedBomId={editingBomId}
-        onSelectBom={startEditBom}
-        onCardKeyDown={handleInteractiveStockCardKeyDown}
-      />
-      </BuilderLayoutItemSlot>
-      ) : null}
+              <div className="grid gap-3">
+                <div className="rounded-2xl border border-white/70 bg-white/60 px-4 py-3 text-sm text-neutral-600">
+                  Se o saldo mudar de 500 para 750, por exemplo, o sistema pede confirmacao e cria
+                  uma entrada automatica de 250. O mesmo vale para reducoes.
+                </div>
+                <div className="mass-prep-stock-grid">
+                  {stockBoardCards.map((card) => {
+                    const stockItemId = card.item.id!;
+                    const editValue = stockCardBalanceByItemId[stockItemId] ?? formatQty(card.balance);
+                    const itemError = stockCardErrorByItemId[stockItemId];
+                    const isSavingItem = stockCardSavingItemId === stockItemId;
 
-      {!isOperationMode ? (
-      <BuilderLayoutItemSlot
-        id="bom"
-        className={isSpotlightSlot('bom') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
-      >
-      <details className="app-details">
-      <summary>3. Produzir: fichas tecnicas</summary>
-      <div className="app-panel mt-3 grid gap-4">
-        <div ref={bomSectionRef} className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-lg font-semibold">Fichas tecnicas</h3>
-          <div className="flex flex-wrap gap-2">
-            <button className="app-button app-button-ghost" onClick={loadFlavorCombinations}>
-              {flavorComboLoading ? 'Atualizando...' : 'Atualizar combinacoes'}
-            </button>
-            <button className="app-button app-button-primary" onClick={applyBroaPreset}>
-              Aplicar padrao Broa
-            </button>
-          </div>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <select
-            className="app-select"
-            value={bomProductId}
-            onChange={(e) => setBomProductId(e.target.value ? Number(e.target.value) : '')}
-          >
-            <option value="">Produto</option>
-            {products.map((product) => (
-              <option key={product.id} value={product.id}>
-                {product.name}
-              </option>
-            ))}
-          </select>
-          <input
-            className="app-input"
-            placeholder="Nome da ficha tecnica"
-            value={bomName}
-            onChange={(e) => setBomName(e.target.value)}
-          />
-        </div>
-        <details className="app-details">
-          <summary>Mais detalhes da ficha</summary>
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <input
-              className="app-input"
-              placeholder="Unidade de venda (ex: Caixa com 7)"
-              value={bomSaleUnitLabel}
-              onChange={(e) => setBomSaleUnitLabel(e.target.value)}
-            />
-            <input
-              className="app-input"
-              placeholder="Rendimento (broas por receita)"
-              value={bomYieldUnits}
-              onChange={(e) => setBomYieldUnits(e.target.value)}
-            />
-          </div>
-        </details>
-        <div className="grid gap-3">
-          {bomItems.map((item, index) => (
-            <div key={`${item.itemId}-${index}`} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-              <select
-                className="app-select"
-                value={item.itemId}
-                onChange={(e) =>
-                  updateBomItem(index, { itemId: e.target.value ? Number(e.target.value) : '' })
-                }
-              >
-                <option value="">Item</option>
-                {items.map((invItem) => (
-                  <option key={invItem.id} value={invItem.id}>
-                    {invItem.name}
-                  </option>
-                ))}
-              </select>
-              <input
-                className="app-input"
-                placeholder="Peso por venda"
-                value={item.qtyPerSaleUnit ?? ''}
-                onChange={(e) =>
-                  updateBomItem(index, {
-                    qtyPerRecipe: '',
-                    qtyPerSaleUnit: e.target.value,
-                    qtyPerUnit: ''
-                  })
-                }
-                onBlur={() =>
-                  updateBomItem(index, {
-                    qtyPerRecipe: '',
-                    qtyPerSaleUnit: formatDecimalInputBR(item.qtyPerSaleUnit || '', { maxFractionDigits: 4 }),
-                    qtyPerUnit: ''
-                  })
-                }
-              />
-              <button
-                className="app-button app-button-danger"
-                onClick={() => removeBomItem(index)}
-              >
-                Remover
-              </button>
+                    return (
+                      <article key={`stock-card-${stockItemId}`} className="mass-prep-stock-card">
+                        <p className="mass-prep-stock-card__category">
+                          {inventoryCategoryLabel(card.item.category)}
+                        </p>
+                        <h4 className="mass-prep-stock-card__name">{card.item.name}</h4>
+                        <p className="mass-prep-stock-card__balance">
+                          Saldo atual: {formatQty(card.balance)} {card.item.unit}
+                        </p>
+                        <label className="mass-prep-stock-card__edit-label">
+                          Ajustar saldo ({card.item.unit})
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            className="app-input mass-prep-stock-card__input"
+                            value={editValue}
+                            onChange={(event) => {
+                              const nextValue = event.target.value;
+                              setStockCardBalanceByItemId((current) => ({
+                                ...current,
+                                [stockItemId]: nextValue
+                              }));
+                              setStockCardErrorByItemId((current) => ({
+                                ...current,
+                                [stockItemId]: ''
+                              }));
+                            }}
+                            onBlur={() => {
+                              void saveStockCardBalance(card.item);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key !== 'Enter') return;
+                              event.preventDefault();
+                              void saveStockCardBalance(card.item);
+                            }}
+                            placeholder="0"
+                            disabled={isSavingItem}
+                          />
+                        </label>
+                        {itemError ? <p className="mass-prep-stock-card__error">{itemError}</p> : null}
+                      </article>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
-          ))}
-        </div>
-        <div className="app-form-actions app-form-actions--mobile-sticky">
-          <button className="app-button app-button-ghost" onClick={addBomItem}>
-            Adicionar item
-          </button>
-          <button
-            className="app-button app-button-primary disabled:cursor-not-allowed disabled:opacity-60"
-            onClick={saveBom}
-            disabled={!canSaveBom}
-          >
-            {editingBomId ? 'Atualizar ficha tecnica' : 'Criar ficha tecnica'}
-          </button>
-        </div>
+          </BuilderLayoutItemSlot>
 
-        <div className="grid gap-3">
-          {boms.map((bom: any) => {
-            const isExpanded = editingBomId === bom.id;
-            return (
-              <div
-                key={bom.id}
-                className={`app-panel app-panel--interactive app-panel--expandable ${
-                  isExpanded ? 'app-panel--expanded' : ''
-                }`}
-                role="button"
-                tabIndex={0}
-                onClick={() => startEditBom(bom)}
-                onKeyDown={(event) =>
-                  handleInteractiveStockCardKeyDown(event, () => startEditBom(bom))
-                }
-              >
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-3">
-                      <p className="truncate font-semibold">{bom.name}</p>
-                      <span className="app-panel__chevron" aria-hidden="true" />
-                    </div>
-                    <p className="mt-1 text-sm text-neutral-500">
-                      Produto: {bom.product?.name || 'Produto'} • {bom.saleUnitLabel || 'Unidade'}
-                    </p>
+          <BuilderLayoutItemSlot id="d1">
+            <div className="app-panel grid gap-4">
+              <div className="grid gap-1">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
+                  3. Alertas e compras
+                </p>
+                <p className="text-sm text-neutral-600">
+                  Veja o que falta para atender a demanda prevista antes de comprar ou produzir.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span className="text-sm font-semibold text-neutral-700">
+                  D+1 ({d1Basis === 'deliveryDate' ? 'data de entrega' : 'pedido + 1 dia'})
+                </span>
+                <div className="flex flex-wrap items-end gap-2">
+                  <label className="text-sm text-neutral-600">
+                    Data
+                    <input
+                      className="app-input mt-1"
+                      type="date"
+                      value={d1Date}
+                      onChange={(e) => setD1Date(e.target.value)}
+                    />
+                  </label>
+                  <button className="app-button app-button-ghost" onClick={() => loadD1(d1Date)}>
+                    Atualizar
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-2xl border border-white/70 bg-white/75 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                    Itens em falta
+                  </p>
+                  <p className="mt-2 text-lg font-semibold text-neutral-900">{d1Shortages.length}</p>
+                  <p className="text-sm text-neutral-600">Total de itens com falta no D+1</p>
+                </div>
+                <div className="rounded-2xl border border-white/70 bg-white/75 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                    Ingredientes vs embalagem
+                  </p>
+                  <p className="mt-2 text-lg font-semibold text-neutral-900">
+                    {d1ShortageSummary.ingredients} / {d1ShortageSummary.internalPackaging + d1ShortageSummary.externalPackaging}
+                  </p>
+                  <p className="text-sm text-neutral-600">Ingredientes / embalagens em falta</p>
+                </div>
+                <div className="rounded-2xl border border-white/70 bg-white/75 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                    Pedidos impactados
+                  </p>
+                  <p className="mt-2 text-lg font-semibold text-neutral-900">{impactedOrdersCount}</p>
+                  <p className="text-sm text-neutral-600">Pedidos com alerta de ficha tecnica</p>
+                </div>
+              </div>
+
+              {d1Error ? <p className="text-sm text-red-700">{d1Error}</p> : null}
+              {d1Loading ? <p className="text-sm text-neutral-500">Calculando D+1...</p> : null}
+
+              {!d1Loading && !d1Error ? (
+                hasD1Attention ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    Ha faltas previstas ou alertas de ficha tecnica. Use o detalhamento abaixo para
+                    decidir compra e producao.
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className="app-button app-button-ghost"
-                      onClick={(event) => {
-                        stopStockCardAction(event);
-                        startEditBom(bom);
-                      }}
-                    >
-                      Editar
-                    </button>
+                ) : (
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                    Sem faltas previstas para a data selecionada.
+                  </div>
+                )
+              ) : null}
+
+              <details className="app-details" open={!isOperationMode || hasD1Attention}>
+                <summary>Ver detalhamento D+1</summary>
+                <div className="mt-3 grid gap-4">
+                  <div className="overflow-x-auto rounded-lg border border-white/60 bg-white/70">
+                    <table className="min-w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-white/70 text-left text-xs uppercase tracking-[0.18em] text-neutral-500">
+                          <th className="px-3 py-2">Insumo</th>
+                          <th className="px-3 py-2">Unidade</th>
+                          <th className="px-3 py-2">Necessario</th>
+                          <th className="px-3 py-2">Disponivel</th>
+                          <th className="px-3 py-2">Falta</th>
+                          <th className="px-3 py-2">Por produto</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {d1Rows.map((row) => (
+                          <tr key={row.ingredientId} className="border-b border-white/50 align-top">
+                            <td className="px-3 py-2 font-medium text-neutral-800">{row.name}</td>
+                            <td className="px-3 py-2 text-neutral-600">{row.unit}</td>
+                            <td className="px-3 py-2 text-neutral-700">{formatQty(row.requiredQty)}</td>
+                            <td className="px-3 py-2 text-neutral-700">{formatQty(row.availableQty)}</td>
+                            <td
+                              className={`px-3 py-2 font-semibold ${
+                                row.shortageQty > 0 ? 'text-red-700' : 'text-emerald-700'
+                              }`}
+                            >
+                              {formatQty(row.shortageQty)}
+                            </td>
+                            <td className="px-3 py-2 text-xs text-neutral-600">
+                              {row.breakdown?.length ? d1BreakdownSummary(row) : '-'}
+                            </td>
+                          </tr>
+                        ))}
+                        {!d1Loading && d1Rows.length === 0 ? (
+                          <tr>
+                            <td className="px-3 py-3 text-sm text-neutral-500" colSpan={6}>
+                              Sem necessidades calculadas para a data selecionada.
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {d1Warnings.length > 0 ? (
+                    <div className="grid gap-2">
+                      {d1Warnings.map((warning, index) => (
+                        <div
+                          key={`${warning.orderId}-${warning.productId}-${index}`}
+                          className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                        >
+                          Pedido #{warning.orderId} • {warning.productName}: {warning.message}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </details>
+            </div>
+          </BuilderLayoutItemSlot>
+
+          <BuilderLayoutItemSlot id="capacity">
+            <StockCapacitySection
+              capacity={capacity}
+              bomCostByBomId={bomCostByBomId}
+              selectedBomId={editingBomId}
+              onSelectBom={startEditBom}
+              onCardKeyDown={handleInteractiveStockCardKeyDown}
+            />
+          </BuilderLayoutItemSlot>
+
+          <BuilderLayoutItemSlot id="movements">
+            <div className="app-panel grid gap-4">
+              <div className="grid gap-1">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
+                  5. Auditoria
+                </p>
+                <p className="text-sm text-neutral-600">Audite e limpe aqui. Fora da rotina.</p>
+              </div>
+
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
+                  {movements.length} movimentacao(oes) registradas
+                </span>
+                <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
+                  {recentMovements.length} registro(s) mais recente(s) no resumo
+                </span>
+              </div>
+
+              <details className="app-details" open={!isOperationMode}>
+                <summary>Historico de movimentacoes</summary>
+                <div className="mt-3 grid gap-3">
+                  <div className="app-inline-actions">
                     <button
                       type="button"
                       className="app-button app-button-danger"
-                      onClick={(event) => {
-                        stopStockCardAction(event);
-                        void removeBom(bom.id);
-                      }}
+                      onClick={clearAllMovements}
                     >
-                      Remover
+                      Zerar movimentacoes
                     </button>
                   </div>
+
+                  {movements.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-white/70 bg-white/65 px-4 py-6 text-sm text-neutral-500">
+                      Nenhuma movimentacao registrada.
+                    </div>
+                  ) : (
+                    movements.map((movement) => (
+                      <div key={movement.id} className="app-panel text-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            {itemMap.get(movement.itemId)?.name || `Item ${movement.itemId}`} •{' '}
+                            {movementTypeLabel(movement.type)} • {formatQty(movement.quantity)}{' '}
+                            {itemMap.get(movement.itemId)?.unit || 'un'} •{' '}
+                            {movement.reason || 'Sem observacao'}
+                          </div>
+                          <button
+                            className="app-button app-button-danger"
+                            onClick={() => removeMovement(movement.id!)}
+                          >
+                            Remover
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
-                <div className="app-panel__expand" aria-hidden={!isExpanded}>
-                  <div className="app-panel__expand-inner">
-                    <div className="app-panel__expand-surface grid gap-2 text-sm text-neutral-500">
-                      {(bom.items || []).length === 0 ? (
-                        <p>Nenhum item nessa ficha.</p>
+              </details>
+            </div>
+          </BuilderLayoutItemSlot>
+
+          <BuilderLayoutItemSlot
+            id="bom"
+            className={isSpotlightSlot('bom') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
+          >
+            <details ref={technicalCatalogDetailsRef} className="app-details" open={!isOperationMode}>
+              <summary>6. Catalogo tecnico</summary>
+              <div className="app-panel mt-3 grid gap-4">
+                <div ref={bomSectionRef} className="grid gap-1">
+                  <div className="grid gap-1">
+                    <h3 className="text-lg font-semibold">Cadastro raro</h3>
+                    <p className="text-sm text-neutral-600">Produtos, fichas e custos ficam aqui.</p>
+                  </div>
+                </div>
+
+                <details
+                  ref={productCatalogDetailsRef}
+                  className="app-details"
+                  open={!isOperationMode || Boolean(editingProductId)}
+                >
+                  <summary>Produtos ativos e status</summary>
+                  <div className="mt-3 grid gap-4 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
+                    <form
+                      className="grid gap-3 rounded-2xl border border-white/70 bg-white/75 p-4"
+                      onSubmit={saveProduct}
+                    >
+                      <p className="text-sm text-neutral-600">
+                        Use apenas quando nome, preco ou status do produto mudar.
+                      </p>
+                      <input
+                        className="app-input"
+                        placeholder="Nome do produto"
+                        value={productForm.name}
+                        onChange={(event) =>
+                          setProductForm((current) => ({ ...current, name: event.target.value }))
+                        }
+                      />
+                      <input
+                        className="app-input"
+                        inputMode="decimal"
+                        placeholder="Preco por unidade"
+                        value={productPriceInput}
+                        onChange={(event) => setProductPriceInput(event.target.value)}
+                        onBlur={() => setProductPriceInput(formatMoneyInputBR(productPriceInput) || '0,00')}
+                      />
+                      <details className="app-details">
+                        <summary>Mais detalhes do produto</summary>
+                        <div className="mt-3 grid gap-3 md:grid-cols-2">
+                          <input
+                            className="app-input"
+                            placeholder="Categoria"
+                            value={productForm.category ?? ''}
+                            onChange={(event) =>
+                              setProductForm((current) => ({ ...current, category: event.target.value }))
+                            }
+                          />
+                          <input
+                            className="app-input"
+                            placeholder="Unidade"
+                            value={productForm.unit ?? ''}
+                            onChange={(event) =>
+                              setProductForm((current) => ({ ...current, unit: event.target.value }))
+                            }
+                          />
+                          <label className="flex items-center gap-2 text-sm text-neutral-700 md:col-span-2">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(productForm.active)}
+                              onChange={(event) =>
+                                setProductForm((current) => ({ ...current, active: event.target.checked }))
+                              }
+                            />
+                            Produto ativo
+                          </label>
+                        </div>
+                      </details>
+                      <div className="app-form-actions">
+                        {editingProductId ? (
+                          <button
+                            type="button"
+                            className="app-button app-button-ghost"
+                            onClick={resetProductForm}
+                          >
+                            Cancelar
+                          </button>
+                        ) : null}
+                        <button type="submit" className="app-button app-button-primary">
+                          {editingProductId ? 'Atualizar produto' : 'Criar produto'}
+                        </button>
+                      </div>
+                    </form>
+
+                    <div className="grid gap-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/70 bg-white/60 px-4 py-3 text-sm">
+                        <div className="text-neutral-600">
+                          Mostrando {visibleProducts.length} produto(s)
+                          {!showInactiveTechnicalEntries && inactiveProducts.length > 0
+                            ? ` • ${inactiveProducts.length} inativo(s) oculto(s)`
+                            : ''}
+                        </div>
+                        {inactiveProducts.length > 0 ? (
+                          <button
+                            type="button"
+                            className="app-button app-button-ghost"
+                            onClick={() => setShowInactiveTechnicalEntries((current) => !current)}
+                          >
+                            {showInactiveTechnicalEntries
+                              ? 'Ocultar inativos'
+                              : `Mostrar inativos (${inactiveProducts.length})`}
+                          </button>
+                        ) : null}
+                      </div>
+
+                      {visibleProducts.length === 0 ? (
+                        <div className="rounded-2xl border border-dashed border-white/70 bg-white/65 px-4 py-6 text-sm text-neutral-500">
+                          {products.length === 0
+                            ? 'Nenhum produto cadastrado no catalogo.'
+                            : 'Nenhum produto ativo visivel no catalogo.'}
+                        </div>
                       ) : (
-                        (bom.items || []).map((item: any) => (
-                          <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/60 bg-white/70 px-3 py-2">
-                            <div>
-                              <p className="font-medium text-neutral-800">
-                                {item.item?.name || `Item ${item.itemId}`}
-                              </p>
-                              <p className="text-xs text-neutral-500">
-                                Peso: {item.qtyPerSaleUnit ?? item.qtyPerUnit ?? item.qtyPerRecipe ?? '-'} {item.item?.unit || ''}
-                                {' • '}
-                                Valor: {formatCurrencyBR(item.item?.purchasePackCost ?? 0)}
-                              </p>
+                        visibleProducts.map((product) => (
+                          <div
+                            key={product.id}
+                            className="rounded-2xl border border-white/70 bg-white/75 px-4 py-3"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="truncate font-semibold text-neutral-900">{product.name}</p>
+                                  <span
+                                    className={`rounded-full px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${
+                                      product.active
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : 'bg-neutral-200 text-neutral-700'
+                                    }`}
+                                  >
+                                    {product.active ? 'Ativo' : 'Inativo'}
+                                  </span>
+                                </div>
+                                <p className="mt-1 text-sm text-neutral-500">
+                                  {(product.category || 'Sem categoria')} • {(product.unit || 'unidade')} •{' '}
+                                  {formatCurrencyBR(product.price || 0)}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  className="app-button app-button-ghost"
+                                  onClick={() => startEditProduct(product)}
+                                >
+                                  Editar
+                                </button>
+                                <button
+                                  type="button"
+                                  className="app-button app-button-danger"
+                                  onClick={() => {
+                                    if (!product.id) return;
+                                    void removeProduct(product.id);
+                                  }}
+                                >
+                                  Remover
+                                </button>
+                              </div>
                             </div>
                           </div>
                         ))
                       )}
                     </div>
                   </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+                </details>
 
-        <div className="app-panel">
-          <p className="font-semibold text-neutral-900">
-            Combinacoes de sabores (7 broas): {flavorComboTotal}
-          </p>
-          <div className="mt-3 grid gap-2 text-sm text-neutral-700">
-            {flavorCombos.length === 0 ? (
-              <p>Nenhuma combinacao carregada.</p>
-            ) : (
-              flavorCombos.map((combo, index) => (
-                <p key={`${combo.code}-${index}`}>
-                  <strong>{combo.code}</strong> • {combo.composition}
-                </p>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-      </details>
-      </BuilderLayoutItemSlot>
-      ) : null}
-
-      {!isOperationMode ? (
-      <BuilderLayoutItemSlot id="packaging">
-      <details className="app-details">
-      <summary>2. Comprar: custos de embalagem</summary>
-      <div className="app-panel mt-3 grid gap-4">
-        <h3 className="text-lg font-semibold">Custo de compra por embalagem</h3>
-        <div className="grid gap-3 md:grid-cols-3">
-          <select
-            className="app-select"
-            value={editingItemId}
-            onChange={(e) => {
-              const id = e.target.value ? Number(e.target.value) : '';
-              if (id === '') {
-                setEditingItemId('');
-                return;
-              }
-              const item = items.find((entry) => entry.id === id);
-              if (item) startEditItem(item);
-            }}
-          >
-            <option value="">Item</option>
-            {items.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-          <input
-            className="app-input"
-            placeholder="Tamanho embalagem"
-            value={packSize}
-            onChange={(e) => setPackSize(e.target.value)}
-            onBlur={() => setPackSize(formatDecimalInputBR(packSize, { maxFractionDigits: 4 }) || '0')}
-          />
-          <input
-            className="app-input"
-            placeholder="Custo embalagem (R$)"
-            value={packCost}
-            onChange={(e) => setPackCost(e.target.value)}
-            onBlur={() => setPackCost(formatMoneyInputBR(packCost || '0') || '0,00')}
-          />
-        </div>
-        <div className="app-form-actions app-form-actions--mobile-sticky">
-          <button className="app-button app-button-primary" onClick={updateItem}>
-            Atualizar custo
-          </button>
-        </div>
-      </div>
-      </details>
-      </BuilderLayoutItemSlot>
-      ) : null}
-
-      {!isOperationMode ? (
-      <BuilderLayoutItemSlot id="balance">
-      <details className="app-details">
-        <summary>4. Conferir: saldo por item</summary>
-      <div className="mt-3 grid gap-3">
-        {items.map((item) => {
-          const isExpanded = editingItemId === item.id;
-          return (
-            <div
-              key={item.id}
-              className={`app-panel app-panel--interactive app-panel--expandable ${
-                isExpanded ? 'app-panel--expanded' : ''
-              }`}
-              role="button"
-              tabIndex={0}
-              onClick={() => startEditItem(item)}
-              onKeyDown={(event) =>
-                handleInteractiveStockCardKeyDown(event, () => startEditItem(item))
-              }
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-3">
-                    <p className="truncate font-semibold">{item.name}</p>
-                    <span className="app-panel__chevron" aria-hidden="true" />
-                  </div>
-                  <p className="mt-1 text-sm text-neutral-500">
-                    {inventoryCategoryLabel(item.category)} • {formatQty(item.balance || 0)} {item.unit}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="app-button app-button-danger"
-                  onClick={(event) => {
-                    stopStockCardAction(event);
-                    void removeItem(item.id!);
-                  }}
+                <details
+                  ref={bomCatalogDetailsRef}
+                  className="app-details"
+                  open={!isOperationMode || Boolean(editingBomId)}
                 >
-                  Remover
-                </button>
-              </div>
-              <div className="app-panel__expand" aria-hidden={!isExpanded}>
-                <div className="app-panel__expand-inner">
-                  <div className="app-panel__expand-surface grid gap-2 text-sm text-neutral-600">
-                    <p>Custo unitario: R$ {(unitCostMap.get(item.id!) ?? 0).toFixed(4)}</p>
-                    <p>
-                      Pack: {item.purchasePackSize && item.purchasePackSize > 0 ? `${formatQty(item.purchasePackSize)} ${item.unit}` : 'nao definido'}
-                    </p>
-                    <p>
-                      Custo pack:{' '}
-                      {item.purchasePackCost && item.purchasePackCost > 0
-                        ? formatCurrencyBR(item.purchasePackCost)
-                        : 'nao definido'}
-                    </p>
+                  <summary>Fichas tecnicas por produto</summary>
+                  <div className="mt-3 grid gap-4">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <select
+                        className="app-select"
+                        value={bomProductId}
+                        onChange={(e) => setBomProductId(e.target.value ? Number(e.target.value) : '')}
+                      >
+                        <option value="">Produto</option>
+                        {visibleProducts.map((product) => (
+                          <option key={product.id} value={product.id}>
+                            {product.name}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        className="app-input"
+                        placeholder="Nome da ficha tecnica"
+                        value={bomName}
+                        onChange={(e) => setBomName(e.target.value)}
+                      />
+                    </div>
+
+                    <details className="app-details">
+                      <summary>Mais detalhes da ficha</summary>
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        <input
+                          className="app-input"
+                          placeholder="Unidade de venda (ex: Caixa com 7)"
+                          value={bomSaleUnitLabel}
+                          onChange={(e) => setBomSaleUnitLabel(e.target.value)}
+                        />
+                        <input
+                          className="app-input"
+                          placeholder="Rendimento (broas por receita)"
+                          value={bomYieldUnits}
+                          onChange={(e) => setBomYieldUnits(e.target.value)}
+                        />
+                      </div>
+                    </details>
+
+                    <div className="grid gap-3">
+                      {bomItems.map((item, index) => (
+                        <div
+                          key={`${item.itemId}-${index}`}
+                          className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
+                        >
+                          <select
+                            className="app-select"
+                            value={item.itemId}
+                            onChange={(e) =>
+                              updateBomItem(index, {
+                                itemId: e.target.value ? Number(e.target.value) : ''
+                              })
+                            }
+                          >
+                            <option value="">Item</option>
+                            {items.map((invItem) => (
+                              <option key={invItem.id} value={invItem.id}>
+                                {invItem.name}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            className="app-input"
+                            placeholder="Qtd por venda"
+                            value={item.qtyPerSaleUnit ?? ''}
+                            onChange={(e) =>
+                              updateBomItem(index, {
+                                qtyPerRecipe: '',
+                                qtyPerSaleUnit: e.target.value,
+                                qtyPerUnit: ''
+                              })
+                            }
+                            onBlur={() =>
+                              updateBomItem(index, {
+                                qtyPerRecipe: '',
+                                qtyPerSaleUnit: formatDecimalInputBR(item.qtyPerSaleUnit || '', {
+                                  maxFractionDigits: 4
+                                }),
+                                qtyPerUnit: ''
+                              })
+                            }
+                          />
+                          <button
+                            type="button"
+                            className="app-button app-button-danger"
+                            onClick={() => removeBomItem(index)}
+                          >
+                            Remover
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="app-form-actions app-form-actions--mobile-sticky">
+                      <button type="button" className="app-button app-button-ghost" onClick={addBomItem}>
+                        Adicionar item
+                      </button>
+                      <button
+                        type="button"
+                        className="app-button app-button-primary disabled:cursor-not-allowed disabled:opacity-60"
+                        onClick={saveBom}
+                        disabled={!canSaveBom}
+                      >
+                        {editingBomId ? 'Atualizar ficha tecnica' : 'Criar ficha tecnica'}
+                      </button>
+                    </div>
+
+                    <div className="grid gap-3">
+                      {visibleBoms.map((bom: any) => {
+                        const isExpanded = editingBomId === bom.id;
+                        return (
+                          <div
+                            key={bom.id}
+                            className={`app-panel app-panel--interactive app-panel--expandable ${
+                              isExpanded ? 'app-panel--expanded' : ''
+                            }`}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => startEditBom(bom)}
+                            onKeyDown={(event) =>
+                              handleInteractiveStockCardKeyDown(event, () => startEditBom(bom))
+                            }
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-3">
+                                  <p className="truncate font-semibold">{bom.name}</p>
+                                  <span className="app-panel__chevron" aria-hidden="true" />
+                                </div>
+                                <p className="mt-1 text-sm text-neutral-500">
+                                  Produto: {bom.product?.name || 'Produto'} • {bom.saleUnitLabel || 'Unidade'}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  className="app-button app-button-ghost"
+                                  onClick={(event) => {
+                                    stopStockCardAction(event);
+                                    startEditBom(bom);
+                                  }}
+                                >
+                                  Editar
+                                </button>
+                                <button
+                                  type="button"
+                                  className="app-button app-button-danger"
+                                  onClick={(event) => {
+                                    stopStockCardAction(event);
+                                    void removeBom(bom.id);
+                                  }}
+                                >
+                                  Remover
+                                </button>
+                              </div>
+                            </div>
+                            <div className="app-panel__expand" aria-hidden={!isExpanded}>
+                              <div className="app-panel__expand-inner">
+                                <div className="app-panel__expand-surface grid gap-2 text-sm text-neutral-500">
+                                  {(bom.items || []).length === 0 ? (
+                                    <p>Nenhum item nessa ficha.</p>
+                                  ) : (
+                                    (bom.items || []).map((item: any) => (
+                                      <div
+                                        key={item.id}
+                                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/60 bg-white/70 px-3 py-2"
+                                      >
+                                        <div>
+                                          <p className="font-medium text-neutral-800">
+                                            {item.item?.name || `Item ${item.itemId}`}
+                                          </p>
+                                          <p className="text-xs text-neutral-500">
+                                            Qtd: {item.qtyPerSaleUnit ?? item.qtyPerUnit ?? item.qtyPerRecipe ?? '-'}{' '}
+                                            {item.item?.unit || ''}
+                                            {' • '}
+                                            Valor: {formatCurrencyBR(item.item?.purchasePackCost ?? 0)}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {visibleBoms.length === 0 ? (
+                        <div className="rounded-2xl border border-dashed border-white/70 bg-white/65 px-4 py-6 text-sm text-neutral-500">
+                          {inactiveBomsCount > 0 && !showInactiveTechnicalEntries
+                            ? `Sem ficha ativa visivel. ${inactiveBomsCount} oculta(s).`
+                            : 'Nenhuma ficha tecnica cadastrada.'}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      </details>
-      </BuilderLayoutItemSlot>
-      ) : null}
+                </details>
 
-      {!isOperationMode ? (
-      <BuilderLayoutItemSlot id="movements">
-      <details className="app-details">
-        <summary>4. Conferir: historico de movimentacoes</summary>
-      <div className="mt-3 grid gap-3">
-        <div className="app-inline-actions">
-          <button
-            type="button"
-            className="app-button app-button-danger"
-            onClick={clearAllMovements}
-          >
-            Limpar todas as movimentacoes
-          </button>
-        </div>
-        {movements.map((movement) => (
-          <div key={movement.id} className="app-panel text-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                {itemMap.get(movement.itemId)?.name || `Item ${movement.itemId}`} •{' '}
-                {movementTypeLabel(movement.type)} • {formatQty(movement.quantity)}{' '}
-                {itemMap.get(movement.itemId)?.unit || 'un'} • {movement.reason || 'Sem observacao'}
-              </div>
-              <button
-                className="app-button app-button-danger"
-                onClick={() => removeMovement(movement.id!)}
-              >
-                Remover
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-      </details>
-      </BuilderLayoutItemSlot>
-      ) : null}
+                <details
+                  ref={inventoryItemsDetailsRef}
+                  className="app-details"
+                  open={!isOperationMode}
+                >
+                  <summary>Insumos e custos de compra</summary>
+                  <div className="mt-3 grid gap-4">
+                    <BuilderLayoutItemSlot id="packaging">
+                      <div className="grid gap-4 rounded-2xl border border-white/70 bg-white/75 p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="grid gap-1">
+                            <h4 className="text-base font-semibold text-neutral-900">Preco de compra</h4>
+                            <p className="text-sm text-neutral-600">Use o botao para atualizar pelos links da planilha.</p>
+                          </div>
+                          <button
+                            type="button"
+                            className="app-button app-button-ghost"
+                            onClick={refreshPurchaseCosts}
+                            disabled={isRefreshingPurchaseCosts}
+                          >
+                            {isRefreshingPurchaseCosts ? 'Atualizando...' : 'Atualizar precos online'}
+                          </button>
+                        </div>
+                        {purchaseCostRefreshResponse ? (
+                          <div className="rounded-2xl border border-white/70 bg-white/70 px-3 py-3 text-sm text-neutral-700">
+                            <p>
+                              {purchaseCostRefreshResponse.totals.updatedSourceCount} online •{' '}
+                              {purchaseCostRefreshResponse.totals.fallbackSourceCount} manual •{' '}
+                              {purchaseCostRefreshResponse.totals.updatedItemCount} item(ns) atualizado(s)
+                            </p>
+                            {purchaseCostRefreshResponse.results.some((entry) => entry.status !== 'UPDATED') ? (
+                              <div className="mt-2 grid gap-1 text-xs text-neutral-600">
+                                {purchaseCostRefreshResponse.results
+                                  .filter((entry) => entry.status !== 'UPDATED')
+                                  .map((entry) => (
+                                    <p key={`${entry.canonicalName}-${entry.status}`}>
+                                      {entry.canonicalName}: {entry.status === 'FALLBACK' ? 'valor manual' : 'sem item'}.
+                                    </p>
+                                  ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        <div className="grid gap-3 md:grid-cols-3">
+                          <select
+                            className="app-select"
+                            value={editingItemId}
+                            onChange={(e) => {
+                              const selectedId = e.target.value ? Number(e.target.value) : '';
+                              if (selectedId === '') {
+                                setEditingItemId('');
+                                return;
+                              }
+                              const item = items.find((entry) => entry.id === selectedId);
+                              if (item) startEditItem(item);
+                            }}
+                          >
+                            <option value="">Item</option>
+                            {items.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {item.name}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            className="app-input"
+                            placeholder="Tamanho embalagem"
+                            value={packSize}
+                            onChange={(e) => setPackSize(e.target.value)}
+                            onBlur={() => setPackSize(formatDecimalInputBR(packSize, { maxFractionDigits: 4 }) || '0')}
+                          />
+                          <input
+                            className="app-input"
+                            placeholder="Custo embalagem (R$)"
+                            value={packCost}
+                            onChange={(e) => setPackCost(e.target.value)}
+                            onBlur={() => setPackCost(formatMoneyInputBR(packCost || '0') || '0,00')}
+                          />
+                        </div>
+                        <div className="app-form-actions app-form-actions--mobile-sticky">
+                          <button className="app-button app-button-primary" onClick={updateItem}>
+                            Salvar preco manual
+                          </button>
+                        </div>
+                      </div>
+                    </BuilderLayoutItemSlot>
 
-      </section>
-    </BuilderLayoutProvider>
+                    <BuilderLayoutItemSlot id="balance">
+                      <div className="grid gap-3">
+                        <div className="rounded-2xl border border-white/70 bg-white/60 px-4 py-3 text-sm text-neutral-600">
+                          Base completa de insumos e embalagens. Use so para manutencao.
+                        </div>
+                        {items.map((item) => {
+                          const isExpanded = editingItemId === item.id;
+                          return (
+                            <div
+                              key={item.id}
+                              className={`app-panel app-panel--interactive app-panel--expandable ${
+                                isExpanded ? 'app-panel--expanded' : ''
+                              }`}
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => startEditItem(item)}
+                              onKeyDown={(event) =>
+                                handleInteractiveStockCardKeyDown(event, () => startEditItem(item))
+                              }
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-3">
+                                    <p className="truncate font-semibold">{item.name}</p>
+                                    <span className="app-panel__chevron" aria-hidden="true" />
+                                  </div>
+                                  <p className="mt-1 text-sm text-neutral-500">
+                                    {inventoryCategoryLabel(item.category)} • {formatQty(item.balance || 0)} {item.unit}
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="app-button app-button-danger"
+                                  onClick={(event) => {
+                                    stopStockCardAction(event);
+                                    void removeItem(item.id!);
+                                  }}
+                                >
+                                  Remover
+                                </button>
+                              </div>
+                              <div className="app-panel__expand" aria-hidden={!isExpanded}>
+                                <div className="app-panel__expand-inner">
+                                  <div className="app-panel__expand-surface grid gap-2 text-sm text-neutral-600">
+                                    <p>Custo unitario: R$ {(unitCostMap.get(item.id!) ?? 0).toFixed(4)}</p>
+                                    <p>
+                                      Pack:{' '}
+                                      {item.purchasePackSize && item.purchasePackSize > 0
+                                        ? `${formatQty(item.purchasePackSize)} ${item.unit}`
+                                        : 'nao definido'}
+                                    </p>
+                                    <p>
+                                      Custo pack:{' '}
+                                      {item.purchasePackCost && item.purchasePackCost > 0
+                                        ? formatCurrencyBR(item.purchasePackCost)
+                                        : 'nao definido'}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </BuilderLayoutItemSlot>
+                  </div>
+                </details>
+              </div>
+            </details>
+          </BuilderLayoutItemSlot>
+        </section>
+      </BuilderLayoutProvider>
     </>
   );
 }

@@ -31,11 +31,13 @@ export function StockCapacitySection({
 }: StockCapacitySectionProps) {
   return (
     <details className="app-details">
-      <summary>3. Produzir: capacidade por produto</summary>
+      <summary>4. Capacidade de producao</summary>
       <div className="app-panel mt-3 grid gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-xl font-semibold">Capacidade por produto</h3>
-          <p className="text-sm text-neutral-500">Estimativa de caixas e custo atual por ficha tecnica</p>
+          <p className="text-sm text-neutral-500">
+            Quantas caixas sao possiveis agora e qual insumo esta limitando
+          </p>
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           {capacity.map((entry) => {

@@ -3,12 +3,10 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller.js';
 import { PrismaModule } from './prisma.module.js';
-import { ProductsModule } from './modules/products/products.module.js';
 import { CustomersModule } from './modules/customers/customers.module.js';
 import { OrdersModule } from './modules/orders/orders.module.js';
 import { DeliveriesModule } from './modules/deliveries/deliveries.module.js';
 import { PaymentsModule } from './modules/payments/payments.module.js';
-import { StockModule } from './modules/stock/stock.module.js';
 import { InventoryModule } from './modules/inventory/inventory.module.js';
 import { BomModule } from './modules/bom/bom.module.js';
 import { ProductionModule } from './modules/production/production.module.js';
@@ -28,12 +26,10 @@ import { RbacGuard } from './security/rbac.guard.js';
       ]
     }),
     PrismaModule,
-    ProductsModule,
     CustomersModule,
     OrdersModule,
     DeliveriesModule,
     PaymentsModule,
-    StockModule,
     InventoryModule,
     BomModule,
     ProductionModule,

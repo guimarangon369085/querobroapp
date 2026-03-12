@@ -1,11 +1,11 @@
 # PROJECT_SNAPSHOT
 
-Ultima atualizacao: 2026-03-11
+Ultima atualizacao: 2026-03-12
 
 ## Estado atual
 
 - Monorepo ativo com API, Web, Mobile e contratos compartilhados.
-- Web consolidado em 4 telas reais: `Pedidos`, `Clientes`, `Produtos`, `Estoque`.
+- Web consolidado em 3 telas operacionais reais: `Pedidos`, `Clientes` e `Estoque`, com captura publica em `/pedido`.
 - `Pedidos` e a entrada principal; agenda `Dia/Semana/Mes` na mesma tela, com criacao de pedido no proprio painel e lista completa de pedidos logo abaixo do calendario.
 - CTAs contextuais por tela: `Pedidos` usa acao `Criar` no painel, `Clientes/Produtos` usam acao inline/sticky e `Estoque` usa botao flutuante `Nova movimentacao`.
 - `Calendario`, `Inicio`, `Jornada`, `Resumo` e `Builder` nao existem mais como superficies operacionais.
@@ -13,12 +13,13 @@ Ultima atualizacao: 2026-03-11
 - API cobre pedido, pagamento, estoque, BOM, D+1, producao e entrega local interna.
 - O processo de qualidade atual inclui `qa:trust`, `qa:browser-smoke`, `qa:critical-e2e`, drift check e testes raiz.
 - Gate operacional de religamento foi validado em 2026-03-11 com `stop-all -> dev-all`, health da API e execucao de smoke + E2E critico.
-- `Produtos` voltou a existir como superficie web real em 2026-03-11, com navegacao propria e atalho para ficha tecnica em `Estoque`.
+- `Produtos` deixou de existir como superficie operacional; catalogo e ficha tecnica ficam dentro de `Estoque`.
+- Existe agora uma captura publica de pedido em `/pedido`, usando o mesmo intake externo que vai servir para `Google Forms`, pagina propria e futuro `WhatsApp Flow`.
 
 ## O que um usuario consegue fazer hoje
 
 1. Abrir o app direto em `Pedidos`.
-2. Navegar entre `Pedidos`, `Clientes`, `Produtos` e `Estoque`.
+2. Navegar entre `Pedidos`, `Clientes` e `Estoque`.
 3. Criar pedido manualmente no web.
 4. Confirmar pedido e colocar ele na fila de producao.
 5. Iniciar a proxima fornada com baixa real de estoque no momento em que a fornada comeca.
@@ -30,20 +31,22 @@ Ultima atualizacao: 2026-03-11
 
 ## Telas web
 
+- `/pedido`: pagina publica do cliente com submit para o intake canonico e exibicao do PIX copia e cola.
 - `/pedidos`: agenda do dia, criacao de pedido, status, producao, entrega e pagamento.
 - `/clientes`: cadastro e edicao rapida.
-- `/produtos`: catalogo e ficha tecnica.
 - `/estoque`: saldo, D+1, compras e leitura operacional.
+- `/produtos`: redirect legado para `/estoque`.
 - `/calendario`: redirect permanente para `/pedidos`.
 - Rotas antigas (`/`, `/dashboard`, `/hoje`, `/jornada`, `/inicio`, `/resumo`, `/base`, `/producao`, `/saidas`, `/caixa`) convergem para `Pedidos`.
-- Alias legado de captura (`/whatsapp-flow/pedido/:sessionId`) tambem converte para `Pedidos`.
+- Alias legado de captura (`/whatsapp-flow/pedido/:sessionId`) ainda converte para `Pedidos` ate a troca do canal.
 - `/builder`: redirect para `/pedidos`; o runtime interno segue exposto por `GET /runtime-config`.
 
 ## API (blocos)
 
-- Cadastro: `products`, `customers`
+- Cadastro: `customers`, `inventory-products`
 - Operacao: `orders`, `payments`, `deliveries`, `production`
-- Estoque: `inventory`, `stock`, `bom`
+- Estoque: `inventory`, `inventory-products`, `bom`
+- Intake externo: `orders/intake`, `orders/intake/customer-form`, `orders/intake/google-form`, `orders/intake/whatsapp-flow`
 - Suporte interno: `runtime-config` (read-only) e redirects legados controlados no web
 
 ## Qualidade tecnica
@@ -54,7 +57,7 @@ Ultima atualizacao: 2026-03-11
 - `pnpm check:prisma-drift`: guard de drift dev/prod.
 - Os flows de QA que sobem um web temporario agora usam dist dirs dedicados do Next, para nao disputar o `.next` do `next dev`.
 - O workflow principal de CI no GitHub agora roda `check:prisma-drift` e `qa:trust` com lint habilitado.
-- O browser smoke voltou a exigir `/produtos` como rota real, evitando regressao silenciosa para redirect em `Estoque`.
+- O browser smoke garante o redirect legado de `/produtos` e cobre as telas operacionais principais.
 
 ## Validacao operacional mais recente
 
@@ -65,10 +68,10 @@ Ultima atualizacao: 2026-03-11
 
 ## Gaps abertos
 
-1. Integracoes externas foram removidas e devem ser replanejadas do zero quando a operacao principal estiver consolidada.
-2. Mobile segue atras do web no fluxo operacional novo.
-3. Ainda vale ampliar cobertura de testes alem dos gates atuais, principalmente em cenarios de edge case de dominio.
-4. Vale manter docs e env sem residuos legados para evitar falsa percepcao de feature ainda ativa.
+1. `Google Forms` ja e viavel como canal temporario, mas ainda falta configuracao real do Apps Script e URL publica final.
+2. `WhatsApp Flow` segue sem numero dedicado; a migracao futura deve reutilizar o contrato externo atual.
+3. Mobile segue atras do web no fluxo operacional novo.
+4. Ainda vale ampliar cobertura de testes alem dos gates atuais, principalmente em cenarios de edge case de dominio.
 
 ## Como religar e validar rapido
 

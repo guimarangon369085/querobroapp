@@ -444,7 +444,7 @@ ensure_web_server
 
 check_route "pedidos" "/pedidos" "Agenda"
 check_route "clientes" "/clientes" "Clientes"
-check_route "produtos" "/produtos" "produto(s)" "/produtos"
+check_route "produtos" "/produtos" "" "/estoque"
 check_route "estoque" "/estoque" "" "/estoque"
 
 echo "QA Browser Smoke OK (${WEB_URL})"

@@ -54,7 +54,7 @@ test(
       const cleanupSteps = [
         created.orderId ? () => request(apiUrl, `/orders/${created.orderId}`, { method: 'DELETE' }) : null,
         created.bomId ? () => request(apiUrl, `/boms/${created.bomId}`, { method: 'DELETE' }) : null,
-        created.productId ? () => request(apiUrl, `/products/${created.productId}`, { method: 'DELETE' }) : null,
+        created.productId ? () => request(apiUrl, `/inventory-products/${created.productId}`, { method: 'DELETE' }) : null,
         created.customerId
           ? () => request(apiUrl, `/customers/${created.customerId}`, { method: 'DELETE' })
           : null,
@@ -104,7 +104,7 @@ test(
       }
     });
 
-    const product = await request(apiUrl, '/products', {
+    const product = await request(apiUrl, '/inventory-products', {
       method: 'POST',
       body: {
         name: `Broa Tradicional Semantica [TESTE_E2E] ${suffix}`,

@@ -1,7 +1,5 @@
 import type { Customer, Order, OrderItem, Payment } from '@querobroapp/shared';
 
-export const paymentMethods = ['pix', 'dinheiro', 'cartao', 'transferencia'] as const;
-
 export const nextStatusByCurrent: Record<string, string | null> = {
   ABERTO: 'CONFIRMADO',
   CONFIRMADO: null,

@@ -472,7 +472,7 @@ export function OrderQuickCreate({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-[0.9rem] font-semibold text-neutral-700">Cliente</span>
             <Link href="/clientes" className="app-button app-button-ghost text-xs">
-              NOVO CLIENTE
+              Novo cliente
             </Link>
           </div>
           <input
@@ -529,14 +529,12 @@ export function OrderQuickCreate({
           <div className="flex items-start gap-3">
             <AppIcon name="refresh" className="mt-0.5 h-5 w-5 shrink-0" />
             <div className="min-w-0">
-              <p className="font-semibold">Pedido base carregado do histórico do cliente.</p>
+              <p className="font-semibold">Ultimo pedido.</p>
               <p className="mt-1 text-xs opacity-80">
                 {restoredFromLastOrder.customerName} • pedido #{restoredFromLastOrder.orderId}
                 {restoredFromLastOrder.referenceLabel ? ` • ${restoredFromLastOrder.referenceLabel}` : ''}
               </p>
-              <p className="mt-1 text-xs opacity-80">
-                Revise os itens e confirme em Criar para gerar o novo pedido.
-              </p>
+              <p className="mt-1 text-xs opacity-80">Revise e crie.</p>
             </div>
           </div>
         </div>
@@ -586,10 +584,10 @@ export function OrderQuickCreate({
         </p>
         {hasOpenVirtualBox ? (
           <p className="mt-1 text-xs opacity-75">
-            Faltam {remainingUnitsToCloseBox} unidade(s) para fechar a proxima caixa.
+            Faltam {remainingUnitsToCloseBox} un para fechar a caixa.
           </p>
         ) : displayTotalUnits > 0 ? (
-          <p className="mt-1 text-xs opacity-75">Todas as caixas atuais estao fechadas.</p>
+          <p className="mt-1 text-xs opacity-75">Todas as caixas estao fechadas.</p>
         ) : null}
       </div>
 
@@ -772,7 +770,7 @@ export function OrderQuickCreate({
       ) : null}
       {orderError ? <p className="text-xs text-red-600">{orderError}</p> : null}
       {!canCreateOrder && !orderError && !tutorialMode ? (
-        <p className="text-xs text-neutral-500">Selecione um cliente.</p>
+        <p className="text-xs text-neutral-500">Escolha um cliente.</p>
       ) : null}
     </div>
   );

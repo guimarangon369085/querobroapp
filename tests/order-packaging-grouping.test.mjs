@@ -65,7 +65,7 @@ test(
 
       const cleanupResources = [
         created.productTraditionalId
-          ? () => request(apiUrl, `/products/${created.productTraditionalId}`, { method: 'DELETE' })
+          ? () => request(apiUrl, `/inventory-products/${created.productTraditionalId}`, { method: 'DELETE' })
           : null,
         created.customerId
           ? () => request(apiUrl, `/customers/${created.customerId}`, { method: 'DELETE' })
@@ -194,7 +194,7 @@ test(
       }
     });
 
-    const productTraditional = await request(apiUrl, '/products', {
+    const productTraditional = await request(apiUrl, '/inventory-products', {
       method: 'POST',
       body: {
         name: `Broa Tradicional (T) [TESTE_E2E] ${suffix}`,

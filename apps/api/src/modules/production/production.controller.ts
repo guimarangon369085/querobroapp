@@ -33,9 +33,4 @@ export class ProductionController {
   completeBatch(@Param('id') id: string) {
     return this.service.completeBatch(parseWithSchema(batchIdSchema, id));
   }
-
-  @Post('rebalance-legacy-consumption')
-  rebalanceLegacyConsumption() {
-    return this.service.rebalanceLegacyOrderConsumption();
-  }
 }

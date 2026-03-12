@@ -26,7 +26,7 @@ test(
           : null,
         created.bomId ? () => request(apiUrl, `/boms/${created.bomId}`, { method: 'DELETE' }) : null,
         created.productId
-          ? () => request(apiUrl, `/products/${created.productId}`, { method: 'DELETE' })
+          ? () => request(apiUrl, `/inventory-products/${created.productId}`, { method: 'DELETE' })
           : null
       ].filter(Boolean);
 
@@ -43,7 +43,7 @@ test(
 
     const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-    const product = await request(apiUrl, '/products', {
+    const product = await request(apiUrl, '/inventory-products', {
       method: 'POST',
       body: {
         name: `Broa E2E [TESTE_E2E] ${suffix}`,

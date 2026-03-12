@@ -1,11 +1,11 @@
 import { Injectable, NotFoundException, Inject } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
-import { PrismaService } from '../../prisma.service.js';
 import { ProductSchema } from '@querobroapp/shared';
 import { normalizeMoney, normalizeText, normalizeTitle } from '../../common/normalize.js';
+import { PrismaService } from '../../prisma.service.js';
 
 @Injectable()
-export class ProductsService {
+export class InventoryProductsService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   private async ensureDefaultBom(
@@ -36,29 +36,6 @@ export class ProductsService {
     const product = await this.prisma.product.findUnique({ where: { id } });
     if (!product) throw new NotFoundException('Produto nao encontrado');
     return product;
-  }
-
-  async getBom(id: number) {
-    const product = await this.get(id);
-
-    const existing = await this.prisma.bom.findFirst({
-      where: { productId: id },
-      include: { items: { include: { item: true } }, product: true },
-      orderBy: { id: 'asc' }
-    });
-    if (existing) return existing;
-
-    const created = await this.prisma.bom.create({
-      data: {
-        productId: id,
-        name: product.name,
-        saleUnitLabel: product.unit,
-        yieldUnits: null
-      },
-      include: { items: { include: { item: true } }, product: true }
-    });
-
-    return created;
   }
 
   create(payload: unknown) {
@@ -101,13 +78,12 @@ export class ProductsService {
 
   async remove(id: number) {
     await this.get(id);
-    const [itemsCount, movementsCount, bomsCount] = await this.prisma.$transaction([
+    const [itemsCount, bomsCount] = await this.prisma.$transaction([
       this.prisma.orderItem.count({ where: { productId: id } }),
-      this.prisma.stockMovement.count({ where: { productId: id } }),
       this.prisma.bom.count({ where: { productId: id } })
     ]);
 
-    if (itemsCount > 0 || movementsCount > 0 || bomsCount > 0) {
+    if (itemsCount > 0 || bomsCount > 0) {
       await this.prisma.product.update({
         where: { id },
         data: { active: false }

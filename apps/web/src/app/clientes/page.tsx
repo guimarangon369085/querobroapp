@@ -7,7 +7,7 @@ import {
   useState,
   type KeyboardEvent
 } from 'react';
-import type { Customer, OrderItem, Product } from '@querobroapp/shared';
+import type { Customer, OrderIntake, OrderItem, Product } from '@querobroapp/shared';
 import { apiFetch } from '@/lib/api';
 import {
   buildWhatsAppUrl,
@@ -36,6 +36,7 @@ import {
   lookupPostalCodeAutofill
 } from '@/lib/customer-autofill';
 import { loadGooglePlacesLibrary } from '@/lib/google-places';
+import { submitOrderIntake } from '@/features/orders/orders-api';
 
 const emptyCustomer: Partial<Customer> = {
   name: '',
@@ -559,10 +560,10 @@ function CustomersPageContent() {
         setRepeatDraftError(null);
       }
       await load();
-      notifySuccess(isEditing ? 'Cliente atualizado com sucesso.' : 'Cliente criado com sucesso.');
+      notifySuccess('Cliente salvo.');
       scrollToLayoutSlot('list');
     } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Nao foi possivel salvar o cliente.');
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel salvar.');
     }
   };
 
@@ -643,7 +644,7 @@ function CustomersPageContent() {
     try {
       const [orders, products] = await Promise.all([
         apiFetch<CustomerOrderPreview[]>('/orders'),
-        apiFetch<Product[]>('/products')
+        apiFetch<Product[]>('/inventory-products')
       ]);
 
       const nextProductNameById: Record<number, string> = {};
@@ -665,7 +666,7 @@ function CustomersPageContent() {
       setCustomerRecentOrders(recent);
       return recent;
     } catch (err) {
-      setCustomerOrdersError(err instanceof Error ? err.message : 'Nao foi possivel carregar os pedidos do cliente.');
+      setCustomerOrdersError(err instanceof Error ? err.message : 'Nao foi possivel carregar os pedidos.');
       setCustomerRecentOrders([]);
       return [] as CustomerOrderPreview[];
     } finally {
@@ -713,7 +714,7 @@ function CustomersPageContent() {
 
     const parsedScheduledAt = parseDateTimeLocalInput(repeatDraftScheduledAt);
     if (!parsedScheduledAt) {
-      setRepeatDraftError('Informe data e horario validos para criar o pedido.');
+      setRepeatDraftError('Informe data e hora.');
       return;
     }
 
@@ -725,28 +726,48 @@ function CustomersPageContent() {
       .filter((item) => Number.isFinite(item.productId) && item.productId > 0 && item.quantity > 0);
 
     if (nextItems.length === 0) {
-      setRepeatDraftError('Esse pedido nao possui caixas validas para refazer.');
+      setRepeatDraftError('Esse pedido nao tem caixas validas.');
       return;
     }
 
     setRepeatDraftError(null);
     setIsRepeatOrderPending(true);
     try {
-      await apiFetch('/orders', {
-        method: 'POST',
-        body: JSON.stringify({
-          customerId: selectedCustomer.id,
+      const payload: OrderIntake = {
+        version: 1,
+        intent: 'CONFIRMED',
+        customer: {
+          customerId: selectedCustomer.id
+        },
+        fulfillment: {
+          mode: 'DELIVERY',
+          scheduledAt: parsedScheduledAt.toISOString()
+        },
+        order: {
           items: nextItems,
           discount: typeof order.discount === 'number' ? order.discount : 0,
-          notes: order.notes || undefined,
-          scheduledAt: parsedScheduledAt.toISOString()
-        })
-      });
-      notifySuccess('Pedido recriado e enviado para a agenda.');
+          notes: order.notes || undefined
+        },
+        payment: {
+          method: 'pix',
+          status: 'PENDENTE',
+          dueAt: parsedScheduledAt.toISOString()
+        },
+        source: {
+          channel: 'ADMIN_REPEAT',
+          originLabel: 'clientes.repeat-order'
+        }
+      };
+
+      const created = await submitOrderIntake(payload);
+      notifySuccess(
+        'Pedido copiado com ' +
+          (created.intake.pixCharge?.payable ? 'PIX pronto.' : 'PIX de desenvolvimento.')
+      );
       closeCustomerModal();
       router.push('/pedidos?focus=list');
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Nao foi possivel refazer o pedido.';
+      const message = err instanceof Error ? err.message : 'Nao foi possivel repetir o pedido.';
       setRepeatDraftError(message);
       notifyError(message);
     } finally {
@@ -772,9 +793,9 @@ function CustomersPageContent() {
   const remove = async (id: number) => {
     const customerToRestore = customers.find((entry) => entry.id === id);
     const accepted = await confirm({
-      title: 'Remover cliente?',
-      description: 'Essa acao exclui o cliente permanentemente.',
-      confirmLabel: 'Remover',
+      title: 'Excluir cliente?',
+      description: 'O cadastro sera removido.',
+      confirmLabel: 'Excluir',
       cancelLabel: 'Cancelar',
       danger: true
     });
@@ -786,7 +807,7 @@ function CustomersPageContent() {
       }
       await load();
       if (customerToRestore) {
-        notifyUndo(`Cliente ${customerToRestore.name} removido com sucesso.`, async () => {
+        notifyUndo(`Cliente ${customerToRestore.name} excluido.`, async () => {
           await apiFetch('/customers', {
             method: 'POST',
             body: JSON.stringify({
@@ -807,14 +828,14 @@ function CustomersPageContent() {
             })
           });
           await load();
-          notifySuccess('Cliente restaurado com sucesso.');
+          notifySuccess('Cliente restaurado.');
           scrollToLayoutSlot('list');
         });
       } else {
-        notifySuccess('Cliente removido com sucesso.');
+        notifySuccess('Cliente excluido.');
       }
     } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Nao foi possivel remover o cliente.');
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel excluir.');
     }
   };
 
@@ -930,11 +951,11 @@ function CustomersPageContent() {
         <details className="app-details">
           <summary>
             <span className="app-details__summary-label">
-              Mais Informações
+              Mais dados
             </span>
           </summary>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <FormField label="Instrucoes de entrega" hint="Portao, referencia, interfone">
+            <FormField label="Entrega" hint="Portao, referencia, interfone">
               <input
                 className="app-input"
                 placeholder="Ex: portao preto, tocar 18"
@@ -1050,10 +1071,10 @@ function CustomersPageContent() {
         }
       >
       <div className="app-panel flex flex-wrap items-center gap-3">
-        <span className="text-sm font-semibold text-neutral-700">{customers.length} cliente(s)</span>
+        <span className="text-sm font-semibold text-neutral-700">Total {customers.length}</span>
         <input
           className="app-input md:w-auto md:min-w-[320px]"
-          placeholder="Buscar por nome, telefone ou endereco"
+          placeholder="Buscar cliente"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -1116,7 +1137,7 @@ function CustomersPageContent() {
         })}
         {filteredCustomers.length === 0 && (
           <div className="app-panel border-dashed text-sm text-neutral-500">
-            Nenhum cliente encontrado com este filtro.
+            Nenhum cliente encontrado.
           </div>
         )}
       </div>
@@ -1146,20 +1167,20 @@ function CustomersPageContent() {
               <section className="grid gap-3">
                 <div className="flex items-center justify-between gap-3">
                   <h4 className="text-sm font-semibold uppercase tracking-[0.14em] text-neutral-600">
-                    Ultimos pedidos
+                    Pedidos recentes
                   </h4>
-                  <span className="text-xs text-neutral-500">{customerRecentOrders.length} registro(s)</span>
+                  <span className="text-xs text-neutral-500">Total {customerRecentOrders.length}</span>
                 </div>
 
                 {isLoadingCustomerOrders ? (
                   <div className="app-panel border-dashed text-sm text-neutral-500">
-                    Carregando pedidos do cliente...
+                    Carregando pedidos...
                   </div>
                 ) : customerOrdersError ? (
                   <div className="app-panel border-dashed text-sm text-red-700">{customerOrdersError}</div>
                 ) : customerRecentOrders.length === 0 ? (
                   <div className="app-panel border-dashed text-sm text-neutral-500">
-                    Nenhum pedido encontrado para este cliente.
+                    Sem pedidos para este cliente.
                   </div>
                 ) : (
                   customerRecentOrders.map((order) => {
@@ -1195,13 +1216,13 @@ function CustomersPageContent() {
                             onClick={() => startRepeatOrder(order)}
                             disabled={isRepeatOrderPending}
                           >
-                            REFAZER PEDIDO
+                            REPETIR
                           </button>
                         </div>
 
                         {isRepeatExpanded ? (
                           <div className="mt-3 grid gap-2 rounded-xl border border-[color:var(--line-soft)] bg-white p-3">
-                            <FormField label="Horario de entrega do novo pedido">
+                            <FormField label="Nova data e hora">
                               <input
                                 className="app-input"
                                 type="datetime-local"
@@ -1222,7 +1243,7 @@ function CustomersPageContent() {
                                 }}
                                 disabled={isRepeatOrderPending}
                               >
-                                {isRepeatOrderPending ? 'Criando...' : 'Confirmar e criar na agenda'}
+                                {isRepeatOrderPending ? 'Criando...' : 'Criar pedido'}
                               </button>
                               <button
                                 type="button"
@@ -1244,14 +1265,14 @@ function CustomersPageContent() {
               <section className="grid gap-3">
                 <div className="flex items-center justify-between gap-3">
                   <h4 className="text-sm font-semibold uppercase tracking-[0.14em] text-neutral-600">
-                    Informacoes
+                    Dados
                   </h4>
                   <button
                     type="button"
                     className="app-button app-button-ghost min-h-8 px-3 py-1.5 text-[0.7rem] normal-case tracking-[0.02em]"
                     onClick={() => setIsCustomerInfoEditing((current) => !current)}
                   >
-                    {isCustomerInfoEditing ? 'Ocultar edição' : 'Editar'}
+                    {isCustomerInfoEditing ? 'Fechar edicao' : 'Editar'}
                   </button>
                 </div>
 
@@ -1398,7 +1419,7 @@ function CustomersPageContent() {
                         />
                       </FormField>
                     </div>
-                    <FormField label="Instrucoes de entrega" hint="Portao, referencia, interfone">
+                    <FormField label="Entrega" hint="Portao, referencia, interfone">
                       <input
                         className="app-input"
                         placeholder="Ex: portao preto, tocar 18"
@@ -1410,7 +1431,7 @@ function CustomersPageContent() {
                     <div className="app-form-actions">
                       <button className="app-button app-button-primary" type="submit">
                         <AppIcon name="refresh" className="h-4 w-4" />
-                        Salvar alteracoes
+                        Salvar
                       </button>
                       <button
                         className="app-button app-button-ghost"
@@ -1423,7 +1444,7 @@ function CustomersPageContent() {
                           setError(null);
                         }}
                       >
-                        Cancelar edição
+                        Cancelar
                       </button>
                     </div>
                     {!isOperationMode ? (
@@ -1436,7 +1457,7 @@ function CustomersPageContent() {
                             void remove(selectedCustomer.id);
                           }}
                         >
-                          Remover cliente
+                          Excluir cliente
                         </button>
                       </div>
                     ) : null}

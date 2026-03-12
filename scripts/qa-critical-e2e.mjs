@@ -411,15 +411,18 @@ async function runCriticalFlow() {
     `
       await page.goto(${JSON.stringify(`${webUrl}/produtos`)}, { waitUntil: 'domcontentloaded' });
       try { await page.waitForLoadState('networkidle', { timeout: 5000 }); } catch {}
-      await page.getByText('Base de massa', { exact: false }).first().waitFor({ state: 'visible', timeout: 10000 });
+      await page.getByText('Catalogo tecnico', { exact: false }).first().waitFor({ state: 'visible', timeout: 10000 });
+      if (!page.url().includes('/estoque')) {
+        throw new Error('A rota /produtos deveria redirecionar para /estoque.');
+      }
     `,
-    'Validar rota produtos'
+    'Validar redirect legado de produtos'
   );
   pwSnapshot('critical-e2e-produtos-route');
   assertConsoleClean('critical-e2e-produtos-route');
   assertNetworkClean('critical-e2e-produtos-route');
 
-  const createdProduct = await apiRequest('/products', {
+  const createdProduct = await apiRequest('/inventory-products', {
     method: 'POST',
     body: {
       name: productName,

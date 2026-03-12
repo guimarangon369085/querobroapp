@@ -13,7 +13,7 @@ import {
   type PointerEvent,
   type MouseEvent
 } from 'react';
-import type { Customer, InventoryItem, InventoryMovement, Product } from '@querobroapp/shared';
+import type { Customer, InventoryItem, InventoryMovement, OrderIntake, PixCharge, Product } from '@querobroapp/shared';
 import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import {
@@ -33,7 +33,12 @@ import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/build
 import { OrdersBoard } from './orders-board';
 import { OrderQuickCreate } from './order-quick-create';
 import { type MassPrepEvent, type OrderView } from './orders-model';
-import { fetchOrdersWorkspace } from './orders-api';
+import {
+  fetchOrderPixCharge,
+  fetchOrdersWorkspace,
+  sendOrderPixChargeWhatsApp,
+  submitOrderIntake
+} from './orders-api';
 
 const TEST_DATA_TAG = '[TESTE_E2E]';
 const TUTORIAL_QUERY_VALUE = 'primeira_vez';
@@ -1147,6 +1152,7 @@ function OrdersPageContent() {
   const [massPrepEditBalanceByItemId, setMassPrepEditBalanceByItemId] = useState<Record<number, string>>({});
   const [massPrepEditErrorByItemId, setMassPrepEditErrorByItemId] = useState<Record<number, string>>({});
   const [massPrepSavingItemId, setMassPrepSavingItemId] = useState<number | null>(null);
+  const massPrepPendingActionItemIdsRef = useRef<Set<number>>(new Set());
   const [massPrepPrepareError, setMassPrepPrepareError] = useState<string | null>(null);
   const [isPreparingMassReady, setIsPreparingMassReady] = useState(false);
   const [isUpdatingMassPrepStatus, setIsUpdatingMassPrepStatus] = useState(false);
@@ -1157,6 +1163,10 @@ function OrdersPageContent() {
   const [selectedOrderEditNotes, setSelectedOrderEditNotes] = useState<string>('');
   const [selectedOrderEditError, setSelectedOrderEditError] = useState<string | null>(null);
   const [isSavingSelectedOrderEdit, setIsSavingSelectedOrderEdit] = useState(false);
+  const [selectedOrderPixCharge, setSelectedOrderPixCharge] = useState<PixCharge | null>(null);
+  const [selectedOrderPixChargeLoading, setSelectedOrderPixChargeLoading] = useState(false);
+  const [selectedOrderPixChargeError, setSelectedOrderPixChargeError] = useState<string | null>(null);
+  const [isSendingSelectedOrderPixWhatsApp, setIsSendingSelectedOrderPixWhatsApp] = useState(false);
   const [selectedOrderEditingBoxKey, setSelectedOrderEditingBoxKey] = useState<string | null>(null);
   const [selectedOrderEditingBoxDraftByProductId, setSelectedOrderEditingBoxDraftByProductId] = useState<
     Record<number, number>
@@ -1215,6 +1225,23 @@ function OrdersPageContent() {
     setIsOrderDetailModalOpen(false);
     setSelectedOrder(null);
   }, []);
+
+  const sendSelectedOrderPixWhatsApp = useCallback(async () => {
+    if (!selectedOrder?.id) return;
+    setIsSendingSelectedOrderPixWhatsApp(true);
+    try {
+      const response = await sendOrderPixChargeWhatsApp(selectedOrder.id);
+      notifySuccess(
+        response.messages.length >= 2
+          ? 'PIX enviado em 2 mensagens no WhatsApp.'
+          : 'PIX enviado no WhatsApp.'
+      );
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : 'Nao foi possivel enviar o PIX no WhatsApp.');
+    } finally {
+      setIsSendingSelectedOrderPixWhatsApp(false);
+    }
+  }, [notifyError, notifySuccess, selectedOrder?.id]);
 
   const openNewOrderModal = useCallback(() => {
     setIsOrderDetailModalOpen(false);
@@ -1290,7 +1317,9 @@ function OrdersPageContent() {
   );
 
   const saveMassPrepItemBalance = useCallback(
-    async (itemId: number, options?: { silent?: boolean }) => {
+    async (itemId: number) => {
+      if (massPrepPendingActionItemIdsRef.current.has(itemId)) return;
+
       const rawValue = massPrepEditBalanceByItemId[itemId];
       const parsedValue = parseLocaleNumber(rawValue);
       if (parsedValue == null || !Number.isFinite(parsedValue)) {
@@ -1302,10 +1331,39 @@ function OrdersPageContent() {
       }
 
       const currentCard = massPrepStockCards.find((card) => card.itemId === itemId);
-      if (currentCard) {
-        const normalizedCurrent = roundInventoryQty(currentCard.balance);
-        const normalizedNext = roundInventoryQty(parsedValue);
-        if (Math.abs(normalizedCurrent - normalizedNext) < 0.0001) {
+      if (!currentCard) return;
+
+      const normalizedCurrent = roundInventoryQty(currentCard.balance);
+      const normalizedNext = roundInventoryQty(parsedValue);
+      if (Math.abs(normalizedCurrent - normalizedNext) < 0.0001) {
+        setMassPrepEditBalanceByItemId((current) => ({
+          ...current,
+          [itemId]: formatInventoryBalanceInput(currentCard.balance)
+        }));
+        setMassPrepEditErrorByItemId((current) => ({
+          ...current,
+          [itemId]: ''
+        }));
+        return;
+      }
+
+      const delta = roundInventoryQty(normalizedNext - normalizedCurrent);
+      const deltaAbs = roundInventoryQty(Math.abs(delta));
+      const movementLabel = delta > 0 ? 'entrada' : 'saida';
+
+      massPrepPendingActionItemIdsRef.current.add(itemId);
+      try {
+        const accepted = await confirm({
+          title: delta > 0 ? 'Confirmar entrada?' : 'Confirmar saida?',
+          description: `Saldo: ${formatInventoryBalance(normalizedCurrent)} ${currentCard.unit}. Vai para ${formatInventoryBalance(
+            normalizedNext
+          )} ${currentCard.unit}. Registra ${movementLabel} de ${formatInventoryBalance(deltaAbs)} ${
+            currentCard.unit
+          } em ${currentCard.name}.`,
+          confirmLabel: delta > 0 ? 'Confirmar entrada' : 'Confirmar saida',
+          cancelLabel: 'Cancelar'
+        });
+        if (!accepted) {
           setMassPrepEditBalanceByItemId((current) => ({
             ...current,
             [itemId]: formatInventoryBalanceInput(currentCard.balance)
@@ -1316,21 +1374,20 @@ function OrdersPageContent() {
           }));
           return;
         }
-      }
 
-      setMassPrepSavingItemId(itemId);
-      setMassPrepEditErrorByItemId((current) => ({
-        ...current,
-        [itemId]: ''
-      }));
-      try {
-        await apiFetch('/inventory-movements', {
+        setMassPrepSavingItemId(itemId);
+        setMassPrepEditErrorByItemId((current) => ({
+          ...current,
+          [itemId]: ''
+        }));
+
+        await apiFetch(`/inventory-items/${itemId}/effective-balance`, {
           method: 'POST',
           body: JSON.stringify({
-            itemId,
-            type: 'ADJUST',
-            quantity: roundInventoryQty(parsedValue),
-            reason: 'Ajuste manual via pop-up FAZER MASSA'
+            quantity: normalizedNext,
+            reason: `Ajuste manual via pop-up FAZER MASSA (${formatInventoryBalance(
+              normalizedCurrent
+            )} -> ${formatInventoryBalance(normalizedNext)} ${currentCard.unit})`
           })
         });
 
@@ -1341,9 +1398,9 @@ function OrdersPageContent() {
             refreshedCards.map((card) => [card.itemId, formatInventoryBalanceInput(card.balance)])
           )
         );
-        if (!options?.silent) {
-          notifySuccess('Saldo ajustado no estoque.');
-        }
+        notifySuccess(
+          `${delta > 0 ? 'Entrada' : 'Saida'} registrada: ${formatInventoryBalance(deltaAbs)} ${currentCard.unit} em ${currentCard.name}.`
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Nao foi possivel salvar o saldo deste item.';
         setMassPrepEditErrorByItemId((current) => ({
@@ -1352,10 +1409,11 @@ function OrdersPageContent() {
         }));
         notifyError(message);
       } finally {
+        massPrepPendingActionItemIdsRef.current.delete(itemId);
         setMassPrepSavingItemId(null);
       }
     },
-    [loadMassPrepStockSnapshot, massPrepEditBalanceByItemId, massPrepStockCards, notifyError, notifySuccess]
+    [confirm, loadMassPrepStockSnapshot, massPrepEditBalanceByItemId, massPrepStockCards, notifyError, notifySuccess]
   );
 
   const removeSelectedMassPrepEvent = useCallback(async () => {
@@ -1363,8 +1421,8 @@ function OrdersPageContent() {
     if (!orderId) return;
 
     const accepted = await confirm({
-      title: 'Excluir evento FAZER MASSA?',
-      description: 'O pedido sera mantido. Essa acao remove apenas o evento da agenda.',
+      title: 'Excluir FAZER MASSA?',
+      description: 'O pedido continua. So o evento sera removido.',
       confirmLabel: 'Excluir evento',
       cancelLabel: 'Cancelar',
       danger: true
@@ -1376,9 +1434,9 @@ function OrdersPageContent() {
       await apiFetch(`/orders/${orderId}/mass-prep-event`, { method: 'DELETE' });
       closeMassPrepStockModal();
       await loadAll();
-      notifySuccess('Evento FAZER MASSA excluido.');
+      notifySuccess('FAZER MASSA excluido.');
     } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Nao foi possivel excluir o evento FAZER MASSA.');
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel excluir FAZER MASSA.');
     } finally {
       setIsDeletingMassPrepEvent(false);
     }
@@ -1401,9 +1459,9 @@ function OrdersPageContent() {
         );
         setSelectedMassPrepEvent(updatedEvent);
         await loadAll();
-        notifySuccess(`Status de FAZER MASSA atualizado para ${formatMassPrepStatus(nextStatus)}.`);
+        notifySuccess(`FAZER MASSA: ${formatMassPrepStatus(nextStatus)}.`);
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Nao foi possivel atualizar o status de FAZER MASSA.';
+        const message = err instanceof Error ? err.message : 'Nao foi possivel atualizar FAZER MASSA.';
         setMassPrepPrepareError(message);
         notifyError(message);
       } finally {
@@ -1510,6 +1568,53 @@ function OrdersPageContent() {
   }, [isOrderDetailModalOpen, selectedOrder]);
 
   useEffect(() => {
+    if (!selectedOrder || !isOrderDetailModalOpen) {
+      setSelectedOrderPixCharge(null);
+      setSelectedOrderPixChargeError(null);
+      setSelectedOrderPixChargeLoading(false);
+      return;
+    }
+
+    const paymentStatus = selectedOrder.paymentStatus || 'PENDENTE';
+    const balanceDue = toMoney(Math.max(selectedOrder.balanceDue ?? selectedOrder.total ?? 0, 0));
+    if (selectedOrder.status === 'CANCELADO' || paymentStatus === 'PAGO' || balanceDue <= 0) {
+      setSelectedOrderPixCharge(null);
+      setSelectedOrderPixChargeError(null);
+      setSelectedOrderPixChargeLoading(false);
+      return;
+    }
+
+    let active = true;
+    setSelectedOrderPixChargeLoading(true);
+    setSelectedOrderPixChargeError(null);
+    fetchOrderPixCharge(selectedOrder.id!)
+      .then((charge) => {
+        if (!active) return;
+        setSelectedOrderPixCharge(charge);
+      })
+      .catch((error) => {
+        if (!active) return;
+        const message =
+          error instanceof Error && error.message.includes('HTTP 404')
+            ? 'Cobranca PIX ainda nao disponivel.'
+            : error instanceof Error
+            ? error.message
+            : 'Nao foi possivel carregar o PIX.';
+        setSelectedOrderPixCharge(null);
+        setSelectedOrderPixChargeError(message);
+      })
+      .finally(() => {
+        if (active) {
+          setSelectedOrderPixChargeLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isOrderDetailModalOpen, selectedOrder]);
+
+  useEffect(() => {
     if (!tutorialMode) return;
     setNewOrderNotes((prev) => withTestDataTag(prev, 'Pedido do momento'));
   }, [tutorialMode]);
@@ -1574,12 +1679,12 @@ function OrdersPageContent() {
   const createOrder = async () => {
     if (isCreatingOrder) return;
     if (!newOrderCustomerId || newOrderItems.length === 0) {
-      setOrderError('Selecione cliente e pelo menos 1 unidade.');
+      setOrderError('Selecione cliente e caixa.');
       return;
     }
     const scheduledAt = parseDateTimeLocalInput(newOrderScheduledAt);
     if (!scheduledAt) {
-      setOrderError('Informe uma data e horario validos para o pedido.');
+      setOrderError('Informe data e hora.');
       return;
     }
     if (draftDiscount < 0) {
@@ -1589,18 +1694,34 @@ function OrdersPageContent() {
     setOrderError(null);
     setIsCreatingOrder(true);
     try {
-      const createdOrder = await apiFetch<OrderView>('/orders', {
-        method: 'POST',
-        body: JSON.stringify({
-          customerId: Number(newOrderCustomerId),
+      const payload: OrderIntake = {
+        version: 1,
+        intent: 'CONFIRMED',
+        customer: {
+          customerId: Number(newOrderCustomerId)
+        },
+        fulfillment: {
+          mode: 'DELIVERY',
+          scheduledAt: scheduledAt.toISOString()
+        },
+        order: {
           items: newOrderItems,
           discount: parseCurrencyBR(newOrderDiscount),
-          scheduledAt: scheduledAt.toISOString(),
           notes: tutorialMode
             ? withTestDataTag(newOrderNotes, 'Pedido do momento')
-            : newOrderNotes || undefined,
-        }),
-      });
+            : newOrderNotes || undefined
+        },
+        payment: {
+          method: 'pix',
+          status: 'PENDENTE',
+          dueAt: scheduledAt.toISOString()
+        },
+        source: {
+          channel: 'INTERNAL_DASHBOARD'
+        }
+      };
+      const created = await submitOrderIntake(payload);
+      const createdOrder = created.order;
       setNewOrderCustomerId('');
       setCustomerSearch('');
       setNewOrderItems([]);
@@ -1610,7 +1731,13 @@ function OrdersPageContent() {
       setRestoredLastOrderDraft(null);
       const refreshedOrders = await loadAll();
       const freshCreated = refreshedOrders.find((entry) => entry.id === createdOrder.id);
-      notifySuccess('Pedido criado com sucesso.');
+      notifySuccess(
+        created.intake.stage !== 'PIX_PENDING'
+          ? 'Pedido criado.'
+          : created.intake.pixCharge?.payable
+          ? 'Pedido criado com PIX pronto.'
+          : 'Pedido criado com PIX de desenvolvimento.'
+      );
       setIsNewOrderModalOpen(false);
       if (freshCreated) {
         openOrderDetail(freshCreated);
@@ -1618,7 +1745,7 @@ function OrdersPageContent() {
         scrollToLayoutSlot('list');
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Nao foi possivel criar o pedido.';
+      const message = err instanceof Error ? err.message : 'Nao foi possivel criar.';
       setOrderError(message);
       notifyError(message);
     } finally {
@@ -1629,7 +1756,7 @@ function OrdersPageContent() {
   const removeOrder = async (orderId: number) => {
     const accepted = await confirm({
       title: 'Excluir pedido?',
-      description: 'Essa acao remove o pedido e tira a demanda da fila de producao.',
+      description: 'O pedido sai da fila.',
       confirmLabel: 'Excluir',
       cancelLabel: 'Cancelar',
       danger: true
@@ -1640,10 +1767,10 @@ function OrdersPageContent() {
       setSelectedOrder(null);
       setIsOrderDetailModalOpen(false);
       await loadAll();
-      notifySuccess('Pedido excluido com sucesso.');
+      notifySuccess('Pedido excluido.');
       scrollToLayoutSlot('list');
     } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Nao foi possivel excluir o pedido.');
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel excluir.');
     }
   };
 
@@ -1693,12 +1820,12 @@ function OrdersPageContent() {
       });
       await loadAll();
       if (notifyOnSuccess) {
-        notifySuccess('Data e horario do pedido atualizados.');
+        notifySuccess('Data atualizada.');
       }
       return true;
     } catch (err) {
       applyLocalOrderSchedule(orderId, previousScheduledAtIso);
-      notifyError(err instanceof Error ? err.message : 'Nao foi possivel atualizar a data do pedido.');
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel atualizar a data.');
       return false;
     }
   };
@@ -2417,6 +2544,8 @@ function OrdersPageContent() {
   const selectedCustomerPhoneHref = buildWhatsAppUrl(selectedCustomer?.phone);
   const selectedCustomerPhoneLabel =
     formatPhoneBR(selectedCustomer?.phone) || (selectedCustomer?.phone || '').trim() || 'Telefone nao informado';
+  const selectedOrderPaymentStatus = selectedOrder?.paymentStatus || 'PENDENTE';
+  const selectedOrderBalanceDue = toMoney(Math.max(selectedOrder?.balanceDue ?? selectedOrder?.total ?? 0, 0));
   const selectedCustomerDeletedAtLabel = selectedCustomer?.deletedAt
     ? formatDeletionTimestampLabel(selectedCustomer.deletedAt)
     : null;
@@ -2546,7 +2675,7 @@ function OrdersPageContent() {
   const prepareMassReadyFromIngredients = useCallback(async () => {
     if (!selectedMassPrepEvent) return;
     if (massPrepHasMissingForDraft) {
-      setMassPrepPrepareError('Insumos insuficientes para preparar 1 receita de MASSA PRONTA.');
+      setMassPrepPrepareError('Falta insumo para 1 receita de MASSA PRONTA.');
       return;
     }
 
@@ -2569,12 +2698,12 @@ function OrdersPageContent() {
           refreshedCards.map((card) => [card.itemId, formatInventoryBalanceInput(card.balance)])
         )
       );
-      notifySuccess(`MASSA PRONTA atualizada (+${response.recipesPrepared} receita(s)).`);
+      notifySuccess(`MASSA PRONTA +${response.recipesPrepared} receita(s).`);
     } catch (err) {
       const message =
         err instanceof Error
           ? err.message
-          : 'Nao foi possivel converter os ingredientes em MASSA PRONTA.';
+          : 'Nao foi possivel gerar MASSA PRONTA.';
       setMassPrepPrepareError(message);
       notifyError(message);
     } finally {
@@ -2602,7 +2731,7 @@ function OrdersPageContent() {
     if (!selectedOrder?.id) return;
     const parsedScheduledAt = parseDateTimeLocalInput(selectedOrderEditScheduledAt);
     if (!parsedScheduledAt) {
-      setSelectedOrderEditError('Informe uma data e horario validos.');
+      setSelectedOrderEditError('Informe data e hora.');
       return;
     }
 
@@ -2621,9 +2750,9 @@ function OrdersPageContent() {
       if (freshSelected) {
         setSelectedOrder(freshSelected);
       }
-      notifySuccess('Pedido atualizado no pop-up.');
+      notifySuccess('Pedido salvo.');
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Nao foi possivel salvar as alteracoes do pedido.';
+      const message = err instanceof Error ? err.message : 'Nao foi possivel salvar o pedido.';
       setSelectedOrderEditError(message);
       notifyError(message);
     } finally {
@@ -2711,7 +2840,7 @@ function OrdersPageContent() {
       );
       if (normalizedUnits > remainingUnits) {
         setSelectedOrderEditingBoxError(
-          `Esta caixa aceita apenas mais ${remainingUnits} unidade(s).`
+          `Cabem mais ${remainingUnits} un nesta caixa.`
         );
         return;
       }
@@ -2735,7 +2864,7 @@ function OrdersPageContent() {
       const traditionalFlavor = selectedOrderEditableFlavorByCode.get('T');
       const pairedFlavor = selectedOrderEditableFlavorByCode.get(code);
       if (!traditionalFlavor || !pairedFlavor) {
-        setSelectedOrderEditingBoxError('Sabor indisponivel para montar caixa mista.');
+        setSelectedOrderEditingBoxError('Falta sabor para essa mista.');
         return;
       }
 
@@ -2744,7 +2873,7 @@ function OrdersPageContent() {
         0
       );
       if (remainingUnits < ORDER_BOX_UNITS) {
-        setSelectedOrderEditingBoxError('A caixa precisa estar vazia para aplicar uma mista.');
+        setSelectedOrderEditingBoxError('Esvazie a caixa para montar uma mista.');
         return;
       }
 
@@ -2795,7 +2924,7 @@ function OrdersPageContent() {
     const targetUnits = selectedOrderEditingBox.targetUnits;
     const normalizedDraftTotal = selectedOrderEditingBoxDraftTotalUnits;
     if (normalizedDraftTotal !== targetUnits) {
-      setSelectedOrderEditingBoxError(`A caixa precisa manter ${targetUnits} unidade(s).`);
+      setSelectedOrderEditingBoxError(`A caixa precisa fechar com ${targetUnits} un.`);
       return;
     }
 
@@ -2812,7 +2941,7 @@ function OrdersPageContent() {
       }));
 
     if (nextParts.length === 0) {
-      setSelectedOrderEditingBoxError('Informe ao menos 1 sabor na caixa.');
+      setSelectedOrderEditingBoxError('Adicione ao menos 1 sabor.');
       return;
     }
 
@@ -2847,9 +2976,9 @@ function OrdersPageContent() {
       setSelectedOrderEditingBoxKey(null);
       setSelectedOrderEditingBoxDraftByProductId({});
       setSelectedOrderEditingBoxError(null);
-      notifySuccess(isAddingNewBox ? 'Caixa adicionada no pedido.' : 'Caixa atualizada no pedido.');
+      notifySuccess(isAddingNewBox ? 'Caixa adicionada.' : 'Caixa atualizada.');
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Nao foi possivel atualizar a caixa do pedido.';
+      const message = err instanceof Error ? err.message : 'Nao foi possivel salvar a caixa.';
       setSelectedOrderEditingBoxError(message);
       notifyError(message);
     } finally {
@@ -2875,13 +3004,13 @@ function OrdersPageContent() {
       setSelectedOrderEditingBoxKey(null);
       setSelectedOrderEditingBoxDraftByProductId({});
       setSelectedOrderEditingBoxError(null);
-      notifySuccess('Nova caixa descartada.');
+      notifySuccess('Caixa descartada.');
       return;
     }
 
     const accepted = await confirm({
       title: 'Excluir caixa?',
-      description: 'Essa acao remove a caixa deste pedido e recalcula os totais automaticamente.',
+      description: 'A caixa sera removida e o total recalculado.',
       confirmLabel: 'Excluir caixa',
       cancelLabel: 'Cancelar',
       danger: true
@@ -2893,7 +3022,7 @@ function OrdersPageContent() {
       .map((box) => box.parts);
     const nextItems = mapOrderVirtualBoxPartsToItems(nextBoxes);
     if (nextItems.length === 0) {
-      setSelectedOrderEditingBoxError('Pedido precisa manter ao menos 1 caixa.');
+      setSelectedOrderEditingBoxError('O pedido precisa ter ao menos 1 caixa.');
       return;
     }
 
@@ -2916,7 +3045,7 @@ function OrdersPageContent() {
       setSelectedOrderEditingBoxKey(null);
       setSelectedOrderEditingBoxDraftByProductId({});
       setSelectedOrderEditingBoxError(null);
-      notifySuccess('Caixa excluida do pedido.');
+      notifySuccess('Caixa excluida.');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Nao foi possivel excluir a caixa.';
       setSelectedOrderEditingBoxError(message);
@@ -2945,7 +3074,7 @@ function OrdersPageContent() {
       >
       {loadError ? (
         <div className="app-panel">
-          <p className="text-sm text-red-700">Nao foi possivel carregar os pedidos: {loadError}</p>
+          <p className="text-sm text-red-700">Erro ao carregar pedidos: {loadError}</p>
         </div>
       ) : null}
       </BuilderLayoutItemSlot>
@@ -2992,7 +3121,7 @@ function OrdersPageContent() {
         >
         {loading ? (
           <div className="app-panel border-dashed text-sm text-neutral-500">
-            Carregando agenda...
+            Carregando pedidos...
           </div>
         ) : (
           <>
@@ -3033,7 +3162,7 @@ function OrdersPageContent() {
                       );
                     })}
                     {selectedDateTimelineEvents.length === 0 ? (
-                      <div className="orders-day-grid__empty">sem eventos entre 08:00 e 21:59</div>
+                      <div className="orders-day-grid__empty">sem pedidos no horario</div>
                     ) : (
                       selectedDateTimelineEvents.map((item) => {
                         const status = resolveCalendarEntryStatus(item.entry);
@@ -3189,7 +3318,7 @@ function OrdersPageContent() {
                         />
                       ))}
                       {cell.timelineEvents.length === 0 ? (
-                        <div className="orders-week-grid__empty">sem eventos</div>
+                        <div className="orders-week-grid__empty">sem pedidos</div>
                       ) : (
                         cell.timelineEvents.map((item) => {
                           const status = resolveCalendarEntryStatus(item.entry);
@@ -3241,7 +3370,7 @@ function OrdersPageContent() {
 
                     {cell.overflowCount > 0 ? (
                       <p className="orders-week-grid__overflow">
-                        +{cell.overflowCount} fora da faixa
+                        +{cell.overflowCount} fora do horario
                       </p>
                     ) : null}
                   </div>
@@ -3322,17 +3451,14 @@ function OrdersPageContent() {
             <div className="orders-list-panel">
               <div className="orders-list-panel__header">
                 <div>
-                  <p className="orders-list-panel__title">HISTÓRICO DE PEDIDOS</p>
-                  <p className="orders-list-panel__subtitle">
-                    {sortedVisibleOrderList.length} registro(s)
-                    {isOperationMode ? ' no histórico' : ''}
-                  </p>
+                  <p className="orders-list-panel__title">PEDIDOS</p>
+                  <p className="orders-list-panel__subtitle">Total {sortedVisibleOrderList.length}</p>
                 </div>
               </div>
               <div className="orders-list-panel__stack">
                 {sortedVisibleOrderList.length === 0 ? (
                   <p className="orders-list-panel__empty">
-                    {isOperationMode ? 'Nenhum pedido no histórico.' : 'Nenhum pedido registrado.'}
+                    Sem pedidos.
                   </p>
                 ) : (
                   sortedVisibleOrderList.map((order) => {
@@ -3392,7 +3518,7 @@ function OrdersPageContent() {
                               </span>
                               {isActive ? (
                                 <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-100 px-1.5 py-0 text-[10px] font-semibold leading-4 text-amber-900">
-                                  Aberto agora
+                                  Em foco
                                 </span>
                               ) : null}
                             </div>
@@ -3632,7 +3758,7 @@ function OrdersPageContent() {
             </div>
             {selectedOrderIsCancelled ? (
               <p className="mt-2 text-xs text-rose-600">
-                Pedido cancelado. O fluxo de etapas foi bloqueado.
+                Pedido cancelado. Etapas bloqueadas.
               </p>
             ) : null}
           </div>
@@ -3673,7 +3799,7 @@ function OrdersPageContent() {
               </div>
               {selectedCustomer?.deletedAt ? (
                 <p className="mt-1 text-xs text-amber-600">
-                  Cliente excluído em {selectedCustomerDeletedAtLabel}. O pedido mantém o historico.
+                  Cliente excluido em {selectedCustomerDeletedAtLabel}. Pedido mantido.
                 </p>
               ) : null}
             </div>
@@ -3682,13 +3808,71 @@ function OrdersPageContent() {
               className="app-button app-button-danger"
               onClick={() => removeOrder(selectedOrder.id!)}
             >
-              Excluir pedido
+              Excluir
             </button>
+          </div>
+          <div className="mt-3 grid gap-2 rounded-2xl border border-white/70 bg-white/80 p-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                  COBRANCA PIX
+                </p>
+                <p className="text-sm font-semibold text-neutral-900">
+                  {selectedOrderPaymentStatus === 'PAGO'
+                    ? 'Pedido pago.'
+                    : selectedOrderPixCharge?.payable
+                    ? `Saldo ${formatCurrencyBR(selectedOrderBalanceDue)} pronto para enviar no WhatsApp`
+                    : `Saldo ${formatCurrencyBR(selectedOrderBalanceDue)} em modo de desenvolvimento`}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="app-button app-button-primary text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => {
+                  void sendSelectedOrderPixWhatsApp();
+                }}
+                disabled={
+                  selectedOrderPaymentStatus === 'PAGO' ||
+                  !selectedOrderPixCharge ||
+                  selectedOrderPixChargeLoading ||
+                  isSendingSelectedOrderPixWhatsApp ||
+                  !selectedCustomer?.phone
+                }
+              >
+                {isSendingSelectedOrderPixWhatsApp ? 'Enviando...' : 'Enviar PIX no WhatsApp'}
+              </button>
+            </div>
+            {selectedOrderPaymentStatus === 'PAGO' ? (
+              <p className="text-xs text-neutral-600">
+                Total pago: {formatCurrencyBR(selectedOrder.amountPaid ?? selectedOrder.total ?? 0)}.
+              </p>
+            ) : selectedOrderPixChargeLoading ? (
+              <p className="text-xs text-neutral-600">Carregando cobranca PIX...</p>
+            ) : selectedOrderPixCharge ? (
+              <>
+                <p className="text-xs text-neutral-600">
+                  O envio faz 2 mensagens seguidas: a primeira com o contexto do pedido e a segunda so com a chave PIX.
+                </p>
+                {!selectedCustomer?.phone ? (
+                  <p className="text-xs font-medium text-rose-700">Cliente sem telefone valido para WhatsApp.</p>
+                ) : null}
+                {selectedOrderPixCharge.expiresAt ? (
+                  <p className="text-xs text-neutral-600">
+                    Referencia: vence em{' '}
+                    {formatOrderDateTimeLabel(safeDateFromIso(selectedOrderPixCharge.expiresAt)) || 'data invalida'}.
+                  </p>
+                ) : null}
+              </>
+            ) : selectedOrderPixChargeError ? (
+              <p className="text-xs font-medium text-rose-700">{selectedOrderPixChargeError}</p>
+            ) : (
+              <p className="text-xs text-neutral-600">Sem cobranca PIX disponivel.</p>
+            )}
           </div>
           <div>
             <div className="mb-3 grid gap-3 rounded-2xl border border-white/70 bg-white/80 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
               <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
-                Data e horario
+                Data e hora
                 <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px]">
                   <input
                     className="app-input"
@@ -3723,13 +3907,13 @@ function OrdersPageContent() {
                 </div>
               </label>
               <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
-                Observacoes
+                Obs.
                 <input
                   className="app-input"
                   type="text"
                   value={selectedOrderEditNotes}
                   onChange={(event) => setSelectedOrderEditNotes(event.target.value)}
-                  placeholder="Observacoes do pedido"
+                  placeholder="Obs."
                 />
               </label>
               <button
@@ -3738,7 +3922,7 @@ function OrdersPageContent() {
                 onClick={saveSelectedOrderEdit}
                 disabled={isSavingSelectedOrderEdit}
               >
-                {isSavingSelectedOrderEdit ? 'Salvando...' : 'Salvar edicao'}
+                {isSavingSelectedOrderEdit ? 'Salvando...' : 'Salvar'}
               </button>
               {selectedOrderEditError ? (
                 <p className="text-xs font-medium text-rose-700 md:col-span-3">{selectedOrderEditError}</p>
@@ -3804,7 +3988,7 @@ function OrdersPageContent() {
                       {isEditingBox ? (
                         <div className="mt-2 grid gap-2 rounded-xl border border-white/80 bg-white/90 p-2.5">
                           <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
-                            Detalhamento • {selectedOrderEditingBoxDraftTotalUnits}/{box.targetUnits} un
+                            Itens • {selectedOrderEditingBoxDraftTotalUnits}/{box.targetUnits} un
                           </p>
                           <div className="grid gap-1.5">
                             {selectedOrderEditingBoxRows.map((row) => {
@@ -3936,7 +4120,7 @@ function OrdersPageContent() {
                           ) : null}
                           {!selectedOrderAllowsBoxEdit ? (
                             <p className="text-xs text-amber-700">
-                              O status atual do pedido nao permite editar caixas.
+                              Esse status bloqueia a edicao das caixas.
                             </p>
                           ) : null}
                           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -3955,7 +4139,7 @@ function OrdersPageContent() {
                               {isDeletingSelectedOrderEditingBox
                                 ? 'Excluindo...'
                                 : box.key === SELECTED_ORDER_NEW_BOX_KEY
-                                  ? 'Descartar caixa'
+                                  ? 'Descartar'
                                   : 'Excluir caixa'}
                             </button>
                             <button
@@ -3979,7 +4163,7 @@ function OrdersPageContent() {
                                 selectedOrderEditingBoxDraftTotalUnits !== box.targetUnits
                               }
                             >
-                              {isSavingSelectedOrderEditingBox ? 'Salvando...' : 'Salvar caixa'}
+                              {isSavingSelectedOrderEditingBox ? 'Salvando...' : 'Salvar'}
                             </button>
                           </div>
                         </div>
@@ -3989,7 +4173,7 @@ function OrdersPageContent() {
                 })}
               </div>
             ) : (
-              <p className="mt-3 text-xs text-neutral-500">Sem caixas neste pedido.</p>
+              <p className="mt-3 text-xs text-neutral-500">Sem caixas.</p>
             )}
           </div>
 
@@ -4080,7 +4264,7 @@ function OrdersPageContent() {
                               : 'border-emerald-200 bg-emerald-50 text-emerald-700'
                           }`}
                         >
-                          {massPrepHasMissingForDraft ? 'Ingredientes insuficientes' : 'Ingredientes ok'}
+                          {massPrepHasMissingForDraft ? 'Falta insumo' : 'Ingredientes ok'}
                         </span>
                       ) : null}
                     </div>
@@ -4135,7 +4319,7 @@ function OrdersPageContent() {
 
               {massPrepStockLoading ? (
                 <p className="rounded-2xl border border-dashed border-neutral-200 bg-white/70 px-3 py-4 text-sm text-neutral-500">
-                  Carregando saldo do estoque...
+                  Carregando estoque...
                 </p>
               ) : massPrepStockError ? (
                 <p className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-4 text-sm text-rose-700">
@@ -4146,11 +4330,11 @@ function OrdersPageContent() {
                   <article className="mass-prep-ready-highlight">
                     <h4 className="mass-prep-ready-highlight__title">MASSA PRONTA</h4>
                     <p className="text-xs text-neutral-600">
-                      Batida operacional: 2 receitas = 42 broas. Se faltar insumo, cai para 1 receita ={' '}
+                      Padrao: 2 receitas = 42 broas. Se faltar insumo: 1 receita ={' '}
                       {MASS_READY_BROAS_PER_RECIPE} broas.
                     </p>
                     <p className="text-xs text-neutral-600">
-                      Proxima batida: {massPrepDraftTargetRecipes} receita(s) ={' '}
+                      Proxima: {massPrepDraftTargetRecipes} receita(s) ={' '}
                       {massPrepDraftTargetRecipes * MASS_READY_BROAS_PER_RECIPE} broa(s).
                     </p>
                     <button
@@ -4188,7 +4372,7 @@ function OrdersPageContent() {
 
                   {massPrepIngredientCards.length === 0 ? (
                     <p className="rounded-2xl border border-dashed border-neutral-200 bg-white/70 px-3 py-4 text-sm text-neutral-500">
-                      Nenhum ingrediente de estoque encontrado.
+                      Sem ingredientes no estoque.
                     </p>
                   ) : null}
 
@@ -4204,10 +4388,10 @@ function OrdersPageContent() {
                           <p className="mass-prep-stock-card__category">{inventoryCategoryLabel(card.category)}</p>
                           <h4 className="mass-prep-stock-card__name">{card.name}</h4>
                           <p className="mass-prep-stock-card__balance">
-                            Saldo atual: {formatInventoryBalance(card.balance)} {card.unit}
+                            Saldo: {formatInventoryBalance(card.balance)} {card.unit}
                           </p>
                           <label className="mass-prep-stock-card__edit-label">
-                            Ajustar saldo ({card.unit})
+                            Novo saldo ({card.unit})
                             <input
                               type="text"
                               inputMode="decimal"
@@ -4225,12 +4409,12 @@ function OrdersPageContent() {
                                 }));
                               }}
                               onBlur={() => {
-                                void saveMassPrepItemBalance(card.itemId, { silent: true });
+                                void saveMassPrepItemBalance(card.itemId);
                               }}
                               onKeyDown={(event) => {
                                 if (event.key !== 'Enter') return;
                                 event.preventDefault();
-                                void saveMassPrepItemBalance(card.itemId, { silent: true });
+                                void saveMassPrepItemBalance(card.itemId);
                               }}
                               placeholder="0"
                               disabled={isSavingItem}
@@ -4256,7 +4440,7 @@ function OrdersPageContent() {
         onClick={openNewOrderModal}
         aria-label="Novo pedido"
       >
-        NOVO PEDIDO
+        Novo pedido
       </button>
       </BuilderLayoutProvider>
     </>

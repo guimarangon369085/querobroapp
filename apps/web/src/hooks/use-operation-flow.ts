@@ -62,7 +62,7 @@ function useOperationFlowState(options: UseOperationFlowOptions = {}): UseOperat
 
     try {
       const [products, customers, orders, payments, boms] = await Promise.all([
-        apiFetch<Product[]>('/products'),
+        apiFetch<Product[]>('/inventory-products'),
         apiFetch<Customer[]>('/customers'),
         apiFetch<Order[]>('/orders'),
         apiFetch<Payment[]>('/payments'),

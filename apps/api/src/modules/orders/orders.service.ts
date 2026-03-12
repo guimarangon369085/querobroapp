@@ -2,7 +2,15 @@ import { BadRequestException, Injectable, NotFoundException, Inject } from '@nes
 import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
-import { OrderItemSchema, OrderSchema, OrderStatusEnum } from '@querobroapp/shared';
+import {
+  ExternalOrderSubmissionSchema,
+  OrderIntakeMetaSchema,
+  OrderIntakeSchema,
+  OrderItemSchema,
+  OrderSchema,
+  OrderStatusEnum,
+  PixChargeSchema
+} from '@querobroapp/shared';
 import { z } from 'zod';
 import {
   addInventoryLookupItem,
@@ -22,14 +30,26 @@ import {
   resolveInventoryFamilyItemIds,
   resolvePlannedMassPrepRecipes
 } from '../inventory/inventory-formulas.js';
+import { normalizePhone, normalizeText, normalizeTitle } from '../../common/normalize.js';
+import { PaymentsService } from '../payments/payments.service.js';
+import { WhatsAppService } from '../whatsapp/whatsapp.service.js';
 
 const updateSchema = OrderSchema.partial().omit({ id: true, createdAt: true, items: true });
 const replaceItemsSchema = z.object({
   items: z.array(OrderItemSchema.pick({ productId: true, quantity: true })).min(1)
 });
 const markPaidSchema = z.object({
-  method: z.string().trim().min(1).optional(),
   paidAt: z.string().datetime().optional().nullable()
+});
+
+const whatsappFlowIntakeSchema = OrderIntakeSchema.omit({ source: true }).extend({
+  source: z
+    .object({
+      externalId: z.string().trim().min(1).max(160).optional().nullable(),
+      idempotencyKey: z.string().trim().min(1).max(160).optional().nullable(),
+      originLabel: z.string().trim().min(1).max(160).optional().nullable()
+    })
+    .default({})
 });
 
 const statusTransitions: Record<string, string[]> = {
@@ -42,6 +62,7 @@ const statusTransitions: Record<string, string[]> = {
 };
 
 const MASS_PREP_EVENT_SCOPE = 'MASS_PREP_EVENT';
+const ORDER_INTAKE_SCOPE = 'ORDER_INTAKE';
 const MASS_PREP_EVENT_NAME = 'FAZER MASSA';
 const MASS_PREP_EVENT_DURATION_MINUTES = 60;
 const ORDER_BOX_PRICE_CUSTOM = 52;
@@ -89,6 +110,10 @@ type OrderWithRelations = Prisma.OrderGetPayload<{
   include: { items: true; customer: true; payments: true };
 }>;
 type TransactionClient = Prisma.TransactionClient;
+type OrderIntakePayload = z.infer<typeof OrderIntakeSchema>;
+type OrderIntakeMeta = z.infer<typeof OrderIntakeMetaSchema>;
+type PixCharge = z.infer<typeof PixChargeSchema>;
+type ExternalOrderSubmissionPayload = z.infer<typeof ExternalOrderSubmissionSchema>;
 
 type MassPrepEvent = z.infer<typeof massPrepEventSchema>;
 type OrderFlavorCode = 'T' | 'G' | 'D' | 'Q' | 'R';
@@ -105,11 +130,22 @@ type InventoryLookupItem = {
 
 @Injectable()
 export class OrdersService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(PaymentsService) private readonly paymentsService: PaymentsService,
+    @Inject(WhatsAppService) private readonly whatsAppService: WhatsAppService
+  ) {}
 
   private toMoney(value: number) {
     if (!Number.isFinite(value)) return 0;
     return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+
+  private formatCurrencyBR(value: number) {
+    return this.toMoney(value).toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'BRL'
+    });
   }
 
   private toUnitPrice(value: number | null | undefined) {
@@ -1037,6 +1073,541 @@ export class OrdersService {
     return order;
   }
 
+  private intakeIdemKey(payload: OrderIntakePayload) {
+    const rawKey = payload.source.idempotencyKey?.trim() || payload.source.externalId?.trim();
+    if (!rawKey) return null;
+    return `${payload.source.channel}:${rawKey}`;
+  }
+
+  private intakeRequestHash(payload: OrderIntakePayload) {
+    return JSON.stringify(payload);
+  }
+
+  private intakeRecordExpiry() {
+    const expiresAt = new Date();
+    expiresAt.setFullYear(expiresAt.getFullYear() + 10);
+    return expiresAt;
+  }
+
+  private parseExternalOrderSubmission(
+    payload: unknown,
+    params: {
+      defaultChannel: 'GOOGLE_FORM' | 'PUBLIC_FORM' | 'WHATSAPP_FLOW';
+      defaultOriginLabel: string;
+    }
+  ) {
+    const raw = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
+    const source =
+      raw.source && typeof raw.source === 'object' ? (raw.source as Record<string, unknown>) : {};
+
+    return ExternalOrderSubmissionSchema.parse({
+      ...raw,
+      source: {
+        ...source,
+        channel: source.channel ?? params.defaultChannel,
+        originLabel: source.originLabel ?? params.defaultOriginLabel
+      }
+    });
+  }
+
+  private async resolveActiveFlavorProductIdByCode() {
+    const products = await this.prisma.product.findMany({
+      where: { active: true },
+      select: { id: true, name: true },
+      orderBy: { id: 'asc' }
+    });
+    const productIdByCode = new Map<OrderFlavorCode, number>();
+
+    for (const product of products) {
+      const code = this.resolveOrderFlavorCodeFromProductName(product.name);
+      if (!code || productIdByCode.has(code)) continue;
+      productIdByCode.set(code, product.id);
+    }
+
+    return productIdByCode;
+  }
+
+  private buildOrderItemsFromFlavorCounts(
+    flavorCounts: ExternalOrderSubmissionPayload['flavors'],
+    productIdByCode: Map<OrderFlavorCode, number>
+  ) {
+    return (['T', 'G', 'D', 'Q', 'R'] as const)
+      .map((code) => {
+        const quantity = Math.max(Math.floor(flavorCounts[code] || 0), 0);
+        if (quantity <= 0) return null;
+        const productId = productIdByCode.get(code);
+        if (!productId) {
+          throw new BadRequestException(`Produto ativo nao encontrado para o sabor ${code}.`);
+        }
+        return { productId, quantity };
+      })
+      .filter((item): item is { productId: number; quantity: number } => Boolean(item));
+  }
+
+  private async intakeExternalSubmission(
+    data: ExternalOrderSubmissionPayload,
+    params: {
+      intakeChannel: 'CUSTOMER_LINK' | 'WHATSAPP_FLOW';
+    }
+  ) {
+    const productIdByCode = await this.resolveActiveFlavorProductIdByCode();
+    const items = this.buildOrderItemsFromFlavorCounts(data.flavors, productIdByCode);
+
+    return this.intake({
+      version: 1,
+      intent: 'CONFIRMED',
+      customer: {
+        name: data.customer.name,
+        phone: data.customer.phone ?? null,
+        address: data.customer.address ?? null,
+        deliveryNotes: data.customer.deliveryNotes ?? null
+      },
+      fulfillment: {
+        mode: data.fulfillment.mode,
+        scheduledAt: data.fulfillment.scheduledAt
+      },
+      order: {
+        items,
+        notes: data.notes ?? undefined
+      },
+      payment: {
+        method: 'pix',
+        status: 'PENDENTE',
+        dueAt: data.fulfillment.scheduledAt
+      },
+      source: {
+        channel: params.intakeChannel,
+        externalId: data.source.externalId ?? null,
+        idempotencyKey: data.source.idempotencyKey ?? data.source.externalId ?? null,
+        originLabel: data.source.originLabel ?? null
+      }
+    });
+  }
+
+  private normalizeCustomerName(value?: string | null) {
+    return normalizeTitle(value ?? undefined) ?? normalizeText(value ?? undefined) ?? null;
+  }
+
+  private async resolveIntakeCustomer(
+    tx: TransactionClient,
+    customer: OrderIntakePayload['customer']
+  ) {
+    if ('customerId' in customer) {
+      const existing = await tx.customer.findUnique({ where: { id: customer.customerId } });
+      if (!existing) throw new NotFoundException('Cliente nao encontrado');
+      if (existing.deletedAt) {
+        throw new BadRequestException('Cliente foi excluido e nao pode receber novos pedidos.');
+      }
+      return existing;
+    }
+
+    const normalizedName = this.normalizeCustomerName(customer.name);
+    if (!normalizedName) {
+      throw new BadRequestException('Nome do cliente e obrigatorio.');
+    }
+
+    const normalizedPhone = normalizePhone(customer.phone);
+    const normalizedAddress = normalizeTitle(customer.address ?? undefined) ?? null;
+    const normalizedDeliveryNotes = normalizeText(customer.deliveryNotes ?? undefined);
+
+    let existing = normalizedPhone
+      ? await tx.customer.findFirst({
+          where: {
+            deletedAt: null,
+            phone: normalizedPhone
+          },
+          orderBy: { id: 'desc' }
+        })
+      : null;
+
+    if (!existing) {
+      existing = await tx.customer.findFirst({
+        where: {
+          deletedAt: null,
+          name: normalizedName
+        },
+        orderBy: { id: 'desc' }
+      });
+    }
+
+    if (existing) {
+      const shouldUpdate =
+        (normalizedPhone && !existing.phone) ||
+        (normalizedAddress && !existing.address) ||
+        (normalizedDeliveryNotes && !existing.deliveryNotes);
+      if (!shouldUpdate) return existing;
+
+      return tx.customer.update({
+        where: { id: existing.id },
+        data: {
+          phone: existing.phone || normalizedPhone,
+          address: existing.address || normalizedAddress,
+          deliveryNotes: existing.deliveryNotes || normalizedDeliveryNotes
+        }
+      });
+    }
+
+    return tx.customer.create({
+      data: {
+        name: normalizedName,
+        firstName: normalizedName.split(' ')[0] || null,
+        lastName: normalizedName.includes(' ') ? normalizedName.split(' ').slice(1).join(' ') : null,
+        email: null,
+        phone: normalizedPhone,
+        address: normalizedAddress,
+        addressLine1: normalizedAddress,
+        addressLine2: null,
+        neighborhood: null,
+        city: null,
+        state: null,
+        postalCode: null,
+        country: null,
+        placeId: null,
+        lat: null,
+        lng: null,
+        deliveryNotes: normalizedDeliveryNotes
+      }
+    });
+  }
+
+  private async priceOrderItems(
+    tx: TransactionClient,
+    items: Array<{ productId: number; quantity: number }>
+  ) {
+    const parsedItems = items.map((item) =>
+      OrderItemSchema.pick({ productId: true, quantity: true }).parse(item)
+    );
+    const productIds = Array.from(new Set(parsedItems.map((item) => item.productId)));
+    const products = await tx.product.findMany({ where: { id: { in: productIds } } });
+    const productMap = new Map(products.map((product) => [product.id, product]));
+
+    const itemsData: Array<{ productId: number; quantity: number; unitPrice: number; total: number }> = [];
+    for (const item of parsedItems) {
+      const product = productMap.get(item.productId);
+      if (!product) throw new NotFoundException('Produto nao encontrado');
+      const unitPrice = this.toUnitPrice(product.price);
+      const total = this.toMoney(unitPrice * item.quantity);
+      itemsData.push({ productId: item.productId, quantity: item.quantity, unitPrice, total });
+    }
+
+    const subtotal = await this.calculateOrderSubtotalFromItems(tx, parsedItems);
+    return { parsedItems, itemsData, subtotal };
+  }
+
+  private intakeStageFrom(
+    payload: OrderIntakePayload,
+    order: ReturnType<OrdersService['withFinancial']>,
+    payment: {
+      id: number;
+      status: string;
+      paidAt: Date | null;
+      dueDate: Date | null;
+      providerRef: string | null;
+      method: string;
+    } | null
+  ) {
+    if (payload.intent === 'DRAFT') return 'DRAFT' as const;
+
+    const pixStatus = payment && (payment.status === 'PAGO' || payment.paidAt) ? 'PAGO' : 'PENDENTE';
+    if (payment && pixStatus === 'PENDENTE') return 'PIX_PENDING' as const;
+    if (payment && pixStatus === 'PAGO' && order.scheduledAt) return 'SCHEDULED' as const;
+    if (payment && pixStatus === 'PAGO') return 'PAID' as const;
+    return 'CONFIRMED' as const;
+  }
+
+  private buildOrderIntakeMeta(
+    payload: OrderIntakePayload,
+    order: ReturnType<OrdersService['withFinancial']>,
+    payment: {
+      id: number;
+      status: string;
+      paidAt: Date | null;
+      dueDate: Date | null;
+      providerRef: string | null;
+      method: string;
+    } | null,
+    pixCharge: PixCharge | null
+  ) {
+    const pixStatus = payment && (payment.status === 'PAGO' || payment.paidAt) ? 'PAGO' : 'PENDENTE';
+    return OrderIntakeMetaSchema.parse({
+      version: 1,
+      channel: payload.source.channel,
+      intent: payload.intent,
+      stage: this.intakeStageFrom(payload, order, payment),
+      fulfillmentMode: payload.fulfillment.mode,
+      paymentMethod: 'pix',
+      pixStatus,
+      paymentId: payment?.id ?? null,
+      dueAt: payment?.dueDate?.toISOString() ?? null,
+      paidAt: payment?.paidAt?.toISOString() ?? null,
+      providerRef: payment?.providerRef ?? null,
+      pixCharge,
+      orderId: order.id!,
+      customerId: order.customerId
+    });
+  }
+
+  private async findStoredIntakeResult(
+    tx: TransactionClient,
+    idemKey: string
+  ): Promise<{ order: ReturnType<OrdersService['withFinancial']>; intake: OrderIntakeMeta } | null> {
+    const record = await tx.idempotencyRecord.findUnique({
+      where: {
+        scope_idemKey: {
+          scope: ORDER_INTAKE_SCOPE,
+          idemKey
+        }
+      }
+    });
+    if (!record?.responseJson) return null;
+
+    try {
+      const parsed = JSON.parse(record.responseJson) as {
+        orderId?: number;
+        intake?: unknown;
+      };
+      if (!parsed.orderId || !parsed.intake) return null;
+      const order = await tx.order.findUnique({
+        where: { id: parsed.orderId },
+        include: { items: true, customer: true, payments: true }
+      });
+      if (!order) return null;
+      return {
+        order: this.withFinancial(order),
+        intake: OrderIntakeMetaSchema.parse({
+          pixCharge: null,
+          ...(typeof parsed.intake === 'object' && parsed.intake ? parsed.intake : {})
+        })
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private async saveIntakeResult(
+    tx: TransactionClient,
+    idemKey: string,
+    requestHash: string,
+    result: { order: ReturnType<OrdersService['withFinancial']>; intake: OrderIntakeMeta }
+  ) {
+    await tx.idempotencyRecord.upsert({
+      where: {
+        scope_idemKey: {
+          scope: ORDER_INTAKE_SCOPE,
+          idemKey
+        }
+      },
+      update: {
+        requestHash,
+        responseJson: JSON.stringify({
+          orderId: result.order.id,
+          intake: result.intake
+        }),
+        expiresAt: this.intakeRecordExpiry()
+      },
+      create: {
+        scope: ORDER_INTAKE_SCOPE,
+        idemKey,
+        requestHash,
+        responseJson: JSON.stringify({
+          orderId: result.order.id,
+          intake: result.intake
+        }),
+        expiresAt: this.intakeRecordExpiry()
+      }
+    });
+  }
+
+  async intake(payload: unknown) {
+    const data = OrderIntakeSchema.parse(payload);
+
+    return this.prisma.$transaction(async (tx) => {
+      const idemKey = this.intakeIdemKey(data);
+      const requestHash = this.intakeRequestHash(data);
+
+      if (idemKey) {
+        const existingRecord = await tx.idempotencyRecord.findUnique({
+          where: {
+            scope_idemKey: {
+              scope: ORDER_INTAKE_SCOPE,
+              idemKey
+            }
+          }
+        });
+
+        if (existingRecord) {
+          if (existingRecord.requestHash !== requestHash) {
+            throw new BadRequestException('Chave de idempotencia reutilizada com payload diferente.');
+          }
+          const stored = await this.findStoredIntakeResult(tx, idemKey);
+          if (stored) return stored;
+        }
+      }
+
+      const customer = await this.resolveIntakeCustomer(tx, data.customer);
+      const { itemsData, subtotal } = await this.priceOrderItems(tx, data.order.items);
+      const discount = this.toMoney(data.order.discount ?? 0);
+      const total = this.toMoney(Math.max(subtotal - discount, 0));
+      const scheduledAt = this.parseOptionalDateTime(data.fulfillment.scheduledAt);
+
+      const createdOrder = await tx.order.create({
+        data: {
+          customerId: customer.id,
+          status: 'ABERTO',
+          notes: data.order.notes ?? null,
+          scheduledAt,
+          subtotal,
+          discount,
+          total,
+          items: {
+            create: itemsData
+          }
+        },
+        include: { items: true, customer: true, payments: true }
+      });
+
+      let paymentRecord: {
+        id: number;
+        orderId: number;
+        amount: number;
+        status: string;
+        paidAt: Date | null;
+        dueDate: Date | null;
+        providerRef: string | null;
+        method: string;
+      } | null = null;
+
+      if (data.intent !== 'DRAFT' && data.payment) {
+        paymentRecord = await tx.payment.create({
+          data: {
+            orderId: createdOrder.id,
+            amount: total,
+            method: 'pix',
+            status: data.payment.status,
+            dueDate: data.payment.dueAt ? new Date(data.payment.dueAt) : scheduledAt,
+            paidAt:
+              data.payment.status === 'PAGO'
+                ? data.payment.paidAt
+                  ? new Date(data.payment.paidAt)
+                  : new Date()
+                : null,
+            providerRef: data.payment.providerRef ?? null
+          }
+        });
+
+        if (paymentRecord.status !== 'PAGO' && !paymentRecord.paidAt) {
+          paymentRecord = await this.paymentsService.ensurePixChargeOnRecord(tx, paymentRecord);
+        }
+      }
+
+      const hydratedOrder = await tx.order.findUnique({
+        where: { id: createdOrder.id },
+        include: { items: true, customer: true, payments: true }
+      });
+      if (!hydratedOrder) throw new NotFoundException('Pedido nao encontrado');
+
+      await this.syncOrderInventoryAndMassPrepEvent(tx, hydratedOrder);
+
+      const freshOrder = await tx.order.findUnique({
+        where: { id: createdOrder.id },
+        include: { items: true, customer: true, payments: true }
+      });
+      if (!freshOrder) throw new NotFoundException('Pedido nao encontrado');
+
+      const order = this.withFinancial(freshOrder);
+      const latestPayment =
+        paymentRecord
+          ? freshOrder.payments.find((entry) => entry.id === paymentRecord?.id) ?? paymentRecord
+          : null;
+      const pixCharge =
+        latestPayment && latestPayment.method === 'pix'
+          ? this.paymentsService.buildPixCharge(latestPayment)
+          : null;
+      const result = {
+        order,
+        intake: this.buildOrderIntakeMeta(data, order, latestPayment, pixCharge)
+      };
+
+      if (idemKey) {
+        await this.saveIntakeResult(tx, idemKey, requestHash, result);
+      }
+
+      return result;
+    });
+  }
+
+  async intakeWhatsAppFlow(payload: unknown) {
+    const data = whatsappFlowIntakeSchema.parse(payload);
+    return this.intake({
+      ...data,
+      payment: data.payment ?? {
+        method: 'pix',
+        status: 'PENDENTE',
+        dueAt: data.fulfillment.scheduledAt ?? null
+      },
+      source: {
+        channel: 'WHATSAPP_FLOW',
+        externalId: data.source.externalId ?? null,
+        idempotencyKey: data.source.idempotencyKey ?? data.source.externalId ?? null,
+        originLabel: data.source.originLabel ?? 'whatsapp-flow'
+      }
+    });
+  }
+
+  async intakeCustomerForm(payload: unknown) {
+    const data = this.parseExternalOrderSubmission(payload, {
+      defaultChannel: 'PUBLIC_FORM',
+      defaultOriginLabel: 'customer-form'
+    });
+    return this.intakeExternalSubmission(data, {
+      intakeChannel: data.source.channel === 'WHATSAPP_FLOW' ? 'WHATSAPP_FLOW' : 'CUSTOMER_LINK'
+    });
+  }
+
+  async intakeGoogleForm(payload: unknown) {
+    const data = this.parseExternalOrderSubmission(payload, {
+      defaultChannel: 'GOOGLE_FORM',
+      defaultOriginLabel: 'google-form'
+    });
+    return this.intakeExternalSubmission(data, {
+      intakeChannel: 'CUSTOMER_LINK'
+    });
+  }
+
+  async getPixCharge(orderId: number) {
+    return this.paymentsService.getOrderPixCharge(orderId);
+  }
+
+  async sendPixChargeWhatsApp(orderId: number) {
+    const order = await this.getRaw(orderId);
+    const financialOrder = this.withFinancial(order);
+    if (financialOrder.paymentStatus === 'PAGO') {
+      throw new BadRequestException('Pedido ja esta pago. Nao ha PIX para enviar.');
+    }
+
+    const phone = normalizePhone(order.customer?.phone);
+    if (!phone) {
+      throw new BadRequestException('Cliente sem telefone valido para WhatsApp.');
+    }
+
+    const pixCharge = await this.paymentsService.getOrderPixCharge(orderId);
+    if (!pixCharge.payable) {
+      throw new BadRequestException('Cobranca PIX ainda nao esta pronta para envio.');
+    }
+
+    const amount = financialOrder.balanceDue > 0 ? financialOrder.balanceDue : financialOrder.total;
+    const customerName =
+      normalizeTitle(order.customer?.firstName || order.customer?.name || undefined) ?? 'cliente';
+
+    return this.whatsAppService.sendPixCharge({
+      customerName,
+      phone,
+      orderId: order.id,
+      amountLabel: this.formatCurrencyBR(amount),
+      copyPasteCode: pixCharge.copyPasteCode
+    });
+  }
+
   async list() {
     const orders = await this.prisma.order.findMany({
       include: { items: true, customer: true, payments: true },
@@ -1208,54 +1779,33 @@ export class OrdersService {
     if (items.length === 0) {
       throw new BadRequestException('Itens sao obrigatorios');
     }
-
-    return this.prisma.$transaction(async (tx) => {
-      const customer = await tx.customer.findUnique({ where: { id: data.customerId } });
-      if (!customer) throw new NotFoundException('Cliente nao encontrado');
-      if (customer.deletedAt) {
-        throw new BadRequestException('Cliente foi excluido e nao pode receber novos pedidos.');
+    const result = await this.intake({
+      version: 1,
+      intent: 'CONFIRMED',
+      customer: {
+        customerId: data.customerId
+      },
+      fulfillment: {
+        mode: 'DELIVERY',
+        scheduledAt: data.scheduledAt ?? undefined
+      },
+      order: {
+        items,
+        discount: data.discount ?? 0,
+        notes: data.notes ?? undefined
+      },
+      payment: {
+        method: 'pix',
+        status: 'PENDENTE',
+        dueAt: data.scheduledAt ?? undefined
+      },
+      source: {
+        channel: 'INTERNAL_DASHBOARD',
+        originLabel: 'legacy-post-orders'
       }
-
-      const parsedItems = items.map((item) =>
-        OrderItemSchema.pick({ productId: true, quantity: true }).parse(item)
-      );
-
-      const productIds = Array.from(new Set(parsedItems.map((item) => item.productId)));
-      const products = await tx.product.findMany({ where: { id: { in: productIds } } });
-      const productMap = new Map(products.map((product) => [product.id, product]));
-
-      const itemsData = [] as Array<{ productId: number; quantity: number; unitPrice: number; total: number }>;
-      for (const item of parsedItems) {
-        const product = productMap.get(item.productId);
-        if (!product) throw new NotFoundException('Produto nao encontrado');
-        const unitPrice = this.toUnitPrice(product.price);
-        const total = this.toMoney(unitPrice * item.quantity);
-        itemsData.push({ productId: item.productId, quantity: item.quantity, unitPrice, total });
-      }
-
-      const subtotal = await this.calculateOrderSubtotalFromItems(tx, parsedItems);
-      const discount = this.toMoney(data.discount ?? 0);
-      const total = this.toMoney(Math.max(subtotal - discount, 0));
-
-      const createdOrder = await tx.order.create({
-        data: {
-          customerId: data.customerId,
-          notes: data.notes ?? null,
-          scheduledAt: this.parseOptionalDateTime(data.scheduledAt),
-          subtotal,
-          discount,
-          total,
-          items: {
-            create: itemsData
-          }
-        },
-        include: { items: true, customer: true, payments: true }
-      });
-
-      await this.syncOrderInventoryAndMassPrepEvent(tx, createdOrder);
-
-      return this.withFinancial(createdOrder);
     });
+
+    return result.order;
   }
 
   async update(id: number, payload: unknown) {
@@ -1527,15 +2077,33 @@ export class OrdersService {
         return this.withFinancial(order);
       }
 
-      await tx.payment.create({
-        data: {
-          orderId: order.id,
-          amount: balanceDue,
-          method: data.method?.trim() || 'pix',
-          status: 'PAGO',
-          paidAt: data.paidAt ? new Date(data.paidAt) : new Date()
-        }
-      });
+      const reusablePendingPayment = order.payments.find(
+        (payment) =>
+          payment.status !== 'PAGO' &&
+          !payment.paidAt &&
+          payment.method.trim().toLowerCase() === 'pix' &&
+          Math.abs(this.toMoney(payment.amount) - balanceDue) <= 0.00001
+      );
+
+      if (reusablePendingPayment) {
+        await tx.payment.update({
+          where: { id: reusablePendingPayment.id },
+          data: {
+            status: 'PAGO',
+            paidAt: data.paidAt ? new Date(data.paidAt) : new Date()
+          }
+        });
+      } else {
+        await tx.payment.create({
+          data: {
+            orderId: order.id,
+            amount: balanceDue,
+            method: 'pix',
+            status: 'PAGO',
+            paidAt: data.paidAt ? new Date(data.paidAt) : new Date()
+          }
+        });
+      }
 
       const updated = await tx.order.findUnique({
         where: { id: orderId },

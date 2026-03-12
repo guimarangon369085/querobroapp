@@ -21,7 +21,7 @@ test('payment guardrails: bloqueia overpayment e total abaixo do valor pago', as
         ? () => request(apiUrl, `/customers/${created.customerId}`, { method: 'DELETE' })
         : null,
       created.productId
-        ? () => request(apiUrl, `/products/${created.productId}`, { method: 'DELETE' })
+        ? () => request(apiUrl, `/inventory-products/${created.productId}`, { method: 'DELETE' })
         : null
     ].filter(Boolean);
 
@@ -38,7 +38,7 @@ test('payment guardrails: bloqueia overpayment e total abaixo do valor pago', as
 
   const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-  const product = await request(apiUrl, '/products', {
+  const product = await request(apiUrl, '/inventory-products', {
     method: 'POST',
     body: {
       name: `Guardrail broa ${suffix}`,

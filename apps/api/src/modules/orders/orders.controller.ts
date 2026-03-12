@@ -1,13 +1,50 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Inject } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Headers,
+  Inject,
+  Param,
+  Patch,
+  Post,
+  Put,
+  UnauthorizedException
+} from '@nestjs/common';
 import { OrdersService } from './orders.service.js';
 import { parseWithSchema } from '../../common/validation.js';
 import { z } from 'zod';
+import { Public } from '../../security/public.decorator.js';
+import { getSecurityRuntimeConfig } from '../../security/security-config.js';
 
 const idSchema = z.coerce.number().int().positive();
+
+function extractBearerToken(authHeader?: string | null) {
+  const value = String(authHeader || '').trim();
+  if (!value) return '';
+  const match = value.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || '';
+}
 
 @Controller('orders')
 export class OrdersController {
   constructor(@Inject(OrdersService) private readonly service: OrdersService) {}
+
+  private assertExternalFormAccess(authorization?: string | null, explicitToken?: string | null) {
+    const configuredToken = String(process.env.ORDER_FORM_BRIDGE_TOKEN || '').trim();
+    const providedToken = String(explicitToken || '').trim() || extractBearerToken(authorization);
+
+    if (configuredToken) {
+      if (providedToken === configuredToken) return;
+      throw new UnauthorizedException('Token do bridge de formulario invalido.');
+    }
+
+    if (getSecurityRuntimeConfig().enabled) {
+      throw new UnauthorizedException(
+        'ORDER_FORM_BRIDGE_TOKEN obrigatorio para expor intake de formulario externo com auth ligada.'
+      );
+    }
+  }
 
   @Get()
   list() {
@@ -19,14 +56,56 @@ export class OrdersController {
     return this.service.listMassPrepEvents();
   }
 
-  @Get(':id')
-  get(@Param('id') id: string) {
-    return this.service.get(parseWithSchema(idSchema, id));
-  }
-
   @Post()
   create(@Body() body: unknown) {
     return this.service.create(body);
+  }
+
+  @Post('intake')
+  intake(@Body() body: unknown) {
+    return this.service.intake(body);
+  }
+
+  @Public()
+  @Post('intake/customer-form')
+  intakeCustomerForm(
+    @Body() body: unknown,
+    @Headers('authorization') authorization?: string,
+    @Headers('x-order-form-token') formToken?: string
+  ) {
+    this.assertExternalFormAccess(authorization, formToken);
+    return this.service.intakeCustomerForm(body);
+  }
+
+  @Public()
+  @Post('intake/google-form')
+  intakeGoogleForm(
+    @Body() body: unknown,
+    @Headers('authorization') authorization?: string,
+    @Headers('x-order-form-token') formToken?: string
+  ) {
+    this.assertExternalFormAccess(authorization, formToken);
+    return this.service.intakeGoogleForm(body);
+  }
+
+  @Post('intake/whatsapp-flow')
+  intakeWhatsAppFlow(@Body() body: unknown) {
+    return this.service.intakeWhatsAppFlow(body);
+  }
+
+  @Get(':id/pix-charge')
+  pixCharge(@Param('id') id: string) {
+    return this.service.getPixCharge(parseWithSchema(idSchema, id));
+  }
+
+  @Post(':id/send-pix-whatsapp')
+  sendPixWhatsApp(@Param('id') id: string) {
+    return this.service.sendPixChargeWhatsApp(parseWithSchema(idSchema, id));
+  }
+
+  @Get(':id')
+  get(@Param('id') id: string) {
+    return this.service.get(parseWithSchema(idSchema, id));
   }
 
   @Put(':id')

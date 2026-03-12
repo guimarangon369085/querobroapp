@@ -3,7 +3,6 @@ import type { SVGProps } from 'react';
 export type AppIconName =
   | 'pedidos'
   | 'clientes'
-  | 'produtos'
   | 'estoque'
   | 'refresh'
   | 'external'
@@ -89,16 +88,6 @@ export function AppIcon({ name, className }: { name: AppIconName; className?: st
           <path d="M12.3 16.8c.7-1.7 1.8-2.6 3.1-2.6 1.3 0 2.4.9 3.1 2.6" {...iconStroke} />
           <circle cx="8.2" cy="11.1" r=".7" fill="#f6aba3" />
           <circle cx="16.9" cy="11.7" r=".7" fill="#f6aba3" />
-        </svg>
-      );
-    case 'produtos':
-      return (
-        <svg {...iconProps(className)} aria-hidden="true">
-          <IconPlate tint="#fff7d9" />
-          <rect x="6.5" y="8" width="11" height="9.8" rx="2.2" fill="#fff8eb" stroke={ICON_OUTLINE} strokeWidth="1.2" />
-          <path d="M12 8v9.8M6.5 11.1h11" {...iconStroke} />
-          <circle cx="9.2" cy="13.8" r="1.1" fill="#ffa995" />
-          <circle cx="14.8" cy="13.8" r="1.1" fill="#9ed5ff" />
         </svg>
       );
     case 'estoque':

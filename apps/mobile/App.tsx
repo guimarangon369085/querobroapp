@@ -25,8 +25,6 @@ type OrderView = Order & {
   paymentStatus?: 'PENDENTE' | 'PARCIAL' | 'PAGO';
 };
 
-const paymentMethods = ['pix', 'dinheiro', 'cartao', 'transferencia'] as const;
-
 function toMoney(value: number) {
   if (!Number.isFinite(value)) return 0;
   return Math.round((value + Number.EPSILON) * 100) / 100;
@@ -71,7 +69,6 @@ export default function App() {
   const [showProductList, setShowProductList] = useState(false);
 
   const [paymentAmount, setPaymentAmount] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<(typeof paymentMethods)[number]>('pix');
 
   const productMap = useMemo(() => new Map(products.map((p) => [p.id!, p])), [products]);
   const orderSubtotal = useMemo(() => {
@@ -265,7 +262,7 @@ export default function App() {
         body: JSON.stringify({
           orderId: selectedOrder.id,
           amount,
-          method: paymentMethod,
+          method: 'pix',
           status: 'PAGO',
           paidAt: new Date().toISOString()
         })
@@ -298,7 +295,7 @@ export default function App() {
             try {
               await apiFetch(`/orders/${selectedOrder.id}/mark-paid`, {
                 method: 'PATCH',
-                body: JSON.stringify({ method: paymentMethod })
+                body: JSON.stringify({})
               });
               await loadAll();
               Alert.alert('OK', 'Pedido marcado como pago.');
@@ -695,17 +692,6 @@ export default function App() {
                 value={paymentAmount}
                 onChangeText={(text) => setPaymentAmount(text)}
               />
-              <View style={styles.chipsRow}>
-                {paymentMethods.map((method) => (
-                  <Pressable
-                    key={method}
-                    style={[styles.chip, paymentMethod === method && styles.chipActive]}
-                    onPress={() => setPaymentMethod(method)}
-                  >
-                    <Text style={[styles.chipText, paymentMethod === method && styles.chipTextActive]}>{method}</Text>
-                  </Pressable>
-                ))}
-              </View>
               <View style={styles.row}>
                 <Pressable style={[styles.secondaryButton, styles.halfButton]} onPress={registerPayment}>
                   <Text style={styles.secondaryButtonText}>Registrar</Text>

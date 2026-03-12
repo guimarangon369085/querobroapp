@@ -1,4 +1,11 @@
-import type { Customer, Product } from '@querobroapp/shared';
+import type {
+  Customer,
+  OrderIntake,
+  OrderIntakeMeta,
+  PixCharge,
+  Product,
+  WhatsAppPixDispatch
+} from '@querobroapp/shared';
 import { apiFetch } from '@/lib/api';
 import type {
   DeliveryReadiness,
@@ -15,15 +22,37 @@ export type OrdersWorkspaceData = {
   massPrepEvents: MassPrepEvent[];
 };
 
+export type OrderIntakeResult = {
+  order: OrderView;
+  intake: OrderIntakeMeta;
+};
+
 export async function fetchOrdersWorkspace(): Promise<OrdersWorkspaceData> {
   const [orders, customers, products, massPrepEvents] = await Promise.all([
     apiFetch<OrderView[]>('/orders'),
     apiFetch<Customer[]>('/customers'),
-    apiFetch<Product[]>('/products'),
+    apiFetch<Product[]>('/inventory-products'),
     apiFetch<MassPrepEvent[]>('/orders/mass-prep-events')
   ]);
 
   return { orders, customers, products, massPrepEvents };
+}
+
+export function submitOrderIntake(payload: OrderIntake) {
+  return apiFetch<OrderIntakeResult>('/orders/intake', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export function fetchOrderPixCharge(orderId: number) {
+  return apiFetch<PixCharge>(`/orders/${orderId}/pix-charge`);
+}
+
+export function sendOrderPixChargeWhatsApp(orderId: number) {
+  return apiFetch<WhatsAppPixDispatch>(`/orders/${orderId}/send-pix-whatsapp`, {
+    method: 'POST'
+  });
 }
 
 export function fetchOrderDeliveryReadiness(orderId: number) {

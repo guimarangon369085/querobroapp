@@ -43,7 +43,6 @@ model Product {
   active    Boolean         @default(true)
   createdAt DateTime        @default(now())
   items     OrderItem[]
-  movements StockMovement[]
   boms      Bom[]
 
   @@index([name])
@@ -64,7 +63,6 @@ model Order {
   customer           Customer            @relation(fields: [customerId], references: [id])
   items              OrderItem[]
   payments           Payment[]
-  stockMovements     StockMovement[]
   inventoryMovements InventoryMovement[]
 
   @@index([customerId])
@@ -98,22 +96,6 @@ model Payment {
 
   @@index([orderId])
   @@index([status])
-}
-
-model StockMovement {
-  id        Int      @id @default(autoincrement())
-  productId Int
-  type      String
-  quantity  Int
-  reason    String?
-  orderId   Int?
-  createdAt DateTime @default(now())
-  product   Product  @relation(fields: [productId], references: [id])
-  order     Order?   @relation(fields: [orderId], references: [id])
-
-  @@index([productId])
-  @@index([orderId])
-  @@index([createdAt])
 }
 
 model InventoryItem {

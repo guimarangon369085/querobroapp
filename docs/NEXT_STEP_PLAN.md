@@ -1,10 +1,13 @@
 # NEXT_STEP_PLAN
 
-Ultima atualizacao: 2026-03-11
+Ultima atualizacao: 2026-03-12
 
 ## Objetivo da fase atual
 
-Consolidar UX operacional em `Estoque` e `Pedidos` sobre um ambiente local ja validado em ciclo completo de religamento.
+Consolidar dois canais de captura de pedido sobre o mesmo nucleo:
+
+- operacao interna em `Pedidos`
+- captura externa em `/pedido` e `Google Forms`
 
 ## Gate operacional (concluido em 2026-03-11)
 
@@ -15,48 +18,49 @@ Consolidar UX operacional em `Estoque` e `Pedidos` sobre um ambiente local ja va
 
 ## Prioridade 1 (agora)
 
-### UX operacional em Estoque
+### Teste real do canal externo
 
-- Hierarquia por jornada real: `planejar -> comprar -> produzir -> conferir`.
-- Painel do dia com fila, broas alvo, fornadas e hora de inicio sugerida.
-- Lista rapida de compras por faltas D+1.
-- Validacao em desktop e mobile width com uso real.
+- Configurar `ORDER_FORM_BRIDGE_TOKEN` onde houver auth ligada.
+- Publicar a URL final do `web` para a pagina `/pedido`.
+- Montar o `Google Form` real com os labels definidos em `docs/GOOGLE_FORMS_BRIDGE.md`.
+- Colar o `scripts/google-form-bridge.gs` no Apps Script do formulario.
+- Validar uma submissao real ponta a ponta caindo no app com `PIX_PENDING`.
 
 Criterio de pronto:
-- operador decide o plano do dia em menos de 5 minutos.
+- cliente consegue abrir o link, enviar o pedido e receber o PIX sem intervencao manual de cadastro.
 
 ## Prioridade 2 (agora)
 
-### Refino final de Pedidos como agenda do dia
+### Refino final de Estoque e Pedidos
 
 - Continuar reduzindo densidade visual e scroll na visao `Dia`.
 - Extrair blocos grandes restantes de `orders-screen` para componentes menores.
-- Garantir consistencia total de clique inteiro em cards, listas e acoes.
-- Validar estados vazios, sem agendamento e mudanca de dia em desktop e mobile width.
+- Seguir limpando redundancias em `Estoque` agora que `Produtos` saiu da navegação.
+- Validar estados vazios e mudanca de dia em desktop e mobile width.
 
 Criterio de pronto:
 - operador navega o dia, cria pedido e atualiza status sem friccao nem ambiguidades.
 
 ## Prioridade 3 (agora)
 
-### Robustez do nucleo e cobertura
+### Migracao futura para WhatsApp Flow
 
-- Manter o app sem dependencias externas enquanto a operacao principal ainda estiver estabilizando.
-- Eliminar residuos legados de configuracao, docs e expectativas de integracao antiga.
-- Aumentar testes de dominio em pedidos, pagamentos, estoque, producao e entrega local.
-- Ampliar a cobertura de navegador alem do smoke e do E2E critico.
+- Reaproveitar o contrato externo atual (`customer-form`) em vez de criar outro dominio.
+- Trocar apenas a origem do payload quando houver numero dedicado.
+- Manter `PIX` simples no curto prazo: chave/copia e cola entregue ao cliente.
+- Postergar automacao de confirmacao financeira ate existir provedor adequado.
 
 Criterio de pronto:
-- regressao reduzida, ambiente de teste previsivel e reintegracao futura feita com base limpa.
+- numero dedicado entra sem refazer o fluxo de dominio.
 
 ## Ordem de execucao
 
-1. UX de estoque.
-2. Refino final de pedidos.
-3. Hardening extra do nucleo e dos testes.
+1. Teste real de `/pedido` e do `Google Forms`.
+2. Refino final de `Estoque` e `Pedidos`.
+3. Migracao futura para `WhatsApp Flow` sobre o mesmo contrato externo.
 
 ## Riscos de nao fazer
 
-- Interface continua exigindo interacoes demais em tarefas recorrentes.
-- Mudancas de backend ou uma reintegracao futura podem quebrar fluxo sem cobertura suficiente.
-- Defasagem documental pode reintroduzir incerteza operacional entre sessoes.
+- O link publico pode parecer pronto sem estar realmente publicado com URL/token corretos.
+- Um formulario externo mal configurado pode criar friccao mesmo com o backend pronto.
+- Se o contrato externo divergir entre canais, a migracao para `WhatsApp Flow` vai reintroduzir retrabalho.
