@@ -1,17 +1,30 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import type { Product } from '@querobroapp/shared';
 import { AppIcon } from '@/components/app-icons';
 import { FormField } from '@/components/form/FormField';
 import { formatCurrencyBR } from '@/lib/format';
+import {
+  ORDER_BOX_UNITS,
+  ORDER_FLAVOR_OFFICIAL_BOX_NAME_BY_CODE,
+  ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE,
+  ORDER_MISTA_SHORTCUT_CODES,
+  compactOrderProductName,
+  normalizeOrderFlavorName,
+  resolveOrderCardImage,
+  resolveOrderFlavorCodeFromName,
+  type OrderFlavorCode,
+  type OrderMistaShortcutCode
+} from './order-box-catalog';
 
-const BOX_UNITS = 7;
-const MISTA_SHORTCUT_CODES = ['G', 'D', 'Q', 'R'] as const;
+const BOX_UNITS = ORDER_BOX_UNITS;
+const MISTA_SHORTCUT_CODES = ORDER_MISTA_SHORTCUT_CODES;
 
-type MistaShortcutCode = (typeof MISTA_SHORTCUT_CODES)[number];
-type FlavorShortcutCode = 'T' | MistaShortcutCode;
+type MistaShortcutCode = OrderMistaShortcutCode;
+type FlavorShortcutCode = OrderFlavorCode;
 
 type SelectOption = {
   id: number;
@@ -56,20 +69,9 @@ type OrderQuickCreateProps = {
   onAddProductUnits: (productId: number, units: number) => void;
 };
 
-const flavorOfficialBoxNameByCode: Record<FlavorShortcutCode, string> = {
-  T: 'Caixa Tradicional (T)',
-  G: 'Caixa de Goiabada (G)',
-  D: 'Caixa de Doce de Leite (D)',
-  Q: 'Caixa de Queijo (Q)',
-  R: 'Caixa de Requeijão de Corte (R)'
-};
+const flavorOfficialBoxNameByCode = ORDER_FLAVOR_OFFICIAL_BOX_NAME_BY_CODE;
 
-const mistaOfficialBoxNameByCode: Record<MistaShortcutCode, string> = {
-  G: 'Caixa Mista de Goiabada (MG)',
-  D: 'Caixa Mista de Doce de Leite (MD)',
-  Q: 'Caixa Mista de Queijo (MQ)',
-  R: 'Caixa Mista de Requeijão de Corte (MR)'
-};
+const mistaOfficialBoxNameByCode = ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE;
 
 function formatDateInputValue(date: Date) {
   const year = date.getFullYear();
@@ -180,36 +182,10 @@ function formatVirtualBoxProgress(totalUnits: number, remainingUnits: number) {
   return `${fullBoxes} cx + ${openUnits}/7`;
 }
 
-function compactProductName(name: string) {
-  const compacted = name.replace(/^Broa\s+/i, '').trim();
-  return compacted
-    .replace(/requeij[aã]o de corte/gi, 'Requeijão de Corte')
-    .replace(/doce de leite/gi, 'Doce de Leite');
-}
-
-function normalizeFlavorName(value?: string | null) {
-  return (value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toLowerCase();
-}
-
-function resolveFlavorCodeFromName(value?: string | null): FlavorShortcutCode | null {
-  const normalized = normalizeFlavorName(value);
-  if (!normalized) return null;
-  if (normalized.includes('tradicional')) return 'T';
-  if (normalized.includes('goiabada')) return 'G';
-  if (normalized.includes('doce')) return 'D';
-  if (normalized.includes('queijo') && !normalized.includes('requeij')) return 'Q';
-  if (normalized.includes('requeij')) return 'R';
-  return null;
-}
-
 function resolveVirtualBoxOfficialName(parts: VirtualBoxPart[]) {
   const normalizedParts = parts
     .map((part) => ({
-      code: resolveFlavorCodeFromName(part.productName),
+      code: resolveOrderFlavorCodeFromName(part.productName),
       units: Math.max(Math.floor(part.units || 0), 0),
       productName: part.productName
     }))
@@ -248,7 +224,7 @@ function resolveFlavorShortcutProductIds(products: Product[]) {
 
   for (const product of products) {
     if (typeof product.id !== 'number') continue;
-    const normalized = normalizeFlavorName(product.name);
+    const normalized = normalizeOrderFlavorName(product.name);
 
     if (!ids.T && normalized.includes('tradicional')) {
       ids.T = product.id;
@@ -291,7 +267,7 @@ function buildVirtualBoxPartitions(
     let remainingUnits = Math.max(Math.floor(item.quantity || 0), 0);
     if (remainingUnits <= 0) continue;
 
-    const productName = compactProductName(
+    const productName = compactOrderProductName(
       productMap.get(item.productId)?.name ?? `Produto ${item.productId}`
     );
 
@@ -380,12 +356,12 @@ export function OrderQuickCreate({
       mistaBoxes.push([
         {
           productId: traditionalId,
-          productName: compactProductName(productMap.get(traditionalId)?.name ?? 'Tradicional (T)'),
+          productName: compactOrderProductName(productMap.get(traditionalId)?.name ?? 'Tradicional (T)'),
           units: 4
         },
         {
           productId: flavorId,
-          productName: compactProductName(productMap.get(flavorId)?.name ?? `Sabor ${code}`),
+          productName: compactOrderProductName(productMap.get(flavorId)?.name ?? `Sabor ${code}`),
           units: 3
         }
       ]);
@@ -595,6 +571,7 @@ export function OrderQuickCreate({
         {productsForCards.map((product) => {
           const selectedQty = quantityByProductId.get(product.id!) || 0;
           const isSelected = selectedQty > 0;
+          const productImage = resolveOrderCardImage(product.name);
           return (
             <div
               key={product.id}
@@ -606,8 +583,17 @@ export function OrderQuickCreate({
               }`}
             >
               <div className="flex flex-wrap items-start gap-3">
+                <div className="relative h-16 w-16 overflow-hidden rounded-2xl border border-white/80 bg-white/80 shadow-[0_10px_24px_rgba(70,44,26,0.08)]">
+                  <Image
+                    alt={compactOrderProductName(product.name)}
+                    className="h-full w-full object-cover"
+                    fill
+                    sizes="64px"
+                    src={productImage}
+                  />
+                </div>
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-neutral-900">{compactProductName(product.name)}</p>
+                  <p className="text-sm font-semibold text-neutral-900">{compactOrderProductName(product.name)}</p>
                 </div>
               </div>
               <div className="mt-3 grid gap-2">
@@ -678,6 +664,15 @@ export function OrderQuickCreate({
           }`}
         >
           <div className="flex flex-wrap items-start gap-3">
+            <div className="relative h-16 w-16 overflow-hidden rounded-2xl border border-white/80 bg-white/80 shadow-[0_10px_24px_rgba(70,44,26,0.08)]">
+              <Image
+                alt="Caixa mista"
+                className="h-full w-full object-cover"
+                fill
+                sizes="64px"
+                src="/querobroa-brand/green-composition.jpg"
+              />
+            </div>
             <div className="min-w-0">
               <p className="text-sm font-semibold text-neutral-900">Mista (M)</p>
             </div>

@@ -32,11 +32,13 @@ export type MassPrepEvent = {
 };
 
 export type DeliveryReadiness = {
-  provider: 'LOCAL';
-  mode: 'INTERNAL';
+  provider: 'NONE' | 'LOCAL' | 'UBER_DIRECT';
+  mode: 'PROVIDER';
   ready: boolean;
   reason: string;
   missingRequirements: string[];
+  quoteStatus: 'NOT_REQUIRED' | 'PENDING' | 'QUOTED' | 'FALLBACK' | 'EXPIRED' | 'FAILED';
+  deliveryFee: number;
   draft: {
     orderId: number;
     customerName: string;
@@ -55,16 +57,40 @@ export type DeliveryReadiness = {
 
 export type DeliveryTracking = {
   orderId: number;
-  provider: 'LOCAL';
-  mode: 'INTERNAL';
-  status: 'PENDING_REQUIREMENTS' | 'REQUESTED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'FAILED';
+  provider: 'NONE' | 'LOCAL' | 'UBER_DIRECT';
+  mode: 'PROVIDER';
+  status:
+    | 'NOT_REQUESTED'
+    | 'PENDING_REQUIREMENTS'
+    | 'REQUESTED'
+    | 'OUT_FOR_DELIVERY'
+    | 'DELIVERED'
+    | 'FAILED'
+    | 'CANCELED';
   createdAt: string;
   updatedAt: string;
   trackingId: string;
+  providerDeliveryId?: string | null;
+  providerTrackingUrl?: string | null;
+  providerQuoteId?: string | null;
+  quoteFee?: number | null;
+  quoteExpiresAt?: string | null;
   pickupEta: string | null;
   dropoffEta: string | null;
   lastError: string | null;
   draft: DeliveryReadiness['draft'];
+};
+
+export type DeliveryQuote = {
+  provider: 'NONE' | 'LOCAL' | 'UBER_DIRECT';
+  fee: number;
+  currencyCode: string;
+  source: 'NONE' | 'UBER_QUOTE' | 'MANUAL_FALLBACK';
+  status: 'NOT_REQUIRED' | 'PENDING' | 'QUOTED' | 'FALLBACK' | 'EXPIRED' | 'FAILED';
+  quoteToken: string | null;
+  expiresAt: string | null;
+  fallbackReason: string | null;
+  breakdownLabel?: string | null;
 };
 
 export type ProductionBatchAllocation = {

@@ -3,9 +3,10 @@ import { OrdersController } from './orders.controller.js';
 import { OrdersService } from './orders.service.js';
 import { PaymentsModule } from '../payments/payments.module.js';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module.js';
+import { DeliveriesModule } from '../deliveries/deliveries.module.js';
 
 @Module({
-  imports: [PaymentsModule, WhatsAppModule],
+  imports: [PaymentsModule, WhatsAppModule, DeliveriesModule],
   controllers: [OrdersController],
   providers: [OrdersService],
   exports: [OrdersService]

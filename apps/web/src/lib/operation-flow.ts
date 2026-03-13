@@ -56,6 +56,7 @@ export const OFFLINE_FALLBACK_FLOW_RAW: OperationFlowRaw = {
     {
       id: 1,
       customerId: 1,
+      fulfillmentMode: 'DELIVERY',
       status: 'PRONTO',
       total: 80,
       amountPaid: 40,

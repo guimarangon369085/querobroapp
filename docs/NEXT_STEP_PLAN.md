@@ -1,13 +1,14 @@
 # NEXT_STEP_PLAN
 
-Ultima atualizacao: 2026-03-12
+Ultima atualizacao: 2026-03-13
 
 ## Objetivo da fase atual
 
-Consolidar dois canais de captura de pedido sobre o mesmo nucleo:
+Consolidar os canais de captura de pedido e o total final do checkout sobre o mesmo nucleo:
 
 - operacao interna em `Pedidos`
 - captura externa em `/pedido` e `Google Forms`
+- entrega com frete cotado antes do PIX
 
 ## Gate operacional (concluido em 2026-03-11)
 
@@ -18,23 +19,25 @@ Consolidar dois canais de captura de pedido sobre o mesmo nucleo:
 
 ## Prioridade 1 (agora)
 
-### Teste real do canal externo
+### Teste real do canal externo com total final correto
 
 - Configurar `ORDER_FORM_BRIDGE_TOKEN` onde houver auth ligada.
 - Publicar a URL final do `web` para a pagina `/pedido`.
 - Montar o `Google Form` real com os labels definidos em `docs/GOOGLE_FORMS_BRIDGE.md`.
 - Colar o `scripts/google-form-bridge.gs` no Apps Script do formulario.
 - Validar uma submissao real ponta a ponta caindo no app com `PIX_PENDING`.
+- Validar no mesmo teste um pedido `Entrega` com frete somado antes do PIX.
 
 Criterio de pronto:
-- cliente consegue abrir o link, enviar o pedido e receber o PIX sem intervencao manual de cadastro.
+- cliente consegue abrir o link, enviar o pedido e receber o PIX com o total final correto sem intervencao manual de cadastro.
 
 ## Prioridade 2 (agora)
 
 ### Refino final de Estoque e Pedidos
 
 - Continuar reduzindo densidade visual e scroll na visao `Dia`.
-- Extrair blocos grandes restantes de `orders-screen` para componentes menores.
+- Continuar a extracao dos blocos grandes restantes de `orders-screen` para componentes menores.
+- Manter o catalogo de caixas/sabores centralizado entre `/pedido`, `quick create` e `/pedidos`.
 - Seguir limpando redundancias em `Estoque` agora que `Produtos` saiu da navegação.
 - Validar estados vazios e mudanca de dia em desktop e mobile width.
 
@@ -55,7 +58,7 @@ Criterio de pronto:
 
 ## Ordem de execucao
 
-1. Teste real de `/pedido` e do `Google Forms`.
+1. Teste real de `/pedido` e do `Google Forms`, incluindo `Entrega`.
 2. Refino final de `Estoque` e `Pedidos`.
 3. Migracao futura para `WhatsApp Flow` sobre o mesmo contrato externo.
 

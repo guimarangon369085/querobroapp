@@ -32,26 +32,35 @@ import { useFeedback } from '@/components/feedback-provider';
 import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
 import { OrdersBoard } from './orders-board';
 import { OrderQuickCreate } from './order-quick-create';
-import { type MassPrepEvent, type OrderView } from './orders-model';
 import {
+  ORDER_BOX_UNITS,
+  ORDER_FLAVOR_CODES,
+  ORDER_FLAVOR_OFFICIAL_BOX_NAME_BY_CODE,
+  ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE,
+  ORDER_MISTA_SHORTCUT_CODES,
+  buildOrderFlavorSummaryFromItems,
+  calculateOrderSubtotalFromFlavorSummary,
+  compactOrderProductName,
+  normalizeOrderFlavorName,
+  resolveOrderFlavorCodeFromName,
+  type OrderFlavorCode
+} from './order-box-catalog';
+import { type DeliveryReadiness, type DeliveryTracking, type MassPrepEvent, type OrderView } from './orders-model';
+import {
+  fetchOrderDeliveryReadiness,
+  fetchOrderDeliveryTracking,
   fetchOrderPixCharge,
   fetchOrdersWorkspace,
+  markOrderDeliveryComplete,
   sendOrderPixChargeWhatsApp,
+  startOrderDelivery,
   submitOrderIntake
 } from './orders-api';
 
 const TEST_DATA_TAG = '[TESTE_E2E]';
 const TUTORIAL_QUERY_VALUE = 'primeira_vez';
-const ORDER_BOX_UNITS = 7;
-const ORDER_MISTA_SHORTCUT_CODES = ['G', 'D', 'Q', 'R'] as const;
-const ORDER_BOX_PRICE_CUSTOM = 52;
-const ORDER_BOX_PRICE_TRADITIONAL = 40;
-const ORDER_BOX_PRICE_MIXED_GOIABADA = 45;
-const ORDER_BOX_PRICE_MIXED_OTHER = 47;
-const ORDER_BOX_PRICE_GOIABADA = 50;
 const MASS_PREP_EVENT_NAME = 'FAZER MASSA';
 const MONTH_WIDGET_MAX_DOTS = 8;
-const ORDER_FLAVOR_CODES = ['T', 'G', 'D', 'Q', 'R'] as const;
 const SELECTED_ORDER_NEW_BOX_KEY = 'box-new';
 const MASS_READY_ITEM_NAME = 'MASSA PRONTA';
 const MASS_READY_BROAS_PER_RECIPE = 21;
@@ -88,7 +97,6 @@ type OrderVirtualBoxPart = {
   productName: string;
   units: number;
 };
-type OrderFlavorCode = (typeof ORDER_FLAVOR_CODES)[number];
 type OrderVirtualEditableBox = {
   key: string;
   label: string;
@@ -112,20 +120,9 @@ type CustomerLastOrderDraft = {
   notes: string;
 };
 
-const orderFlavorOfficialBoxNameByCode: Record<OrderFlavorCode, string> = {
-  T: 'Caixa Tradicional (T)',
-  G: 'Caixa de Goiabada (G)',
-  D: 'Caixa de Doce de Leite (D)',
-  Q: 'Caixa de Queijo (Q)',
-  R: 'Caixa de Requeijão de Corte (R)'
-};
+const orderFlavorOfficialBoxNameByCode = ORDER_FLAVOR_OFFICIAL_BOX_NAME_BY_CODE;
 
-const orderMistaOfficialBoxNameByCode: Record<Exclude<OrderFlavorCode, 'T'>, string> = {
-  G: 'Caixa Mista de Goiabada (MG)',
-  D: 'Caixa Mista de Doce de Leite (MD)',
-  Q: 'Caixa Mista de Queijo (MQ)',
-  R: 'Caixa Mista de Requeijão de Corte (MR)'
-};
+const orderMistaOfficialBoxNameByCode = ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE;
 
 function unitsToCloseOrderBox(quantity: number) {
   const normalized = Math.max(Math.floor(quantity), 0);
@@ -146,144 +143,11 @@ function formatOrderUnitsLabel(quantity: number) {
   return `${normalized} un • ${fullBoxes} cx + ${remainder} un`;
 }
 
-function compactOrderProductName(name: string) {
-  const compacted = name.replace(/^Broa\s+/i, '').trim();
-  return compacted
-    .replace(/requeij[aã]o de corte/gi, 'Requeijão de Corte')
-    .replace(/doce de leite/gi, 'Doce de Leite');
-}
-
-function normalizeOrderFlavorName(value?: string | null) {
-  return (value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toLowerCase();
-}
-
-function resolveOrderFlavorCodeFromName(value?: string | null): OrderFlavorCode | null {
-  const normalized = normalizeOrderFlavorName(value);
-  if (!normalized) return null;
-  if (normalized.includes('tradicional')) return 'T';
-  if (normalized.includes('goiabada')) return 'G';
-  if (normalized.includes('doce')) return 'D';
-  if (normalized.includes('queijo') && !normalized.includes('requeij')) return 'Q';
-  if (normalized.includes('requeij')) return 'R';
-  return null;
-}
-
-function buildOrderFlavorSummaryFromItems(
-  items: Array<{ productId: number; quantity: number }>,
-  productMap: Map<number, Product>
-) {
-  const flavorCounts: Record<OrderFlavorCode, number> = {
-    T: 0,
-    G: 0,
-    D: 0,
-    Q: 0,
-    R: 0
-  };
-  let totalUnits = 0;
-
-  for (const item of items) {
-    const quantity = Math.max(Math.floor(item.quantity || 0), 0);
-    if (quantity <= 0) continue;
-    totalUnits += quantity;
-    const flavorCode = resolveOrderFlavorCodeFromName(productMap.get(item.productId)?.name);
-    if (!flavorCode) continue;
-    flavorCounts[flavorCode] += quantity;
-  }
-
-  return { totalUnits, flavorCounts };
-}
-
-function calculateOrderSubtotalFromFlavorSummary(params: {
-  totalUnits: number;
-  flavorCounts: Record<OrderFlavorCode, number>;
-}) {
-  const { totalUnits, flavorCounts } = params;
-  if (totalUnits <= 0) return 0;
-
-  const fullBoxes = Math.floor(totalUnits / ORDER_BOX_UNITS);
-  const openUnits = totalUnits % ORDER_BOX_UNITS;
-  if (fullBoxes <= 0) {
-    return toMoney((ORDER_BOX_PRICE_CUSTOM / ORDER_BOX_UNITS) * openUnits);
-  }
-
-  const countTraditional = Math.max(Math.floor(flavorCounts.T || 0), 0);
-  const countGoiabada = Math.max(Math.floor(flavorCounts.G || 0), 0);
-  const countDoce = Math.max(Math.floor(flavorCounts.D || 0), 0);
-  const countQueijo = Math.max(Math.floor(flavorCounts.Q || 0), 0);
-  const countRequeijao = Math.max(Math.floor(flavorCounts.R || 0), 0);
-
-  const goiabadaTriplets = Math.floor(countGoiabada / 3);
-  const otherTriplets =
-    Math.floor(countDoce / 3) +
-    Math.floor(countQueijo / 3) +
-    Math.floor(countRequeijao / 3);
-
-  const discountTraditional = ORDER_BOX_PRICE_CUSTOM - ORDER_BOX_PRICE_TRADITIONAL;
-  const discountMixedGoiabada = ORDER_BOX_PRICE_CUSTOM - ORDER_BOX_PRICE_MIXED_GOIABADA;
-  const discountMixedOther = ORDER_BOX_PRICE_CUSTOM - ORDER_BOX_PRICE_MIXED_OTHER;
-  const discountGoiabada = ORDER_BOX_PRICE_CUSTOM - ORDER_BOX_PRICE_GOIABADA;
-
-  let bestDiscount = 0;
-  const maxMixedGoiabada = Math.min(
-    goiabadaTriplets,
-    Math.floor(countTraditional / 4),
-    fullBoxes
-  );
-
-  for (let mixedGoiabada = 0; mixedGoiabada <= maxMixedGoiabada; mixedGoiabada += 1) {
-    const remainingTraditionalAfterMixedGoiabada = countTraditional - mixedGoiabada * 4;
-    const maxMixedOther = Math.min(
-      otherTriplets,
-      Math.floor(remainingTraditionalAfterMixedGoiabada / 4),
-      fullBoxes - mixedGoiabada
-    );
-
-    for (let mixedOther = 0; mixedOther <= maxMixedOther; mixedOther += 1) {
-      const remainingTraditional = remainingTraditionalAfterMixedGoiabada - mixedOther * 4;
-      const maxTraditionalBoxes = Math.min(
-        Math.floor(remainingTraditional / ORDER_BOX_UNITS),
-        fullBoxes - mixedGoiabada - mixedOther
-      );
-
-      for (let traditionalBoxes = 0; traditionalBoxes <= maxTraditionalBoxes; traditionalBoxes += 1) {
-        const usedBoxes = mixedGoiabada + mixedOther + traditionalBoxes;
-        const remainingBoxSlots = fullBoxes - usedBoxes;
-        const remainingGoiabada = countGoiabada - mixedGoiabada * 3;
-        const goiabadaBoxes = Math.min(
-          Math.floor(remainingGoiabada / ORDER_BOX_UNITS),
-          remainingBoxSlots
-        );
-
-        const discount =
-          mixedGoiabada * discountMixedGoiabada +
-          mixedOther * discountMixedOther +
-          traditionalBoxes * discountTraditional +
-          goiabadaBoxes * discountGoiabada;
-
-        if (discount > bestDiscount) {
-          bestDiscount = discount;
-        }
-      }
-    }
-  }
-
-  const fullBoxesSubtotal = fullBoxes * ORDER_BOX_PRICE_CUSTOM - bestDiscount;
-  const openSubtotal =
-    openUnits > 0 ? toMoney((ORDER_BOX_PRICE_CUSTOM / ORDER_BOX_UNITS) * openUnits) : 0;
-
-  return toMoney(fullBoxesSubtotal + openSubtotal);
-}
-
 function calculateOrderSubtotalFromItems(
   items: Array<{ productId: number; quantity: number }>,
   productMap: Map<number, Product>
 ) {
-  const summary = buildOrderFlavorSummaryFromItems(items, productMap);
-  return calculateOrderSubtotalFromFlavorSummary(summary);
+  return calculateOrderSubtotalFromFlavorSummary(buildOrderFlavorSummaryFromItems(items, productMap));
 }
 
 function resolveOrderFlavorProductIds(products: Product[]) {
@@ -1167,6 +1031,12 @@ function OrdersPageContent() {
   const [selectedOrderPixChargeLoading, setSelectedOrderPixChargeLoading] = useState(false);
   const [selectedOrderPixChargeError, setSelectedOrderPixChargeError] = useState<string | null>(null);
   const [isSendingSelectedOrderPixWhatsApp, setIsSendingSelectedOrderPixWhatsApp] = useState(false);
+  const [selectedOrderDeliveryReadiness, setSelectedOrderDeliveryReadiness] = useState<DeliveryReadiness | null>(null);
+  const [selectedOrderDeliveryTracking, setSelectedOrderDeliveryTracking] = useState<DeliveryTracking | null>(null);
+  const [selectedOrderDeliveryLoading, setSelectedOrderDeliveryLoading] = useState(false);
+  const [selectedOrderDeliveryError, setSelectedOrderDeliveryError] = useState<string | null>(null);
+  const [isStartingSelectedOrderDelivery, setIsStartingSelectedOrderDelivery] = useState(false);
+  const [isCompletingSelectedOrderDelivery, setIsCompletingSelectedOrderDelivery] = useState(false);
   const [selectedOrderEditingBoxKey, setSelectedOrderEditingBoxKey] = useState<string | null>(null);
   const [selectedOrderEditingBoxDraftByProductId, setSelectedOrderEditingBoxDraftByProductId] = useState<
     Record<number, number>
@@ -1242,6 +1112,45 @@ function OrdersPageContent() {
       setIsSendingSelectedOrderPixWhatsApp(false);
     }
   }, [notifyError, notifySuccess, selectedOrder?.id]);
+
+  const startSelectedOrderDelivery = useCallback(async () => {
+    if (!selectedOrder?.id) return;
+    setIsStartingSelectedOrderDelivery(true);
+    try {
+      const response = await startOrderDelivery(selectedOrder.id);
+      setSelectedOrderDeliveryTracking(response.tracking);
+      const readiness = await fetchOrderDeliveryReadiness(selectedOrder.id);
+      setSelectedOrderDeliveryReadiness(readiness);
+      notifySuccess(
+        response.tracking.provider === 'UBER_DIRECT'
+          ? 'Envio Uber solicitado.'
+          : 'Envio registrado para acompanhamento.'
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Nao foi possivel solicitar o envio.';
+      setSelectedOrderDeliveryError(message);
+      notifyError(message);
+    } finally {
+      setIsStartingSelectedOrderDelivery(false);
+    }
+  }, [notifyError, notifySuccess, selectedOrder?.id]);
+
+  const completeSelectedOrderDelivery = useCallback(async () => {
+    if (!selectedOrder?.id) return;
+    setIsCompletingSelectedOrderDelivery(true);
+    try {
+      const tracking = await markOrderDeliveryComplete(selectedOrder.id);
+      setSelectedOrderDeliveryTracking(tracking);
+      await loadAll();
+      notifySuccess('Entrega marcada como concluida.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Nao foi possivel concluir a entrega.';
+      setSelectedOrderDeliveryError(message);
+      notifyError(message);
+    } finally {
+      setIsCompletingSelectedOrderDelivery(false);
+    }
+  }, [loadAll, notifyError, notifySuccess, selectedOrder?.id]);
 
   const openNewOrderModal = useCallback(() => {
     setIsOrderDetailModalOpen(false);
@@ -1606,6 +1515,52 @@ function OrdersPageContent() {
       .finally(() => {
         if (active) {
           setSelectedOrderPixChargeLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isOrderDetailModalOpen, selectedOrder]);
+
+  useEffect(() => {
+    if (!selectedOrder || !isOrderDetailModalOpen) {
+      setSelectedOrderDeliveryReadiness(null);
+      setSelectedOrderDeliveryTracking(null);
+      setSelectedOrderDeliveryError(null);
+      setSelectedOrderDeliveryLoading(false);
+      return;
+    }
+
+    if (selectedOrder.fulfillmentMode !== 'DELIVERY') {
+      setSelectedOrderDeliveryReadiness(null);
+      setSelectedOrderDeliveryTracking(null);
+      setSelectedOrderDeliveryError(null);
+      setSelectedOrderDeliveryLoading(false);
+      return;
+    }
+
+    let active = true;
+    setSelectedOrderDeliveryLoading(true);
+    setSelectedOrderDeliveryError(null);
+    Promise.all([
+      fetchOrderDeliveryReadiness(selectedOrder.id!),
+      fetchOrderDeliveryTracking(selectedOrder.id!).catch(() => ({ exists: false, tracking: null }))
+    ])
+      .then(([readiness, tracking]) => {
+        if (!active) return;
+        setSelectedOrderDeliveryReadiness(readiness);
+        setSelectedOrderDeliveryTracking(tracking.tracking);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setSelectedOrderDeliveryReadiness(null);
+        setSelectedOrderDeliveryTracking(null);
+        setSelectedOrderDeliveryError(error instanceof Error ? error.message : 'Nao foi possivel carregar a entrega.');
+      })
+      .finally(() => {
+        if (active) {
+          setSelectedOrderDeliveryLoading(false);
         }
       });
 
@@ -3810,6 +3765,84 @@ function OrdersPageContent() {
             >
               Excluir
             </button>
+          </div>
+          <div className="mt-3 grid gap-2 rounded-2xl border border-white/70 bg-white/80 p-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                  ENTREGA
+                </p>
+                <p className="text-sm font-semibold text-neutral-900">
+                  {selectedOrder.fulfillmentMode === 'DELIVERY'
+                    ? `${formatCurrencyBR(selectedOrder.deliveryFee ?? 0)} • ${selectedOrder.deliveryProvider === 'UBER_DIRECT' ? 'Uber' : selectedOrder.deliveryFeeSource === 'MANUAL_FALLBACK' ? 'provisório' : 'sem frete'}`
+                    : 'Retirada'}
+                </p>
+              </div>
+              {selectedOrder.fulfillmentMode === 'DELIVERY' ? (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="app-button app-button-secondary text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={() => {
+                      void startSelectedOrderDelivery();
+                    }}
+                    disabled={
+                      isStartingSelectedOrderDelivery ||
+                      selectedOrder.status !== 'PRONTO' ||
+                      selectedOrderDeliveryTracking?.status === 'REQUESTED' ||
+                      selectedOrderDeliveryTracking?.status === 'OUT_FOR_DELIVERY'
+                    }
+                  >
+                    {isStartingSelectedOrderDelivery ? 'Solicitando...' : 'Solicitar envio'}
+                  </button>
+                  {selectedOrderDeliveryTracking &&
+                  selectedOrderDeliveryTracking.status !== 'DELIVERED' &&
+                  selectedOrderDeliveryTracking.status !== 'CANCELED' ? (
+                    <button
+                      type="button"
+                      className="app-button app-button-ghost text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                      onClick={() => {
+                        void completeSelectedOrderDelivery();
+                      }}
+                      disabled={isCompletingSelectedOrderDelivery}
+                    >
+                      {isCompletingSelectedOrderDelivery ? 'Concluindo...' : 'Marcar entregue'}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+            {selectedOrder.fulfillmentMode === 'DELIVERY' ? (
+              <>
+                <p className="text-xs text-neutral-600">
+                  Status da cotação: {selectedOrder.deliveryQuoteStatus || 'NOT_REQUIRED'}.
+                  {selectedOrderDeliveryReadiness?.reason ? ` ${selectedOrderDeliveryReadiness.reason}` : ''}
+                </p>
+                {selectedOrderDeliveryTracking ? (
+                  <p className="text-xs text-neutral-600">
+                    Acompanhamento: {selectedOrderDeliveryTracking.status}
+                    {selectedOrderDeliveryTracking.providerTrackingUrl ? (
+                      <>
+                        {' • '}
+                        <a
+                          href={selectedOrderDeliveryTracking.providerTrackingUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline decoration-dotted underline-offset-2"
+                        >
+                          abrir tracking
+                        </a>
+                      </>
+                    ) : null}
+                  </p>
+                ) : null}
+                {selectedOrderDeliveryError ? (
+                  <p className="text-xs font-medium text-rose-700">{selectedOrderDeliveryError}</p>
+                ) : selectedOrderDeliveryLoading ? (
+                  <p className="text-xs text-neutral-600">Carregando entrega...</p>
+                ) : null}
+              </>
+            ) : null}
           </div>
           <div className="mt-3 grid gap-2 rounded-2xl border border-white/70 bg-white/80 p-3">
             <div className="flex flex-wrap items-start justify-between gap-2">

@@ -1,6 +1,6 @@
 # PROJECT_SNAPSHOT
 
-Ultima atualizacao: 2026-03-12
+Ultima atualizacao: 2026-03-13
 
 ## Estado atual
 
@@ -15,6 +15,8 @@ Ultima atualizacao: 2026-03-12
 - Gate operacional de religamento foi validado em 2026-03-11 com `stop-all -> dev-all`, health da API e execucao de smoke + E2E critico.
 - `Produtos` deixou de existir como superficie operacional; catalogo e ficha tecnica ficam dentro de `Estoque`.
 - Existe agora uma captura publica de pedido em `/pedido`, usando o mesmo intake externo que vai servir para `Google Forms`, pagina propria e futuro `WhatsApp Flow`.
+- Pedidos de `Entrega` agora podem receber cotacao de frete antes do submit final, com o valor incorporado ao total e ao PIX.
+- `/pedido`, `quick create` e a logica de caixas em `Pedidos` passaram a compartilhar o mesmo catalogo de caixas/sabores e as mesmas imagens originais da marca.
 
 ## O que um usuario consegue fazer hoje
 
@@ -28,10 +30,11 @@ Ultima atualizacao: 2026-03-12
 8. Iniciar entrega local interna.
 9. Marcar entrega concluida e deixar o pedido em `ENTREGUE`.
 10. Registrar pagamento parcial ou total.
+11. Simular frete de entrega antes de fechar o pedido publico.
 
 ## Telas web
 
-- `/pedido`: pagina publica do cliente com submit para o intake canonico e exibicao do PIX copia e cola.
+- `/pedido`: pagina publica do cliente com submit para o intake canonico, cotacao previa de frete e exibicao do PIX copia e cola.
 - `/pedidos`: agenda do dia, criacao de pedido, status, producao, entrega e pagamento.
 - `/clientes`: cadastro e edicao rapida.
 - `/estoque`: saldo, D+1, compras e leitura operacional.
@@ -47,6 +50,7 @@ Ultima atualizacao: 2026-03-12
 - Operacao: `orders`, `payments`, `deliveries`, `production`
 - Estoque: `inventory`, `inventory-products`, `bom`
 - Intake externo: `orders/intake`, `orders/intake/customer-form`, `orders/intake/google-form`, `orders/intake/whatsapp-flow`
+- Cotacao de frete: `deliveries/quotes` + proxy interno do web em `/api/delivery-quote`
 - Suporte interno: `runtime-config` (read-only) e redirects legados controlados no web
 
 ## Qualidade tecnica
@@ -70,8 +74,9 @@ Ultima atualizacao: 2026-03-12
 
 1. `Google Forms` ja e viavel como canal temporario, mas ainda falta configuracao real do Apps Script e URL publica final.
 2. `WhatsApp Flow` segue sem numero dedicado; a migracao futura deve reutilizar o contrato externo atual.
-3. Mobile segue atras do web no fluxo operacional novo.
-4. Ainda vale ampliar cobertura de testes alem dos gates atuais, principalmente em cenarios de edge case de dominio.
+3. A integracao Uber/entrega real ainda depende de credenciais do provider; hoje existe cotacao e fallback server-side preparados.
+4. Mobile segue atras do web no fluxo operacional novo.
+5. Ainda vale ampliar cobertura de testes alem dos gates atuais, principalmente em cenarios de edge case de dominio.
 
 ## Como religar e validar rapido
 

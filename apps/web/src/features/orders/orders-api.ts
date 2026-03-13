@@ -9,6 +9,7 @@ import type {
 import { apiFetch } from '@/lib/api';
 import type {
   DeliveryReadiness,
+  DeliveryQuote,
   DeliveryTracking,
   MassPrepEvent,
   OrderView,
@@ -57,6 +58,27 @@ export function sendOrderPixChargeWhatsApp(orderId: number) {
 
 export function fetchOrderDeliveryReadiness(orderId: number) {
   return apiFetch<DeliveryReadiness>(`/deliveries/orders/${orderId}/readiness`);
+}
+
+export function fetchDeliveryQuote(payload: {
+  mode: 'DELIVERY' | 'PICKUP';
+  scheduledAt: string;
+  customer: {
+    name?: string | null;
+    phone?: string | null;
+    address?: string | null;
+    deliveryNotes?: string | null;
+  };
+  manifest: {
+    items: Array<{ name: string; quantity: number }>;
+    subtotal: number;
+    totalUnits: number;
+  };
+}) {
+  return apiFetch<DeliveryQuote>('/deliveries/quotes', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
 }
 
 export function startOrderDelivery(orderId: number) {

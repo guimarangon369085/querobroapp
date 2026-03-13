@@ -33,6 +33,7 @@ import {
 import { normalizePhone, normalizeText, normalizeTitle } from '../../common/normalize.js';
 import { PaymentsService } from '../payments/payments.service.js';
 import { WhatsAppService } from '../whatsapp/whatsapp.service.js';
+import { DeliveriesService } from '../deliveries/deliveries.service.js';
 
 const updateSchema = OrderSchema.partial().omit({ id: true, createdAt: true, items: true });
 const replaceItemsSchema = z.object({
@@ -133,7 +134,8 @@ export class OrdersService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(PaymentsService) private readonly paymentsService: PaymentsService,
-    @Inject(WhatsAppService) private readonly whatsAppService: WhatsAppService
+    @Inject(WhatsAppService) private readonly whatsAppService: WhatsAppService,
+    @Inject(DeliveriesService) private readonly deliveriesService: DeliveriesService
   ) {}
 
   private toMoney(value: number) {
@@ -152,6 +154,10 @@ export class OrdersService {
     const parsed = Number(value ?? 0);
     if (!Number.isFinite(parsed) || parsed < 0) return 0;
     return parsed;
+  }
+
+  private computeOrderTotal(subtotal: number, discount: number, deliveryFee: number) {
+    return this.toMoney(Math.max(this.toMoney(subtotal) - this.toMoney(discount), 0) + this.toMoney(deliveryFee));
   }
 
   private toQty(value: number) {
@@ -382,7 +388,7 @@ export class OrdersService {
   }
 
   private async calculateOrderSubtotalFromItems(
-    tx: TransactionClient,
+    tx: TransactionClient | PrismaService,
     items: Array<{ productId: number; quantity: number }>
   ) {
     if (items.length <= 0) return 0;
@@ -1166,6 +1172,7 @@ export class OrdersService {
         mode: data.fulfillment.mode,
         scheduledAt: data.fulfillment.scheduledAt
       },
+      delivery: data.delivery,
       order: {
         items,
         notes: data.notes ?? undefined
@@ -1182,6 +1189,36 @@ export class OrdersService {
         originLabel: data.source.originLabel ?? null
       }
     });
+  }
+
+  private buildDeliveryQuoteDraft(input: {
+    fulfillmentMode: 'DELIVERY' | 'PICKUP';
+    scheduledAt?: string | null;
+    customerName?: string | null;
+    customerPhone?: string | null;
+    customerAddress?: string | null;
+    customerDeliveryNotes?: string | null;
+    subtotal: number;
+    items: Array<{ productId: number; quantity: number; name?: string | null }>;
+  }) {
+    return {
+      mode: input.fulfillmentMode,
+      scheduledAt: input.scheduledAt || new Date().toISOString(),
+      customer: {
+        name: input.customerName ?? null,
+        phone: input.customerPhone ?? null,
+        address: input.customerAddress ?? null,
+        deliveryNotes: input.customerDeliveryNotes ?? null
+      },
+      manifest: {
+        items: input.items.map((item) => ({
+          name: item.name || `Produto ${item.productId}`,
+          quantity: item.quantity
+        })),
+        subtotal: this.toMoney(input.subtotal),
+        totalUnits: input.items.reduce((sum, item) => sum + Math.max(Math.floor(item.quantity || 0), 0), 0)
+      }
+    };
   }
 
   private normalizeCustomerName(value?: string | null) {
@@ -1270,8 +1307,28 @@ export class OrdersService {
     });
   }
 
+  private async resolveDeliveryQuoteCustomer(customer: OrderIntakePayload['customer']) {
+    if ('customerId' in customer) {
+      const existing = await this.prisma.customer.findUnique({ where: { id: customer.customerId } });
+      if (!existing) throw new NotFoundException('Cliente nao encontrado');
+      return {
+        name: existing.name,
+        phone: existing.phone ?? null,
+        address: existing.address ?? null,
+        deliveryNotes: existing.deliveryNotes ?? null
+      };
+    }
+
+    return {
+      name: customer.name,
+      phone: customer.phone ?? null,
+      address: customer.address ?? null,
+      deliveryNotes: customer.deliveryNotes ?? null
+    };
+  }
+
   private async priceOrderItems(
-    tx: TransactionClient,
+    tx: TransactionClient | PrismaService,
     items: Array<{ productId: number; quantity: number }>
   ) {
     const parsedItems = items.map((item) =>
@@ -1282,16 +1339,22 @@ export class OrdersService {
     const productMap = new Map(products.map((product) => [product.id, product]));
 
     const itemsData: Array<{ productId: number; quantity: number; unitPrice: number; total: number }> = [];
+    const manifestItems: Array<{ productId: number; quantity: number; name: string }> = [];
     for (const item of parsedItems) {
       const product = productMap.get(item.productId);
       if (!product) throw new NotFoundException('Produto nao encontrado');
       const unitPrice = this.toUnitPrice(product.price);
       const total = this.toMoney(unitPrice * item.quantity);
       itemsData.push({ productId: item.productId, quantity: item.quantity, unitPrice, total });
+      manifestItems.push({
+        productId: item.productId,
+        quantity: item.quantity,
+        name: product.name
+      });
     }
 
     const subtotal = await this.calculateOrderSubtotalFromItems(tx, parsedItems);
-    return { parsedItems, itemsData, subtotal };
+    return { parsedItems, itemsData, subtotal, manifestItems };
   }
 
   private intakeStageFrom(
@@ -1341,6 +1404,11 @@ export class OrdersService {
       dueAt: payment?.dueDate?.toISOString() ?? null,
       paidAt: payment?.paidAt?.toISOString() ?? null,
       providerRef: payment?.providerRef ?? null,
+      deliveryFee: this.toMoney(order.deliveryFee ?? 0),
+      deliveryProvider: order.deliveryProvider ?? 'NONE',
+      deliveryFeeSource: order.deliveryFeeSource ?? 'NONE',
+      deliveryQuoteStatus: order.deliveryQuoteStatus ?? 'NOT_REQUIRED',
+      deliveryQuoteExpiresAt: order.deliveryQuoteExpiresAt?.toISOString() ?? null,
       pixCharge,
       orderId: order.id!,
       customerId: order.customerId
@@ -1420,6 +1488,22 @@ export class OrdersService {
 
   async intake(payload: unknown) {
     const data = OrderIntakeSchema.parse(payload);
+    const quoteCustomer = await this.resolveDeliveryQuoteCustomer(data.customer);
+    const pricedOrder = await this.priceOrderItems(this.prisma, data.order.items);
+    const scheduledAt = this.parseOptionalDateTime(data.fulfillment.scheduledAt);
+    const deliveryQuote = await this.deliveriesService.resolveDeliverySelection(
+      data.delivery,
+      this.buildDeliveryQuoteDraft({
+        fulfillmentMode: data.fulfillment.mode,
+        scheduledAt: scheduledAt?.toISOString() ?? data.fulfillment.scheduledAt ?? null,
+        customerName: quoteCustomer.name,
+        customerPhone: quoteCustomer.phone,
+        customerAddress: quoteCustomer.address,
+        customerDeliveryNotes: quoteCustomer.deliveryNotes,
+        subtotal: pricedOrder.subtotal,
+        items: pricedOrder.manifestItems
+      })
+    );
 
     return this.prisma.$transaction(async (tx) => {
       const idemKey = this.intakeIdemKey(data);
@@ -1445,18 +1529,25 @@ export class OrdersService {
       }
 
       const customer = await this.resolveIntakeCustomer(tx, data.customer);
-      const { itemsData, subtotal } = await this.priceOrderItems(tx, data.order.items);
+      const { itemsData, subtotal } = pricedOrder;
       const discount = this.toMoney(data.order.discount ?? 0);
-      const total = this.toMoney(Math.max(subtotal - discount, 0));
-      const scheduledAt = this.parseOptionalDateTime(data.fulfillment.scheduledAt);
+      const deliveryFee = this.toMoney(deliveryQuote.fee ?? 0);
+      const total = this.computeOrderTotal(subtotal, discount, deliveryFee);
 
       const createdOrder = await tx.order.create({
         data: {
           customerId: customer.id,
           status: 'ABERTO',
+          fulfillmentMode: data.fulfillment.mode,
           notes: data.order.notes ?? null,
           scheduledAt,
           subtotal,
+          deliveryFee,
+          deliveryProvider: deliveryQuote.provider,
+          deliveryFeeSource: deliveryQuote.source,
+          deliveryQuoteStatus: deliveryQuote.status,
+          deliveryQuoteRef: deliveryQuote.quoteToken ?? null,
+          deliveryQuoteExpiresAt: this.parseOptionalDateTime(deliveryQuote.expiresAt ?? null),
           discount,
           total,
           items: {
@@ -1642,7 +1733,11 @@ export class OrdersService {
           .filter((item) => item.quantity > 0);
 
         const nextSubtotal = await this.calculateOrderSubtotalFromItems(tx, normalizedItems);
-        const nextTotal = this.toMoney(Math.max(nextSubtotal - this.toMoney(order.discount ?? 0), 0));
+        const nextTotal = this.computeOrderTotal(
+          nextSubtotal,
+          this.toMoney(order.discount ?? 0),
+          this.toMoney(order.deliveryFee ?? 0)
+        );
         const previousSubtotal = this.toMoney(order.subtotal ?? 0);
         const previousTotal = this.toMoney(order.total ?? 0);
         const subtotalChanged = Math.abs(previousSubtotal - nextSubtotal) > 0.00001;
@@ -1772,7 +1867,7 @@ export class OrdersService {
   }
 
   async create(payload: unknown) {
-    const data = OrderSchema.pick({ customerId: true, notes: true, discount: true, scheduledAt: true, items: true }).parse(
+    const data = OrderSchema.pick({ customerId: true, notes: true, discount: true, scheduledAt: true, items: true, fulfillmentMode: true }).parse(
       payload
     );
     const items = data.items ?? [];
@@ -1786,7 +1881,7 @@ export class OrdersService {
         customerId: data.customerId
       },
       fulfillment: {
-        mode: 'DELIVERY',
+        mode: data.fulfillmentMode ?? 'DELIVERY',
         scheduledAt: data.scheduledAt ?? undefined
       },
       order: {
@@ -1831,7 +1926,7 @@ export class OrdersService {
         }))
       );
       const discount = this.toMoney(data.discount ?? existing.discount ?? 0);
-      const total = this.toMoney(Math.max(subtotal - discount, 0));
+      const total = this.computeOrderTotal(subtotal, discount, this.toMoney(existing.deliveryFee ?? 0));
       const amountPaid = this.getPaidAmount(existing.payments || []);
       this.ensureOrderTotalCoversPaid(total, amountPaid);
 
@@ -1911,7 +2006,7 @@ export class OrdersService {
         }
       ];
       const newSubtotal = await this.calculateOrderSubtotalFromItems(tx, nextSubtotalItems);
-      const newTotal = this.toMoney(Math.max(newSubtotal - order.discount, 0));
+      const newTotal = this.computeOrderTotal(newSubtotal, order.discount, this.toMoney(order.deliveryFee ?? 0));
       await tx.order.update({ where: { id: orderId }, data: { subtotal: newSubtotal, total: newTotal } });
 
       const updatedOrder = await tx.order.findUnique({
@@ -1963,7 +2058,7 @@ export class OrdersService {
       }
 
       const subtotal = await this.calculateOrderSubtotalFromItems(tx, normalizedItems);
-      const total = this.toMoney(Math.max(subtotal - order.discount, 0));
+      const total = this.computeOrderTotal(subtotal, order.discount, this.toMoney(order.deliveryFee ?? 0));
       const amountPaid = this.getPaidAmount(order.payments || []);
       this.ensureOrderTotalCoversPaid(total, amountPaid);
 
@@ -2010,7 +2105,7 @@ export class OrdersService {
           quantity: entry.quantity
         }))
       );
-      const newTotal = this.toMoney(Math.max(newSubtotal - order.discount, 0));
+      const newTotal = this.computeOrderTotal(newSubtotal, order.discount, this.toMoney(order.deliveryFee ?? 0));
       const amountPaid = this.getPaidAmount(order.payments || []);
       this.ensureOrderTotalCoversPaid(newTotal, amountPaid);
 

@@ -1,0 +1,53 @@
+type DeliveryManifestItem = {
+  name: string;
+  quantity: number;
+};
+
+export type DeliveryQuoteInput = {
+  orderId?: number | null;
+  pickupName: string;
+  pickupPhone: string;
+  pickupAddress: string;
+  dropoffName: string;
+  dropoffPhone: string;
+  dropoffAddress: string;
+  scheduledAt: string | null;
+  orderTotal: number;
+  manifestSummary: string;
+  items: DeliveryManifestItem[];
+};
+
+export type DeliveryQuoteOutput = {
+  provider: 'LOCAL' | 'UBER_DIRECT';
+  fee: number;
+  currencyCode: string;
+  source: 'UBER_QUOTE' | 'MANUAL_FALLBACK';
+  status: 'QUOTED' | 'FALLBACK' | 'FAILED';
+  providerQuoteId: string | null;
+  expiresAt: string | null;
+  fallbackReason: string | null;
+  breakdownLabel: string | null;
+  rawPayload?: unknown;
+};
+
+export type DeliveryDispatchInput = DeliveryQuoteInput & {
+  providerQuoteId?: string | null;
+};
+
+export type DeliveryDispatchOutput = {
+  provider: 'LOCAL' | 'UBER_DIRECT';
+  status: 'REQUESTED' | 'FAILED';
+  trackingId: string;
+  providerDeliveryId: string | null;
+  providerTrackingUrl: string | null;
+  pickupEta: string | null;
+  dropoffEta: string | null;
+  lastError: string | null;
+  rawPayload?: unknown;
+};
+
+export interface DeliveryProvider {
+  quote(input: DeliveryQuoteInput): Promise<DeliveryQuoteOutput>;
+  createDelivery(input: DeliveryDispatchInput): Promise<DeliveryDispatchOutput>;
+}
+

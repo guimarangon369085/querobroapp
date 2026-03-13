@@ -1,13 +1,28 @@
 import {
+  BadGatewayException,
   BadRequestException,
   Inject,
   Injectable,
   NotFoundException
 } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import {
+  DeliveryJobSchema,
+  DeliveryQuoteDraftSchema,
+  DeliveryQuoteResponseSchema,
+  DeliveryQuoteSelectionSchema,
+  OrderFulfillmentModeEnum
+} from '@querobroapp/shared';
 import { PrismaService } from '../../prisma.service.js';
+import type { DeliveryDispatchInput, DeliveryProvider, DeliveryQuoteInput } from './delivery-provider.js';
+import { LocalDeliveryProvider } from './local-delivery.provider.js';
+import { UberDirectProvider } from './uber-direct.provider.js';
 
 type OrderWithDeliveryContext = Awaited<ReturnType<DeliveriesService['getOrderForDelivery']>>;
+type DeliveryQuoteDraft = typeof DeliveryQuoteDraftSchema._type;
+type DeliveryQuoteSelection = typeof DeliveryQuoteSelectionSchema._type;
+type DeliveryQuoteResponse = typeof DeliveryQuoteResponseSchema._type;
+type DeliveryJob = typeof DeliveryJobSchema._type;
 
 type DeliveryDraft = {
   orderId: number;
@@ -25,33 +40,23 @@ type DeliveryDraft = {
 };
 
 type DeliveryReadinessResult = {
-  provider: 'LOCAL';
-  mode: 'INTERNAL';
+  provider: 'NONE' | 'LOCAL' | 'UBER_DIRECT';
+  mode: 'PROVIDER';
   ready: boolean;
   reason: string;
   missingRequirements: string[];
   draft: DeliveryDraft;
+  quoteStatus: DeliveryQuoteResponse['status'];
+  deliveryFee: number;
 };
 
-type DeliveryTrackingStatus =
-  | 'PENDING_REQUIREMENTS'
-  | 'REQUESTED'
-  | 'OUT_FOR_DELIVERY'
-  | 'DELIVERED'
-  | 'FAILED';
-
-type DeliveryTrackingRecord = {
-  orderId: number;
-  provider: 'LOCAL';
-  mode: 'INTERNAL';
-  status: DeliveryTrackingStatus;
-  createdAt: string;
-  updatedAt: string;
+type DeliveryTrackingRecord = DeliveryJob & {
   trackingId: string;
-  pickupEta: string | null;
-  dropoffEta: string | null;
-  lastError: string | null;
+  mode: 'PROVIDER';
   draft: DeliveryDraft;
+  providerQuoteId: string | null;
+  quoteFee: number | null;
+  quoteExpiresAt: string | null;
 };
 
 type LegacyDeliveryTrackingRecord = Partial<DeliveryTrackingRecord> & {
@@ -65,57 +70,98 @@ type LegacyDeliveryTrackingRecord = Partial<DeliveryTrackingRecord> & {
   lastProviderError?: string | null;
 };
 
+type QuoteRecordPayload = {
+  requestHash: string;
+  quote: DeliveryQuoteResponse;
+};
+
+const DELIVERY_TRACKING_SCOPE = 'DELIVERY_TRACKING';
+const DELIVERY_QUOTE_SCOPE = 'DELIVERY_QUOTE';
+
 @Injectable()
 export class DeliveriesService {
+  private readonly localProvider = new LocalDeliveryProvider();
+  private readonly uberProvider = new UberDirectProvider();
+
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  async quoteDelivery(payload: unknown) {
+    const draft = DeliveryQuoteDraftSchema.parse(payload);
+    return this.quoteForDraft(draft);
+  }
+
+  async resolveDeliverySelection(selectionPayload: unknown, draftPayload: DeliveryQuoteDraft) {
+    const draft = DeliveryQuoteDraftSchema.parse(draftPayload);
+    if (draft.mode !== OrderFulfillmentModeEnum.enum.DELIVERY) {
+      return this.buildNotRequiredQuote();
+    }
+
+    const requestHash = this.quoteRequestHash(draft);
+    const selection = DeliveryQuoteSelectionSchema.parse(selectionPayload ?? {});
+    const quoteToken = selection.quoteToken?.trim();
+
+    if (!quoteToken) {
+      return this.quoteForDraft(draft, { forceRefresh: true });
+    }
+
+    const stored = await this.readQuoteRecord(quoteToken);
+    if (stored && stored.requestHash === requestHash && !this.isQuoteExpired(stored.quote)) {
+      return stored.quote;
+    }
+
+    const refreshed = await this.quoteForDraft(draft, { forceRefresh: true });
+    throw new BadRequestException({
+      code: 'DELIVERY_QUOTE_REFRESH_REQUIRED',
+      message: 'Frete atualizado. Revise o valor antes de enviar novamente.',
+      delivery: refreshed
+    });
+  }
 
   async getReadiness(orderId: number): Promise<DeliveryReadinessResult> {
     const order = await this.getOrderForDelivery(orderId);
-    const dropoffAddress = this.buildCustomerAddress(order.customer);
-    const items = (order.items || []).map((item) => ({
-      productId: item.productId,
-      name: item.product?.name || `Produto ${item.productId}`,
-      quantity: item.quantity
-    }));
+    const draft = this.buildOrderDraft(order);
+    const missingRequirements = this.collectMissingRequirements(order, draft);
 
-    const missingRequirements = [
-      ...(!order.customer?.name?.trim() ? ['cliente sem nome'] : []),
-      ...(!order.customer?.phone?.trim() ? ['cliente sem telefone'] : []),
-      ...(!dropoffAddress ? ['cliente sem endereco completo para entrega'] : []),
-      ...((order.items || []).length === 0 ? ['pedido sem itens'] : [])
-    ];
+    if (order.fulfillmentMode !== OrderFulfillmentModeEnum.enum.DELIVERY) {
+      return {
+        provider: 'NONE',
+        mode: 'PROVIDER',
+        ready: false,
+        reason: 'Pedido marcado para retirada. Nao ha entrega para solicitar.',
+        missingRequirements: ['pedido configurado como retirada'],
+        draft,
+        quoteStatus: 'NOT_REQUIRED',
+        deliveryFee: 0
+      };
+    }
 
-    const ready = missingRequirements.length === 0;
     return {
-      provider: 'LOCAL',
-      mode: 'INTERNAL',
-      ready,
-      reason: ready
-        ? 'Entrega local pronta para iniciar.'
-        : `Corrija os dados do pedido antes de iniciar: ${missingRequirements.join(' • ')}`,
+      provider: this.normalizeProvider(order.deliveryProvider),
+      mode: 'PROVIDER',
+      ready: missingRequirements.length === 0,
+      reason:
+        missingRequirements.length === 0
+          ? 'Entrega pronta para solicitar.'
+          : `Corrija os dados do pedido antes de iniciar: ${missingRequirements.join(' • ')}`,
       missingRequirements,
-      draft: {
-        orderId: order.id,
-        customerName: (order.customer?.name || '').trim(),
-        customerPhone: (order.customer?.phone || '').trim(),
-        dropoffAddress,
-        orderTotal: this.toMoney(order.total ?? 0),
-        scheduledAt: order.scheduledAt?.toISOString() || '',
-        manifestSummary: items.map((item) => `${item.name} x ${item.quantity}`).join(', '),
-        items
-      }
+      draft,
+      quoteStatus: this.normalizeQuoteStatus(order.deliveryQuoteStatus),
+      deliveryFee: this.toMoney(order.deliveryFee ?? 0)
     };
   }
 
   async startOrderDelivery(orderId: number) {
     const order = await this.getOrderForDelivery(orderId);
+    if (order.fulfillmentMode !== OrderFulfillmentModeEnum.enum.DELIVERY) {
+      throw new BadRequestException('Pedido configurado como retirada. Nao ha envio para solicitar.');
+    }
     if (!['PRONTO', 'ENTREGUE'].includes(order.status)) {
       throw new BadRequestException('Entrega so pode ser iniciada quando o pedido estiver PRONTO.');
     }
 
     const readiness = await this.getReadiness(orderId);
     const existing = await this.readTracking(orderId);
-    if (existing && existing.status !== 'FAILED' && existing.status !== 'DELIVERED') {
+    if (existing && !['FAILED', 'DELIVERED', 'CANCELED'].includes(existing.status)) {
       return {
         reusedExisting: true,
         tracking: await this.syncTrackingRecord(existing)
@@ -125,29 +171,77 @@ export class DeliveriesService {
     if (!readiness.ready) {
       const blocked = await this.saveTracking(orderId, {
         orderId,
-        provider: 'LOCAL',
-        mode: 'INTERNAL',
+        provider: this.normalizeProvider(order.deliveryProvider),
         status: 'PENDING_REQUIREMENTS',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         trackingId: `blocked-${randomUUID()}`,
+        providerDeliveryId: null,
+        providerTrackingUrl: null,
         pickupEta: null,
         dropoffEta: null,
         lastError: readiness.missingRequirements.join(' • '),
-        draft: readiness.draft
+        mode: 'PROVIDER',
+        draft: readiness.draft,
+        providerQuoteId: order.deliveryQuoteRef ?? null,
+        quoteFee: this.toMoney(order.deliveryFee ?? 0),
+        quoteExpiresAt: order.deliveryQuoteExpiresAt?.toISOString() ?? null
       });
 
-      return {
-        reusedExisting: false,
-        tracking: blocked
-      };
+      return { reusedExisting: false, tracking: blocked };
     }
 
-    const tracking = await this.createLocalTracking(orderId, readiness);
-    return {
-      reusedExisting: false,
-      tracking
-    };
+    const provider = this.selectDispatchProvider(order.deliveryProvider);
+    const input = this.buildProviderInput(readiness.draft, order.deliveryQuoteRef ?? null);
+
+    try {
+      const dispatch = await provider.createDelivery(input);
+      const tracking = await this.saveTracking(orderId, {
+        orderId,
+        provider: dispatch.provider,
+        status: dispatch.status,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        trackingId: dispatch.trackingId,
+        providerDeliveryId: dispatch.providerDeliveryId,
+        providerTrackingUrl: dispatch.providerTrackingUrl,
+        pickupEta: dispatch.pickupEta,
+        dropoffEta: dispatch.dropoffEta,
+        lastError: dispatch.lastError,
+        mode: 'PROVIDER',
+        draft: readiness.draft,
+        providerQuoteId: order.deliveryQuoteRef ?? null,
+        quoteFee: this.toMoney(order.deliveryFee ?? 0),
+        quoteExpiresAt: order.deliveryQuoteExpiresAt?.toISOString() ?? null
+      });
+      return {
+        reusedExisting: false,
+        tracking
+      };
+    } catch (error) {
+      const failed = await this.saveTracking(orderId, {
+        orderId,
+        provider: this.normalizeProvider(order.deliveryProvider),
+        status: 'FAILED',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        trackingId: `failed-${randomUUID()}`,
+        providerDeliveryId: null,
+        providerTrackingUrl: null,
+        pickupEta: null,
+        dropoffEta: null,
+        lastError: error instanceof Error ? error.message : 'Falha ao solicitar envio.',
+        mode: 'PROVIDER',
+        draft: readiness.draft,
+        providerQuoteId: order.deliveryQuoteRef ?? null,
+        quoteFee: this.toMoney(order.deliveryFee ?? 0),
+        quoteExpiresAt: order.deliveryQuoteExpiresAt?.toISOString() ?? null
+      });
+      return {
+        reusedExisting: false,
+        tracking: failed
+      };
+    }
   }
 
   async getOrderTracking(orderId: number) {
@@ -182,6 +276,201 @@ export class DeliveriesService {
     return delivered;
   }
 
+  private buildNotRequiredQuote() {
+    return DeliveryQuoteResponseSchema.parse({
+      provider: 'NONE',
+      fee: 0,
+      currencyCode: 'BRL',
+      source: 'NONE',
+      status: 'NOT_REQUIRED',
+      quoteToken: null,
+      expiresAt: null,
+      fallbackReason: null,
+      breakdownLabel: 'Sem frete'
+    });
+  }
+
+  private async quoteForDraft(draftPayload: DeliveryQuoteDraft, options?: { forceRefresh?: boolean }) {
+    const draft = DeliveryQuoteDraftSchema.parse(draftPayload);
+    if (draft.mode !== OrderFulfillmentModeEnum.enum.DELIVERY) {
+      return this.buildNotRequiredQuote();
+    }
+
+    const requestHash = this.quoteRequestHash(draft);
+    const quoteToken = this.quoteToken(requestHash);
+    if (!options?.forceRefresh) {
+      const existing = await this.readQuoteRecord(quoteToken);
+      if (existing && existing.requestHash === requestHash && !this.isQuoteExpired(existing.quote)) {
+        return existing.quote;
+      }
+    }
+
+    const input = this.buildQuoteInput(draft);
+    const quote = await this.fetchProviderQuote(input);
+    const normalized = DeliveryQuoteResponseSchema.parse({
+      provider: quote.provider,
+      fee: this.toMoney(quote.fee),
+      currencyCode: quote.currencyCode || 'BRL',
+      source: quote.source,
+      status: quote.status,
+      quoteToken,
+      expiresAt: quote.expiresAt ?? null,
+      fallbackReason: quote.fallbackReason ?? null,
+      breakdownLabel: quote.breakdownLabel ?? null
+    });
+
+    await this.saveQuoteRecord(quoteToken, requestHash, normalized);
+    return normalized;
+  }
+
+  private async fetchProviderQuote(input: DeliveryQuoteInput) {
+    if (!input.dropoffAddress.trim()) {
+      throw new BadRequestException('Endereco de entrega obrigatorio para cotar frete.');
+    }
+
+    if (this.uberProvider.isConfigured()) {
+      try {
+        return await this.uberProvider.quote(input);
+      } catch (error) {
+        if (error instanceof BadGatewayException) {
+          return this.localProvider.quote(input);
+        }
+        throw error;
+      }
+    }
+
+    return this.localProvider.quote(input);
+  }
+
+  private buildQuoteInput(draft: DeliveryQuoteDraft): DeliveryQuoteInput {
+    return {
+      orderId: null,
+      pickupName: this.pickupOrigin().name,
+      pickupPhone: this.pickupOrigin().phone,
+      pickupAddress: this.pickupOrigin().address,
+      dropoffName: this.normalizeText(draft.customer.name) || 'Cliente',
+      dropoffPhone: this.normalizeText(draft.customer.phone) || '',
+      dropoffAddress: this.normalizeText(draft.customer.address),
+      scheduledAt: draft.scheduledAt,
+      orderTotal: this.toMoney(draft.manifest.subtotal),
+      manifestSummary: this.buildManifestSummary(draft.manifest.items),
+      items: draft.manifest.items.map((item) => ({ name: item.name, quantity: item.quantity }))
+    };
+  }
+
+  private buildProviderInput(draft: DeliveryDraft, providerQuoteId: string | null): DeliveryDispatchInput {
+    return {
+      orderId: draft.orderId,
+      pickupName: this.pickupOrigin().name,
+      pickupPhone: this.pickupOrigin().phone,
+      pickupAddress: this.pickupOrigin().address,
+      dropoffName: draft.customerName,
+      dropoffPhone: draft.customerPhone,
+      dropoffAddress: draft.dropoffAddress,
+      scheduledAt: draft.scheduledAt || null,
+      orderTotal: this.toMoney(draft.orderTotal),
+      manifestSummary: draft.manifestSummary,
+      items: draft.items.map((item) => ({ name: item.name, quantity: item.quantity })),
+      providerQuoteId
+    };
+  }
+
+  private pickupOrigin() {
+    return {
+      name: this.normalizeText(process.env.DELIVERY_PICKUP_NAME) || 'Quero Broa',
+      phone:
+        this.normalizeText(process.env.DELIVERY_PICKUP_PHONE) ||
+        this.normalizeText(process.env.PIX_STATIC_KEY) ||
+        '',
+      address: this.normalizeText(process.env.DELIVERY_PICKUP_ADDRESS)
+    };
+  }
+
+  private selectDispatchProvider(provider: string | null | undefined): DeliveryProvider {
+    const normalized = this.normalizeProvider(provider);
+    if (normalized === 'UBER_DIRECT' && this.uberProvider.isConfigured()) {
+      return this.uberProvider;
+    }
+    return this.localProvider;
+  }
+
+  private quoteRequestHash(draft: DeliveryQuoteDraft) {
+    return createHash('sha256')
+      .update(
+        JSON.stringify({
+          mode: draft.mode,
+          scheduledAt: draft.scheduledAt,
+          pickupAddress: this.pickupOrigin().address,
+          customerAddress: this.normalizeText(draft.customer.address),
+          subtotal: this.toMoney(draft.manifest.subtotal),
+          totalUnits: draft.manifest.totalUnits,
+          itemCount: draft.manifest.items.length
+        })
+      )
+      .digest('hex');
+  }
+
+  private quoteToken(requestHash: string) {
+    return `DQ_${requestHash}`;
+  }
+
+  private async readQuoteRecord(quoteToken: string): Promise<QuoteRecordPayload | null> {
+    const record = await this.prisma.idempotencyRecord.findUnique({
+      where: {
+        scope_idemKey: {
+          scope: DELIVERY_QUOTE_SCOPE,
+          idemKey: quoteToken
+        }
+      }
+    });
+    if (!record?.responseJson) return null;
+
+    try {
+      const parsed = JSON.parse(record.responseJson) as QuoteRecordPayload;
+      return {
+        requestHash: this.normalizeText(parsed.requestHash),
+        quote: DeliveryQuoteResponseSchema.parse(parsed.quote)
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private async saveQuoteRecord(quoteToken: string, requestHash: string, quote: DeliveryQuoteResponse) {
+    const expiry = quote.expiresAt ? new Date(quote.expiresAt) : this.defaultQuoteExpiry();
+    await this.prisma.idempotencyRecord.upsert({
+      where: {
+        scope_idemKey: {
+          scope: DELIVERY_QUOTE_SCOPE,
+          idemKey: quoteToken
+        }
+      },
+      update: {
+        requestHash,
+        responseJson: JSON.stringify({ requestHash, quote }),
+        expiresAt: expiry
+      },
+      create: {
+        scope: DELIVERY_QUOTE_SCOPE,
+        idemKey: quoteToken,
+        requestHash,
+        responseJson: JSON.stringify({ requestHash, quote }),
+        expiresAt: expiry
+      }
+    });
+  }
+
+  private defaultQuoteExpiry() {
+    return new Date(Date.now() + 20 * 60_000);
+  }
+
+  private isQuoteExpired(quote: DeliveryQuoteResponse) {
+    if (!quote.expiresAt) return false;
+    const timestamp = Date.parse(quote.expiresAt);
+    if (Number.isNaN(timestamp)) return false;
+    return timestamp <= Date.now();
+  }
+
   private async getOrderForDelivery(orderId: number) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
@@ -200,6 +489,35 @@ export class DeliveriesService {
     }
 
     return order;
+  }
+
+  private buildOrderDraft(order: OrderWithDeliveryContext): DeliveryDraft {
+    const items = (order.items || []).map((item) => ({
+      productId: item.productId,
+      name: item.product?.name || `Produto ${item.productId}`,
+      quantity: item.quantity
+    }));
+
+    return {
+      orderId: order.id,
+      customerName: (order.customer?.name || '').trim(),
+      customerPhone: (order.customer?.phone || '').trim(),
+      dropoffAddress: this.buildCustomerAddress(order.customer),
+      orderTotal: this.toMoney(order.total ?? 0),
+      scheduledAt: order.scheduledAt?.toISOString() || '',
+      manifestSummary: items.map((item) => `${item.name} x ${item.quantity}`).join(', '),
+      items
+    };
+  }
+
+  private collectMissingRequirements(order: OrderWithDeliveryContext, draft: DeliveryDraft) {
+    return [
+      ...(!this.pickupOrigin().address ? ['origem de coleta sem endereco configurado'] : []),
+      ...(!order.customer?.name?.trim() ? ['cliente sem nome'] : []),
+      ...(!order.customer?.phone?.trim() ? ['cliente sem telefone'] : []),
+      ...(!draft.dropoffAddress ? ['cliente sem endereco completo para entrega'] : []),
+      ...((order.items || []).length === 0 ? ['pedido sem itens'] : [])
+    ];
   }
 
   private toMoney(value: number) {
@@ -226,24 +544,15 @@ export class DeliveriesService {
     return parts.length > 0 ? parts.join(', ') : normalizedFallback;
   }
 
-  private async createLocalTracking(orderId: number, readiness: DeliveryReadinessResult) {
-    const now = Date.now();
-    return this.saveTracking(orderId, {
-      orderId,
-      provider: 'LOCAL',
-      mode: 'INTERNAL',
-      status: 'REQUESTED',
-      createdAt: new Date(now).toISOString(),
-      updatedAt: new Date(now).toISOString(),
-      trackingId: `local-${randomUUID()}`,
-      pickupEta: new Date(now + 10 * 60_000).toISOString(),
-      dropoffEta: new Date(now + 40 * 60_000).toISOString(),
-      lastError: null,
-      draft: readiness.draft
-    });
+  private buildManifestSummary(items: DeliveryQuoteDraft['manifest']['items']) {
+    return items.map((item) => `${item.name} x ${item.quantity}`).join(', ');
   }
 
   private async syncTrackingRecord(tracking: DeliveryTrackingRecord) {
+    if (tracking.provider !== 'LOCAL') {
+      return tracking;
+    }
+
     const now = Date.now();
     const pickupAt = tracking.pickupEta ? new Date(tracking.pickupEta).getTime() : NaN;
     const dropoffAt = tracking.dropoffEta ? new Date(tracking.dropoffEta).getTime() : NaN;
@@ -289,7 +598,7 @@ export class DeliveriesService {
     const record = await this.prisma.idempotencyRecord.findUnique({
       where: {
         scope_idemKey: {
-          scope: 'DELIVERY_TRACKING',
+          scope: DELIVERY_TRACKING_SCOPE,
           idemKey: `ORDER_${orderId}`
         }
       }
@@ -297,19 +606,13 @@ export class DeliveriesService {
     if (!record) return null;
 
     try {
-      return this.normalizeTrackingRecord(
-        orderId,
-        JSON.parse(record.responseJson) as LegacyDeliveryTrackingRecord
-      );
+      return this.normalizeTrackingRecord(orderId, JSON.parse(record.responseJson) as LegacyDeliveryTrackingRecord);
     } catch {
       return null;
     }
   }
 
-  private normalizeTrackingRecord(
-    orderId: number,
-    tracking: LegacyDeliveryTrackingRecord
-  ): DeliveryTrackingRecord {
+  private normalizeTrackingRecord(orderId: number, tracking: LegacyDeliveryTrackingRecord): DeliveryTrackingRecord {
     const createdAt = this.normalizeIsoTimestamp(tracking.createdAt) || new Date().toISOString();
     const updatedAt = this.normalizeIsoTimestamp(tracking.updatedAt) || createdAt;
     const trackingId =
@@ -319,32 +622,59 @@ export class DeliveriesService {
       `legacy-order-${orderId}`;
 
     return {
+      id: Number(tracking.id) || undefined,
       orderId,
-      provider: 'LOCAL',
-      mode: 'INTERNAL',
+      provider: this.normalizeProvider(tracking.provider),
       status: this.normalizeTrackingStatus(tracking.status),
-      createdAt,
-      updatedAt,
-      trackingId,
+      providerDeliveryId: this.normalizeText(tracking.providerDeliveryId) || null,
+      providerTrackingUrl: this.normalizeText(tracking.providerTrackingUrl) || this.normalizeText(tracking.trackingUrl) || null,
       pickupEta: this.normalizeIsoTimestamp(tracking.pickupEta),
       dropoffEta: this.normalizeIsoTimestamp(tracking.dropoffEta),
       lastError:
         this.normalizeText(tracking.lastError) || this.normalizeText(tracking.lastProviderError) || null,
-      draft: this.normalizeDraft(orderId, tracking.draft)
+      createdAt,
+      updatedAt,
+      trackingId,
+      mode: 'PROVIDER',
+      draft: this.normalizeDraft(orderId, tracking.draft),
+      providerQuoteId: this.normalizeText(tracking.providerQuoteId) || null,
+      quoteFee: Number.isFinite(Number(tracking.quoteFee)) ? this.toMoney(Number(tracking.quoteFee)) : null,
+      quoteExpiresAt: this.normalizeIsoTimestamp(tracking.quoteExpiresAt)
     };
   }
 
-  private normalizeTrackingStatus(status: string | undefined): DeliveryTrackingStatus {
+  private normalizeProvider(provider: string | null | undefined): DeliveryTrackingRecord['provider'] {
+    if (provider === 'LOCAL' || provider === 'UBER_DIRECT' || provider === 'NONE') return provider;
+    return 'LOCAL';
+  }
+
+  private normalizeTrackingStatus(status: string | undefined): DeliveryTrackingRecord['status'] {
     if (
+      status === 'NOT_REQUESTED' ||
       status === 'PENDING_REQUIREMENTS' ||
       status === 'REQUESTED' ||
       status === 'OUT_FOR_DELIVERY' ||
       status === 'DELIVERED' ||
-      status === 'FAILED'
+      status === 'FAILED' ||
+      status === 'CANCELED'
     ) {
       return status;
     }
     return 'REQUESTED';
+  }
+
+  private normalizeQuoteStatus(status: string | null | undefined): DeliveryQuoteResponse['status'] {
+    if (
+      status === 'NOT_REQUIRED' ||
+      status === 'PENDING' ||
+      status === 'QUOTED' ||
+      status === 'FALLBACK' ||
+      status === 'EXPIRED' ||
+      status === 'FAILED'
+    ) {
+      return status;
+    }
+    return 'NOT_REQUIRED';
   }
 
   private normalizeDraft(orderId: number, draft?: Partial<DeliveryDraft>): DeliveryDraft {
@@ -353,7 +683,7 @@ export class DeliveriesService {
       customerName: this.normalizeText(draft?.customerName) || '',
       customerPhone: this.normalizeText(draft?.customerPhone) || '',
       dropoffAddress: this.normalizeText(draft?.dropoffAddress) || '',
-      orderTotal: this.toMoney(draft?.orderTotal ?? 0),
+      orderTotal: this.toMoney(Number(draft?.orderTotal) || 0),
       scheduledAt: this.normalizeText(draft?.scheduledAt) || '',
       manifestSummary: this.normalizeText(draft?.manifestSummary) || '',
       items: Array.isArray(draft?.items)
@@ -393,7 +723,7 @@ export class DeliveriesService {
     await this.prisma.idempotencyRecord.upsert({
       where: {
         scope_idemKey: {
-          scope: 'DELIVERY_TRACKING',
+          scope: DELIVERY_TRACKING_SCOPE,
           idemKey: `ORDER_${orderId}`
         }
       },
@@ -403,7 +733,7 @@ export class DeliveriesService {
         expiresAt
       },
       create: {
-        scope: 'DELIVERY_TRACKING',
+        scope: DELIVERY_TRACKING_SCOPE,
         idemKey: `ORDER_${orderId}`,
         requestHash: normalized.trackingId,
         responseJson: JSON.stringify(normalized),

@@ -12,6 +12,19 @@ export const OrderStatusEnum = z.enum([
 export const PaymentStatusEnum = z.enum(['PENDENTE', 'PAGO', 'CANCELADO']);
 export const OrderPaymentStatusEnum = z.enum(['PENDENTE', 'PARCIAL', 'PAGO']);
 export const PixChargeProviderEnum = z.enum(['STATIC_PIX', 'LOCAL_DEV']);
+export const OrderFulfillmentModeEnum = z.enum(['DELIVERY', 'PICKUP']);
+export const DeliveryProviderEnum = z.enum(['NONE', 'LOCAL', 'UBER_DIRECT']);
+export const DeliveryFeeSourceEnum = z.enum(['NONE', 'UBER_QUOTE', 'MANUAL_FALLBACK']);
+export const DeliveryQuoteStatusEnum = z.enum(['NOT_REQUIRED', 'PENDING', 'QUOTED', 'FALLBACK', 'EXPIRED', 'FAILED']);
+export const DeliveryJobStatusEnum = z.enum([
+  'NOT_REQUESTED',
+  'PENDING_REQUIREMENTS',
+  'REQUESTED',
+  'OUT_FOR_DELIVERY',
+  'DELIVERED',
+  'FAILED',
+  'CANCELED'
+]);
 
 export const StockMovementTypeEnum = z.enum(['IN', 'OUT', 'ADJUST']);
 export const InventoryCategoryEnum = z.enum(['INGREDIENTE', 'EMBALAGEM_INTERNA', 'EMBALAGEM_EXTERNA']);
@@ -82,7 +95,13 @@ export const OrderSchema = z.object({
   id: z.number().int().positive().optional(),
   customerId: z.number().int().positive(),
   status: OrderStatusEnum.default('ABERTO'),
+  fulfillmentMode: OrderFulfillmentModeEnum.default('DELIVERY'),
   subtotal: z.number().nonnegative().optional(),
+  deliveryFee: z.number().nonnegative().optional(),
+  deliveryProvider: DeliveryProviderEnum.optional(),
+  deliveryFeeSource: DeliveryFeeSourceEnum.optional(),
+  deliveryQuoteStatus: DeliveryQuoteStatusEnum.optional(),
+  deliveryQuoteExpiresAt: z.string().optional().nullable(),
   discount: z.number().nonnegative().optional(),
   total: z.number().nonnegative().optional(),
   amountPaid: z.number().nonnegative().optional(),
@@ -115,7 +134,6 @@ export const OrderIntakeChannelEnum = z.enum([
 
 export const OrderIntakeIntentEnum = z.enum(['DRAFT', 'CONFIRMED', 'PAID']);
 export const OrderIntakeStageEnum = z.enum(['DRAFT', 'CONFIRMED', 'PIX_PENDING', 'PAID', 'SCHEDULED']);
-export const OrderFulfillmentModeEnum = z.enum(['DELIVERY', 'PICKUP']);
 export const PixChargeStatusEnum = z.enum(['PENDENTE', 'PAGO']);
 
 export const OrderIntakeCustomerRefSchema = z.union([
@@ -150,6 +168,15 @@ export const OrderIntakeSourceSchema = z.object({
   originLabel: z.string().trim().min(1).max(160).optional().nullable()
 });
 
+export const DeliveryQuoteSelectionSchema = z.object({
+  quoteToken: z.string().trim().min(1).max(512).optional().nullable(),
+  fee: z.number().nonnegative().optional().nullable(),
+  provider: DeliveryProviderEnum.optional().nullable(),
+  source: DeliveryFeeSourceEnum.optional().nullable(),
+  status: DeliveryQuoteStatusEnum.optional().nullable(),
+  expiresAt: z.string().datetime().optional().nullable()
+});
+
 export const OrderIntakeSchema = z.object({
   version: z.literal(1).default(1),
   intent: OrderIntakeIntentEnum.default('CONFIRMED'),
@@ -160,6 +187,7 @@ export const OrderIntakeSchema = z.object({
       scheduledAt: z.string().datetime().optional().nullable()
     })
     .default({}),
+  delivery: DeliveryQuoteSelectionSchema.optional(),
   order: z.object({
     items: z.array(OrderIntakeItemSchema).min(1),
     discount: z.number().nonnegative().default(0),
@@ -181,6 +209,11 @@ export const OrderIntakeMetaSchema = z.object({
   dueAt: z.string().nullable(),
   paidAt: z.string().nullable(),
   providerRef: z.string().nullable(),
+  deliveryFee: z.number().nonnegative(),
+  deliveryProvider: DeliveryProviderEnum,
+  deliveryFeeSource: DeliveryFeeSourceEnum,
+  deliveryQuoteStatus: DeliveryQuoteStatusEnum,
+  deliveryQuoteExpiresAt: z.string().nullable(),
   pixCharge: PixChargeSchema.nullable(),
   orderId: z.number().int().positive(),
   customerId: z.number().int().positive()
@@ -211,6 +244,7 @@ export const ExternalOrderSubmissionSchema = z
       mode: OrderFulfillmentModeEnum.default('DELIVERY'),
       scheduledAt: z.string().datetime()
     }),
+    delivery: DeliveryQuoteSelectionSchema.optional(),
     flavors: ExternalOrderFlavorCountsSchema,
     notes: z.string().optional().nullable(),
     source: z
@@ -237,6 +271,63 @@ export const ExternalOrderSubmissionSchema = z
       });
     }
   });
+
+export const DeliveryQuoteDraftSchema = z.object({
+  mode: OrderFulfillmentModeEnum.default('DELIVERY'),
+  scheduledAt: z.string().datetime(),
+  customer: z.object({
+    name: z.string().min(1).optional().nullable(),
+    phone: z.string().optional().nullable(),
+    address: z.string().optional().nullable(),
+    deliveryNotes: z.string().optional().nullable()
+  }),
+  manifest: z.object({
+    items: z
+      .array(
+        z.object({
+          name: z.string().min(1),
+          quantity: z.number().nonnegative()
+        })
+      )
+      .default([]),
+    subtotal: z.number().nonnegative().default(0),
+    totalUnits: z.number().int().nonnegative().default(0)
+  })
+});
+
+export const DeliveryQuoteResponseSchema = z.object({
+  provider: DeliveryProviderEnum,
+  fee: z.number().nonnegative(),
+  currencyCode: z.string().trim().min(3).max(8).default('BRL'),
+  source: DeliveryFeeSourceEnum,
+  status: DeliveryQuoteStatusEnum,
+  quoteToken: z.string().trim().min(1).max(512).optional().nullable(),
+  expiresAt: z.string().nullable(),
+  fallbackReason: z.string().nullable(),
+  breakdownLabel: z.string().trim().min(1).max(160).optional().nullable()
+});
+
+export const DeliveryQuoteViewSchema = DeliveryQuoteResponseSchema.extend({
+  id: z.number().int().positive().optional(),
+  orderId: z.number().int().positive().optional().nullable(),
+  providerQuoteId: z.string().trim().min(1).max(160).optional().nullable(),
+  requestHash: z.string().trim().min(1).max(160).optional().nullable(),
+  createdAt: z.string().optional().nullable()
+});
+
+export const DeliveryJobSchema = z.object({
+  id: z.number().int().positive().optional(),
+  orderId: z.number().int().positive(),
+  provider: DeliveryProviderEnum,
+  status: DeliveryJobStatusEnum,
+  providerDeliveryId: z.string().trim().min(1).max(160).optional().nullable(),
+  providerTrackingUrl: z.string().trim().max(512).optional().nullable(),
+  pickupEta: z.string().optional().nullable(),
+  dropoffEta: z.string().optional().nullable(),
+  lastError: z.string().optional().nullable(),
+  createdAt: z.string().optional().nullable(),
+  updatedAt: z.string().optional().nullable()
+});
 
 export const InventoryItemSchema = z.object({
   id: z.number().int().positive().optional(),

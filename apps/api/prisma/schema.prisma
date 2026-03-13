@@ -54,7 +54,14 @@ model Order {
   id                 Int                 @id @default(autoincrement())
   customerId         Int
   status             String              @default("ABERTO")
+  fulfillmentMode    String              @default("DELIVERY")
   subtotal           Float               @default(0)
+  deliveryFee        Float               @default(0)
+  deliveryProvider   String              @default("NONE")
+  deliveryFeeSource  String              @default("NONE")
+  deliveryQuoteStatus String             @default("NOT_REQUIRED")
+  deliveryQuoteRef   String?
+  deliveryQuoteExpiresAt DateTime?
   discount           Float               @default(0)
   total              Float               @default(0)
   notes              String?
@@ -67,6 +74,7 @@ model Order {
 
   @@index([customerId])
   @@index([status])
+  @@index([fulfillmentMode])
 }
 
 model OrderItem {
