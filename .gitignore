@@ -19,6 +19,7 @@ node_modules
 /apps/api/prisma/dev.db*
 /apps/api/dev.db*
 /apps/mobile/.expo
+/apps/api/.codex-temp/
 /packages/shared/dist
 /docs/.cache
 /docs/historical-deposits/record.md
