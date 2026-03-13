@@ -12,10 +12,12 @@ import {
   ORDER_FLAVOR_OFFICIAL_BOX_NAME_BY_CODE,
   ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE,
   ORDER_MISTA_SHORTCUT_CODES,
+  ORDER_SABORES_REFERENCE_IMAGE,
   compactOrderProductName,
   normalizeOrderFlavorName,
   resolveOrderCardImage,
   resolveOrderFlavorCodeFromName,
+  resolveOrderReferenceImage,
   type OrderFlavorCode,
   type OrderMistaShortcutCode
 } from './order-box-catalog';
@@ -572,6 +574,7 @@ export function OrderQuickCreate({
           const selectedQty = quantityByProductId.get(product.id!) || 0;
           const isSelected = selectedQty > 0;
           const productImage = resolveOrderCardImage(product.name);
+          const productReferenceImage = resolveOrderReferenceImage(product.name);
           return (
             <div
               key={product.id}
@@ -583,14 +586,27 @@ export function OrderQuickCreate({
               }`}
             >
               <div className="flex flex-wrap items-start gap-3">
-                <div className="relative h-16 w-16 overflow-hidden rounded-2xl border border-white/80 bg-white/80 shadow-[0_10px_24px_rgba(70,44,26,0.08)]">
-                  <Image
-                    alt={compactOrderProductName(product.name)}
-                    className="h-full w-full object-cover"
-                    fill
-                    sizes="64px"
-                    src={productImage}
-                  />
+                <div className="relative h-16 w-16 shrink-0">
+                  <div className="relative h-full w-full overflow-hidden rounded-2xl border border-white/80 bg-white/80 shadow-[0_10px_24px_rgba(70,44,26,0.08)]">
+                    <Image
+                      alt={compactOrderProductName(product.name)}
+                      className="h-full w-full object-cover"
+                      fill
+                      sizes="64px"
+                      src={productImage}
+                    />
+                    <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_24%,rgba(46,29,20,0.12)_100%)]" />
+                  </div>
+                  <div className="absolute -bottom-1 -right-1 h-10 w-8 overflow-hidden rounded-xl border border-white/90 bg-white/90 shadow-[0_10px_18px_rgba(70,44,26,0.16)]">
+                    <Image
+                      alt={`${compactOrderProductName(product.name)} no cardapio oficial`}
+                      className="h-full w-full object-cover"
+                      fill
+                      sizes="32px"
+                      src={productReferenceImage}
+                    />
+                    <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_34%,rgba(46,29,20,0.06)_100%)]" />
+                  </div>
                 </div>
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-neutral-900">{compactOrderProductName(product.name)}</p>
@@ -664,14 +680,27 @@ export function OrderQuickCreate({
           }`}
         >
           <div className="flex flex-wrap items-start gap-3">
-            <div className="relative h-16 w-16 overflow-hidden rounded-2xl border border-white/80 bg-white/80 shadow-[0_10px_24px_rgba(70,44,26,0.08)]">
-              <Image
-                alt="Caixa mista"
-                className="h-full w-full object-cover"
-                fill
-                sizes="64px"
-                src="/querobroa-brand/green-composition.jpg"
-              />
+            <div className="relative h-16 w-16 shrink-0">
+              <div className="relative h-full w-full overflow-hidden rounded-2xl border border-white/80 bg-white/80 shadow-[0_10px_24px_rgba(70,44,26,0.08)]">
+                <Image
+                  alt="Caixa mista"
+                  className="h-full w-full object-cover"
+                  fill
+                  sizes="64px"
+                  src="/querobroa-brand/green-composition.jpg"
+                />
+                <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_24%,rgba(46,29,20,0.12)_100%)]" />
+              </div>
+              <div className="absolute -bottom-1 -right-1 h-10 w-8 overflow-hidden rounded-xl border border-white/90 bg-white/90 shadow-[0_10px_18px_rgba(70,44,26,0.16)]">
+                <Image
+                  alt="Sabores no cardapio oficial"
+                  className="h-full w-full object-cover"
+                  fill
+                  sizes="32px"
+                  src={ORDER_SABORES_REFERENCE_IMAGE}
+                />
+                <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_34%,rgba(46,29,20,0.06)_100%)]" />
+              </div>
             </div>
             <div className="min-w-0">
               <p className="text-sm font-semibold text-neutral-900">Mista (M)</p>

@@ -9,7 +9,7 @@ source "$ROOT_DIR/scripts/runtime-path.sh"
 setup_runtime_path
 
 API_URL="http://127.0.0.1:3001/health"
-WEB_URL="http://127.0.0.1:3000/pedidos"
+WEB_URL="${QUEROBROAPP_START_URL:-http://127.0.0.1:3000/pedidos}"
 API_LOG="/tmp/querobroapp-api.log"
 WEB_LOG="/tmp/querobroapp-web.log"
 UID_VALUE="$(id -u)"

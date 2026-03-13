@@ -1,5 +1,4 @@
-const API_BASE_URL = 'https://api.seu-dominio.com';
-const API_AUTH_TOKEN = '';
+const APP_BASE_URL = 'https://web-publico.seu-endereco.com';
 
 const FORM_FIELDS = {
   timestamp: 'Carimbo de data/hora',
@@ -21,20 +20,11 @@ const FORM_FIELDS = {
 function onFormSubmit(e) {
   const namedValues = e && e.namedValues ? e.namedValues : {};
   const payload = buildQuerobroappPayload_(namedValues);
-  const url = `${API_BASE_URL.replace(/\/+$/, '')}/orders/intake/google-form`;
-
-  const headers = {
-    'Content-Type': 'application/json'
-  };
-
-  if (API_AUTH_TOKEN) {
-    headers.Authorization = `Bearer ${API_AUTH_TOKEN}`;
-  }
+  const url = `${APP_BASE_URL.replace(/\/+$/, '')}/api/google-form`;
 
   const response = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',
-    headers,
     payload: JSON.stringify(payload),
     muteHttpExceptions: true
   });

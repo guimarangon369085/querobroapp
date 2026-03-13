@@ -1,8 +1,9 @@
 import { buildQuerobroappPayloadFromNamedValues, GOOGLE_FORM_FIELDS } from './google-form-bridge-payload.mjs';
 
-const API_URL = String(process.env.QBAPP_GOOGLE_FORM_API_URL || 'http://127.0.0.1:3001').trim().replace(/\/+$/, '');
-const FORM_TOKEN = String(process.env.QBAPP_GOOGLE_FORM_TOKEN || process.env.ORDER_FORM_BRIDGE_TOKEN || '')
-  .trim();
+const APP_URL = String(process.env.QBAPP_GOOGLE_FORM_APP_URL || 'http://127.0.0.1:3000').trim().replace(/\/+$/, '');
+const API_URL = String(process.env.QBAPP_GOOGLE_FORM_API_URL || 'http://127.0.0.1:3001')
+  .trim()
+  .replace(/\/+$/, '');
 const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
 async function request(path, init = {}) {
@@ -41,15 +42,21 @@ const namedValues = {
 };
 
 const payload = buildQuerobroappPayloadFromNamedValues(namedValues);
-const headers = FORM_TOKEN ? { Authorization: `Bearer ${FORM_TOKEN}` } : {};
 const created = { orderId: null, customerId: null };
 
 try {
-  const result = await request('/orders/intake/google-form', {
+  const response = await fetch(`${APP_URL}/api/google-form`, {
     method: 'POST',
-    headers,
-    body: payload
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
   });
+  const text = await response.text();
+  const result = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    throw new Error(`POST /api/google-form -> ${response.status}\n${text}`);
+  }
 
   created.orderId = result.order?.id ?? null;
   created.customerId = result.intake?.customerId ?? null;

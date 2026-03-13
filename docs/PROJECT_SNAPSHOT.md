@@ -6,6 +6,7 @@ Ultima atualizacao: 2026-03-13
 
 - Monorepo ativo com API, Web, Mobile e contratos compartilhados.
 - Web consolidado em 3 telas operacionais reais: `Pedidos`, `Clientes` e `Estoque`, com captura publica em `/pedido`.
+- A raiz publica do web agora esta preparada para dominio externo: `/` pode operar como landing fullscreen da marca, `/pedido` como captura publica e `/pedidos` como superficie operacional no mesmo app.
 - `Pedidos` e a entrada principal; agenda `Dia/Semana/Mes` na mesma tela, com criacao de pedido no proprio painel e lista completa de pedidos logo abaixo do calendario.
 - CTAs contextuais por tela: `Pedidos` usa acao `Criar` no painel, `Clientes/Produtos` usam acao inline/sticky e `Estoque` usa botao flutuante `Nova movimentacao`.
 - `Calendario`, `Inicio`, `Jornada`, `Resumo` e `Builder` nao existem mais como superficies operacionais.
@@ -35,6 +36,7 @@ Ultima atualizacao: 2026-03-13
 ## Telas web
 
 - `/pedido`: pagina publica do cliente com submit para o intake canonico, cotacao previa de frete e exibicao do PIX copia e cola.
+- `/`: landing publica fullscreen da marca, preparada para `www.querobroa.com.br`.
 - `/pedidos`: agenda do dia, criacao de pedido, status, producao, entrega e pagamento.
 - `/clientes`: cadastro e edicao rapida.
 - `/estoque`: saldo, D+1, compras e leitura operacional.
@@ -51,6 +53,7 @@ Ultima atualizacao: 2026-03-13
 - Estoque: `inventory`, `inventory-products`, `bom`
 - Intake externo: `orders/intake`, `orders/intake/customer-form`, `orders/intake/google-form`, `orders/intake/whatsapp-flow`
 - Cotacao de frete: `deliveries/quotes` + proxy interno do web em `/api/delivery-quote`
+- Proxy de `Google Forms`: web exposto em `/api/google-form` para receber o Apps Script sem abrir a API inteira publicamente
 - Suporte interno: `runtime-config` (read-only) e redirects legados controlados no web
 
 ## Qualidade tecnica
@@ -73,10 +76,11 @@ Ultima atualizacao: 2026-03-13
 ## Gaps abertos
 
 1. `Google Forms` ja e viavel como canal temporario, mas ainda falta configuracao real do Apps Script e URL publica final.
-2. `WhatsApp Flow` segue sem numero dedicado; a migracao futura deve reutilizar o contrato externo atual.
-3. A integracao Uber/entrega real ainda depende de credenciais do provider; hoje existe cotacao e fallback server-side preparados.
-4. Mobile segue atras do web no fluxo operacional novo.
-5. Ainda vale ampliar cobertura de testes alem dos gates atuais, principalmente em cenarios de edge case de dominio.
+2. O deploy publico ainda nao esta ligado ao dominio comprado `querobroa.com.br`; faltam bind do host final, DNS e validacao externa em `www.querobroa.com.br`.
+3. `WhatsApp Flow` segue sem numero dedicado; a migracao futura deve reutilizar o contrato externo atual.
+4. A integracao Uber/entrega real ainda depende de credenciais do provider; hoje existe cotacao e fallback server-side preparados.
+5. Mobile segue atras do web no fluxo operacional novo.
+6. Ainda vale ampliar cobertura de testes alem dos gates atuais, principalmente em cenarios de edge case de dominio.
 
 ## Como religar e validar rapido
 

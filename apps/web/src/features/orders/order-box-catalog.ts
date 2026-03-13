@@ -36,6 +36,8 @@ export const ORDER_FLAVOR_CARD_IMAGE_BY_CODE: Record<OrderFlavorCode, string> = 
   R: '/querobroa-brand/yellow-composition.jpg'
 };
 
+export const ORDER_SABORES_REFERENCE_IMAGE = '/querobroa-brand/references/sabores-cardapio.jpg';
+
 export const ORDER_BOX_CATALOG = {
   T: {
     label: 'Tradicional',
@@ -43,6 +45,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 7 broas tradicionais',
     note: 'Receita classica da casa',
     image: '/querobroa-brand/stack.jpg',
+    referenceImage: '/querobroa-brand/references/tradicional-cardapio.jpg',
     accentClassName:
       'border-[rgba(176,120,66,0.16)] bg-[linear-gradient(165deg,rgba(255,249,241,0.98),rgba(247,232,213,0.9))]',
     units: { T: 7, G: 0, D: 0, Q: 0, R: 0 },
@@ -54,6 +57,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 7 broas de goiabada',
     note: 'Mais pedida',
     image: '/querobroa-brand/goiabada-pink.jpg',
+    referenceImage: '/querobroa-brand/references/goiabada-cardapio.jpg',
     accentClassName:
       'border-[rgba(190,84,108,0.18)] bg-[linear-gradient(165deg,rgba(255,246,248,0.98),rgba(249,228,234,0.9))]',
     units: { T: 0, G: 7, D: 0, Q: 0, R: 0 },
@@ -65,6 +69,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 7 broas de doce de leite',
     note: 'Mais cremosa',
     image: '/querobroa-brand/doce-pink.jpg',
+    referenceImage: '/querobroa-brand/references/doce-leite-cardapio.jpg',
     accentClassName:
       'border-[rgba(172,116,61,0.16)] bg-[linear-gradient(165deg,rgba(255,248,241,0.98),rgba(247,236,224,0.9))]',
     units: { T: 0, G: 0, D: 7, Q: 0, R: 0 },
@@ -76,6 +81,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 7 broas de queijo',
     note: 'Mais marcante',
     image: '/querobroa-brand/queijo-brown.jpg',
+    referenceImage: '/querobroa-brand/references/queijo-serro-cardapio.jpg',
     accentClassName:
       'border-[rgba(110,95,71,0.18)] bg-[linear-gradient(165deg,rgba(251,247,242,0.98),rgba(240,230,218,0.92))]',
     units: { T: 0, G: 0, D: 0, Q: 7, R: 0 },
@@ -87,6 +93,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 7 broas de requeijao',
     note: 'Mais suave',
     image: '/querobroa-brand/yellow-composition.jpg',
+    referenceImage: '/querobroa-brand/references/requeijao-corte-cardapio.jpg',
     accentClassName:
       'border-[rgba(150,122,83,0.18)] bg-[linear-gradient(165deg,rgba(255,250,242,0.98),rgba(247,238,223,0.92))]',
     units: { T: 0, G: 0, D: 0, Q: 0, R: 7 },
@@ -98,6 +105,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 4 tradicionais + 3 goiabada',
     note: 'A mista mais classica',
     image: '/querobroa-brand/goiabada-pink.jpg',
+    referenceImage: '/querobroa-brand/references/goiabada-cardapio.jpg',
     accentClassName:
       'border-[rgba(190,84,108,0.18)] bg-[linear-gradient(165deg,rgba(255,247,243,0.98),rgba(251,232,228,0.92))]',
     units: { T: 4, G: 3, D: 0, Q: 0, R: 0 },
@@ -109,6 +117,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 4 tradicionais + 3 doce de leite',
     note: 'Equilibrio entre classica e cremosa',
     image: '/querobroa-brand/doce-pink.jpg',
+    referenceImage: '/querobroa-brand/references/doce-leite-cardapio.jpg',
     accentClassName:
       'border-[rgba(172,116,61,0.16)] bg-[linear-gradient(165deg,rgba(255,248,243,0.98),rgba(247,235,225,0.92))]',
     units: { T: 4, G: 0, D: 3, Q: 0, R: 0 },
@@ -120,6 +129,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 4 tradicionais + 3 queijo',
     note: 'Mais intensa',
     image: '/querobroa-brand/queijo-brown.jpg',
+    referenceImage: '/querobroa-brand/references/queijo-serro-cardapio.jpg',
     accentClassName:
       'border-[rgba(110,95,71,0.18)] bg-[linear-gradient(165deg,rgba(252,248,244,0.98),rgba(242,233,223,0.92))]',
     units: { T: 4, G: 0, D: 0, Q: 3, R: 0 },
@@ -131,6 +141,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 4 tradicionais + 3 requeijao',
     note: 'Mineira e mais leve',
     image: '/querobroa-brand/half-broa.jpg',
+    referenceImage: '/querobroa-brand/references/requeijao-corte-cardapio.jpg',
     accentClassName:
       'border-[rgba(150,122,83,0.18)] bg-[linear-gradient(165deg,rgba(255,250,243,0.98),rgba(245,236,223,0.92))]',
     units: { T: 4, G: 0, D: 0, Q: 0, R: 3 },
@@ -196,6 +207,11 @@ export function resolveOrderFlavorCodeFromName(value?: string | null): OrderFlav
 export function resolveOrderCardImage(productName?: string | null) {
   const code = resolveOrderFlavorCodeFromName(productName);
   return code ? ORDER_FLAVOR_CARD_IMAGE_BY_CODE[code] : '/querobroa-brand/green-composition.jpg';
+}
+
+export function resolveOrderReferenceImage(productName?: string | null) {
+  const code = resolveOrderFlavorCodeFromName(productName);
+  return code ? ORDER_BOX_CATALOG[code].referenceImage : ORDER_SABORES_REFERENCE_IMAGE;
 }
 
 export function deriveFlavorUnitsFromBoxCounts(boxCounts: Record<OrderBoxCode, number>) {

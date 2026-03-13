@@ -11,6 +11,7 @@ import {
   ORDER_BOX_UNITS,
   ORDER_BRAND_GALLERY_IMAGES,
   ORDER_FLAVOR_CODES,
+  ORDER_SABORES_REFERENCE_IMAGE,
   type OrderBoxCode,
   type OrderFlavorCode,
   calculateOrderSubtotalFromFlavorSummary,
@@ -759,10 +760,22 @@ export function PublicOrderPage() {
                         active ? 'ring-1 ring-[rgba(181,68,57,0.16)]' : ''
                       }`}
                     >
-                      <div className="grid gap-3 grid-cols-[88px_minmax(0,1fr)] items-center sm:gap-4 sm:grid-cols-[110px_minmax(0,1fr)]">
-                        <div className="relative h-[88px] overflow-hidden rounded-[18px] border border-white/80 bg-white/70 shadow-[0_12px_24px_rgba(74,47,31,0.12)] transition-transform duration-300 group-hover:translate-y-[-2px] group-hover:rotate-[1deg] sm:h-[110px] sm:rounded-[22px] sm:shadow-[0_14px_28px_rgba(74,47,31,0.12)]">
-                          <Image alt={meta.label} className="h-full w-full object-cover" fill sizes="(max-width: 640px) 88px, 110px" src={meta.image} />
-                          <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_30%,rgba(46,29,20,0.08)_100%)]" />
+                      <div className="grid gap-3 grid-cols-[96px_minmax(0,1fr)] items-center sm:gap-4 sm:grid-cols-[118px_minmax(0,1fr)]">
+                        <div className="relative h-[96px] w-[96px] shrink-0 sm:h-[118px] sm:w-[118px]">
+                          <div className="relative h-full w-full overflow-hidden rounded-[18px] border border-white/80 bg-white/70 shadow-[0_12px_24px_rgba(74,47,31,0.12)] transition-transform duration-300 group-hover:translate-y-[-2px] group-hover:rotate-[1deg] sm:rounded-[22px] sm:shadow-[0_14px_28px_rgba(74,47,31,0.12)]">
+                            <Image alt={meta.label} className="h-full w-full object-cover" fill sizes="(max-width: 640px) 96px, 118px" src={meta.image} />
+                            <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_26%,rgba(46,29,20,0.12)_100%)]" />
+                          </div>
+                          <div className="absolute -bottom-2 -right-2 h-[58px] w-[44px] overflow-hidden rounded-[14px] border border-white/90 bg-white/88 shadow-[0_12px_22px_rgba(74,47,31,0.18)] sm:h-[74px] sm:w-[56px] sm:rounded-[16px]">
+                            <Image
+                              alt={`${meta.label} no cardapio oficial`}
+                              className="h-full w-full object-cover"
+                              fill
+                              sizes="(max-width: 640px) 44px, 56px"
+                              src={meta.referenceImage}
+                            />
+                            <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_34%,rgba(46,29,20,0.06)_100%)]" />
+                          </div>
                         </div>
                         <div>
                           <div className="flex items-start justify-between gap-3">
@@ -784,11 +797,11 @@ export function PublicOrderPage() {
                       <div className="grid grid-cols-[52px_minmax(0,1fr)_52px] items-center gap-2 sm:grid-cols-[56px_minmax(0,1fr)_56px] sm:gap-3">
                         <button
                           type="button"
-                          onClick={() => setBoxQuantity(code, quantity + 1)}
+                          onClick={() => setBoxQuantity(code, Math.max(quantity - 1, 0))}
                           className="h-12 rounded-[16px] border border-white/85 bg-white/86 text-2xl font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:h-14 sm:rounded-[18px]"
-                          aria-label={`Aumentar ${meta.label}`}
+                          aria-label={`Diminuir ${meta.label}`}
                         >
-                          +
+                          −
                         </button>
                         <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
                           <input
@@ -805,11 +818,11 @@ export function PublicOrderPage() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => setBoxQuantity(code, Math.max(quantity - 1, 0))}
+                          onClick={() => setBoxQuantity(code, quantity + 1)}
                           className="h-12 rounded-[16px] border border-white/85 bg-white/86 text-2xl font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:h-14 sm:rounded-[18px]"
-                          aria-label={`Diminuir ${meta.label}`}
+                          aria-label={`Aumentar ${meta.label}`}
                         >
-                          −
+                          +
                         </button>
                       </div>
                     </article>
@@ -891,22 +904,24 @@ export function PublicOrderPage() {
                                 key={`${box.id}-${code}`}
                                 className="grid grid-cols-[minmax(0,1fr)_44px_58px_44px] items-center gap-2 rounded-[16px] border border-white/80 bg-white/82 px-3 py-2.5"
                               >
-                                <div className="min-w-0">
+                                <div className="min-w-0 flex items-center gap-2">
+                                  <div className="relative h-10 w-10 shrink-0">
+                                    <div className="relative h-full w-full overflow-hidden rounded-xl border border-white/80 bg-white shadow-[0_8px_18px_rgba(70,44,26,0.08)]">
+                                      <Image alt={meta.label} className="h-full w-full object-cover" fill sizes="40px" src={meta.image} />
+                                    </div>
+                                    <div className="absolute -bottom-1 -right-1 h-6 w-5 overflow-hidden rounded-[8px] border border-white/90 bg-white/90 shadow-[0_8px_14px_rgba(70,44,26,0.14)]">
+                                      <Image
+                                        alt={`${meta.label} no cardapio oficial`}
+                                        className="h-full w-full object-cover"
+                                        fill
+                                        sizes="20px"
+                                        src={meta.referenceImage}
+                                      />
+                                    </div>
+                                  </div>
                                   <p className="truncate text-sm font-semibold text-[color:var(--ink-strong)]">
                                     {meta.label}
                                   </p>
-                                </div>
-                                <button
-                                  type="button"
-                                  className="h-10 rounded-[14px] border border-white/85 bg-white text-xl font-semibold text-[color:var(--ink-strong)] transition hover:bg-white"
-                                  onClick={() => adjustCustomBoxFlavor(box.id, code, 1)}
-                                  disabled={box.totalUnits >= ORDER_BOX_UNITS}
-                                  aria-label={`Aumentar ${meta.label} na Caixa Sabores #${box.index + 1}`}
-                                >
-                                  +
-                                </button>
-                                <div className="text-center text-sm font-semibold text-[color:var(--ink-strong)]">
-                                  {quantity}
                                 </div>
                                 <button
                                   type="button"
@@ -916,6 +931,18 @@ export function PublicOrderPage() {
                                   aria-label={`Diminuir ${meta.label} na Caixa Sabores #${box.index + 1}`}
                                 >
                                   −
+                                </button>
+                                <div className="text-center text-sm font-semibold text-[color:var(--ink-strong)]">
+                                  {quantity}
+                                </div>
+                                <button
+                                  type="button"
+                                  className="h-10 rounded-[14px] border border-white/85 bg-white text-xl font-semibold text-[color:var(--ink-strong)] transition hover:bg-white"
+                                  onClick={() => adjustCustomBoxFlavor(box.id, code, 1)}
+                                  disabled={box.totalUnits >= ORDER_BOX_UNITS}
+                                  aria-label={`Aumentar ${meta.label} na Caixa Sabores #${box.index + 1}`}
+                                >
+                                  +
                                 </button>
                               </div>
                             );
@@ -931,15 +958,28 @@ export function PublicOrderPage() {
                     ))}
                   </div>
                 ) : (
-                  <div className="mt-4 overflow-hidden rounded-[20px] border border-white/80 bg-white/80">
-                    <div className="relative aspect-[16/10]">
-                      <Image
-                        alt="Caixa Sabores com 7 broas variadas"
-                        className="h-full w-full object-cover"
-                        fill
-                        sizes="(max-width: 768px) 100vw, 560px"
-                        src="/querobroa-brand/green-composition.jpg"
-                      />
+                  <div className="mt-4 rounded-[20px] border border-white/80 bg-white/80 p-3">
+                    <div className="relative aspect-[16/10] overflow-visible rounded-[18px]">
+                      <div className="relative h-full w-full overflow-hidden rounded-[18px]">
+                        <Image
+                          alt="Caixa Sabores com 7 broas variadas"
+                          className="h-full w-full object-cover"
+                          fill
+                          sizes="(max-width: 768px) 70vw, 420px"
+                          src="/querobroa-brand/green-composition.jpg"
+                        />
+                        <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_24%,rgba(46,29,20,0.12)_100%)]" />
+                      </div>
+                      <div className="absolute bottom-3 right-3 h-[44%] w-[26%] overflow-hidden rounded-[18px] border border-white/90 bg-white/90 shadow-[0_18px_34px_rgba(74,47,31,0.18)]">
+                        <Image
+                          alt="Sabores no cardapio oficial"
+                          className="h-full w-full object-cover"
+                          fill
+                          sizes="(max-width: 768px) 28vw, 140px"
+                          src={ORDER_SABORES_REFERENCE_IMAGE}
+                        />
+                        <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_34%,rgba(46,29,20,0.06)_100%)]" />
+                      </div>
                     </div>
                   </div>
                 )}

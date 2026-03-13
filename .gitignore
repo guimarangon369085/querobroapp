@@ -27,5 +27,6 @@ secrets/*.dec.*
 /apps/web/public/querobroa/brand/*
 !/apps/web/public/querobroa/brand/.gitkeep
 /.playwright-cli/
+/.tools/
 /output/
 /packages/ui/dist/

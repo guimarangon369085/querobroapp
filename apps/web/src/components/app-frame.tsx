@@ -9,10 +9,14 @@ function isPublicOrderPath(pathname: string) {
   return pathname === '/pedido' || pathname.startsWith('/pedido/');
 }
 
+function isPublicLandingPath(pathname: string) {
+  return pathname === '/';
+}
+
 export function AppFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
-  if (isPublicOrderPath(pathname)) {
+  if (isPublicOrderPath(pathname) || isPublicLandingPath(pathname)) {
     return <>{children}</>;
   }
 

@@ -4,6 +4,7 @@ Canal temporario para capturar pedidos sem depender ainda de um numero dedicado 
 
 ## Rotas
 
+- `POST /api/google-form` no `web` (proxy recomendado quando so o web estiver publico)
 - `POST /orders/intake/google-form`
 - Alias generico futuro: `POST /orders/intake/customer-form`
 
@@ -105,7 +106,8 @@ Regra operacional:
 ## Mapa de migracao futura
 
 - `Google Forms`:
-  - chama `POST /orders/intake/google-form`
+  - chama `POST /api/google-form` no `web`
+  - a route handler do Next repassa para `POST /orders/intake/google-form`
 - `Pagina publica atual do app`:
   - abre em `/pedido`
   - envia para `POST /api/customer-form`
@@ -126,15 +128,13 @@ Arquivo de apoio:
 
 Configure os 2 valores no topo do script:
 
-- `API_BASE_URL`
-- `API_AUTH_TOKEN`
+- `APP_BASE_URL`
 
 Regras:
 
-- em producao, `API_BASE_URL` precisa ser uma URL publica HTTPS acessivel pelo Google
+- em producao, `APP_BASE_URL` precisa ser uma URL publica HTTPS acessivel pelo Google
 - `127.0.0.1` ou `localhost` servem apenas para teste local via script Node, nao para o Apps Script real
-- se `ORDER_FORM_BRIDGE_TOKEN` estiver configurado no backend, o mesmo valor deve entrar em `API_AUTH_TOKEN`
-- se `APP_AUTH_ENABLED=true`, configure `ORDER_FORM_BRIDGE_TOKEN` e nao reutilize o token admin do app para o Forms
+- quando o script chama `/api/google-form`, o token do backend fica no servidor do `web`; o Apps Script nao precisa carregar `ORDER_FORM_BRIDGE_TOKEN`
 
 ## Migracao futura para WhatsApp Flow
 
