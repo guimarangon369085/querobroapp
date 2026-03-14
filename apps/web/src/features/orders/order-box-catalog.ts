@@ -33,7 +33,7 @@ const ORDER_CARDAPIO_IMAGE_PATHS = {
   goiabada: '/querobroa-brand/cardapio/goiabada.jpg',
   mistaGoiabada: '/querobroa-brand/cardapio/mista-goiabada.jpg',
   doceDeLeite: '/querobroa-brand/cardapio/doce-de-leite.jpg',
-  queijoDoSerro: '/querobroa-brand/cardapio/queijo-do-serro.jpg',
+  queijoDoSerro: '/querobroa-brand/cardapio/queijo-do-serro-camadas.jpg',
   mistaDoceDeLeite: '/querobroa-brand/cardapio/mista-doce-de-leite.jpg',
   mistaQueijoDoSerro: '/querobroa-brand/cardapio/mista-queijo-do-serro.jpg',
   mistaRequeijaoDeCorte: '/querobroa-brand/cardapio/mista-requeijao-de-corte.jpg',
