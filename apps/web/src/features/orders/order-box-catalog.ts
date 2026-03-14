@@ -29,11 +29,13 @@ export const ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE: Record<OrderMistaShortcutCod
 };
 
 const ORDER_CARDAPIO_IMAGE_PATHS = {
-  traditional: '/querobroa-brand/cardapio/tradicional-neutral.jpg',
+  traditional: '/querobroa-brand/cardapio/tradicional.jpg',
   goiabada: '/querobroa-brand/cardapio/goiabada.jpg',
   doceDeLeite: '/querobroa-brand/cardapio/doce-de-leite.jpg',
   queijoDoSerro: '/querobroa-brand/cardapio/queijo-do-serro.jpg',
-  queijoDoSerroFlakes: '/querobroa-brand/cardapio/queijo-do-serro-flakes.jpg',
+  mistaDoceDeLeite: '/querobroa-brand/cardapio/mista-doce-de-leite.jpg',
+  mistaQueijoDoSerro: '/querobroa-brand/cardapio/mista-queijo-do-serro.jpg',
+  mistaRequeijaoDeCorte: '/querobroa-brand/cardapio/mista-requeijao-de-corte.jpg',
   requeijaoDeCorte: '/querobroa-brand/cardapio/requeijao-de-corte.jpg',
   sabores: '/querobroa-brand/cardapio/sabores-caixa.jpg'
 } as const;
@@ -126,8 +128,8 @@ export const ORDER_BOX_CATALOG = {
     codeLabel: 'MD',
     detail: '1 caixa = 4 tradicionais + 3 doce de leite',
     note: 'Equilibrio entre classica e cremosa',
-    image: ORDER_CARDAPIO_IMAGE_PATHS.doceDeLeite,
-    referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.doceDeLeite,
+    image: ORDER_CARDAPIO_IMAGE_PATHS.mistaDoceDeLeite,
+    referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.mistaDoceDeLeite,
     accentClassName:
       'border-[rgba(172,116,61,0.16)] bg-[linear-gradient(165deg,rgba(255,248,243,0.98),rgba(247,235,225,0.92))]',
     units: { T: 4, G: 0, D: 3, Q: 0, R: 0 },
@@ -138,8 +140,8 @@ export const ORDER_BOX_CATALOG = {
     codeLabel: 'MQ',
     detail: '1 caixa = 4 tradicionais + 3 queijo',
     note: 'Mais intensa',
-    image: ORDER_CARDAPIO_IMAGE_PATHS.queijoDoSerroFlakes,
-    referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.queijoDoSerroFlakes,
+    image: ORDER_CARDAPIO_IMAGE_PATHS.mistaQueijoDoSerro,
+    referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.mistaQueijoDoSerro,
     accentClassName:
       'border-[rgba(110,95,71,0.18)] bg-[linear-gradient(165deg,rgba(252,248,244,0.98),rgba(242,233,223,0.92))]',
     units: { T: 4, G: 0, D: 0, Q: 3, R: 0 },
@@ -150,8 +152,8 @@ export const ORDER_BOX_CATALOG = {
     codeLabel: 'MR',
     detail: '1 caixa = 4 tradicionais + 3 requeijao',
     note: 'Mineira e mais leve',
-    image: ORDER_CARDAPIO_IMAGE_PATHS.requeijaoDeCorte,
-    referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.requeijaoDeCorte,
+    image: ORDER_CARDAPIO_IMAGE_PATHS.mistaRequeijaoDeCorte,
+    referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.mistaRequeijaoDeCorte,
     accentClassName:
       'border-[rgba(150,122,83,0.18)] bg-[linear-gradient(165deg,rgba(255,250,243,0.98),rgba(245,236,223,0.92))]',
     units: { T: 4, G: 0, D: 0, Q: 0, R: 3 },
