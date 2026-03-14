@@ -31,6 +31,7 @@ export const ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE: Record<OrderMistaShortcutCod
 const ORDER_CARDAPIO_IMAGE_PATHS = {
   traditional: '/querobroa-brand/cardapio/tradicional.jpg',
   goiabada: '/querobroa-brand/cardapio/goiabada.jpg',
+  mistaGoiabada: '/querobroa-brand/cardapio/mista-goiabada.jpg',
   doceDeLeite: '/querobroa-brand/cardapio/doce-de-leite.jpg',
   queijoDoSerro: '/querobroa-brand/cardapio/queijo-do-serro.jpg',
   mistaDoceDeLeite: '/querobroa-brand/cardapio/mista-doce-de-leite.jpg',
@@ -116,8 +117,8 @@ export const ORDER_BOX_CATALOG = {
     codeLabel: 'MG',
     detail: '1 caixa = 4 tradicionais + 3 goiabada',
     note: 'A mista mais classica',
-    image: ORDER_CARDAPIO_IMAGE_PATHS.goiabada,
-    referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.goiabada,
+    image: ORDER_CARDAPIO_IMAGE_PATHS.mistaGoiabada,
+    referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.mistaGoiabada,
     accentClassName:
       'border-[rgba(190,84,108,0.18)] bg-[linear-gradient(165deg,rgba(255,247,243,0.98),rgba(251,232,228,0.92))]',
     units: { T: 4, G: 3, D: 0, Q: 0, R: 0 },
