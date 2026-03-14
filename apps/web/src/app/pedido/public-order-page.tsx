@@ -49,6 +49,9 @@ type PublicOrderFormState = {
   phone: string;
   fulfillmentMode: 'DELIVERY' | 'PICKUP';
   address: string;
+  placeId: string;
+  lat: number | null;
+  lng: number | null;
   deliveryNotes: string;
   date: string;
   time: string;
@@ -82,6 +85,9 @@ const initialFormState: PublicOrderFormState = {
   phone: '',
   fulfillmentMode: 'DELIVERY',
   address: '',
+  placeId: '',
+  lat: null,
+  lng: null,
   deliveryNotes: '',
   date: '',
   time: '',
@@ -441,7 +447,10 @@ export function PublicOrderPage() {
 
           setForm((current) => ({
             ...current,
-            address: nextAddress
+            address: nextAddress,
+            placeId: `${patch.placeId || ''}`,
+            lat: typeof patch.lat === 'number' ? patch.lat : null,
+            lng: typeof patch.lng === 'number' ? patch.lng : null
           }));
         });
       })
@@ -494,6 +503,9 @@ export function PublicOrderPage() {
               name: form.name.trim() || null,
               phone: form.phone.trim() || null,
               address: form.address.trim() || null,
+              placeId: form.placeId.trim() || null,
+              lat: typeof form.lat === 'number' ? form.lat : null,
+              lng: typeof form.lng === 'number' ? form.lng : null,
               deliveryNotes: form.deliveryNotes.trim() || null
             },
             manifest: {
@@ -537,8 +549,11 @@ export function PublicOrderPage() {
     form.address,
     form.deliveryNotes,
     form.fulfillmentMode,
+    form.lat,
+    form.lng,
     form.name,
     form.phone,
+    form.placeId,
     scheduledAtIso,
     selectedBoxes,
     totalBroas
@@ -592,6 +607,9 @@ export function PublicOrderPage() {
         name: form.name.trim(),
         phone: form.phone.trim(),
         address: form.fulfillmentMode === 'DELIVERY' ? form.address.trim() : null,
+        placeId: form.fulfillmentMode === 'DELIVERY' ? form.placeId.trim() || null : null,
+        lat: form.fulfillmentMode === 'DELIVERY' && typeof form.lat === 'number' ? form.lat : null,
+        lng: form.fulfillmentMode === 'DELIVERY' && typeof form.lng === 'number' ? form.lng : null,
         deliveryNotes: form.deliveryNotes.trim() || null
       },
       fulfillment: {
@@ -788,7 +806,15 @@ export function PublicOrderPage() {
                       ref={addressInputRef}
                       name="street-address"
                       value={form.address}
-                      onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          address: event.target.value,
+                          placeId: '',
+                          lat: null,
+                          lng: null
+                        }))
+                      }
                       placeholder={form.fulfillmentMode === 'DELIVERY' ? 'Rua, numero e bairro' : 'Local de retirada'}
                       autoCapitalize="words"
                       autoComplete={form.fulfillmentMode === 'DELIVERY' ? 'street-address' : 'off'}

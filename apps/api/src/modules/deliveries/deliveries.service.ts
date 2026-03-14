@@ -28,6 +28,9 @@ type DeliveryDraft = {
   customerName: string;
   customerPhone: string;
   dropoffAddress: string;
+  dropoffPlaceId: string | null;
+  dropoffLat: number | null;
+  dropoffLng: number | null;
   orderTotal: number;
   scheduledAt: string;
   manifestSummary: string;
@@ -351,6 +354,9 @@ export class DeliveriesService {
       dropoffName: this.normalizeText(draft.customer.name) || 'Cliente',
       dropoffPhone: this.normalizeText(draft.customer.phone) || '',
       dropoffAddress: this.normalizeText(draft.customer.address),
+      dropoffPlaceId: this.normalizeText(draft.customer.placeId) || null,
+      dropoffLat: typeof draft.customer.lat === 'number' && Number.isFinite(draft.customer.lat) ? draft.customer.lat : null,
+      dropoffLng: typeof draft.customer.lng === 'number' && Number.isFinite(draft.customer.lng) ? draft.customer.lng : null,
       scheduledAt: draft.scheduledAt,
       orderTotal: this.toMoney(draft.manifest.subtotal),
       manifestSummary: this.buildManifestSummary(draft.manifest.items),
@@ -368,6 +374,9 @@ export class DeliveriesService {
       dropoffName: draft.customerName,
       dropoffPhone: draft.customerPhone,
       dropoffAddress: draft.dropoffAddress,
+      dropoffPlaceId: draft.dropoffPlaceId,
+      dropoffLat: draft.dropoffLat,
+      dropoffLng: draft.dropoffLng,
       scheduledAt: draft.scheduledAt || null,
       orderTotal: this.toMoney(draft.orderTotal),
       manifestSummary: draft.manifestSummary,
@@ -430,6 +439,11 @@ export class DeliveriesService {
           scheduledAt: draft.scheduledAt,
           pickupAddress: this.pickupOriginKey(),
           customerAddress: this.normalizeText(draft.customer.address),
+          customerPlaceId: this.normalizeText(draft.customer.placeId),
+          customerLat:
+            typeof draft.customer.lat === 'number' && Number.isFinite(draft.customer.lat) ? draft.customer.lat : null,
+          customerLng:
+            typeof draft.customer.lng === 'number' && Number.isFinite(draft.customer.lng) ? draft.customer.lng : null,
           subtotal: this.toMoney(draft.manifest.subtotal),
           totalUnits: draft.manifest.totalUnits,
           itemCount: draft.manifest.items.length
@@ -531,6 +545,11 @@ export class DeliveriesService {
       customerName: (order.customer?.name || '').trim(),
       customerPhone: (order.customer?.phone || '').trim(),
       dropoffAddress: this.buildCustomerAddress(order.customer),
+      dropoffPlaceId: this.normalizeText(order.customer?.placeId) || null,
+      dropoffLat:
+        typeof order.customer?.lat === 'number' && Number.isFinite(order.customer.lat) ? order.customer.lat : null,
+      dropoffLng:
+        typeof order.customer?.lng === 'number' && Number.isFinite(order.customer.lng) ? order.customer.lng : null,
       orderTotal: this.toMoney(order.total ?? 0),
       scheduledAt: order.scheduledAt?.toISOString() || '',
       manifestSummary: items.map((item) => `${item.name} x ${item.quantity}`).join(', '),
@@ -711,6 +730,11 @@ export class DeliveriesService {
       customerName: this.normalizeText(draft?.customerName) || '',
       customerPhone: this.normalizeText(draft?.customerPhone) || '',
       dropoffAddress: this.normalizeText(draft?.dropoffAddress) || '',
+      dropoffPlaceId: this.normalizeText(draft?.dropoffPlaceId) || null,
+      dropoffLat:
+        typeof draft?.dropoffLat === 'number' && Number.isFinite(draft.dropoffLat) ? draft.dropoffLat : null,
+      dropoffLng:
+        typeof draft?.dropoffLng === 'number' && Number.isFinite(draft.dropoffLng) ? draft.dropoffLng : null,
       orderTotal: this.toMoney(Number(draft?.orderTotal) || 0),
       scheduledAt: this.normalizeText(draft?.scheduledAt) || '',
       manifestSummary: this.normalizeText(draft?.manifestSummary) || '',

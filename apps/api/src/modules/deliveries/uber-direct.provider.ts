@@ -54,8 +54,14 @@ export class UberDirectProvider implements DeliveryProvider {
     return String(process.env.UBER_DIRECT_STORE_ID || '').trim();
   }
 
+  private apiMode() {
+    return String(process.env.UBER_DIRECT_API_MODE || 'LEGACY_CUSTOMER')
+      .trim()
+      .toUpperCase();
+  }
+
   private usesCurrentOrdersApi() {
-    return Boolean(this.storeId());
+    return this.apiMode() === 'STORE_ESTIMATES' && Boolean(this.storeId());
   }
 
   private requestTimeoutMs() {
@@ -66,6 +72,38 @@ export class UberDirectProvider implements DeliveryProvider {
 
   private pickupInstructions() {
     return String(process.env.UBER_DIRECT_PICKUP_INSTRUCTIONS || '').trim();
+  }
+
+  private currentApiPickupTimes(input: DeliveryQuoteInput) {
+    const scheduledAtMs = input.scheduledAt ? Date.parse(input.scheduledAt) : Number.NaN;
+    return Number.isFinite(scheduledAtMs) && scheduledAtMs > Date.now() ? [scheduledAtMs] : [0];
+  }
+
+  private buildCurrentApiAddressPayload(input: DeliveryQuoteInput) {
+    const formattedAddress = input.dropoffAddress.trim();
+    if (!formattedAddress) {
+      throw new BadRequestException('Endereco de entrega obrigatorio para cotar Uber Envios.');
+    }
+
+    const payload: Record<string, unknown> = {
+      formatted_address: formattedAddress
+    };
+
+    if (input.dropoffPlaceId?.trim()) {
+      payload.place = {
+        id: input.dropoffPlaceId.trim()
+      };
+      return payload;
+    }
+
+    if (Number.isFinite(input.dropoffLat) && Number.isFinite(input.dropoffLng)) {
+      payload.location = {
+        latitude: input.dropoffLat,
+        longitude: input.dropoffLng
+      };
+    }
+
+    return payload;
   }
 
   private quotesPath() {
@@ -117,11 +155,10 @@ export class UberDirectProvider implements DeliveryProvider {
           store_id: this.storeId(),
           instructions: this.pickupInstructions() || undefined
         },
-        dropoff_address: {
-          formatted_address: input.dropoffAddress
-        },
+        dropoff_address: this.buildCurrentApiAddressPayload(input),
+        pickup_times: this.currentApiPickupTimes(input),
         order_summary: {
-          total_amount: Math.round(this.toMoney(input.orderTotal) * 100),
+          order_value: Math.round(this.toMoney(input.orderTotal) * 100),
           currency_code: 'BRL'
         }
       };
@@ -161,9 +198,7 @@ export class UberDirectProvider implements DeliveryProvider {
             phone_number: input.dropoffPhone || undefined
           },
           location: {
-            address: {
-              formatted_address: input.dropoffAddress
-            }
+            address: this.buildCurrentApiAddressPayload(input)
           }
         },
         order_reference: input.manifestSummary.slice(0, 256)
@@ -225,6 +260,9 @@ export class UberDirectProvider implements DeliveryProvider {
       const record = value as Record<string, unknown>;
       if (typeof record.currency_code === 'string' && record.currency_code.trim()) {
         return record.currency_code.trim().toUpperCase();
+      }
+      if (typeof record.currency_type === 'string' && record.currency_type.trim()) {
+        return record.currency_type.trim().toUpperCase();
       }
       if (typeof record.currency === 'string' && record.currency.trim()) {
         return record.currency.trim().toUpperCase();
@@ -357,11 +395,26 @@ export class UberDirectProvider implements DeliveryProvider {
         (typeof parsed?.quote_id === 'string' && parsed.quote_id) ||
         (typeof parsed?.quoteId === 'string' && parsed.quoteId) ||
         null;
-    const feeSource = usingCurrentApi ? parsed?.delivery_fee ?? parsed?.fee ?? null : parsed?.fee ?? parsed?.price ?? parsed?.total_fee ?? parsed?.delivery_fee ?? null;
-    const expiresAt =
-      (typeof parsed?.expires === 'string' && parsed.expires) ||
-      (typeof parsed?.expires_at === 'string' && parsed.expires_at) ||
-      null;
+    const currentEstimates =
+      usingCurrentApi && Array.isArray(parsed?.estimates)
+        ? (parsed?.estimates as Array<Record<string, unknown>>)
+        : [];
+    const currentPrimaryEstimate = currentEstimates[0] ?? null;
+    const feeSource = usingCurrentApi
+      ? currentPrimaryEstimate?.delivery_fee ?? parsed?.delivery_fee ?? parsed?.fee ?? null
+      : parsed?.fee ?? parsed?.price ?? parsed?.total_fee ?? parsed?.delivery_fee ?? null;
+    const expiresAt = usingCurrentApi
+      ? this.resolveDateTime(
+          this.getNumberField(parsed, 'expires_at') ??
+            this.getNumberField(currentPrimaryEstimate, 'expires_at') ??
+            this.getNumberField(currentPrimaryEstimate, 'expiration_time')
+        ) ||
+        (typeof parsed?.expires === 'string' && parsed.expires) ||
+        (typeof parsed?.expires_at === 'string' && parsed.expires_at) ||
+        null
+      : (typeof parsed?.expires === 'string' && parsed.expires) ||
+        (typeof parsed?.expires_at === 'string' && parsed.expires_at) ||
+        null;
     const fee = this.resolveAmount(feeSource, {
       treatScalarAsMinorUnits:
         typeof feeSource === 'number' &&
@@ -370,7 +423,12 @@ export class UberDirectProvider implements DeliveryProvider {
           Boolean(this.getStringField(parsed, 'currency_type')))
     });
     const currencyCode =
-      (usingCurrentApi ? this.resolveCurrency(feeSource) || this.getStringField(parsed, 'currency_code') : this.resolveCurrency(feeSource)) ||
+      (usingCurrentApi
+        ? this.resolveCurrency(feeSource) ||
+          this.getStringField(parsed, 'currency_code') ||
+          this.getStringField(parsed, 'currency_type') ||
+          this.getStringField(parsed, 'currency')
+        : this.resolveCurrency(feeSource)) ||
       'BRL';
 
     if (!providerQuoteId) {
@@ -386,9 +444,17 @@ export class UberDirectProvider implements DeliveryProvider {
       providerQuoteId,
       expiresAt,
       fallbackReason: null,
-      breakdownLabel: 'Entrega Uber',
+      breakdownLabel: 'Uber Envios',
       rawPayload: parsed
     };
+  }
+
+  private resolveDateTime(value: number | null) {
+    if (!Number.isFinite(value ?? Number.NaN)) return null;
+    const milliseconds = Number(value);
+    const normalized = milliseconds > 10_000_000_000 ? milliseconds : milliseconds * 1000;
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
   }
 
   async createDelivery(input: DeliveryDispatchInput): Promise<DeliveryDispatchOutput> {

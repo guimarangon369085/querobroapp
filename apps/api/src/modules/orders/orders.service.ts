@@ -1166,6 +1166,9 @@ export class OrdersService {
         name: data.customer.name,
         phone: data.customer.phone ?? null,
         address: data.customer.address ?? null,
+        placeId: data.customer.placeId ?? null,
+        lat: data.customer.lat ?? null,
+        lng: data.customer.lng ?? null,
         deliveryNotes: data.customer.deliveryNotes ?? null
       },
       fulfillment: {
@@ -1197,6 +1200,9 @@ export class OrdersService {
     customerName?: string | null;
     customerPhone?: string | null;
     customerAddress?: string | null;
+    customerPlaceId?: string | null;
+    customerLat?: number | null;
+    customerLng?: number | null;
     customerDeliveryNotes?: string | null;
     subtotal: number;
     items: Array<{ productId: number; quantity: number; name?: string | null }>;
@@ -1208,6 +1214,9 @@ export class OrdersService {
         name: input.customerName ?? null,
         phone: input.customerPhone ?? null,
         address: input.customerAddress ?? null,
+        placeId: input.customerPlaceId ?? null,
+        lat: input.customerLat ?? null,
+        lng: input.customerLng ?? null,
         deliveryNotes: input.customerDeliveryNotes ?? null
       },
       manifest: {
@@ -1245,6 +1254,11 @@ export class OrdersService {
 
     const normalizedPhone = normalizePhone(customer.phone);
     const normalizedAddress = normalizeTitle(customer.address ?? undefined) ?? null;
+    const normalizedPlaceId = normalizeText(('placeId' in customer ? customer.placeId : null) ?? undefined);
+    const normalizedLat =
+      'lat' in customer && typeof customer.lat === 'number' && Number.isFinite(customer.lat) ? customer.lat : null;
+    const normalizedLng =
+      'lng' in customer && typeof customer.lng === 'number' && Number.isFinite(customer.lng) ? customer.lng : null;
     const normalizedDeliveryNotes = normalizeText(customer.deliveryNotes ?? undefined);
 
     let existing = normalizedPhone
@@ -1271,6 +1285,9 @@ export class OrdersService {
       const shouldUpdate =
         (normalizedPhone && !existing.phone) ||
         (normalizedAddress && !existing.address) ||
+        (normalizedPlaceId && !existing.placeId) ||
+        (normalizedLat !== null && existing.lat === null) ||
+        (normalizedLng !== null && existing.lng === null) ||
         (normalizedDeliveryNotes && !existing.deliveryNotes);
       if (!shouldUpdate) return existing;
 
@@ -1279,6 +1296,9 @@ export class OrdersService {
         data: {
           phone: existing.phone || normalizedPhone,
           address: existing.address || normalizedAddress,
+          placeId: existing.placeId || normalizedPlaceId,
+          lat: existing.lat ?? normalizedLat,
+          lng: existing.lng ?? normalizedLng,
           deliveryNotes: existing.deliveryNotes || normalizedDeliveryNotes
         }
       });
@@ -1299,9 +1319,9 @@ export class OrdersService {
         state: null,
         postalCode: null,
         country: null,
-        placeId: null,
-        lat: null,
-        lng: null,
+        placeId: normalizedPlaceId,
+        lat: normalizedLat,
+        lng: normalizedLng,
         deliveryNotes: normalizedDeliveryNotes
       }
     });
@@ -1315,6 +1335,9 @@ export class OrdersService {
         name: existing.name,
         phone: existing.phone ?? null,
         address: existing.address ?? null,
+        placeId: existing.placeId ?? null,
+        lat: existing.lat ?? null,
+        lng: existing.lng ?? null,
         deliveryNotes: existing.deliveryNotes ?? null
       };
     }
@@ -1323,6 +1346,9 @@ export class OrdersService {
       name: customer.name,
       phone: customer.phone ?? null,
       address: customer.address ?? null,
+      placeId: 'placeId' in customer ? customer.placeId ?? null : null,
+      lat: 'lat' in customer ? customer.lat ?? null : null,
+      lng: 'lng' in customer ? customer.lng ?? null : null,
       deliveryNotes: customer.deliveryNotes ?? null
     };
   }
@@ -1499,6 +1525,9 @@ export class OrdersService {
         customerName: quoteCustomer.name,
         customerPhone: quoteCustomer.phone,
         customerAddress: quoteCustomer.address,
+        customerPlaceId: quoteCustomer.placeId,
+        customerLat: quoteCustomer.lat,
+        customerLng: quoteCustomer.lng,
         customerDeliveryNotes: quoteCustomer.deliveryNotes,
         subtotal: pricedOrder.subtotal,
         items: pricedOrder.manifestItems

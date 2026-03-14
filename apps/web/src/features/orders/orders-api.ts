@@ -67,6 +67,9 @@ export function fetchDeliveryQuote(payload: {
     name?: string | null;
     phone?: string | null;
     address?: string | null;
+    placeId?: string | null;
+    lat?: number | null;
+    lng?: number | null;
     deliveryNotes?: string | null;
   };
   manifest: {

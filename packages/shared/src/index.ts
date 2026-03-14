@@ -144,6 +144,9 @@ export const OrderIntakeCustomerRefSchema = z.union([
     name: z.string().min(1),
     phone: z.string().optional().nullable(),
     address: z.string().optional().nullable(),
+    placeId: z.string().optional().nullable(),
+    lat: z.number().optional().nullable(),
+    lng: z.number().optional().nullable(),
     deliveryNotes: z.string().optional().nullable()
   })
 ]);
@@ -238,6 +241,9 @@ export const ExternalOrderSubmissionSchema = z
       name: z.string().min(1),
       phone: z.string().optional().nullable(),
       address: z.string().optional().nullable(),
+      placeId: z.string().optional().nullable(),
+      lat: z.number().optional().nullable(),
+      lng: z.number().optional().nullable(),
       deliveryNotes: z.string().optional().nullable()
     }),
     fulfillment: z.object({
@@ -279,6 +285,9 @@ export const DeliveryQuoteDraftSchema = z.object({
     name: z.string().min(1).optional().nullable(),
     phone: z.string().optional().nullable(),
     address: z.string().optional().nullable(),
+    placeId: z.string().optional().nullable(),
+    lat: z.number().optional().nullable(),
+    lng: z.number().optional().nullable(),
     deliveryNotes: z.string().optional().nullable()
   }),
   manifest: z.object({

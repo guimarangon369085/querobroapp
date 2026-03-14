@@ -11,6 +11,9 @@ export type DeliveryQuoteInput = {
   dropoffName: string;
   dropoffPhone: string;
   dropoffAddress: string;
+  dropoffPlaceId?: string | null;
+  dropoffLat?: number | null;
+  dropoffLng?: number | null;
   scheduledAt: string | null;
   orderTotal: number;
   manifestSummary: string;
@@ -50,4 +53,3 @@ export interface DeliveryProvider {
   quote(input: DeliveryQuoteInput): Promise<DeliveryQuoteOutput>;
   createDelivery(input: DeliveryDispatchInput): Promise<DeliveryDispatchOutput>;
 }
-

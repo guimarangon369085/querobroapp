@@ -746,7 +746,7 @@ function formatDeliveryEstimateCaption(order?: OrderView | null) {
 
   const quoteExpiry = formatOrderDateTimeLabel(safeDateFromIso(order.deliveryQuoteExpiresAt ?? null));
   if (order.deliveryProvider === 'UBER_DIRECT') {
-    return quoteExpiry ? `Estimativa Uber valida ate ${quoteExpiry}.` : 'Estimativa Uber registrada.';
+    return quoteExpiry ? `Estimativa Uber Envios valida ate ${quoteExpiry}.` : 'Estimativa Uber Envios registrada.';
   }
 
   return quoteExpiry ? `Estimativa registrada ate ${quoteExpiry}.` : 'Estimativa de frete registrada.';
@@ -3703,7 +3703,7 @@ function OrdersPageContent() {
               </div>
               {selectedOrder.fulfillmentMode === 'DELIVERY' ? (
                 <span className="rounded-full border border-white/80 bg-white/86 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
-                  {selectedOrder.deliveryProvider === 'UBER_DIRECT' ? 'Uber' : 'Estimativa'}
+                  {selectedOrder.deliveryProvider === 'UBER_DIRECT' ? 'Uber Envios' : 'Estimativa'}
                 </span>
               ) : null}
             </div>
