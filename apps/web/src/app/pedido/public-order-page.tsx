@@ -860,13 +860,12 @@ export function PublicOrderPage() {
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <h3 className="text-base font-semibold text-[color:var(--ink-strong)] sm:text-lg">{meta.label}</h3>
-                              <p className="mt-1 text-[0.82rem] leading-5 text-[color:var(--ink-muted)] sm:text-sm">{meta.note}</p>
                             </div>
                             <span className="rounded-full border border-white/80 bg-white/86 px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)] sm:px-3 sm:text-xs">
                               {meta.codeLabel}
                             </span>
                           </div>
-                          <p className="mt-2 text-[0.82rem] leading-5 text-[color:var(--ink-muted)] sm:mt-3 sm:text-sm sm:leading-6">{meta.detail}</p>
+                          <p className="mt-2 text-[0.82rem] leading-5 text-[color:var(--ink-muted)] sm:text-sm sm:leading-6">{meta.detail}</p>
                           <p className="mt-1 text-sm font-semibold text-[color:var(--ink-strong)]">
                             {formatCurrencyBRL(meta.priceEstimate)}
                           </p>

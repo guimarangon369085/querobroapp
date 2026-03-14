@@ -56,7 +56,6 @@ export const ORDER_BOX_CATALOG = {
     label: 'Tradicional',
     codeLabel: 'T',
     detail: '1 caixa = 7 broas tradicionais',
-    note: 'Receita classica da casa',
     image: ORDER_CARDAPIO_IMAGE_PATHS.traditional,
     referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.traditional,
     accentClassName:
@@ -68,7 +67,6 @@ export const ORDER_BOX_CATALOG = {
     label: 'Goiabada',
     codeLabel: 'G',
     detail: '1 caixa = 7 broas de goiabada',
-    note: 'Mais pedida',
     image: ORDER_CARDAPIO_IMAGE_PATHS.goiabada,
     referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.goiabada,
     accentClassName:
@@ -80,7 +78,6 @@ export const ORDER_BOX_CATALOG = {
     label: 'Doce de Leite',
     codeLabel: 'D',
     detail: '1 caixa = 7 broas de doce de leite',
-    note: 'Mais cremosa',
     image: ORDER_CARDAPIO_IMAGE_PATHS.doceDeLeite,
     referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.doceDeLeite,
     accentClassName:
@@ -92,7 +89,6 @@ export const ORDER_BOX_CATALOG = {
     label: 'Queijo do Serro',
     codeLabel: 'Q',
     detail: '1 caixa = 7 broas de queijo',
-    note: 'Mais marcante',
     image: ORDER_CARDAPIO_IMAGE_PATHS.queijoDoSerro,
     referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.queijoDoSerro,
     accentClassName:
@@ -104,7 +100,6 @@ export const ORDER_BOX_CATALOG = {
     label: 'Requeijao de Corte',
     codeLabel: 'R',
     detail: '1 caixa = 7 broas de requeijao',
-    note: 'Mais suave',
     image: ORDER_CARDAPIO_IMAGE_PATHS.requeijaoDeCorte,
     referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.requeijaoDeCorte,
     accentClassName:
@@ -116,7 +111,6 @@ export const ORDER_BOX_CATALOG = {
     label: 'Mista Goiabada',
     codeLabel: 'MG',
     detail: '1 caixa = 4 tradicionais + 3 goiabada',
-    note: 'A mista mais classica',
     image: ORDER_CARDAPIO_IMAGE_PATHS.mistaGoiabada,
     referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.mistaGoiabada,
     accentClassName:
@@ -128,7 +122,6 @@ export const ORDER_BOX_CATALOG = {
     label: 'Mista Doce de Leite',
     codeLabel: 'MD',
     detail: '1 caixa = 4 tradicionais + 3 doce de leite',
-    note: 'Equilibrio entre classica e cremosa',
     image: ORDER_CARDAPIO_IMAGE_PATHS.mistaDoceDeLeite,
     referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.mistaDoceDeLeite,
     accentClassName:
@@ -140,7 +133,6 @@ export const ORDER_BOX_CATALOG = {
     label: 'Mista Queijo',
     codeLabel: 'MQ',
     detail: '1 caixa = 4 tradicionais + 3 queijo',
-    note: 'Mais intensa',
     image: ORDER_CARDAPIO_IMAGE_PATHS.mistaQueijoDoSerro,
     referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.mistaQueijoDoSerro,
     accentClassName:
@@ -152,7 +144,6 @@ export const ORDER_BOX_CATALOG = {
     label: 'Mista Requeijão de Corte',
     codeLabel: 'MR',
     detail: '1 caixa = 4 tradicionais + 3 requeijão de corte',
-    note: 'Mineira e mais leve',
     image: ORDER_CARDAPIO_IMAGE_PATHS.mistaRequeijaoDeCorte,
     referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.mistaRequeijaoDeCorte,
     accentClassName:
