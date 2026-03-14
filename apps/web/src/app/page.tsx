@@ -7,12 +7,13 @@ import { buildPublicAppUrl, isOpsHost } from '@/lib/public-site-config';
 
 const pageTitle = 'QUEROBROA';
 const pageDescription = 'Pedido publico em /pedido e operacao em /pedidos no mesmo app.';
+const homeBackgroundImagePath = '/querobroa/brand/IMG_1318.jpg';
 
 export function generateMetadata(): Metadata {
   const canonicalUrl = buildPublicAppUrl('/', {
     allowLocalFallback: process.env.NODE_ENV !== 'production'
   });
-  const socialImageUrl = buildPublicAppUrl('/querobroa/landing-querobroa-fullscreen.svg', {
+  const socialImageUrl = buildPublicAppUrl(homeBackgroundImagePath, {
     allowLocalFallback: process.env.NODE_ENV !== 'production'
   });
 
@@ -39,9 +40,9 @@ export function generateMetadata(): Metadata {
         ? [
             {
               url: socialImageUrl,
-              width: 1440,
-              height: 2160,
-              alt: 'Landing QUEROBROA com textura em fullscreen'
+              width: 1656,
+              height: 2200,
+              alt: 'Mulher sorrindo segurando uma bandeja de broas na frente da loja'
             }
           ]
         : undefined
@@ -66,12 +67,12 @@ export default async function HomePage() {
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#c9ab72] text-white">
       <Image
-        alt="@QUEROBROA em textura de broa"
-        className="object-cover object-center"
+        alt="Mulher sorrindo segurando uma bandeja de broas na frente da loja"
+        className="object-cover object-[center_28%]"
         fill
         priority
         sizes="100vw"
-        src="/querobroa/landing-querobroa-fullscreen.svg"
+        src={homeBackgroundImagePath}
       />
       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(32,18,7,0.08)_0%,rgba(32,18,7,0.18)_52%,rgba(18,10,4,0.46)_100%)]" />
       <section className="relative z-10 flex min-h-screen flex-col justify-end px-5 py-6 sm:px-8 sm:py-8 lg:px-12 lg:py-10">
