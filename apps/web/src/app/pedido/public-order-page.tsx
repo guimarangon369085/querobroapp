@@ -514,7 +514,7 @@ export function PublicOrderPage() {
           throw new Error(extractErrorMessage(data));
         }
         setDeliveryQuote(data);
-        setDeliveryQuoteError(data.fallbackReason || null);
+        setDeliveryQuoteError(null);
       } catch (quoteError) {
         if (controller.signal.aborted) return;
         const message =
@@ -780,20 +780,22 @@ export function PublicOrderPage() {
                 })}
               </div>
 
-              <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_220px_180px]">
-                <FormField label={form.fulfillmentMode === 'DELIVERY' ? 'Endereco para entrega' : 'Ponto de retirada'}>
-                  <input
-                    className="app-input"
-                    ref={addressInputRef}
-                    name="street-address"
-                    value={form.address}
-                    onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))}
-                    placeholder={form.fulfillmentMode === 'DELIVERY' ? 'Rua, numero e bairro' : 'Local de retirada'}
-                    autoCapitalize="words"
-                    autoComplete={form.fulfillmentMode === 'DELIVERY' ? 'street-address' : 'off'}
-                    spellCheck={false}
-                  />
-                </FormField>
+              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_220px_180px]">
+                <div className="md:col-span-2 xl:col-span-1">
+                  <FormField label={form.fulfillmentMode === 'DELIVERY' ? 'Endereco para entrega' : 'Ponto de retirada'}>
+                    <input
+                      className="app-input"
+                      ref={addressInputRef}
+                      name="street-address"
+                      value={form.address}
+                      onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))}
+                      placeholder={form.fulfillmentMode === 'DELIVERY' ? 'Rua, numero e bairro' : 'Local de retirada'}
+                      autoCapitalize="words"
+                      autoComplete={form.fulfillmentMode === 'DELIVERY' ? 'street-address' : 'off'}
+                      spellCheck={false}
+                    />
+                  </FormField>
+                </div>
                 <FormField label="Data">
                   <input
                     className="app-input"
@@ -969,7 +971,7 @@ export function PublicOrderPage() {
                             return (
                               <div
                                 key={`${box.id}-${code}`}
-                                className="grid grid-cols-[minmax(0,1fr)_44px_58px_44px] items-center gap-2 rounded-[16px] border border-white/80 bg-white/82 px-3 py-2.5"
+                                className="grid grid-cols-[minmax(0,1fr)_40px_50px_40px] items-center gap-1.5 rounded-[16px] border border-white/80 bg-white/82 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_44px_58px_44px] sm:gap-2"
                               >
                                 <div className="min-w-0 flex items-center gap-2">
                                   <div className="relative h-10 w-10 shrink-0">
@@ -977,25 +979,25 @@ export function PublicOrderPage() {
                                       <Image alt={meta.label} className="h-full w-full object-cover" fill sizes="40px" src={meta.image} />
                                     </div>
                                   </div>
-                                  <p className="truncate text-sm font-semibold text-[color:var(--ink-strong)]">
+                                  <p className="truncate text-[0.82rem] font-semibold text-[color:var(--ink-strong)] sm:text-sm">
                                     {meta.label}
                                   </p>
                                 </div>
                                 <button
                                   type="button"
-                                  className="h-10 rounded-[14px] border border-white/85 bg-white text-xl font-semibold text-[color:var(--ink-strong)] transition hover:bg-white"
+                                  className="h-10 rounded-[14px] border border-white/85 bg-white text-[1.15rem] font-semibold text-[color:var(--ink-strong)] transition hover:bg-white sm:text-xl"
                                   onClick={() => adjustCustomBoxFlavor(box.id, code, -1)}
                                   disabled={quantity <= 0}
                                   aria-label={`Diminuir ${meta.label} na Caixa Sabores #${box.index + 1}`}
                                 >
                                   −
                                 </button>
-                                <div className="text-center text-sm font-semibold text-[color:var(--ink-strong)]">
+                                <div className="text-center text-[0.82rem] font-semibold text-[color:var(--ink-strong)] sm:text-sm">
                                   {quantity}
                                 </div>
                                 <button
                                   type="button"
-                                  className="h-10 rounded-[14px] border border-white/85 bg-white text-xl font-semibold text-[color:var(--ink-strong)] transition hover:bg-white"
+                                  className="h-10 rounded-[14px] border border-white/85 bg-white text-[1.15rem] font-semibold text-[color:var(--ink-strong)] transition hover:bg-white sm:text-xl"
                                   onClick={() => adjustCustomBoxFlavor(box.id, code, 1)}
                                   disabled={box.totalUnits >= ORDER_BOX_UNITS}
                                   aria-label={`Aumentar ${meta.label} na Caixa Sabores #${box.index + 1}`}
@@ -1097,9 +1099,7 @@ export function PublicOrderPage() {
                   </div>
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-sm text-[color:var(--ink-muted)]">
-                      {form.fulfillmentMode === 'DELIVERY'
-                        ? deliveryQuote?.breakdownLabel || 'Entrega Uber'
-                        : 'Frete'}
+                      {form.fulfillmentMode === 'DELIVERY' ? 'Frete estimado' : 'Frete'}
                     </span>
                     <strong className="text-base text-[color:var(--ink-strong)] sm:text-lg">
                       {form.fulfillmentMode === 'DELIVERY'
@@ -1115,9 +1115,9 @@ export function PublicOrderPage() {
                   </div>
                 </div>
 
-                {form.fulfillmentMode === 'DELIVERY' && (deliveryQuoteError || deliveryQuote?.fallbackReason) ? (
+                {form.fulfillmentMode === 'DELIVERY' && deliveryQuoteError ? (
                   <div className="rounded-[20px] border border-amber-200 bg-[rgba(255,249,235,0.9)] px-4 py-3 text-sm text-amber-800 sm:rounded-[24px]">
-                    {deliveryQuoteError || deliveryQuote?.fallbackReason}
+                    {deliveryQuoteError}
                   </div>
                 ) : null}
 

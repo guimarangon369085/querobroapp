@@ -20,7 +20,6 @@ import { UberDirectProvider } from './uber-direct.provider.js';
 
 type OrderWithDeliveryContext = Awaited<ReturnType<DeliveriesService['getOrderForDelivery']>>;
 type DeliveryQuoteDraft = typeof DeliveryQuoteDraftSchema._type;
-type DeliveryQuoteSelection = typeof DeliveryQuoteSelectionSchema._type;
 type DeliveryQuoteResponse = typeof DeliveryQuoteResponseSchema._type;
 type DeliveryJob = typeof DeliveryJobSchema._type;
 
@@ -343,11 +342,12 @@ export class DeliveriesService {
   }
 
   private buildQuoteInput(draft: DeliveryQuoteDraft): DeliveryQuoteInput {
+    const pickupOrigin = this.pickupOrigin();
     return {
       orderId: null,
-      pickupName: this.pickupOrigin().name,
-      pickupPhone: this.pickupOrigin().phone,
-      pickupAddress: this.pickupOrigin().address,
+      pickupName: pickupOrigin.name,
+      pickupPhone: pickupOrigin.phone,
+      pickupAddress: pickupOrigin.address,
       dropoffName: this.normalizeText(draft.customer.name) || 'Cliente',
       dropoffPhone: this.normalizeText(draft.customer.phone) || '',
       dropoffAddress: this.normalizeText(draft.customer.address),
@@ -359,11 +359,12 @@ export class DeliveriesService {
   }
 
   private buildProviderInput(draft: DeliveryDraft, providerQuoteId: string | null): DeliveryDispatchInput {
+    const pickupOrigin = this.pickupOrigin();
     return {
       orderId: draft.orderId,
-      pickupName: this.pickupOrigin().name,
-      pickupPhone: this.pickupOrigin().phone,
-      pickupAddress: this.pickupOrigin().address,
+      pickupName: pickupOrigin.name,
+      pickupPhone: pickupOrigin.phone,
+      pickupAddress: pickupOrigin.address,
       dropoffName: draft.customerName,
       dropoffPhone: draft.customerPhone,
       dropoffAddress: draft.dropoffAddress,
@@ -375,14 +376,41 @@ export class DeliveriesService {
     };
   }
 
+  private buildUberStructuredPickupAddress() {
+    return [
+      process.env.UBER_DIRECT_PICKUP_ADDRESS_LINE1,
+      process.env.UBER_DIRECT_PICKUP_ADDRESS_LINE2,
+      process.env.UBER_DIRECT_PICKUP_CITY,
+      process.env.UBER_DIRECT_PICKUP_STATE,
+      process.env.UBER_DIRECT_PICKUP_POSTAL_CODE,
+      process.env.UBER_DIRECT_PICKUP_COUNTRY
+    ]
+      .map((value) => this.normalizeText(value))
+      .filter(Boolean)
+      .join(', ');
+  }
+
+  private pickupOriginKey() {
+    return this.pickupOrigin().address || this.normalizeText(process.env.UBER_DIRECT_STORE_ID);
+  }
+
+  private hasPickupOriginConfigured() {
+    return Boolean(this.pickupOriginKey());
+  }
+
   private pickupOrigin() {
     return {
-      name: this.normalizeText(process.env.DELIVERY_PICKUP_NAME) || 'Quero Broa',
+      name:
+        this.normalizeText(process.env.DELIVERY_PICKUP_NAME) ||
+        this.normalizeText(process.env.UBER_DIRECT_PICKUP_NAME) ||
+        'Quero Broa',
       phone:
         this.normalizeText(process.env.DELIVERY_PICKUP_PHONE) ||
+        this.normalizeText(process.env.UBER_DIRECT_PICKUP_PHONE) ||
         this.normalizeText(process.env.PIX_STATIC_KEY) ||
         '',
-      address: this.normalizeText(process.env.DELIVERY_PICKUP_ADDRESS)
+      address:
+        this.normalizeText(process.env.DELIVERY_PICKUP_ADDRESS) || this.buildUberStructuredPickupAddress()
     };
   }
 
@@ -400,7 +428,7 @@ export class DeliveriesService {
         JSON.stringify({
           mode: draft.mode,
           scheduledAt: draft.scheduledAt,
-          pickupAddress: this.pickupOrigin().address,
+          pickupAddress: this.pickupOriginKey(),
           customerAddress: this.normalizeText(draft.customer.address),
           subtotal: this.toMoney(draft.manifest.subtotal),
           totalUnits: draft.manifest.totalUnits,
@@ -512,7 +540,7 @@ export class DeliveriesService {
 
   private collectMissingRequirements(order: OrderWithDeliveryContext, draft: DeliveryDraft) {
     return [
-      ...(!this.pickupOrigin().address ? ['origem de coleta sem endereco configurado'] : []),
+      ...(!this.hasPickupOriginConfigured() ? ['origem de coleta sem endereco configurado'] : []),
       ...(!order.customer?.name?.trim() ? ['cliente sem nome'] : []),
       ...(!order.customer?.phone?.trim() ? ['cliente sem telefone'] : []),
       ...(!draft.dropoffAddress ? ['cliente sem endereco completo para entrega'] : []),

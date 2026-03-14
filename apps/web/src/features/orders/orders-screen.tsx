@@ -45,15 +45,11 @@ import {
   resolveOrderFlavorCodeFromName,
   type OrderFlavorCode
 } from './order-box-catalog';
-import { type DeliveryReadiness, type DeliveryTracking, type MassPrepEvent, type OrderView } from './orders-model';
+import { type MassPrepEvent, type OrderView } from './orders-model';
 import {
-  fetchOrderDeliveryReadiness,
-  fetchOrderDeliveryTracking,
   fetchOrderPixCharge,
   fetchOrdersWorkspace,
-  markOrderDeliveryComplete,
   sendOrderPixChargeWhatsApp,
-  startOrderDelivery,
   submitOrderIntake
 } from './orders-api';
 
@@ -740,6 +736,22 @@ function safeDateFromIso(iso?: string | null) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+function formatDeliveryEstimateCaption(order?: OrderView | null) {
+  if (!order || order.fulfillmentMode !== 'DELIVERY') return '';
+
+  const deliveryFee = toMoney(order.deliveryFee ?? 0);
+  if (deliveryFee <= 0) {
+    return 'Frete a confirmar.';
+  }
+
+  const quoteExpiry = formatOrderDateTimeLabel(safeDateFromIso(order.deliveryQuoteExpiresAt ?? null));
+  if (order.deliveryProvider === 'UBER_DIRECT') {
+    return quoteExpiry ? `Estimativa Uber valida ate ${quoteExpiry}.` : 'Estimativa Uber registrada.';
+  }
+
+  return quoteExpiry ? `Estimativa registrada ate ${quoteExpiry}.` : 'Estimativa de frete registrada.';
+}
+
 function startOfLocalDay(date: Date) {
   const normalized = new Date(date);
   normalized.setHours(0, 0, 0, 0);
@@ -1031,12 +1043,6 @@ function OrdersPageContent() {
   const [selectedOrderPixChargeLoading, setSelectedOrderPixChargeLoading] = useState(false);
   const [selectedOrderPixChargeError, setSelectedOrderPixChargeError] = useState<string | null>(null);
   const [isSendingSelectedOrderPixWhatsApp, setIsSendingSelectedOrderPixWhatsApp] = useState(false);
-  const [selectedOrderDeliveryReadiness, setSelectedOrderDeliveryReadiness] = useState<DeliveryReadiness | null>(null);
-  const [selectedOrderDeliveryTracking, setSelectedOrderDeliveryTracking] = useState<DeliveryTracking | null>(null);
-  const [selectedOrderDeliveryLoading, setSelectedOrderDeliveryLoading] = useState(false);
-  const [selectedOrderDeliveryError, setSelectedOrderDeliveryError] = useState<string | null>(null);
-  const [isStartingSelectedOrderDelivery, setIsStartingSelectedOrderDelivery] = useState(false);
-  const [isCompletingSelectedOrderDelivery, setIsCompletingSelectedOrderDelivery] = useState(false);
   const [selectedOrderEditingBoxKey, setSelectedOrderEditingBoxKey] = useState<string | null>(null);
   const [selectedOrderEditingBoxDraftByProductId, setSelectedOrderEditingBoxDraftByProductId] = useState<
     Record<number, number>
@@ -1112,45 +1118,6 @@ function OrdersPageContent() {
       setIsSendingSelectedOrderPixWhatsApp(false);
     }
   }, [notifyError, notifySuccess, selectedOrder?.id]);
-
-  const startSelectedOrderDelivery = useCallback(async () => {
-    if (!selectedOrder?.id) return;
-    setIsStartingSelectedOrderDelivery(true);
-    try {
-      const response = await startOrderDelivery(selectedOrder.id);
-      setSelectedOrderDeliveryTracking(response.tracking);
-      const readiness = await fetchOrderDeliveryReadiness(selectedOrder.id);
-      setSelectedOrderDeliveryReadiness(readiness);
-      notifySuccess(
-        response.tracking.provider === 'UBER_DIRECT'
-          ? 'Envio Uber solicitado.'
-          : 'Envio registrado para acompanhamento.'
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Nao foi possivel solicitar o envio.';
-      setSelectedOrderDeliveryError(message);
-      notifyError(message);
-    } finally {
-      setIsStartingSelectedOrderDelivery(false);
-    }
-  }, [notifyError, notifySuccess, selectedOrder?.id]);
-
-  const completeSelectedOrderDelivery = useCallback(async () => {
-    if (!selectedOrder?.id) return;
-    setIsCompletingSelectedOrderDelivery(true);
-    try {
-      const tracking = await markOrderDeliveryComplete(selectedOrder.id);
-      setSelectedOrderDeliveryTracking(tracking);
-      await loadAll();
-      notifySuccess('Entrega marcada como concluida.');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Nao foi possivel concluir a entrega.';
-      setSelectedOrderDeliveryError(message);
-      notifyError(message);
-    } finally {
-      setIsCompletingSelectedOrderDelivery(false);
-    }
-  }, [loadAll, notifyError, notifySuccess, selectedOrder?.id]);
 
   const openNewOrderModal = useCallback(() => {
     setIsOrderDetailModalOpen(false);
@@ -1515,52 +1482,6 @@ function OrdersPageContent() {
       .finally(() => {
         if (active) {
           setSelectedOrderPixChargeLoading(false);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [isOrderDetailModalOpen, selectedOrder]);
-
-  useEffect(() => {
-    if (!selectedOrder || !isOrderDetailModalOpen) {
-      setSelectedOrderDeliveryReadiness(null);
-      setSelectedOrderDeliveryTracking(null);
-      setSelectedOrderDeliveryError(null);
-      setSelectedOrderDeliveryLoading(false);
-      return;
-    }
-
-    if (selectedOrder.fulfillmentMode !== 'DELIVERY') {
-      setSelectedOrderDeliveryReadiness(null);
-      setSelectedOrderDeliveryTracking(null);
-      setSelectedOrderDeliveryError(null);
-      setSelectedOrderDeliveryLoading(false);
-      return;
-    }
-
-    let active = true;
-    setSelectedOrderDeliveryLoading(true);
-    setSelectedOrderDeliveryError(null);
-    Promise.all([
-      fetchOrderDeliveryReadiness(selectedOrder.id!),
-      fetchOrderDeliveryTracking(selectedOrder.id!).catch(() => ({ exists: false, tracking: null }))
-    ])
-      .then(([readiness, tracking]) => {
-        if (!active) return;
-        setSelectedOrderDeliveryReadiness(readiness);
-        setSelectedOrderDeliveryTracking(tracking.tracking);
-      })
-      .catch((error) => {
-        if (!active) return;
-        setSelectedOrderDeliveryReadiness(null);
-        setSelectedOrderDeliveryTracking(null);
-        setSelectedOrderDeliveryError(error instanceof Error ? error.message : 'Nao foi possivel carregar a entrega.');
-      })
-      .finally(() => {
-        if (active) {
-          setSelectedOrderDeliveryLoading(false);
         }
       });
 
@@ -3770,78 +3691,24 @@ function OrdersPageContent() {
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
-                  ENTREGA
+                  FRETE
                 </p>
                 <p className="text-sm font-semibold text-neutral-900">
                   {selectedOrder.fulfillmentMode === 'DELIVERY'
-                    ? `${formatCurrencyBR(selectedOrder.deliveryFee ?? 0)} • ${selectedOrder.deliveryProvider === 'UBER_DIRECT' ? 'Uber' : selectedOrder.deliveryFeeSource === 'MANUAL_FALLBACK' ? 'provisório' : 'sem frete'}`
+                    ? (selectedOrder.deliveryFee ?? 0) > 0
+                      ? formatCurrencyBR(selectedOrder.deliveryFee ?? 0)
+                      : 'A confirmar'
                     : 'Retirada'}
                 </p>
               </div>
               {selectedOrder.fulfillmentMode === 'DELIVERY' ? (
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className="app-button app-button-secondary text-xs disabled:cursor-not-allowed disabled:opacity-60"
-                    onClick={() => {
-                      void startSelectedOrderDelivery();
-                    }}
-                    disabled={
-                      isStartingSelectedOrderDelivery ||
-                      selectedOrder.status !== 'PRONTO' ||
-                      selectedOrderDeliveryTracking?.status === 'REQUESTED' ||
-                      selectedOrderDeliveryTracking?.status === 'OUT_FOR_DELIVERY'
-                    }
-                  >
-                    {isStartingSelectedOrderDelivery ? 'Solicitando...' : 'Solicitar envio'}
-                  </button>
-                  {selectedOrderDeliveryTracking &&
-                  selectedOrderDeliveryTracking.status !== 'DELIVERED' &&
-                  selectedOrderDeliveryTracking.status !== 'CANCELED' ? (
-                    <button
-                      type="button"
-                      className="app-button app-button-ghost text-xs disabled:cursor-not-allowed disabled:opacity-60"
-                      onClick={() => {
-                        void completeSelectedOrderDelivery();
-                      }}
-                      disabled={isCompletingSelectedOrderDelivery}
-                    >
-                      {isCompletingSelectedOrderDelivery ? 'Concluindo...' : 'Marcar entregue'}
-                    </button>
-                  ) : null}
-                </div>
+                <span className="rounded-full border border-white/80 bg-white/86 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                  {selectedOrder.deliveryProvider === 'UBER_DIRECT' ? 'Uber' : 'Estimativa'}
+                </span>
               ) : null}
             </div>
             {selectedOrder.fulfillmentMode === 'DELIVERY' ? (
-              <>
-                <p className="text-xs text-neutral-600">
-                  Status da cotação: {selectedOrder.deliveryQuoteStatus || 'NOT_REQUIRED'}.
-                  {selectedOrderDeliveryReadiness?.reason ? ` ${selectedOrderDeliveryReadiness.reason}` : ''}
-                </p>
-                {selectedOrderDeliveryTracking ? (
-                  <p className="text-xs text-neutral-600">
-                    Acompanhamento: {selectedOrderDeliveryTracking.status}
-                    {selectedOrderDeliveryTracking.providerTrackingUrl ? (
-                      <>
-                        {' • '}
-                        <a
-                          href={selectedOrderDeliveryTracking.providerTrackingUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="underline decoration-dotted underline-offset-2"
-                        >
-                          abrir tracking
-                        </a>
-                      </>
-                    ) : null}
-                  </p>
-                ) : null}
-                {selectedOrderDeliveryError ? (
-                  <p className="text-xs font-medium text-rose-700">{selectedOrderDeliveryError}</p>
-                ) : selectedOrderDeliveryLoading ? (
-                  <p className="text-xs text-neutral-600">Carregando entrega...</p>
-                ) : null}
-              </>
+              <p className="text-xs text-neutral-600">{formatDeliveryEstimateCaption(selectedOrder)}</p>
             ) : null}
           </div>
           <div className="mt-3 grid gap-2 rounded-2xl border border-white/70 bg-white/80 p-3">
@@ -3903,7 +3770,7 @@ function OrdersPageContent() {
             )}
           </div>
           <div>
-            <div className="mb-3 grid gap-3 rounded-2xl border border-white/70 bg-white/80 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+            <div className="mb-3 grid gap-3 rounded-2xl border border-white/70 bg-white/80 p-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
               <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
                 Data e hora
                 <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px]">
@@ -3951,7 +3818,7 @@ function OrdersPageContent() {
               </label>
               <button
                 type="button"
-                className="app-button app-button-primary disabled:cursor-not-allowed disabled:opacity-60"
+                className="app-button app-button-primary w-full xl:w-auto disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={saveSelectedOrderEdit}
                 disabled={isSavingSelectedOrderEdit}
               >
