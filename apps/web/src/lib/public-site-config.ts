@@ -1,5 +1,4 @@
 const LOCAL_DEV_WEB_ORIGIN = 'http://127.0.0.1:3000';
-const ALLOWED_DEFAULT_ENTRY_PATHS = new Set(['/pedidos', '/pedido']);
 
 function normalizeUrlOrigin(value?: string | null) {
   const raw = String(value || '').trim();
@@ -45,14 +44,7 @@ function normalizeHost(value?: string | null) {
     .replace(/:\d+$/, '');
 }
 
-function isOpsHost(hostname?: string | null) {
+export function isOpsHost(hostname?: string | null) {
   const normalized = normalizeHost(hostname);
   return normalized === 'ops.querobroa.com.br' || normalized.startsWith('ops.');
-}
-
-export function getDefaultWebEntryPath(hostname?: string | null) {
-  if (isOpsHost(hostname)) return '/pedidos';
-  const configured = String(process.env.QUEROBROAPP_DEFAULT_WEB_PATH || '').trim();
-  if (ALLOWED_DEFAULT_ENTRY_PATHS.has(configured)) return configured;
-  return '/pedidos';
 }

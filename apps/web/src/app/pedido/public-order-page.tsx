@@ -93,6 +93,30 @@ const initialFormState: PublicOrderFormState = {
   }
 };
 
+const ORDER_HERO_BADGES = [
+  'Frete cotado antes do PIX',
+  'Caixas oficiais e sabores',
+  'Resumo em tempo real'
+] as const;
+
+const ORDER_HERO_STEPS = [
+  {
+    eyebrow: 'Etapa 1',
+    title: 'Quem vai receber',
+    detail: 'Nome e WhatsApp para identificar o pedido sem atrito.'
+  },
+  {
+    eyebrow: 'Etapa 2',
+    title: 'Entrega ou retirada',
+    detail: 'Endereco, data e horario entram antes do total final.'
+  },
+  {
+    eyebrow: 'Etapa 3',
+    title: 'Caixas e sabores',
+    detail: 'Escolha caixas prontas ou feche sua propria combinacao de 7.'
+  }
+] as const;
+
 function extractErrorMessage(body: unknown) {
   if (typeof body === 'string') return body;
   if (!body || typeof body !== 'object') return 'Nao foi possivel enviar o pedido.';
@@ -212,7 +236,14 @@ function BrandGallery({ children }: { children: ReactNode }) {
               className={`absolute overflow-hidden rounded-[28px] border border-white/70 shadow-[0_26px_60px_rgba(76,48,31,0.18)] ${image.className}`}
               style={style}
             >
-              <Image alt={image.alt} className="h-full w-full object-cover" fill sizes="(max-width: 1280px) 40vw, 320px" src={image.src} />
+              <Image
+                alt={image.alt}
+                className="h-full w-full object-cover"
+                fill
+                priority
+                sizes="(max-width: 1280px) 40vw, 320px"
+                src={image.src}
+              />
             </div>
           );
         })}
@@ -595,15 +626,91 @@ export function PublicOrderPage() {
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(255,240,220,0.95),transparent_32%),radial-gradient(circle_at_top_right,rgba(219,234,222,0.9),transparent_28%),linear-gradient(180deg,#f8efe5_0%,#f4eadc_100%)]">
       <div className="mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:py-8">
-        <p className="text-[1.7rem] font-semibold tracking-[-0.05em] text-[color:var(--ink-strong)] sm:text-[2.35rem]">
-          @QUEROBROA
-        </p>
+        <section className="grid gap-4 lg:gap-6 xl:grid-cols-[minmax(0,0.94fr)_minmax(420px,1.06fr)] xl:items-stretch">
+          <div className="overflow-hidden rounded-[30px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(145deg,rgba(255,252,247,0.92),rgba(246,235,221,0.9))] p-5 shadow-[0_20px_64px_rgba(70,44,26,0.12)] sm:rounded-[34px] sm:p-6 lg:p-7 lg:shadow-[0_24px_84px_rgba(70,44,26,0.12)]">
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="text-[1.7rem] font-semibold tracking-[-0.05em] text-[color:var(--ink-strong)] sm:text-[2.35rem]">
+                @QUEROBROA
+              </p>
+              <span className="rounded-full border border-[rgba(126,79,45,0.1)] bg-white/72 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-muted)] sm:text-xs">
+                Pedido publico
+              </span>
+            </div>
 
-        <section className="mt-4 grid gap-4 lg:gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(360px,0.7fr)]">
+            <h1 className="mt-5 max-w-2xl text-[2rem] font-semibold leading-[0.96] tracking-[-0.055em] text-[color:var(--ink-strong)] sm:text-[2.8rem] lg:text-[3.5rem]">
+              Monte o pedido com frete fechado antes do PIX.
+            </h1>
+            <p className="mt-4 max-w-[40rem] text-sm leading-6 text-[color:var(--ink-muted)] sm:text-base sm:leading-7">
+              A pagina junta pedido, cotacao de entrega e total final no mesmo fluxo. Voce escolhe as caixas, combina sabores se quiser e envia tudo direto para o sistema.
+            </p>
+
+            <div className="mt-5 flex flex-wrap gap-2.5">
+              {ORDER_HERO_BADGES.map((badge) => (
+                <span
+                  key={badge}
+                  className="rounded-full border border-[rgba(126,79,45,0.08)] bg-white/76 px-3 py-2 text-[0.72rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)] sm:px-3.5 sm:text-xs"
+                >
+                  {badge}
+                </span>
+              ))}
+            </div>
+
+            <div className="mt-6 grid gap-3 md:grid-cols-3">
+              {ORDER_HERO_STEPS.map((step) => (
+                <article
+                  key={step.title}
+                  className="rounded-[24px] border border-[rgba(126,79,45,0.08)] bg-white/76 px-4 py-4 shadow-[0_14px_32px_rgba(70,44,26,0.06)]"
+                >
+                  <p className="text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-muted)]">
+                    {step.eyebrow}
+                  </p>
+                  <h2 className="mt-2 text-base font-semibold text-[color:var(--ink-strong)] sm:text-[1.05rem]">
+                    {step.title}
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-[color:var(--ink-muted)]">
+                    {step.detail}
+                  </p>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="hidden xl:block">
+            <BrandGallery>
+              <p className="text-[0.72rem] font-semibold uppercase tracking-[0.22em] text-[color:var(--ink-muted)]">
+                Referencia visual
+              </p>
+              <p className="mt-2 text-base font-semibold text-[color:var(--ink-strong)] sm:text-lg lg:text-[1.4rem]">
+                A pagina mostra textura, cor e cardapio como parte da decisao.
+              </p>
+              <p className="mt-2 text-[0.82rem] leading-5 text-[color:var(--ink-muted)] sm:text-sm sm:leading-6">
+                As fotos tratadas e as miniaturas do cardapio ajudam a comparar as caixas antes de fechar o pedido.
+              </p>
+            </BrandGallery>
+          </div>
+        </section>
+
+        <section className="mt-5 grid gap-4 lg:gap-6 xl:grid-cols-[minmax(0,1.08fr)_minmax(340px,0.92fr)]">
           <form
             className="grid gap-4 rounded-[26px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.88)] p-4 shadow-[0_22px_60px_rgba(70,44,26,0.12)] sm:gap-5 sm:rounded-[32px] sm:p-6 sm:shadow-[0_26px_90px_rgba(70,44,26,0.12)]"
             onSubmit={onSubmit}
           >
+            <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-[linear-gradient(160deg,rgba(255,250,245,0.94),rgba(246,236,225,0.86))] p-4 sm:rounded-[28px] sm:p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-[color:var(--ink-muted)]">
+                    Montagem do pedido
+                  </p>
+                  <h2 className="mt-1.5 text-[1.25rem] font-semibold text-[color:var(--ink-strong)] sm:text-[1.55rem]">
+                    Preencha os blocos e acompanhe o total ao lado.
+                  </h2>
+                </div>
+                <div className="rounded-full border border-white/80 bg-white/82 px-3 py-2 text-[0.72rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)] sm:text-xs">
+                  4 blocos
+                </div>
+              </div>
+            </section>
+
             <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6">
               <div className="mb-4 flex items-center justify-between gap-4 sm:mb-5">
                 <div>
@@ -1025,7 +1132,7 @@ export function PublicOrderPage() {
             </div>
           </form>
 
-          <aside className="grid gap-4 self-start sm:gap-5 xl:sticky xl:top-6">
+          <aside className="grid gap-4 self-start sm:gap-5 xl:sticky xl:top-8">
             <section className="order-1 overflow-hidden rounded-[24px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(165deg,rgba(255,252,248,0.96),rgba(243,231,216,0.9))] p-4 shadow-[0_18px_40px_rgba(70,44,26,0.1)] sm:rounded-[30px] sm:p-5 sm:shadow-[0_26px_80px_rgba(70,44,26,0.12)]">
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -1135,20 +1242,40 @@ export function PublicOrderPage() {
               </div>
             </section>
 
-            <div className="order-3 xl:order-2">
-              <BrandGallery>
-              <p className="text-[0.72rem] font-semibold uppercase tracking-[0.22em] text-[color:var(--ink-muted)]">
-                Composicao da marca
+            <section className="order-2 rounded-[24px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.86)] p-4 shadow-[0_18px_40px_rgba(70,44,26,0.08)] sm:rounded-[30px] sm:p-6 sm:shadow-[0_22px_60px_rgba(70,44,26,0.08)]">
+              <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-[color:var(--ink-muted)]">
+                Montagem rapida
               </p>
-              <p className="mt-2 text-base font-semibold text-[color:var(--ink-strong)] sm:text-lg lg:text-xl">Broa, textura e cor como parte do pedido</p>
-              <p className="mt-2 text-[0.82rem] leading-5 text-[color:var(--ink-muted)] sm:text-sm sm:leading-6">
-                A pagina agora usa as fotos tratadas como base visual e nao apenas como enfeite lateral.
+              <h2 className="mt-2 text-[1.2rem] font-semibold text-[color:var(--ink-strong)] sm:text-[1.45rem]">
+                Caixa Sabores fecha sempre em 7 broas.
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-[color:var(--ink-muted)]">
+                Use a montagem livre quando quiser misturar sabores fora das caixas prontas. O resumo recalcula produtos, frete e total automaticamente.
               </p>
-              </BrandGallery>
-            </div>
+
+              <div className="mt-4 grid grid-cols-[88px_minmax(0,1fr)] items-center gap-3 rounded-[22px] bg-white/78 p-3 sm:grid-cols-[104px_minmax(0,1fr)]">
+                <div className="relative h-[88px] overflow-hidden rounded-[18px] border border-white/85 bg-white shadow-[0_12px_24px_rgba(70,44,26,0.08)] sm:h-[104px]">
+                  <Image
+                    alt="Sabores no cardapio oficial"
+                    className="h-full w-full object-cover"
+                    fill
+                    sizes="104px"
+                    src={ORDER_SABORES_REFERENCE_IMAGE}
+                  />
+                </div>
+                <div className="text-sm leading-6 text-[color:var(--ink-muted)]">
+                  <p className="font-semibold text-[color:var(--ink-strong)]">
+                    Exemplo rapido
+                  </p>
+                  <p className="mt-1">
+                    3 tradicionais + 1 de cada recheado fecha a caixa e entra no total sem ajuste manual.
+                  </p>
+                </div>
+              </div>
+            </section>
 
             {result ? (
-              <section className="order-2 overflow-hidden rounded-[24px] border border-emerald-200 bg-[linear-gradient(165deg,rgba(239,250,244,0.98),rgba(228,244,233,0.92))] p-4 shadow-[0_18px_40px_rgba(43,92,61,0.12)] sm:rounded-[30px] sm:p-6 sm:shadow-[0_26px_80px_rgba(43,92,61,0.12)] xl:order-3">
+              <section className="order-3 overflow-hidden rounded-[24px] border border-emerald-200 bg-[linear-gradient(165deg,rgba(239,250,244,0.98),rgba(228,244,233,0.92))] p-4 shadow-[0_18px_40px_rgba(43,92,61,0.12)] sm:rounded-[30px] sm:p-6 sm:shadow-[0_26px_80px_rgba(43,92,61,0.12)]">
                 <div>
                   <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-emerald-700">
                     Pedido recebido
@@ -1216,7 +1343,7 @@ export function PublicOrderPage() {
                 )}
               </section>
             ) : (
-              <section className="order-2 rounded-[24px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.86)] p-4 shadow-[0_18px_40px_rgba(70,44,26,0.08)] sm:rounded-[30px] sm:p-6 sm:shadow-[0_22px_60px_rgba(70,44,26,0.08)] xl:order-3">
+              <section className="order-3 rounded-[24px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.86)] p-4 shadow-[0_18px_40px_rgba(70,44,26,0.08)] sm:rounded-[30px] sm:p-6 sm:shadow-[0_22px_60px_rgba(70,44,26,0.08)]">
                 <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-[color:var(--ink-muted)]">
                   Fluxo
                 </p>

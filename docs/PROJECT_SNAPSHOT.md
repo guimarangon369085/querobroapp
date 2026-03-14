@@ -76,7 +76,7 @@ Ultima atualizacao: 2026-03-13
 ## Gaps abertos
 
 1. `Google Forms` ja e viavel como canal temporario, mas ainda falta configuracao real do Apps Script e URL publica final.
-2. O deploy publico ainda nao esta ligado ao dominio comprado `querobroa.com.br`; faltam bind do host final, DNS e validacao externa em `www.querobroa.com.br`.
+2. O dominio publico ja responde em `querobroa.com.br`, `www`, `ops` e `api`, mas o web ainda precisa publicar o bundle corrigido para `/pedidos` e `/pedido` nao cairem em fallback de `127.0.0.1` quando o client bundle estiver defasado.
 3. `WhatsApp Flow` segue sem numero dedicado; a migracao futura deve reutilizar o contrato externo atual.
 4. A integracao Uber/entrega real ainda depende de credenciais do provider; hoje existe cotacao e fallback server-side preparados.
 5. Mobile segue atras do web no fluxo operacional novo.

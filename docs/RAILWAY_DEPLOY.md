@@ -4,7 +4,7 @@
 
 Subir o mesmo app em producao com:
 
-- `querobroa.com.br` e `www.querobroa.com.br` abrindo o fluxo publico
+- `querobroa.com.br` e `www.querobroa.com.br` abrindo a landing publica da marca
 - `/pedido` como captura publica
 - `/pedidos` como base operacional no mesmo deploy
 - `ops.querobroa.com.br` opcional apontando para o mesmo `web`, abrindo direto em `Pedidos`
@@ -26,9 +26,11 @@ Subir o mesmo app em producao com:
 
 ## Comportamento do web
 
-- `querobroa.com.br/` -> `/pedido`
-- `www.querobroa.com.br/` -> `/pedido`
-- `ops.querobroa.com.br/` -> `/pedidos`
+- `querobroa.com.br/` abre a landing publica
+- `www.querobroa.com.br/` abre a mesma landing publica
+- `querobroa.com.br/pedido` e `www.querobroa.com.br/pedido` abrem a captura publica
+- `querobroa.com.br/pedidos` e `www.querobroa.com.br/pedidos` abrem a operacao
+- `ops.querobroa.com.br/` redireciona para `/pedidos`
 - qualquer host continua podendo acessar tanto `/pedido` quanto `/pedidos`
 
 Esse comportamento usa [page.tsx](/Users/gui/querobroapp/apps/web/src/app/page.tsx) e [public-site-config.ts](/Users/gui/querobroapp/apps/web/src/lib/public-site-config.ts).
@@ -48,7 +50,11 @@ Variaveis obrigatorias:
 - `NEXT_PUBLIC_API_URL=https://api.querobroa.com.br`
 - `ORDER_FORM_API_URL=https://api.querobroa.com.br`
 - `ORDER_FORM_BRIDGE_TOKEN=<mesmo valor da API>`
-- `QUEROBROAPP_DEFAULT_WEB_PATH=/pedido`
+
+Observacao importante para Railway com `Dockerfile`:
+
+- o build do Next precisa receber `NEXT_PUBLIC_APP_URL` e `NEXT_PUBLIC_API_URL` ja na fase de imagem; sem isso, o bundle pode cair em fallback local (`127.0.0.1`)
+- o `Dockerfile.web` agora valida essas duas variaveis durante o build e falha cedo se faltarem
 
 Custom domains:
 
@@ -102,11 +108,19 @@ Esperado:
 
 Nao force valores manualmente antes de ver o alvo emitido pelo Railway.
 
+Checklist rapido de status:
+
+- `dig +short NS querobroa.com.br` deve responder os nameservers delegados
+- `dig +short querobroa.com.br` deve responder o alvo/apex publicado
+- `dig +short CNAME www.querobroa.com.br` deve responder o alvo do Railway
+- `dig +short CNAME api.querobroa.com.br` deve responder o alvo do Railway
+
 ## Validacao
 
-1. `https://querobroa.com.br/` deve abrir no pedido publico
-2. `https://querobroa.com.br/pedido` deve funcionar
-3. `https://querobroa.com.br/pedidos` deve carregar a operacao
-4. `https://ops.querobroa.com.br/` deve abrir em `Pedidos`
-5. `https://api.querobroa.com.br/health` deve responder `{\"status\":\"ok\"}`
-6. O submit de `/pedido` deve cair na mesma base operacional vista em `/pedidos`
+1. `https://querobroa.com.br/` deve abrir a landing publica
+2. `https://www.querobroa.com.br/` deve abrir a mesma landing publica
+3. `https://querobroa.com.br/pedido` deve funcionar
+4. `https://querobroa.com.br/pedidos` deve carregar a operacao
+5. `https://ops.querobroa.com.br/` deve abrir em `Pedidos`
+6. `https://api.querobroa.com.br/health` deve responder `{\"status\":\"ok\"}`
+7. O submit de `/pedido` deve cair na mesma base operacional vista em `/pedidos`

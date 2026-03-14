@@ -3,7 +3,7 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { buildPublicAppUrl } from '@/lib/public-site-config';
+import { buildPublicAppUrl, isOpsHost } from '@/lib/public-site-config';
 
 const pageTitle = 'QUEROBROA';
 const pageDescription = 'Pedido publico em /pedido e operacao em /pedidos no mesmo app.';
@@ -59,7 +59,7 @@ export default async function HomePage() {
   const requestHeaders = await headers();
   const hostname = requestHeaders.get('x-forwarded-host') || requestHeaders.get('host');
 
-  if (String(hostname || '').toLowerCase().startsWith('ops.')) {
+  if (isOpsHost(hostname)) {
     redirect('/pedidos');
   }
 
