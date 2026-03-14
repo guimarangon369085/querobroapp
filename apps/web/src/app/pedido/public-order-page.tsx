@@ -673,20 +673,8 @@ export function PublicOrderPage() {
       <div className="mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:py-8">
         <section className="grid gap-4 lg:gap-6 xl:grid-cols-[minmax(0,0.94fr)_minmax(420px,1.06fr)] xl:items-stretch">
           <div className="overflow-hidden rounded-[30px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(145deg,rgba(255,252,247,0.92),rgba(246,235,221,0.9))] p-5 shadow-[0_20px_64px_rgba(70,44,26,0.12)] sm:rounded-[34px] sm:p-6 lg:p-7 lg:shadow-[0_24px_84px_rgba(70,44,26,0.12)]">
-            <div className="flex flex-wrap items-center gap-3">
-              <p className="text-[1.7rem] font-semibold tracking-[-0.05em] text-[color:var(--ink-strong)] sm:text-[2.35rem]">
-                @QUEROBROA
-              </p>
-              <span className="rounded-full border border-[rgba(126,79,45,0.1)] bg-white/72 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-muted)] sm:text-xs">
-                Pedido
-              </span>
-            </div>
-
-            <h1 className="mt-5 max-w-2xl text-[2rem] font-semibold leading-[0.96] tracking-[-0.055em] text-[color:var(--ink-strong)] sm:text-[2.8rem] lg:text-[3.5rem]">
-              Monte seu pedido.
-            </h1>
-            <p className="mt-4 max-w-[40rem] text-sm leading-6 text-[color:var(--ink-muted)] sm:text-base sm:leading-7">
-              Escolha as caixas, confira o total e envie.
+            <p className="text-[1.7rem] font-semibold tracking-[-0.05em] text-[color:var(--ink-strong)] sm:text-[2.35rem]">
+              @QUEROBROA
             </p>
           </div>
 
