@@ -149,9 +149,9 @@ export const ORDER_BOX_CATALOG = {
     priceEstimate: 47
   },
   MR: {
-    label: 'Mista Requeijao',
+    label: 'Mista Requeijão de Corte',
     codeLabel: 'MR',
-    detail: '1 caixa = 4 tradicionais + 3 requeijao',
+    detail: '1 caixa = 4 tradicionais + 3 requeijão de corte',
     note: 'Mineira e mais leve',
     image: ORDER_CARDAPIO_IMAGE_PATHS.mistaRequeijaoDeCorte,
     referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.mistaRequeijaoDeCorte,
