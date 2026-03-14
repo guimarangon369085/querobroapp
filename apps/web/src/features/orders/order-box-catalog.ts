@@ -24,7 +24,7 @@ export const ORDER_FLAVOR_OFFICIAL_BOX_NAME_BY_CODE: Record<OrderFlavorCode, str
 export const ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE: Record<OrderMistaShortcutCode, string> = {
   G: 'Caixa Mista de Goiabada (MG)',
   D: 'Caixa Mista de Doce de Leite (MD)',
-  Q: 'Caixa Mista de Queijo (MQ)',
+  Q: 'Caixa Mista de Queijo do Serro (MQ)',
   R: 'Caixa Mista de Requeijão de Corte (MR)'
 };
 
@@ -130,9 +130,9 @@ export const ORDER_BOX_CATALOG = {
     priceEstimate: 47
   },
   MQ: {
-    label: 'Mista Queijo',
+    label: 'Mista Queijo do Serro',
     codeLabel: 'MQ',
-    detail: '1 caixa = 4 tradicionais + 3 queijo',
+    detail: '1 caixa = 4 tradicionais + 3 queijo do serro',
     image: ORDER_CARDAPIO_IMAGE_PATHS.mistaQueijoDoSerro,
     referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.mistaQueijoDoSerro,
     accentClassName:

@@ -849,23 +849,18 @@ export function PublicOrderPage() {
                         active ? 'ring-1 ring-[rgba(181,68,57,0.16)]' : ''
                       }`}
                     >
-                      <div className="grid gap-3 grid-cols-[96px_minmax(0,1fr)] items-center sm:gap-4 sm:grid-cols-[118px_minmax(0,1fr)]">
+                      <div className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-3 sm:gap-4 sm:grid-cols-[118px_minmax(0,1fr)]">
                         <div className="relative h-[96px] w-[96px] shrink-0 sm:h-[118px] sm:w-[118px]">
                           <div className="relative h-full w-full overflow-hidden rounded-[18px] border border-white/80 bg-white/70 shadow-[0_12px_24px_rgba(74,47,31,0.12)] transition-transform duration-300 group-hover:translate-y-[-2px] sm:rounded-[22px] sm:shadow-[0_14px_28px_rgba(74,47,31,0.12)]">
                             <Image alt={meta.label} className="h-full w-full object-cover" fill sizes="(max-width: 640px) 96px, 118px" src={meta.image} />
                             <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_26%,rgba(46,29,20,0.12)_100%)]" />
                           </div>
                         </div>
-                        <div>
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <h3 className="text-base font-semibold text-[color:var(--ink-strong)] sm:text-lg">{meta.label}</h3>
-                            </div>
-                            <span className="rounded-full border border-white/80 bg-white/86 px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)] sm:px-3 sm:text-xs">
-                              {meta.codeLabel}
-                            </span>
-                          </div>
-                          <p className="mt-2 text-[0.82rem] leading-5 text-[color:var(--ink-muted)] sm:text-sm sm:leading-6">{meta.detail}</p>
+                        <div className="min-w-0">
+                          <h3 className="text-[0.96rem] font-semibold leading-tight tracking-[-0.02em] text-[color:var(--ink-strong)] sm:text-lg">
+                            {meta.label}
+                          </h3>
+                          <p className="mt-2 text-[0.76rem] leading-[1.35] text-[color:var(--ink-muted)] sm:text-sm sm:leading-6">{meta.detail}</p>
                           <p className="mt-1 text-sm font-semibold text-[color:var(--ink-strong)]">
                             {formatCurrencyBRL(meta.priceEstimate)}
                           </p>
