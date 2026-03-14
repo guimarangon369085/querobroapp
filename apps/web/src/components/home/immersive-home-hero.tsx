@@ -9,7 +9,6 @@ type HeroImage = {
   alt: string;
   glow: string;
   id: number;
-  objectPosition?: string;
   src: string;
 };
 
@@ -40,7 +39,9 @@ const TONES = [
   }
 ] as const;
 
-const HOME_HERO_IMAGES: HeroImage[] = Array.from({ length: 21 }, (_, index) => {
+const HERO_IMAGE_COUNT = 9;
+
+const HOME_HERO_IMAGES: HeroImage[] = Array.from({ length: HERO_IMAGE_COUNT }, (_, index) => {
   const imageId = index + 1;
   const tone = TONES[index % TONES.length];
 
@@ -48,13 +49,12 @@ const HOME_HERO_IMAGES: HeroImage[] = Array.from({ length: 21 }, (_, index) => {
     ...tone,
     id: imageId,
     alt: `Cena ${String(imageId).padStart(2, '0')} do acervo QUEROBROA`,
-    objectPosition: imageId === 8 ? 'center 45%' : imageId === 10 ? 'center 40%' : 'center center',
     src: `/querobroa-brand/home-immersive/scene-${String(imageId).padStart(2, '0')}.jpg`
   };
 });
 
 const AUTOPLAY_MS = 6000;
-const INITIAL_INDEX = 7;
+const INITIAL_INDEX = 4;
 
 function wrapIndex(index: number, total: number) {
   return (index + total) % total;
@@ -110,7 +110,6 @@ export function ImmersiveHomeHero() {
                 quality={86}
                 sizes="100vw"
                 src={image.src}
-                style={{ objectPosition: image.objectPosition }}
               />
             </div>
           );

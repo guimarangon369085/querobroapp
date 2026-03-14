@@ -6,7 +6,7 @@ import { buildPublicAppUrl, isOpsHost } from '@/lib/public-site-config';
 
 const pageTitle = 'QUEROBROA';
 const pageDescription = 'Pedido publico em /pedido e operacao em /pedidos no mesmo app.';
-const homeSocialImagePath = '/querobroa-brand/home-immersive/scene-08.jpg';
+const homeSocialImagePath = '/querobroa-brand/home-immersive/scene-05.jpg';
 
 export function generateMetadata(): Metadata {
   const canonicalUrl = buildPublicAppUrl('/', {
@@ -41,7 +41,7 @@ export function generateMetadata(): Metadata {
               url: socialImageUrl,
               width: 1466,
               height: 2200,
-              alt: 'Pilha de broas QUEROBROA sobre fundo verde claro'
+              alt: 'Broas QUEROBROA em composicao editorial'
             }
           ]
         : undefined
