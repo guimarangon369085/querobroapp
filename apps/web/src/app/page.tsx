@@ -7,7 +7,7 @@ import { buildPublicAppUrl, isOpsHost } from '@/lib/public-site-config';
 
 const pageTitle = 'QUEROBROA';
 const pageDescription = 'Pedido publico em /pedido e operacao em /pedidos no mesmo app.';
-const homeBackgroundImagePath = '/querobroa/brand/IMG_1318.jpg';
+const homeBackgroundImagePath = '/querobroa-brand/home-portrait.jpg';
 
 export function generateMetadata(): Metadata {
   const canonicalUrl = buildPublicAppUrl('/', {
