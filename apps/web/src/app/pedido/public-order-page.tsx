@@ -93,30 +93,6 @@ const initialFormState: PublicOrderFormState = {
   }
 };
 
-const ORDER_HERO_BADGES = [
-  'Frete cotado antes do PIX',
-  'Caixas oficiais e sabores',
-  'Resumo em tempo real'
-] as const;
-
-const ORDER_HERO_STEPS = [
-  {
-    eyebrow: 'Etapa 1',
-    title: 'Quem vai receber',
-    detail: 'Nome e WhatsApp para identificar o pedido sem atrito.'
-  },
-  {
-    eyebrow: 'Etapa 2',
-    title: 'Entrega ou retirada',
-    detail: 'Endereco, data e horario entram antes do total final.'
-  },
-  {
-    eyebrow: 'Etapa 3',
-    title: 'Caixas e sabores',
-    detail: 'Escolha caixas prontas ou feche sua propria combinacao de 7.'
-  }
-] as const;
-
 function extractErrorMessage(body: unknown) {
   if (typeof body === 'string') return body;
   if (!body || typeof body !== 'object') return 'Nao foi possivel enviar o pedido.';
@@ -197,7 +173,7 @@ function formatCustomBoxParts(counts: Record<FlavorCode, number>) {
     .join(' • ');
 }
 
-function BrandGallery({ children }: { children: ReactNode }) {
+function BrandGallery({ children }: { children?: ReactNode }) {
   const [tilt, setTilt] = useState({ rotateX: 0, rotateY: 0 });
 
   const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -247,9 +223,11 @@ function BrandGallery({ children }: { children: ReactNode }) {
             </div>
           );
         })}
-        <div className="absolute bottom-0 left-0 right-0 rounded-[22px] border border-white/70 bg-[rgba(255,251,246,0.82)] p-4 backdrop-blur-sm shadow-[0_18px_40px_rgba(76,48,31,0.08)] sm:rounded-[24px] sm:p-5 lg:rounded-[28px]">
-          {children}
-        </div>
+        {children ? (
+          <div className="absolute bottom-0 left-0 right-0 rounded-[22px] border border-white/70 bg-[rgba(255,251,246,0.82)] p-4 backdrop-blur-sm shadow-[0_18px_40px_rgba(76,48,31,0.08)] sm:rounded-[24px] sm:p-5 lg:rounded-[28px]">
+            {children}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -633,60 +611,20 @@ export function PublicOrderPage() {
                 @QUEROBROA
               </p>
               <span className="rounded-full border border-[rgba(126,79,45,0.1)] bg-white/72 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-muted)] sm:text-xs">
-                Pedido publico
+                Pedido
               </span>
             </div>
 
             <h1 className="mt-5 max-w-2xl text-[2rem] font-semibold leading-[0.96] tracking-[-0.055em] text-[color:var(--ink-strong)] sm:text-[2.8rem] lg:text-[3.5rem]">
-              Monte o pedido com frete fechado antes do PIX.
+              Monte seu pedido.
             </h1>
             <p className="mt-4 max-w-[40rem] text-sm leading-6 text-[color:var(--ink-muted)] sm:text-base sm:leading-7">
-              A pagina junta pedido, cotacao de entrega e total final no mesmo fluxo. Voce escolhe as caixas, combina sabores se quiser e envia tudo direto para o sistema.
+              Escolha as caixas, confira o total e envie.
             </p>
-
-            <div className="mt-5 flex flex-wrap gap-2.5">
-              {ORDER_HERO_BADGES.map((badge) => (
-                <span
-                  key={badge}
-                  className="rounded-full border border-[rgba(126,79,45,0.08)] bg-white/76 px-3 py-2 text-[0.72rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)] sm:px-3.5 sm:text-xs"
-                >
-                  {badge}
-                </span>
-              ))}
-            </div>
-
-            <div className="mt-6 grid gap-3 md:grid-cols-3">
-              {ORDER_HERO_STEPS.map((step) => (
-                <article
-                  key={step.title}
-                  className="rounded-[24px] border border-[rgba(126,79,45,0.08)] bg-white/76 px-4 py-4 shadow-[0_14px_32px_rgba(70,44,26,0.06)]"
-                >
-                  <p className="text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-muted)]">
-                    {step.eyebrow}
-                  </p>
-                  <h2 className="mt-2 text-base font-semibold text-[color:var(--ink-strong)] sm:text-[1.05rem]">
-                    {step.title}
-                  </h2>
-                  <p className="mt-2 text-sm leading-6 text-[color:var(--ink-muted)]">
-                    {step.detail}
-                  </p>
-                </article>
-              ))}
-            </div>
           </div>
 
           <div className="hidden xl:block">
-            <BrandGallery>
-              <p className="text-[0.72rem] font-semibold uppercase tracking-[0.22em] text-[color:var(--ink-muted)]">
-                Referencia visual
-              </p>
-              <p className="mt-2 text-base font-semibold text-[color:var(--ink-strong)] sm:text-lg lg:text-[1.4rem]">
-                A pagina mostra textura, cor e cardapio como parte da decisao.
-              </p>
-              <p className="mt-2 text-[0.82rem] leading-5 text-[color:var(--ink-muted)] sm:text-sm sm:leading-6">
-                As fotos tratadas e as miniaturas do cardapio ajudam a comparar as caixas antes de fechar o pedido.
-              </p>
-            </BrandGallery>
+            <BrandGallery />
           </div>
         </section>
 
@@ -695,27 +633,11 @@ export function PublicOrderPage() {
             className="grid gap-4 rounded-[26px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.88)] p-4 shadow-[0_22px_60px_rgba(70,44,26,0.12)] sm:gap-5 sm:rounded-[32px] sm:p-6 sm:shadow-[0_26px_90px_rgba(70,44,26,0.12)]"
             onSubmit={onSubmit}
           >
-            <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-[linear-gradient(160deg,rgba(255,250,245,0.94),rgba(246,236,225,0.86))] p-4 sm:rounded-[28px] sm:p-5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-[color:var(--ink-muted)]">
-                    Montagem do pedido
-                  </p>
-                  <h2 className="mt-1.5 text-[1.25rem] font-semibold text-[color:var(--ink-strong)] sm:text-[1.55rem]">
-                    Preencha os blocos e acompanhe o total ao lado.
-                  </h2>
-                </div>
-                <div className="rounded-full border border-white/80 bg-white/82 px-3 py-2 text-[0.72rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)] sm:text-xs">
-                  4 blocos
-                </div>
-              </div>
-            </section>
-
             <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6">
               <div className="mb-4 flex items-center justify-between gap-4 sm:mb-5">
                 <div>
                   <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-[color:var(--ink-muted)]">
-                    01. Quem vai receber
+                    01. Dados
                   </p>
                   <h2 className="mt-1.5 text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:mt-2 sm:text-2xl">Seus dados</h2>
                 </div>
@@ -747,7 +669,7 @@ export function PublicOrderPage() {
             <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6">
               <div className="mb-4 sm:mb-5">
                 <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-[color:var(--ink-muted)]">
-                  02. Como voce quer receber
+                  02. Recebimento
                 </p>
                 <h2 className="mt-1.5 text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:mt-2 sm:text-2xl">Entrega ou retirada</h2>
               </div>
@@ -757,12 +679,12 @@ export function PublicOrderPage() {
                   {
                     value: 'DELIVERY' as const,
                     title: 'Entrega',
-                    description: 'Para receber no endereco informado.'
+                    description: 'Receber no endereco.'
                   },
                   {
                     value: 'PICKUP' as const,
                     title: 'Retirada',
-                    description: 'Para buscar no ponto combinado.'
+                    description: 'Buscar no local combinado.'
                   }
                 ].map((option) => {
                   const active = form.fulfillmentMode === option.value;
@@ -798,19 +720,12 @@ export function PublicOrderPage() {
               </div>
 
               <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_220px_180px]">
-                <FormField
-                  label={form.fulfillmentMode === 'DELIVERY' ? 'Endereco para entrega' : 'Ponto de retirada'}
-                  hint={
-                    form.fulfillmentMode === 'DELIVERY'
-                      ? 'Rua, numero e bairro.'
-                      : 'Se quiser, escreva uma referencia para facilitar.'
-                  }
-                >
+                <FormField label={form.fulfillmentMode === 'DELIVERY' ? 'Endereco para entrega' : 'Ponto de retirada'}>
                   <input
                     className="app-input"
                     value={form.address}
                     onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))}
-                    placeholder={form.fulfillmentMode === 'DELIVERY' ? 'Rua, numero e bairro' : 'Retirada'}
+                    placeholder={form.fulfillmentMode === 'DELIVERY' ? 'Rua, numero e bairro' : 'Local de retirada'}
                     autoComplete={form.fulfillmentMode === 'DELIVERY' ? 'street-address' : 'off'}
                   />
                 </FormField>
@@ -833,7 +748,7 @@ export function PublicOrderPage() {
               </div>
 
               <div className="mt-4">
-                <FormField label="Complemento / referencia" hint="Portao, bloco, ponto de referencia.">
+                <FormField label="Complemento">
                   <input
                     className="app-input"
                     value={form.deliveryNotes}
@@ -848,11 +763,10 @@ export function PublicOrderPage() {
               <div className="mb-4 flex flex-col gap-2 sm:mb-5 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
                 <div>
                   <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-[color:var(--ink-muted)]">
-                    03. Escolha as caixas
+                    03. Caixas
                   </p>
-                  <h2 className="mt-1.5 text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:mt-2 sm:text-2xl">Caixas oficiais</h2>
+                  <h2 className="mt-1.5 text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:mt-2 sm:text-2xl">Caixas</h2>
                 </div>
-                <p className="text-[0.82rem] leading-5 text-[color:var(--ink-muted)] sm:text-sm">As unidades sao calculadas automaticamente.</p>
               </div>
 
               <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
@@ -940,17 +854,11 @@ export function PublicOrderPage() {
               <div className="mt-4 rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-[rgba(247,239,230,0.62)] p-4 sm:mt-5 sm:rounded-[26px] sm:p-5">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
-                    <p className="text-[0.72rem] font-semibold uppercase tracking-[0.22em] text-[color:var(--ink-muted)]">
-                      Caixa personalizada
-                    </p>
-                    <h3 className="mt-1.5 text-[1.1rem] font-semibold text-[color:var(--ink-strong)] sm:text-[1.35rem]">
-                      Sabores
+                    <h3 className="text-[1.1rem] font-semibold text-[color:var(--ink-strong)] sm:text-[1.35rem]">
+                      Caixa Sabores
                     </h3>
                     <p className="mt-1 text-[0.82rem] leading-5 text-[color:var(--ink-muted)] sm:text-sm">
-                      Monte 7 broas do seu jeito. O valor entra no total automaticamente.
-                    </p>
-                    <p className="mt-1 text-[0.78rem] leading-5 text-[color:var(--ink-muted)]/90 sm:text-xs">
-                      Exemplo visual: 3 tradicionais + 1 de cada recheado.
+                      Monte 7 broas.
                     </p>
                   </div>
                   <button
@@ -958,7 +866,7 @@ export function PublicOrderPage() {
                     className="app-button app-button-ghost w-full sm:w-auto"
                     onClick={addCustomBox}
                   >
-                    Adicionar caixa sabores
+                    Adicionar caixa
                   </button>
                 </div>
 
@@ -982,10 +890,10 @@ export function PublicOrderPage() {
                             </p>
                             <p className="mt-1 text-[0.82rem] leading-5 text-[color:var(--ink-muted)]">
                               {box.totalUnits === 0
-                                ? 'Escolha a combinacao livre de 7 broas.'
+                                ? 'Monte 7 broas.'
                                 : box.isComplete
-                                  ? 'Caixa fechada.'
-                                  : `Faltam ${box.remainingUnits} broa(s) para fechar 7.`}
+                                  ? 'Fechada.'
+                                  : `Faltam ${box.remainingUnits}.`}
                             </p>
                           </div>
                           <div className="flex items-center gap-2">
@@ -1096,11 +1004,11 @@ export function PublicOrderPage() {
             <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6">
               <div className="mb-4">
                 <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-[color:var(--ink-muted)]">
-                  04. Ultimo detalhe
+                  04. Observacoes
                 </p>
                 <h2 className="mt-1.5 text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:mt-2 sm:text-2xl">Observacoes</h2>
               </div>
-              <FormField label="Observacoes do pedido" hint="Use apenas se precisar combinar algo fora do padrao.">
+              <FormField label="Observacoes do pedido">
                 <textarea
                   className="app-textarea min-h-[120px]"
                   value={form.notes}
@@ -1116,11 +1024,7 @@ export function PublicOrderPage() {
               </div>
             ) : null}
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-[0.9rem] text-[color:var(--ink-muted)]">
-                <p className="font-semibold text-[color:var(--ink-strong)]">Pedido direto no sistema</p>
-                <p>O total final ja considera o frete quando o modo for entrega.</p>
-              </div>
+            <div className="flex justify-end">
               <div className="app-form-actions">
                 <button className="app-button app-button-primary" disabled={isSubmitting} type="submit">
                   {isSubmitting ? 'Enviando pedido...' : 'Enviar pedido'}
@@ -1139,7 +1043,7 @@ export function PublicOrderPage() {
                   <p className="text-[0.72rem] font-semibold uppercase tracking-[0.22em] text-[color:var(--ink-muted)]">
                     Resumo
                   </p>
-                  <h2 className="mt-1.5 text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:mt-2 sm:text-2xl">Seu pedido agora</h2>
+                  <h2 className="mt-1.5 text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:mt-2 sm:text-2xl">Pedido</h2>
                 </div>
                 <div className="rounded-full bg-white/80 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)] sm:text-xs">
                   {form.fulfillmentMode === 'DELIVERY' ? 'Entrega' : 'Retirada'}
@@ -1196,10 +1100,10 @@ export function PublicOrderPage() {
 
                 <div className="rounded-[20px] bg-white/78 p-4 sm:rounded-[24px]">
                   <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)] sm:text-xs">
-                    Data e horario
+                    Data e hora
                   </p>
                   <p className="mt-2 text-base font-semibold text-[color:var(--ink-strong)] sm:text-lg">
-                    {form.date && form.time ? `${form.date} às ${form.time}` : 'Preencha para confirmar'}
+                    {form.date && form.time ? `${form.date} às ${form.time}` : 'Escolha data e hora'}
                   </p>
                 </div>
 
@@ -1226,14 +1130,14 @@ export function PublicOrderPage() {
                     </ul>
                   ) : (
                     <p className="mt-3 text-sm leading-6 text-[color:var(--ink-muted)]">
-                      Nenhuma caixa selecionada ainda.
+                      Nenhuma caixa ainda.
                     </p>
                   )}
                 </div>
 
                 <div className="rounded-[20px] bg-white/78 p-4 sm:rounded-[24px]">
                   <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)] sm:text-xs">
-                    Unidades calculadas
+                    Composicao
                   </p>
                   <p className="mt-3 text-sm leading-6 text-[color:var(--ink-strong)]">
                     {formatOrderFlavorComposition(computedUnits)}
@@ -1242,40 +1146,8 @@ export function PublicOrderPage() {
               </div>
             </section>
 
-            <section className="order-2 rounded-[24px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.86)] p-4 shadow-[0_18px_40px_rgba(70,44,26,0.08)] sm:rounded-[30px] sm:p-6 sm:shadow-[0_22px_60px_rgba(70,44,26,0.08)]">
-              <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-[color:var(--ink-muted)]">
-                Montagem rapida
-              </p>
-              <h2 className="mt-2 text-[1.2rem] font-semibold text-[color:var(--ink-strong)] sm:text-[1.45rem]">
-                Caixa Sabores fecha sempre em 7 broas.
-              </h2>
-              <p className="mt-2 text-sm leading-6 text-[color:var(--ink-muted)]">
-                Use a montagem livre quando quiser misturar sabores fora das caixas prontas. O resumo recalcula produtos, frete e total automaticamente.
-              </p>
-
-              <div className="mt-4 grid grid-cols-[88px_minmax(0,1fr)] items-center gap-3 rounded-[22px] bg-white/78 p-3 sm:grid-cols-[104px_minmax(0,1fr)]">
-                <div className="relative h-[88px] overflow-hidden rounded-[18px] border border-white/85 bg-white shadow-[0_12px_24px_rgba(70,44,26,0.08)] sm:h-[104px]">
-                  <Image
-                    alt="Sabores no cardapio oficial"
-                    className="h-full w-full object-cover"
-                    fill
-                    sizes="104px"
-                    src={ORDER_SABORES_REFERENCE_IMAGE}
-                  />
-                </div>
-                <div className="text-sm leading-6 text-[color:var(--ink-muted)]">
-                  <p className="font-semibold text-[color:var(--ink-strong)]">
-                    Exemplo rapido
-                  </p>
-                  <p className="mt-1">
-                    3 tradicionais + 1 de cada recheado fecha a caixa e entra no total sem ajuste manual.
-                  </p>
-                </div>
-              </div>
-            </section>
-
             {result ? (
-              <section className="order-3 overflow-hidden rounded-[24px] border border-emerald-200 bg-[linear-gradient(165deg,rgba(239,250,244,0.98),rgba(228,244,233,0.92))] p-4 shadow-[0_18px_40px_rgba(43,92,61,0.12)] sm:rounded-[30px] sm:p-6 sm:shadow-[0_26px_80px_rgba(43,92,61,0.12)]">
+              <section className="order-2 overflow-hidden rounded-[24px] border border-emerald-200 bg-[linear-gradient(165deg,rgba(239,250,244,0.98),rgba(228,244,233,0.92))] p-4 shadow-[0_18px_40px_rgba(43,92,61,0.12)] sm:rounded-[30px] sm:p-6 sm:shadow-[0_26px_80px_rgba(43,92,61,0.12)]">
                 <div>
                   <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-emerald-700">
                     Pedido recebido
@@ -1313,9 +1185,6 @@ export function PublicOrderPage() {
                   <div className="mt-5 grid gap-4">
                     <div>
                       <p className="text-sm font-semibold text-[color:var(--ink-strong)]">PIX copia e cola</p>
-                      <p className="mt-1 text-sm leading-6 text-[color:var(--ink-muted)]">
-                        Abra o app do banco, escolha PIX copia e cola e use o codigo abaixo.
-                      </p>
                     </div>
                     <textarea
                       className="app-textarea min-h-[170px] border-emerald-200 bg-white/84 font-mono text-[11px] leading-5 sm:text-xs"
@@ -1342,18 +1211,7 @@ export function PublicOrderPage() {
                   </p>
                 )}
               </section>
-            ) : (
-              <section className="order-3 rounded-[24px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.86)] p-4 shadow-[0_18px_40px_rgba(70,44,26,0.08)] sm:rounded-[30px] sm:p-6 sm:shadow-[0_22px_60px_rgba(70,44,26,0.08)]">
-                <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-[color:var(--ink-muted)]">
-                  Fluxo
-                </p>
-                <ol className="mt-4 grid gap-3 text-sm leading-6 text-[color:var(--ink-muted)]">
-                  <li className="rounded-[22px] bg-white/76 px-4 py-3">1. Preencha seus dados e como quer receber.</li>
-                  <li className="rounded-[22px] bg-white/76 px-4 py-3">2. Escolha caixas oficiais, mistas ou monte a sua em Sabores.</li>
-                  <li className="rounded-[22px] bg-white/76 px-4 py-3">3. O app calcula as unidades e devolve o PIX na hora.</li>
-                </ol>
-              </section>
-            )}
+            ) : null}
           </aside>
         </section>
       </div>
