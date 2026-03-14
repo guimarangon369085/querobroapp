@@ -31,6 +31,15 @@
     "Noto Sans",
     Arial,
     sans-serif;
+  --font-wordmark:
+    "Aptos Narrow",
+    "Arial Narrow",
+    "Franklin Gothic Demi Cond",
+    "Franklin Gothic Medium",
+    "Bahnschrift Condensed",
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
   --font-display:
     "Iowan Old Style",
     "Palatino Linotype",
@@ -187,6 +196,24 @@ section {
 .app-brand__tag {
   font-size: 0.8rem;
   color: var(--ink-muted);
+}
+
+.brand-wordmark {
+  font-family: var(--font-wordmark, var(--font-body, ui-sans-serif, system-ui, sans-serif));
+  font-weight: 800;
+  font-stretch: condensed;
+  font-variation-settings: "wdth" 92;
+  letter-spacing: 0.07em;
+  line-height: 0.92;
+  text-transform: uppercase;
+}
+
+.brand-wordmark--micro {
+  letter-spacing: 0.16em;
+}
+
+.brand-wordmark--display {
+  letter-spacing: 0.05em;
 }
 
 .app-nav {
