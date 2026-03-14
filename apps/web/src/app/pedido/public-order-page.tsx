@@ -1,17 +1,21 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type { ExternalOrderSubmission, OrderIntakeMeta, PixCharge } from '@querobroapp/shared';
 import { FormField } from '@/components/form/FormField';
 import { useFeedback } from '@/components/feedback-provider';
 import {
+  buildCustomerAddressAutofillFromGooglePlace,
+  type GooglePlaceResultLike
+} from '@/lib/customer-autofill';
+import { loadGooglePlacesLibrary } from '@/lib/google-places';
+import {
   ORDER_BOX_CATALOG,
   ORDER_BOX_UNITS,
   ORDER_BRAND_GALLERY_IMAGES,
   ORDER_FLAVOR_CODES,
-  ORDER_SABORES_REFERENCE_IMAGE,
   type OrderBoxCode,
   type OrderFlavorCode,
   calculateOrderSubtotalFromFlavorSummary,
@@ -23,6 +27,7 @@ import {
 const boxCatalog = ORDER_BOX_CATALOG;
 const heroImages = ORDER_BRAND_GALLERY_IMAGES;
 const FLAVOR_CODES = ORDER_FLAVOR_CODES;
+const GOOGLE_MAPS_API_KEY = (process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '').trim();
 
 type BoxCode = OrderBoxCode;
 type FlavorCode = OrderFlavorCode;
@@ -244,6 +249,7 @@ export function PublicOrderPage() {
   const [deliveryQuote, setDeliveryQuote] = useState<DeliveryQuote | null>(null);
   const [deliveryQuoteError, setDeliveryQuoteError] = useState<string | null>(null);
   const [isQuotingDelivery, setIsQuotingDelivery] = useState(false);
+  const addressInputRef = useRef<HTMLInputElement | null>(null);
 
   const parsedBoxCounts = useMemo(() => {
     return Object.fromEntries(
@@ -386,6 +392,67 @@ export function PublicOrderPage() {
       })
     );
   };
+
+  useEffect(() => {
+    if (!GOOGLE_MAPS_API_KEY || form.fulfillmentMode !== 'DELIVERY') return;
+
+    const input = addressInputRef.current;
+    if (!input) return;
+
+    let disposed = false;
+    let listener: { remove?: () => void } | null = null;
+
+    void loadGooglePlacesLibrary({ apiKey: GOOGLE_MAPS_API_KEY })
+      .then((google) => {
+        if (disposed) return;
+
+        const mapsApi = (google as { maps?: { places?: { Autocomplete?: unknown } } }).maps;
+        const placesApi = mapsApi?.places as
+          | {
+              Autocomplete?: new (
+                input: HTMLInputElement,
+                options?: Record<string, unknown>
+              ) => {
+                addListener: (
+                  eventName: string,
+                  handler: () => void
+                ) => {
+                  remove?: () => void;
+                };
+                getPlace?: () => unknown;
+              };
+            }
+          | undefined;
+
+        if (!placesApi?.Autocomplete) return;
+
+        const autocomplete = new placesApi.Autocomplete(input, {
+          fields: ['address_components', 'formatted_address', 'geometry', 'place_id'],
+          componentRestrictions: { country: 'br' },
+          types: ['address']
+        });
+
+        listener = autocomplete.addListener('place_changed', () => {
+          const place = autocomplete.getPlace?.();
+          const patch = buildCustomerAddressAutofillFromGooglePlace(place as GooglePlaceResultLike);
+          const nextAddress = `${patch.address || ''}`.trim();
+          if (!nextAddress) return;
+
+          setForm((current) => ({
+            ...current,
+            address: nextAddress
+          }));
+        });
+      })
+      .catch((error) => {
+        console.warn(error instanceof Error ? error.message : 'Google Places indisponivel no momento.');
+      });
+
+    return () => {
+      disposed = true;
+      if (listener?.remove) listener.remove();
+    };
+  }, [form.fulfillmentMode]);
 
   useEffect(() => {
     if (form.fulfillmentMode !== 'DELIVERY') {
@@ -630,6 +697,7 @@ export function PublicOrderPage() {
 
         <section className="mt-5 grid gap-4 lg:gap-6 xl:grid-cols-[minmax(0,1.08fr)_minmax(340px,0.92fr)]">
           <form
+            autoComplete="on"
             className="grid gap-4 rounded-[26px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.88)] p-4 shadow-[0_22px_60px_rgba(70,44,26,0.12)] sm:gap-5 sm:rounded-[32px] sm:p-6 sm:shadow-[0_26px_90px_rgba(70,44,26,0.12)]"
             onSubmit={onSubmit}
           >
@@ -647,15 +715,19 @@ export function PublicOrderPage() {
                   <input
                     autoFocus
                     className="app-input"
+                    name="name"
                     value={form.name}
                     onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
                     placeholder="Nome e sobrenome"
+                    autoCapitalize="words"
                     autoComplete="name"
                   />
                 </FormField>
                 <FormField label="Telefone com WhatsApp">
                   <input
                     className="app-input"
+                    type="tel"
+                    name="tel"
                     value={form.phone}
                     onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))}
                     placeholder="(31) 99999-9999"
@@ -723,10 +795,14 @@ export function PublicOrderPage() {
                 <FormField label={form.fulfillmentMode === 'DELIVERY' ? 'Endereco para entrega' : 'Ponto de retirada'}>
                   <input
                     className="app-input"
+                    ref={addressInputRef}
+                    name="street-address"
                     value={form.address}
                     onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))}
                     placeholder={form.fulfillmentMode === 'DELIVERY' ? 'Rua, numero e bairro' : 'Local de retirada'}
+                    autoCapitalize="words"
                     autoComplete={form.fulfillmentMode === 'DELIVERY' ? 'street-address' : 'off'}
+                    spellCheck={false}
                   />
                 </FormField>
                 <FormField label="Data">
@@ -751,9 +827,12 @@ export function PublicOrderPage() {
                 <FormField label="Complemento">
                   <input
                     className="app-input"
+                    name="address-line2"
                     value={form.deliveryNotes}
                     onChange={(event) => setForm((current) => ({ ...current, deliveryNotes: event.target.value }))}
                     placeholder="Portao azul, interfone, bloco"
+                    autoComplete={form.fulfillmentMode === 'DELIVERY' ? 'address-line2' : 'off'}
+                    autoCapitalize="sentences"
                   />
                 </FormField>
               </div>
@@ -783,19 +862,9 @@ export function PublicOrderPage() {
                     >
                       <div className="grid gap-3 grid-cols-[96px_minmax(0,1fr)] items-center sm:gap-4 sm:grid-cols-[118px_minmax(0,1fr)]">
                         <div className="relative h-[96px] w-[96px] shrink-0 sm:h-[118px] sm:w-[118px]">
-                          <div className="relative h-full w-full overflow-hidden rounded-[18px] border border-white/80 bg-white/70 shadow-[0_12px_24px_rgba(74,47,31,0.12)] transition-transform duration-300 group-hover:translate-y-[-2px] group-hover:rotate-[1deg] sm:rounded-[22px] sm:shadow-[0_14px_28px_rgba(74,47,31,0.12)]">
+                          <div className="relative h-full w-full overflow-hidden rounded-[18px] border border-white/80 bg-white/70 shadow-[0_12px_24px_rgba(74,47,31,0.12)] transition-transform duration-300 group-hover:translate-y-[-2px] sm:rounded-[22px] sm:shadow-[0_14px_28px_rgba(74,47,31,0.12)]">
                             <Image alt={meta.label} className="h-full w-full object-cover" fill sizes="(max-width: 640px) 96px, 118px" src={meta.image} />
                             <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_26%,rgba(46,29,20,0.12)_100%)]" />
-                          </div>
-                          <div className="absolute -bottom-2 -right-2 h-[58px] w-[44px] overflow-hidden rounded-[14px] border border-white/90 bg-white/88 shadow-[0_12px_22px_rgba(74,47,31,0.18)] sm:h-[74px] sm:w-[56px] sm:rounded-[16px]">
-                            <Image
-                              alt={`${meta.label} no cardapio oficial`}
-                              className="h-full w-full object-cover"
-                              fill
-                              sizes="(max-width: 640px) 44px, 56px"
-                              src={meta.referenceImage}
-                            />
-                            <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_34%,rgba(46,29,20,0.06)_100%)]" />
                           </div>
                         </div>
                         <div>
@@ -924,15 +993,6 @@ export function PublicOrderPage() {
                                     <div className="relative h-full w-full overflow-hidden rounded-xl border border-white/80 bg-white shadow-[0_8px_18px_rgba(70,44,26,0.08)]">
                                       <Image alt={meta.label} className="h-full w-full object-cover" fill sizes="40px" src={meta.image} />
                                     </div>
-                                    <div className="absolute -bottom-1 -right-1 h-6 w-5 overflow-hidden rounded-[8px] border border-white/90 bg-white/90 shadow-[0_8px_14px_rgba(70,44,26,0.14)]">
-                                      <Image
-                                        alt={`${meta.label} no cardapio oficial`}
-                                        className="h-full w-full object-cover"
-                                        fill
-                                        sizes="20px"
-                                        src={meta.referenceImage}
-                                      />
-                                    </div>
                                   </div>
                                   <p className="truncate text-sm font-semibold text-[color:var(--ink-strong)]">
                                     {meta.label}
@@ -974,27 +1034,15 @@ export function PublicOrderPage() {
                   </div>
                 ) : (
                   <div className="mt-4 rounded-[20px] border border-white/80 bg-white/80 p-3">
-                    <div className="relative aspect-[16/10] overflow-visible rounded-[18px]">
-                      <div className="relative h-full w-full overflow-hidden rounded-[18px]">
-                        <Image
-                          alt="Caixa Sabores com 7 broas variadas"
-                          className="h-full w-full object-cover"
-                          fill
-                          sizes="(max-width: 768px) 70vw, 420px"
-                          src="/querobroa-brand/green-composition.jpg"
-                        />
-                        <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_24%,rgba(46,29,20,0.12)_100%)]" />
-                      </div>
-                      <div className="absolute bottom-3 right-3 h-[44%] w-[26%] overflow-hidden rounded-[18px] border border-white/90 bg-white/90 shadow-[0_18px_34px_rgba(74,47,31,0.18)]">
-                        <Image
-                          alt="Sabores no cardapio oficial"
-                          className="h-full w-full object-cover"
-                          fill
-                          sizes="(max-width: 768px) 28vw, 140px"
-                          src={ORDER_SABORES_REFERENCE_IMAGE}
-                        />
-                        <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_34%,rgba(46,29,20,0.06)_100%)]" />
-                      </div>
+                    <div className="relative aspect-[16/10] overflow-hidden rounded-[18px]">
+                      <Image
+                        alt="Caixa Sabores com 7 broas variadas"
+                        className="h-full w-full object-cover"
+                        fill
+                        sizes="(max-width: 768px) 70vw, 420px"
+                        src="/querobroa-brand/green-composition.jpg"
+                      />
+                      <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_24%,rgba(46,29,20,0.12)_100%)]" />
                     </div>
                   </div>
                 )}
