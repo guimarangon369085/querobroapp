@@ -687,7 +687,7 @@ export function OrderQuickCreate({
                   className="h-full w-full object-cover"
                   fill
                   sizes="64px"
-                  src="/querobroa-brand/green-composition.jpg"
+                  src={ORDER_SABORES_REFERENCE_IMAGE}
                 />
                 <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_24%,rgba(46,29,20,0.12)_100%)]" />
               </div>

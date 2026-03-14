@@ -16,6 +16,7 @@ import {
   ORDER_BOX_UNITS,
   ORDER_BRAND_GALLERY_IMAGES,
   ORDER_FLAVOR_CODES,
+  ORDER_SABORES_REFERENCE_IMAGE,
   type OrderBoxCode,
   type OrderFlavorCode,
   calculateOrderSubtotalFromFlavorSummary,
@@ -1028,7 +1029,7 @@ export function PublicOrderPage() {
                         className="h-full w-full object-cover"
                         fill
                         sizes="(max-width: 768px) 70vw, 420px"
-                        src="/querobroa-brand/green-composition.jpg"
+                        src={ORDER_SABORES_REFERENCE_IMAGE}
                       />
                       <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_24%,rgba(46,29,20,0.12)_100%)]" />
                     </div>
