@@ -199,8 +199,10 @@ export class UberDirectProvider implements DeliveryProvider {
     return this.getNumberField((value as Record<string, unknown>)[outer], inner);
   }
 
-  private resolveAmount(value: unknown): number {
-    if (typeof value === 'number') return this.toMoney(value);
+  private resolveAmount(value: unknown, options?: { treatScalarAsMinorUnits?: boolean }): number {
+    if (typeof value === 'number') {
+      return this.toMoney(options?.treatScalarAsMinorUnits ? value / 100 : value);
+    }
     if (value && typeof value === 'object') {
       const record = value as Record<string, unknown>;
       if (typeof record.total === 'number') {
@@ -360,7 +362,13 @@ export class UberDirectProvider implements DeliveryProvider {
       (typeof parsed?.expires === 'string' && parsed.expires) ||
       (typeof parsed?.expires_at === 'string' && parsed.expires_at) ||
       null;
-    const fee = this.resolveAmount(feeSource);
+    const fee = this.resolveAmount(feeSource, {
+      treatScalarAsMinorUnits:
+        typeof feeSource === 'number' &&
+        (Boolean(this.getStringField(parsed, 'currency')) ||
+          Boolean(this.getStringField(parsed, 'currency_code')) ||
+          Boolean(this.getStringField(parsed, 'currency_type')))
+    });
     const currencyCode =
       (usingCurrentApi ? this.resolveCurrency(feeSource) || this.getStringField(parsed, 'currency_code') : this.resolveCurrency(feeSource)) ||
       'BRL';
