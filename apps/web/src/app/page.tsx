@@ -87,12 +87,6 @@ export default async function HomePage() {
             >
               Fazer pedido
             </Link>
-            <Link
-              className="inline-flex min-h-12 items-center justify-center rounded-full border border-white/16 bg-[rgba(255,249,235,0.12)] px-5 text-sm font-semibold text-white/96 backdrop-blur-sm transition hover:bg-[rgba(255,249,235,0.2)]"
-              href="/pedidos"
-            >
-              Entrar na operacao
-            </Link>
           </div>
         </div>
       </section>
