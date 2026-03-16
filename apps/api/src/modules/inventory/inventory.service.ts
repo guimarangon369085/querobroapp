@@ -122,6 +122,35 @@ export class InventoryService {
     return Math.round((value + Number.EPSILON) * 100) / 100;
   }
 
+  private normalizeInventoryItemName(name: string) {
+    const normalized = name.trim();
+    return resolveInventoryDefinition(normalized)?.canonicalName || normalized;
+  }
+
+  private async ensureCanonicalInventoryItemUniqueness(params: {
+    id?: number;
+    name: string;
+    category: string;
+    unit: string;
+  }) {
+    const canonicalName = this.normalizeInventoryItemName(params.name);
+    const duplicate = await this.prisma.inventoryItem.findFirst({
+      where: {
+        ...(typeof params.id === 'number' ? { id: { not: params.id } } : {}),
+        name: canonicalName,
+        category: params.category,
+        unit: params.unit
+      },
+      orderBy: { id: 'asc' }
+    });
+
+    if (duplicate) {
+      throw new ConflictException(`Item oficial ${canonicalName} ja existe. Use o cadastro existente.`);
+    }
+
+    return canonicalName;
+  }
+
   private inventoryBalanceFromMovements(
     movements: Array<{
       type: string;
@@ -309,7 +338,18 @@ export class InventoryService {
 
   createItem(payload: unknown) {
     const data = parseWithSchema(inventoryItemCreateSchema, payload);
-    return this.prisma.inventoryItem.create({ data });
+    return this.ensureCanonicalInventoryItemUniqueness({
+      name: data.name,
+      category: data.category,
+      unit: data.unit
+    }).then((canonicalName) =>
+      this.prisma.inventoryItem.create({
+        data: {
+          ...data,
+          name: canonicalName
+        }
+      })
+    );
   }
 
   async updateItem(id: number, payload: unknown) {
@@ -317,7 +357,23 @@ export class InventoryService {
     if (!item) throw new NotFoundException('Item nao encontrado');
 
     const data = parseWithSchema(inventoryItemUpdateSchema, payload);
-    return this.prisma.inventoryItem.update({ where: { id }, data });
+    const nextCategory = data.category ?? item.category;
+    const nextUnit = data.unit ?? item.unit;
+    const nextName = data.name ?? item.name;
+    const canonicalName = await this.ensureCanonicalInventoryItemUniqueness({
+      id,
+      name: nextName,
+      category: nextCategory,
+      unit: nextUnit
+    });
+
+    return this.prisma.inventoryItem.update({
+      where: { id },
+      data: {
+        ...data,
+        ...(data.name !== undefined ? { name: canonicalName } : {})
+      }
+    });
   }
 
   async removeItem(id: number) {

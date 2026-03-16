@@ -64,9 +64,9 @@ const MASS_PREP_DEFAULT_BATCH_RECIPES = 2;
 const MASS_PREP_RECIPE_INGREDIENTS = [
   { key: 'LEITE', displayName: 'Leite', aliases: ['LEITE'], unit: 'ml', qtyPerRecipe: 240 },
   {
-    key: 'MANTEIGA_COM_SAL',
-    displayName: 'Manteiga com sal',
-    aliases: ['MANTEIGA COM SAL', 'MANTEIGA'],
+    key: 'MANTEIGA',
+    displayName: 'Manteiga',
+    aliases: ['MANTEIGA', 'MANTEIGA COM SAL'],
     unit: 'g',
     qtyPerRecipe: 150
   },

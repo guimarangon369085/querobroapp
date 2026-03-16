@@ -147,8 +147,8 @@ test(
         adjustQty: 100
       },
       {
-        canonicalName: 'MANTEIGA COM SAL',
-        aliases: ['MANTEIGA COM SAL', 'MANTEIGA'],
+        canonicalName: 'MANTEIGA',
+        aliases: ['MANTEIGA', 'MANTEIGA COM SAL'],
         unit: 'g',
         purchasePackSize: 500,
         purchasePackCost: 24.9,
