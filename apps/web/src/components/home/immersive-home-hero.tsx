@@ -1,7 +1,6 @@
 'use client';
 
 import Image from 'next/image';
-import Link from 'next/link';
 import { startTransition, useEffect, useState } from 'react';
 
 type HeroImage = {
@@ -86,7 +85,7 @@ export function ImmersiveHomeHero() {
       aria-label="Galeria da home da QUEROBROA"
       className="relative min-h-screen overflow-hidden bg-[#120c07] text-white"
       onClick={(event) => {
-        if ((event.target as HTMLElement).closest('a')) return;
+        if ((event.target as HTMLElement).closest('a, [data-home-cta]')) return;
         step(1);
       }}
     >
@@ -134,12 +133,15 @@ export function ImmersiveHomeHero() {
         </a>
 
         <div className="flex pb-4 sm:pb-6">
-          <Link
-            className="inline-flex min-h-12 items-center justify-center rounded-full border border-white/18 bg-[rgba(56,34,14,0.44)] px-7 text-sm font-semibold uppercase tracking-[0.18em] text-white backdrop-blur-md transition-[background,transform,border-color] duration-500 ease-[cubic-bezier(.19,1,.22,1)] hover:border-white/28 hover:bg-[rgba(56,34,14,0.58)] hover:translate-y-[-1px]"
-            href="/pedido"
+          <button
+            aria-disabled="true"
+            className="inline-flex min-h-12 cursor-not-allowed items-center justify-center rounded-full border border-white/12 bg-[rgba(56,34,14,0.26)] px-7 text-sm font-semibold uppercase tracking-[0.18em] text-[rgba(255,248,232,0.76)] backdrop-blur-md"
+            data-home-cta
+            disabled
+            type="button"
           >
-            Fazer pedido
-          </Link>
+            Em breve
+          </button>
         </div>
       </section>
     </main>
