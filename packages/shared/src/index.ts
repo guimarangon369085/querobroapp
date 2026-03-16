@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export * from './lib/money.js';
+export * from './lib/external-order-schedule.js';
 
 export const OrderStatusEnum = z.enum([
   'ABERTO',

@@ -3,7 +3,13 @@
 import Image from 'next/image';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import type { ExternalOrderSubmission, OrderIntakeMeta, PixCharge } from '@querobroapp/shared';
+import {
+  formatExternalOrderMinimumSchedule,
+  resolveExternalOrderMinimumSchedule,
+  type ExternalOrderSubmission,
+  type OrderIntakeMeta,
+  type PixCharge
+} from '@querobroapp/shared';
 import { FormField } from '@/components/form/FormField';
 import { useFeedback } from '@/components/feedback-provider';
 import {
@@ -29,9 +35,6 @@ const boxCatalog = ORDER_BOX_CATALOG;
 const heroImages = ORDER_BRAND_GALLERY_IMAGES;
 const FLAVOR_CODES = ORDER_FLAVOR_CODES;
 const GOOGLE_MAPS_API_KEY = (process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '').trim();
-const PUBLIC_ORDER_NEXT_DAY_CUTOFF_HOUR = 22;
-const PUBLIC_ORDER_FIRST_SLOT_HOUR = 8;
-const PUBLIC_ORDER_FIRST_SLOT_MINUTE = 0;
 const PUBLIC_ORDER_TIME_STEP_SECONDS = 15 * 60;
 const PUBLIC_ORDER_DRAFT_SESSION_STORAGE_KEY = 'querobroapp:public-order-draft-session-id';
 
@@ -132,22 +135,8 @@ function parseLocalDateTime(date: string, time: string) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function resolvePublicOrderMinimumSchedule(reference = new Date()) {
-  const minimum = new Date(reference);
-  const dayOffset = minimum.getHours() >= PUBLIC_ORDER_NEXT_DAY_CUTOFF_HOUR ? 2 : 1;
-  minimum.setDate(minimum.getDate() + dayOffset);
-  minimum.setHours(PUBLIC_ORDER_FIRST_SLOT_HOUR, PUBLIC_ORDER_FIRST_SLOT_MINUTE, 0, 0);
-  return minimum;
-}
-
 function buildPublicOrderScheduleErrorMessage(minimum: Date) {
-  const formatted = new Intl.DateTimeFormat('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).format(minimum);
-  return `Novos pedidos so podem ser agendados a partir de ${formatted}.`;
+  return `Novos pedidos so podem ser agendados a partir de ${formatExternalOrderMinimumSchedule(minimum)}.`;
 }
 
 function extractErrorMessage(body: unknown) {
@@ -438,7 +427,7 @@ export function PublicOrderPage() {
   }, [minimumSchedule, parsedScheduledAt]);
 
   const syncMinimumSchedule = useCallback(() => {
-    const nextMinimum = resolvePublicOrderMinimumSchedule();
+    const nextMinimum = resolveExternalOrderMinimumSchedule();
     setMinimumSchedule(nextMinimum);
     setForm((current) => {
       const currentScheduledAt = parseLocalDateTime(current.date, current.time);
@@ -683,7 +672,7 @@ export function PublicOrderPage() {
     event.preventDefault();
 
     const scheduledAt = scheduledAtIso;
-    const currentMinimumSchedule = resolvePublicOrderMinimumSchedule();
+    const currentMinimumSchedule = resolveExternalOrderMinimumSchedule();
     if (!form.name.trim()) {
       setError('Informe o nome completo.');
       return;
@@ -728,7 +717,7 @@ export function PublicOrderPage() {
         return;
       }
       if (!deliveryQuote) {
-        setError('Nao foi possivel calcular o frete. Revise o endereco e tente novamente.');
+        setError(deliveryQuoteError || 'Nao foi possivel calcular o frete agora.');
         return;
       }
     }
@@ -828,7 +817,7 @@ export function PublicOrderPage() {
   };
 
   const resetForm = () => {
-    const nextMinimum = resolvePublicOrderMinimumSchedule();
+    const nextMinimum = resolveExternalOrderMinimumSchedule();
     setDraftSessionId(createPublicOrderDraftSessionId());
     setMinimumSchedule(nextMinimum);
     setForm({

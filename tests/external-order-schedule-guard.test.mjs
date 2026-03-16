@@ -3,11 +3,23 @@ import test from 'node:test';
 import { ensureApiServer, request, requestExpectError } from './lib/api-server.mjs';
 
 function resolveMinimumSchedule(reference = new Date()) {
-  const minimum = new Date(reference);
-  const dayOffset = minimum.getHours() >= 22 ? 2 : 1;
-  minimum.setDate(minimum.getDate() + dayOffset);
-  minimum.setHours(8, 0, 0, 0);
-  return minimum;
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23'
+  });
+  const parts = Object.fromEntries(formatter.formatToParts(reference).map((entry) => [entry.type, entry.value]));
+  const localHour = Number(parts.hour);
+  const dayOffset = localHour >= 22 ? 2 : 1;
+  const targetYear = Number(parts.year);
+  const targetMonth = Number(parts.month);
+  const targetDay = Number(parts.day) + dayOffset;
+  return new Date(Date.UTC(targetYear, targetMonth - 1, targetDay, 11, 0, 0, 0));
 }
 
 function invalidExternalScheduleIso(reference = new Date()) {
@@ -103,5 +115,5 @@ test('whatsapp-flow rejects external schedules before the minimum window', async
     }
   });
 
-  assert.match(JSON.stringify(body), /agendados para o dia seguinte/i);
+  assert.match(JSON.stringify(body), /agendados a partir de/i);
 });

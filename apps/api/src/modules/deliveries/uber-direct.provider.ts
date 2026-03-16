@@ -517,6 +517,30 @@ export class UberDirectProvider implements DeliveryProvider {
     return `+${normalized}`;
   }
 
+  private formatDistanceKilometers(miles: number) {
+    const kilometers = miles * 1.60934;
+    return new Intl.NumberFormat('pt-BR', {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1
+    }).format(kilometers);
+  }
+
+  private formatUndeliverableRadius(details: string) {
+    const match = details.match(
+      /Max Radius:\s*([0-9]+(?:\.[0-9]+)?)\s*miles?,\s*Calculated Distance:\s*([0-9]+(?:\.[0-9]+)?)\s*miles?/i
+    );
+    if (!match) return null;
+
+    const maximumMiles = Number(match[1]);
+    const calculatedMiles = Number(match[2]);
+    if (!Number.isFinite(maximumMiles) || !Number.isFinite(calculatedMiles)) return null;
+
+    return {
+      maximumKm: this.formatDistanceKilometers(maximumMiles),
+      calculatedKm: this.formatDistanceKilometers(calculatedMiles)
+    };
+  }
+
   private resolveBadRequestMessage(value: unknown) {
     const code = this.getStringField(value, 'code').toLowerCase();
     const message = this.getStringField(value, 'message');
@@ -525,9 +549,11 @@ export class UberDirectProvider implements DeliveryProvider {
     const deliverableDetails = this.getNestedStringField(value, 'metadata', 'details');
 
     if (code === 'address_undeliverable') {
-      return deliverableDetails
-        ? `Uber Envios nao atende este destino. ${deliverableDetails}`
-        : 'Uber Envios nao atende este destino.';
+      const radius = deliverableDetails ? this.formatUndeliverableRadius(deliverableDetails) : null;
+      if (radius) {
+        return `O endereco foi reconhecido, mas esta fora da area de cobertura atual do Uber Envios. Alcance maximo: ${radius.maximumKm} km. Distancia estimada: ${radius.calculatedKm} km.`;
+      }
+      return 'O endereco foi reconhecido, mas esta fora da area de cobertura atual do Uber Envios.';
     }
 
     if (dropoffPhoneError || pickupPhoneError) {
