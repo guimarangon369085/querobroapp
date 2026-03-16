@@ -81,6 +81,9 @@ const ORDER_FORMULA_SOURCES = [
   ORDER_FORMULA_SOURCE_FILLING,
   ORDER_FORMULA_SOURCE_PACKAGING
 ] as const;
+const PUBLIC_ORDER_NEXT_DAY_CUTOFF_HOUR = 22;
+const PUBLIC_ORDER_FIRST_SLOT_HOUR = 8;
+const PUBLIC_ORDER_FIRST_SLOT_MINUTE = 0;
 
 const massPrepEventStatusSchema = z.enum(['INGREDIENTES', 'PREPARO', 'NO_FORNO', 'PRONTA']);
 const massPrepEventStatusTransitions: Record<z.infer<typeof massPrepEventStatusSchema>, z.infer<typeof massPrepEventStatusSchema>[]> = {
@@ -1057,6 +1060,26 @@ export class OrdersService {
     return parsed;
   }
 
+  private resolvePublicOrderMinimumSchedule(reference = new Date()) {
+    const minimum = new Date(reference);
+    const dayOffset = minimum.getHours() >= PUBLIC_ORDER_NEXT_DAY_CUTOFF_HOUR ? 2 : 1;
+    minimum.setDate(minimum.getDate() + dayOffset);
+    minimum.setHours(PUBLIC_ORDER_FIRST_SLOT_HOUR, PUBLIC_ORDER_FIRST_SLOT_MINUTE, 0, 0);
+    return minimum;
+  }
+
+  private ensurePublicOrderScheduleAllowed(scheduledAt: Date | null) {
+    if (!scheduledAt) {
+      throw new BadRequestException('Data/hora do pedido invalida.');
+    }
+    const minimum = this.resolvePublicOrderMinimumSchedule();
+    if (scheduledAt.getTime() >= minimum.getTime()) return;
+
+    throw new BadRequestException(
+      'Novos pedidos pelo formulario so podem ser agendados para o dia seguinte. Apos 22:00, a agenda abre para o segundo dia seguinte, a partir de 08:00.'
+    );
+  }
+
   private withFinancial(order: OrderWithRelations) {
     const total = this.toMoney(order.total ?? 0);
     const amountPaid = this.getPaidAmount(order.payments || []);
@@ -1156,6 +1179,7 @@ export class OrdersService {
       intakeChannel: 'CUSTOMER_LINK' | 'WHATSAPP_FLOW';
     }
   ) {
+    this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt));
     const productIdByCode = await this.resolveActiveFlavorProductIdByCode();
     const items = this.buildOrderItemsFromFlavorCounts(data.flavors, productIdByCode);
 

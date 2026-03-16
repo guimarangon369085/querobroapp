@@ -29,6 +29,10 @@ const boxCatalog = ORDER_BOX_CATALOG;
 const heroImages = ORDER_BRAND_GALLERY_IMAGES;
 const FLAVOR_CODES = ORDER_FLAVOR_CODES;
 const GOOGLE_MAPS_API_KEY = (process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '').trim();
+const PUBLIC_ORDER_NEXT_DAY_CUTOFF_HOUR = 22;
+const PUBLIC_ORDER_FIRST_SLOT_HOUR = 8;
+const PUBLIC_ORDER_FIRST_SLOT_MINUTE = 0;
+const PUBLIC_ORDER_TIME_STEP_SECONDS = 15 * 60;
 
 type BoxCode = OrderBoxCode;
 type FlavorCode = OrderFlavorCode;
@@ -105,6 +109,46 @@ const initialFormState: PublicOrderFormState = {
   }
 };
 
+function formatDateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatTimeInputValue(date: Date) {
+  const hours = `${date.getHours()}`.padStart(2, '0');
+  const minutes = `${date.getMinutes()}`.padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
+function parseLocalDateTime(date: string, time: string) {
+  if (!date || !time) return null;
+  const [year, month, day] = date.split('-').map((entry) => Number(entry));
+  const [hour, minute] = time.split(':').map((entry) => Number(entry));
+  if (![year, month, day, hour, minute].every(Number.isFinite)) return null;
+  const parsed = new Date(year, month - 1, day, hour, minute, 0, 0);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function resolvePublicOrderMinimumSchedule(reference = new Date()) {
+  const minimum = new Date(reference);
+  const dayOffset = minimum.getHours() >= PUBLIC_ORDER_NEXT_DAY_CUTOFF_HOUR ? 2 : 1;
+  minimum.setDate(minimum.getDate() + dayOffset);
+  minimum.setHours(PUBLIC_ORDER_FIRST_SLOT_HOUR, PUBLIC_ORDER_FIRST_SLOT_MINUTE, 0, 0);
+  return minimum;
+}
+
+function buildPublicOrderScheduleErrorMessage(minimum: Date) {
+  const formatted = new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(minimum);
+  return `Novos pedidos so podem ser agendados a partir de ${formatted}.`;
+}
+
 function extractErrorMessage(body: unknown) {
   if (typeof body === 'string') return body;
   if (!body || typeof body !== 'object') return 'Nao foi possivel enviar o pedido.';
@@ -138,11 +182,8 @@ function parseCountValue(value: string) {
 }
 
 function toLocalIso(date: string, time: string) {
-  if (!date || !time) return null;
-  const [year, month, day] = date.split('-').map((entry) => Number(entry));
-  const [hour, minute] = time.split(':').map((entry) => Number(entry));
-  if (![year, month, day, hour, minute].every(Number.isFinite)) return null;
-  return new Date(year, month - 1, day, hour, minute, 0, 0).toISOString();
+  const parsed = parseLocalDateTime(date, time);
+  return parsed ? parsed.toISOString() : null;
 }
 
 function formatCurrencyBRL(value?: number | null) {
@@ -257,6 +298,9 @@ export function PublicOrderPage() {
   const [deliveryQuoteError, setDeliveryQuoteError] = useState<string | null>(null);
   const [isQuotingDelivery, setIsQuotingDelivery] = useState(false);
   const addressInputRef = useRef<HTMLInputElement | null>(null);
+  const [minimumSchedule, setMinimumSchedule] = useState<Date | null>(null);
+  const minimumDateValue = minimumSchedule ? formatDateInputValue(minimumSchedule) : '';
+  const minimumTimeValue = minimumSchedule ? formatTimeInputValue(minimumSchedule) : '';
 
   const parsedBoxCounts = useMemo(() => {
     return Object.fromEntries(
@@ -352,6 +396,22 @@ export function PublicOrderPage() {
   const pixCharge: PixCharge | null = result?.intake.pixCharge ?? null;
   const deliveryFee = deliveryQuote?.fee ?? 0;
   const displayTotal = estimatedTotal + deliveryFee;
+
+  useEffect(() => {
+    const nextMinimum = resolvePublicOrderMinimumSchedule();
+    setMinimumSchedule(nextMinimum);
+    setForm((current) => {
+      const currentScheduledAt = parseLocalDateTime(current.date, current.time);
+      if (currentScheduledAt && currentScheduledAt.getTime() >= nextMinimum.getTime()) {
+        return current;
+      }
+      return {
+        ...current,
+        date: formatDateInputValue(nextMinimum),
+        time: formatTimeInputValue(nextMinimum)
+      };
+    });
+  }, []);
 
   const setBoxQuantity = (code: BoxCode, nextValue: number | string) => {
     const normalized = typeof nextValue === 'number' ? String(Math.max(Math.floor(nextValue), 0)) : nextValue;
@@ -563,6 +623,7 @@ export function PublicOrderPage() {
     event.preventDefault();
 
     const scheduledAt = scheduledAtIso;
+    const currentMinimumSchedule = resolvePublicOrderMinimumSchedule();
     if (!form.name.trim()) {
       setError('Informe o nome completo.');
       return;
@@ -577,6 +638,17 @@ export function PublicOrderPage() {
     }
     if (!scheduledAt) {
       setError('Informe data e horario validos.');
+      return;
+    }
+    const parsedScheduledAt = parseLocalDateTime(form.date, form.time);
+    if (!parsedScheduledAt || parsedScheduledAt.getTime() < currentMinimumSchedule.getTime()) {
+      setForm((current) => ({
+        ...current,
+        date: formatDateInputValue(currentMinimumSchedule),
+        time: formatTimeInputValue(currentMinimumSchedule)
+      }));
+      setMinimumSchedule(currentMinimumSchedule);
+      setError(buildPublicOrderScheduleErrorMessage(currentMinimumSchedule));
       return;
     }
     if (totalBroas <= 0) {
@@ -679,7 +751,13 @@ export function PublicOrderPage() {
   };
 
   const resetForm = () => {
-    setForm(initialFormState);
+    const nextMinimum = resolvePublicOrderMinimumSchedule();
+    setMinimumSchedule(nextMinimum);
+    setForm({
+      ...initialFormState,
+      date: formatDateInputValue(nextMinimum),
+      time: formatTimeInputValue(nextMinimum)
+    });
     setCustomBoxes([]);
     setError(null);
     setResult(null);
@@ -826,6 +904,7 @@ export function PublicOrderPage() {
                   <input
                     className="app-input"
                     type="date"
+                    min={minimumDateValue || undefined}
                     value={form.date}
                     onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))}
                   />
@@ -834,6 +913,8 @@ export function PublicOrderPage() {
                   <input
                     className="app-input"
                     type="time"
+                    min={form.date === minimumDateValue ? minimumTimeValue || undefined : undefined}
+                    step={PUBLIC_ORDER_TIME_STEP_SECONDS}
                     value={form.time}
                     onChange={(event) => setForm((current) => ({ ...current, time: event.target.value }))}
                   />
