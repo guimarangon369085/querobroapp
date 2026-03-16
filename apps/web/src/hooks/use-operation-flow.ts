@@ -37,6 +37,8 @@ type UseOperationFlowResult = {
 };
 
 const OperationFlowContext = createContext<UseOperationFlowResult | null>(null);
+const OPERATION_FLOW_CUSTOMERS_REFRESH_MS = 2 * 60 * 1000;
+const OPERATION_FLOW_CATALOG_REFRESH_MS = 5 * 60 * 1000;
 
 function useOperationFlowState(options: UseOperationFlowOptions = {}): UseOperationFlowResult {
   const refreshIntervalMs = options.refreshIntervalMs ?? 0;
@@ -46,6 +48,9 @@ function useOperationFlowState(options: UseOperationFlowOptions = {}): UseOperat
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const mountedRef = useRef(true);
+  const rawRef = useRef<OperationFlowRaw>(EMPTY_FLOW_RAW);
+  const lastCustomersRefreshAtRef = useRef(0);
+  const lastCatalogRefreshAtRef = useRef(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -54,22 +59,46 @@ function useOperationFlowState(options: UseOperationFlowOptions = {}): UseOperat
     };
   }, []);
 
-  const refresh = useCallback(async () => {
+  useEffect(() => {
+    rawRef.current = raw;
+  }, [raw]);
+
+  const loadFlowData = useCallback(async (strategy: 'full' | 'poll') => {
     if (!enabled) return;
     if (!mountedRef.current) return;
     setRefreshing(true);
     setError(null);
 
     try {
+      const now = Date.now();
+      const current = rawRef.current;
+      const shouldRefreshCustomers =
+        strategy === 'full' ||
+        current.customers.length === 0 ||
+        now - lastCustomersRefreshAtRef.current >= OPERATION_FLOW_CUSTOMERS_REFRESH_MS;
+      const shouldRefreshCatalog =
+        strategy === 'full' ||
+        current.products.length === 0 ||
+        current.boms.length === 0 ||
+        now - lastCatalogRefreshAtRef.current >= OPERATION_FLOW_CATALOG_REFRESH_MS;
+
       const [products, customers, orders, payments, boms] = await Promise.all([
-        apiFetch<Product[]>('/inventory-products'),
-        apiFetch<Customer[]>('/customers'),
+        shouldRefreshCatalog
+          ? apiFetch<Product[]>('/inventory-products')
+          : Promise.resolve(current.products),
+        shouldRefreshCustomers ? apiFetch<Customer[]>('/customers') : Promise.resolve(current.customers),
         apiFetch<Order[]>('/orders'),
         apiFetch<Payment[]>('/payments'),
-        apiFetch<Bom[]>('/boms')
+        shouldRefreshCatalog ? apiFetch<Bom[]>('/boms') : Promise.resolve(current.boms)
       ]);
 
       if (!mountedRef.current) return;
+      if (shouldRefreshCustomers) {
+        lastCustomersRefreshAtRef.current = now;
+      }
+      if (shouldRefreshCatalog) {
+        lastCatalogRefreshAtRef.current = now;
+      }
       setRaw({ products, customers, orders, payments, boms });
       setMode('online');
     } catch (loadError) {
@@ -84,23 +113,27 @@ function useOperationFlowState(options: UseOperationFlowOptions = {}): UseOperat
     }
   }, [enabled]);
 
+  const refresh = useCallback(async () => {
+    await loadFlowData('full');
+  }, [loadFlowData]);
+
   useEffect(() => {
     if (!enabled) return;
-    refresh().catch(() => {
+    loadFlowData('full').catch(() => {
       // erro tratado em refresh
     });
-  }, [enabled, refresh]);
+  }, [enabled, loadFlowData]);
 
   useEffect(() => {
     if (!enabled) return;
     if (!refreshIntervalMs || refreshIntervalMs <= 0) return;
     const timer = window.setInterval(() => {
-      refresh().catch(() => {
+      loadFlowData('poll').catch(() => {
         // erro tratado em refresh
       });
     }, refreshIntervalMs);
     return () => window.clearInterval(timer);
-  }, [enabled, refresh, refreshIntervalMs]);
+  }, [enabled, loadFlowData, refreshIntervalMs]);
 
   const flow = useMemo(() => deriveOperationFlow(raw), [raw]);
 

@@ -1285,6 +1285,8 @@ export class OrdersService {
       name: string;
       firstName: string | null;
       lastName: string | null;
+      activeEmailKey: string | null;
+      activePhoneKey: string | null;
       email: string | null;
       phone: string | null;
       address: string | null;
@@ -1321,7 +1323,11 @@ export class OrdersService {
         firstName: canonical.firstName || duplicates.map((entry) => entry.firstName).find(Boolean) || null,
         lastName: canonical.lastName || duplicates.map((entry) => entry.lastName).find(Boolean) || null,
         email: canonical.email || duplicates.map((entry) => entry.email).find(Boolean) || null,
+        activeEmailKey:
+          canonical.activeEmailKey || duplicates.map((entry) => entry.activeEmailKey).find(Boolean) || null,
         phone: canonical.phone || duplicates.map((entry) => entry.phone).find(Boolean) || null,
+        activePhoneKey:
+          canonical.activePhoneKey || duplicates.map((entry) => entry.activePhoneKey).find(Boolean) || null,
         address: canonical.address || duplicates.map((entry) => entry.address).find(Boolean) || null,
         addressLine1:
           canonical.addressLine1 || duplicates.map((entry) => entry.addressLine1).find(Boolean) || null,
@@ -1356,6 +1362,8 @@ export class OrdersService {
       where: { id: { in: duplicateIds } },
       data: {
         deletedAt: new Date(),
+        activeEmailKey: null,
+        activePhoneKey: null,
         phone: null,
         placeId: null
       }
@@ -1437,6 +1445,7 @@ export class OrdersService {
       return tx.customer.update({
         where: { id: existing.id },
         data: {
+          activePhoneKey: existing.activePhoneKey || normalizedPhone,
           phone: existing.phone || normalizedPhone,
           address: existing.address || normalizedAddress,
           placeId: existing.placeId || normalizedPlaceId,
@@ -1452,6 +1461,8 @@ export class OrdersService {
         name: normalizedName,
         firstName: normalizedName.split(' ')[0] || null,
         lastName: normalizedName.includes(' ') ? normalizedName.split(' ').slice(1).join(' ') : null,
+        activeEmailKey: null,
+        activePhoneKey: normalizedPhone,
         email: null,
         phone: normalizedPhone,
         address: normalizedAddress,

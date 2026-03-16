@@ -12,6 +12,8 @@ model Customer {
   name         String
   firstName    String?
   lastName     String?
+  activeEmailKey String? @unique
+  activePhoneKey String? @unique
   email        String?
   phone        String?
   address      String?
@@ -32,6 +34,7 @@ model Customer {
 
   @@index([name])
   @@index([email])
+  @@index([phone])
 }
 
 model Product {

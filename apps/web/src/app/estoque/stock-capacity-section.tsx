@@ -1,7 +1,5 @@
 'use client';
 
-import type { KeyboardEvent } from 'react';
-
 export type StockCapacityEntry = {
   bom: {
     id: number;
@@ -19,15 +17,13 @@ type StockCapacitySectionProps = {
   bomCostByBomId: Map<number, number>;
   selectedBomId: number | null;
   onSelectBom: (bom: StockCapacityEntry['bom']) => void;
-  onCardKeyDown: (event: KeyboardEvent<HTMLDivElement>, action: () => void) => void;
 };
 
 export function StockCapacitySection({
   capacity,
   bomCostByBomId,
   selectedBomId,
-  onSelectBom,
-  onCardKeyDown
+  onSelectBom
 }: StockCapacitySectionProps) {
   return (
     <details className="app-details">
@@ -45,16 +41,16 @@ export function StockCapacitySection({
             return (
               <div
                 key={entry.bom.id}
-                className={`app-panel app-panel--interactive app-panel--expandable ${
+                className={`app-panel app-panel--expandable ${
                   isExpanded ? 'app-panel--expanded' : ''
                 } ${entry.hasNegativeInput || entry.missingQtyDefinitions ? 'stock-capacity-card--warning' : ''}`}
-                role="button"
-                tabIndex={0}
-                onClick={() => onSelectBom(entry.bom)}
-                onKeyDown={(event) => onCardKeyDown(event, () => onSelectBom(entry.bom))}
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 text-left"
+                    onClick={() => onSelectBom(entry.bom)}
+                  >
                     <div className="flex items-center gap-3">
                       <p className="truncate font-semibold">{entry.bom.name}</p>
                       <span className="app-panel__chevron" aria-hidden="true" />
@@ -62,7 +58,7 @@ export function StockCapacitySection({
                     <p className="mt-1 text-sm text-neutral-500">
                       Produto: {entry.bom.product?.name || 'Produto'}
                     </p>
-                  </div>
+                  </button>
                   <span className="rounded-full border border-white/80 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-700">
                     {entry.maxUnits} cx
                   </span>

@@ -7,9 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
-  type FormEvent,
-  type KeyboardEvent,
-  type MouseEvent
+  type FormEvent
 } from 'react';
 import type {
   Bom,
@@ -860,20 +858,6 @@ function StockPageContent() {
     }
   };
 
-  const handleInteractiveStockCardKeyDown = (
-    event: KeyboardEvent<HTMLDivElement>,
-    action: () => void
-  ) => {
-    if (event.currentTarget !== event.target) return;
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    action();
-  };
-
-  const stopStockCardAction = (event: MouseEvent<HTMLElement>) => {
-    event.stopPropagation();
-  };
-
   const canSaveBom = Boolean(bomProductId) && bomName.trim().length > 0;
 
   const effectiveBalanceByItemId = useMemo(() => {
@@ -1505,7 +1489,6 @@ function StockPageContent() {
               bomCostByBomId={bomCostByBomId}
               selectedBomId={editingBomId}
               onSelectBom={startEditBom}
-              onCardKeyDown={handleInteractiveStockCardKeyDown}
             />
           </BuilderLayoutItemSlot>
 
@@ -1859,18 +1842,16 @@ function StockPageContent() {
                         return (
                           <div
                             key={bom.id}
-                            className={`app-panel app-panel--interactive app-panel--expandable ${
+                            className={`app-panel app-panel--expandable ${
                               isExpanded ? 'app-panel--expanded' : ''
                             }`}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => startEditBom(bom)}
-                            onKeyDown={(event) =>
-                              handleInteractiveStockCardKeyDown(event, () => startEditBom(bom))
-                            }
                           >
                             <div className="flex flex-wrap items-center justify-between gap-3">
-                              <div className="min-w-0 flex-1">
+                              <button
+                                type="button"
+                                className="min-w-0 flex-1 text-left"
+                                onClick={() => startEditBom(bom)}
+                              >
                                 <div className="flex items-center gap-3">
                                   <p className="truncate font-semibold">{bom.name}</p>
                                   <span className="app-panel__chevron" aria-hidden="true" />
@@ -1878,23 +1859,19 @@ function StockPageContent() {
                                 <p className="mt-1 text-sm text-neutral-500">
                                   Produto: {bom.product?.name || 'Produto'} • {bom.saleUnitLabel || 'Unidade'}
                                 </p>
-                              </div>
+                              </button>
                               <div className="flex flex-wrap gap-2">
                                 <button
                                   type="button"
                                   className="app-button app-button-ghost"
-                                  onClick={(event) => {
-                                    stopStockCardAction(event);
-                                    startEditBom(bom);
-                                  }}
+                                  onClick={() => startEditBom(bom)}
                                 >
                                   Editar
                                 </button>
                                 <button
                                   type="button"
                                   className="app-button app-button-danger"
-                                  onClick={(event) => {
-                                    stopStockCardAction(event);
+                                  onClick={() => {
                                     void removeBom(bom.id);
                                   }}
                                 >
@@ -2041,18 +2018,16 @@ function StockPageContent() {
                           return (
                             <div
                               key={item.id}
-                              className={`app-panel app-panel--interactive app-panel--expandable ${
+                              className={`app-panel app-panel--expandable ${
                                 isExpanded ? 'app-panel--expanded' : ''
                               }`}
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => startEditItem(item)}
-                              onKeyDown={(event) =>
-                                handleInteractiveStockCardKeyDown(event, () => startEditItem(item))
-                              }
                             >
                               <div className="flex flex-wrap items-center justify-between gap-2">
-                                <div className="min-w-0 flex-1">
+                                <button
+                                  type="button"
+                                  className="min-w-0 flex-1 text-left"
+                                  onClick={() => startEditItem(item)}
+                                >
                                   <div className="flex items-center gap-3">
                                     <p className="truncate font-semibold">{item.name}</p>
                                     <span className="app-panel__chevron" aria-hidden="true" />
@@ -2060,12 +2035,11 @@ function StockPageContent() {
                                   <p className="mt-1 text-sm text-neutral-500">
                                     {inventoryCategoryLabel(item.category)} • {formatQty(item.balance || 0)} {item.unit}
                                   </p>
-                                </div>
+                                </button>
                                 <button
                                   type="button"
                                   className="app-button app-button-danger"
-                                  onClick={(event) => {
-                                    stopStockCardAction(event);
+                                  onClick={() => {
                                     void removeItem(item.id!);
                                   }}
                                 >

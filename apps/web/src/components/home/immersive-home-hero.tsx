@@ -65,6 +65,8 @@ export function ImmersiveHomeHero() {
   const instructionsId = useId();
 
   const activeImage = HOME_HERO_IMAGES[activeIndex];
+  const transitionDuration = prefersReducedMotion ? '100ms' : '1800ms';
+  const transitionTimingFunction = 'cubic-bezier(.19,1,.22,1)';
 
   const step = (delta = 1) => {
     startTransition(() => {
@@ -133,13 +135,15 @@ export function ImmersiveHomeHero() {
             <div
               key={image.src}
               aria-hidden={!active}
-              className={`absolute inset-[-3%] transition-[opacity,transform,filter] ease-[cubic-bezier(.19,1,.22,1)] ${
-                prefersReducedMotion ? 'duration-100' : 'duration-[1800ms]'
-              } ${
+              className={`absolute inset-[-3%] transition-[opacity,transform,filter] ${
                 active
                   ? `opacity-100 ${prefersReducedMotion ? 'scale-100' : 'scale-[1.02]'}`
                   : `pointer-events-none opacity-0 ${prefersReducedMotion ? 'scale-100' : 'scale-[1.08]'}`
               }`}
+              style={{
+                transitionDuration,
+                transitionTimingFunction
+              }}
             >
               <Image
                 alt={image.alt}
@@ -155,10 +159,10 @@ export function ImmersiveHomeHero() {
         })}
 
         <div
-          className={`absolute inset-0 transition-[background] ease-[cubic-bezier(.19,1,.22,1)] ${
-            prefersReducedMotion ? 'duration-100' : 'duration-[1800ms]'
-          }`}
+          className="absolute inset-0 transition-[background]"
           style={{
+            transitionDuration,
+            transitionTimingFunction,
             background: `radial-gradient(circle at 18% 20%, ${activeImage.glow} 0%, transparent 30%), radial-gradient(circle at 82% 18%, ${activeImage.accent} 0%, transparent 24%), linear-gradient(90deg, rgba(15,9,4,0.68) 0%, rgba(15,9,4,0.28) 38%, rgba(15,9,4,0.16) 58%, rgba(15,9,4,0.62) 100%), linear-gradient(180deg, rgba(9,5,2,0.08) 0%, rgba(9,5,2,0.18) 38%, rgba(9,5,2,0.52) 74%, rgba(9,5,2,0.86) 100%)`
           }}
         />
@@ -166,7 +170,7 @@ export function ImmersiveHomeHero() {
 
       <section className="relative z-10 flex min-h-screen flex-col justify-between px-5 py-5 sm:px-8 sm:py-7 lg:px-12 lg:py-10">
         <a
-          className="brand-wordmark brand-wordmark--micro inline-flex w-fit items-center rounded-full border border-white/14 bg-[rgba(26,15,8,0.34)] px-4 py-2 text-[0.72rem] text-[rgba(255,248,232,0.92)] backdrop-blur-md transition-[background,border-color,transform] duration-500 ease-[cubic-bezier(.19,1,.22,1)] hover:border-white/24 hover:bg-[rgba(26,15,8,0.48)] hover:translate-y-[-1px]"
+          className="brand-wordmark brand-wordmark--micro inline-flex w-fit items-center rounded-full border border-white/14 bg-[rgba(26,15,8,0.34)] px-4 py-2 text-[0.72rem] text-[rgba(255,248,232,0.92)] backdrop-blur-md transition-[background,border-color,transform] duration-500 ease-out hover:border-white/24 hover:bg-[rgba(26,15,8,0.48)] hover:translate-y-[-1px]"
           href="https://www.instagram.com/querobroa/"
           rel="noreferrer"
           target="_blank"

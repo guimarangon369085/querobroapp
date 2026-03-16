@@ -44,6 +44,7 @@ type OrderQuickCreateProps = {
   customerOptions: SelectOption[];
   productsForCards: Product[];
   customerSearch: string;
+  selectedCustomerId: number | '';
   restoredFromLastOrder?: {
     orderId: number;
     customerName: string;
@@ -61,6 +62,7 @@ type OrderQuickCreateProps = {
   draftTotal: number;
   productMap: Map<number, Product>;
   onCustomerSearchChange: (value: string) => void;
+  onCustomerOptionPick: (option: SelectOption) => void;
   onScheduledAtChange: (value: string) => void;
   onDiscountChange: (value: string) => void;
   onDiscountBlur: () => void;
@@ -307,6 +309,7 @@ export function OrderQuickCreate({
   customerOptions,
   productsForCards,
   customerSearch,
+  selectedCustomerId,
   restoredFromLastOrder,
   newOrderScheduledAt,
   newOrderDiscount,
@@ -320,6 +323,7 @@ export function OrderQuickCreate({
   draftTotal,
   productMap,
   onCustomerSearchChange,
+  onCustomerOptionPick,
   onScheduledAtChange,
   onDiscountChange,
   onDiscountBlur,
@@ -391,6 +395,17 @@ export function OrderQuickCreate({
     () => splitDateTimeLocalPickerParts(newOrderScheduledAt),
     [newOrderScheduledAt]
   );
+  const customerSuggestions = useMemo(() => {
+    const raw = customerSearch.trim().toLowerCase();
+    if (!raw) return [];
+    return customerOptions
+      .filter((option) => {
+        const full = option.label.toLowerCase();
+        const withoutId = option.label.replace(/\s*\(#\d+\)\s*$/, '').trim().toLowerCase();
+        return full.includes(raw) || withoutId.includes(raw);
+      })
+      .slice(0, 6);
+  }, [customerOptions, customerSearch]);
 
   useEffect(() => {
     if (newOrderItems.length === 0 && mistaShortcutStack.length > 0) {
@@ -465,6 +480,25 @@ export function OrderQuickCreate({
               <option key={customer.id} value={customer.label} />
             ))}
           </datalist>
+          {!selectedCustomerId && customerSuggestions.length > 0 ? (
+            <div className="grid gap-2 rounded-2xl border border-[color:var(--line-soft)] bg-white/85 p-2">
+              {customerSuggestions.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className="app-button app-button-ghost w-full justify-start text-left normal-case tracking-[0.02em]"
+                  onClick={() => onCustomerOptionPick(option)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {!selectedCustomerId && customerSearch.trim() ? (
+            <p className="text-xs text-neutral-500">
+              Selecione um cliente da lista para vincular o pedido corretamente.
+            </p>
+          ) : null}
         </div>
         <FormField label="Data">
           <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px]">

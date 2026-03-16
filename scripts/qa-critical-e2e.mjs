@@ -222,7 +222,8 @@ async function ensureWebServer() {
   runCommand('Build do web', 'pnpm', ['--filter', '@querobroapp/web', 'build'], {
     env: {
       ...process.env,
-      NEXT_DIST_DIR: TEMP_WEB_DIST_DIR
+      NEXT_DIST_DIR: TEMP_WEB_DIST_DIR,
+      NEXT_PUBLIC_API_URL: API_URL
     }
   });
 
@@ -235,7 +236,8 @@ async function ensureWebServer() {
     cwd: WEB_APP_DIR,
     env: {
       ...process.env,
-      NEXT_DIST_DIR: TEMP_WEB_DIST_DIR
+      NEXT_DIST_DIR: TEMP_WEB_DIST_DIR,
+      NEXT_PUBLIC_API_URL: API_URL
     },
     stdio: ['ignore', webLog, webLog]
   });
@@ -402,7 +404,7 @@ async function runCriticalFlow() {
   const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const productName = `Broa E2E [TESTE_E2E] ${suffix}`;
   const customerName = `Cliente E2E [TESTE_E2E] ${suffix}`;
-  const customerPhone = '11999999999';
+  const customerPhone = `119${String(Date.now()).slice(-8)}`;
   const customerAddress = `Rua QA E2E, ${suffix}`;
 
   pw('open', 'about:blank');
@@ -455,7 +457,7 @@ async function runCriticalFlow() {
       await page.getByPlaceholder('(11) 99999-9999').fill(${JSON.stringify(customerPhone)});
       await page.getByPlaceholder('Rua, numero, bairro, cidade').fill(${JSON.stringify(customerAddress)});
       await page.getByRole('button', { name: 'Criar', exact: true }).click();
-      await page.getByText(${JSON.stringify(customerName)}, { exact: false }).first().waitFor({ state: 'visible', timeout: 10000 });
+      await page.getByText(${JSON.stringify(suffix)}, { exact: false }).first().waitFor({ state: 'visible', timeout: 10000 });
     `,
     'Criar cliente'
   );

@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type { ExternalOrderSubmission, OrderIntakeMeta, PixCharge } from '@querobroapp/shared';
 import { FormField } from '@/components/form/FormField';
@@ -437,7 +437,7 @@ export function PublicOrderPage() {
     return parsedScheduledAt.getTime() < minimumSchedule.getTime();
   }, [minimumSchedule, parsedScheduledAt]);
 
-  useEffect(() => {
+  const syncMinimumSchedule = useCallback(() => {
     const nextMinimum = resolvePublicOrderMinimumSchedule();
     setMinimumSchedule(nextMinimum);
     setForm((current) => {
@@ -452,6 +452,23 @@ export function PublicOrderPage() {
       };
     });
   }, []);
+
+  useEffect(() => {
+    syncMinimumSchedule();
+    const timer = window.setInterval(() => {
+      syncMinimumSchedule();
+    }, 60_000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        syncMinimumSchedule();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [syncMinimumSchedule]);
 
   const setBoxQuantity = (code: BoxCode, nextValue: number | string) => {
     const normalized = typeof nextValue === 'number' ? String(Math.max(Math.floor(nextValue), 0)) : nextValue;

@@ -58,10 +58,25 @@ function resolveProductionApiBaseUrlFromPublicAppOrigin() {
   }
 }
 
-function getLocalDevBaseUrl() {
-  if (typeof window === 'undefined') return devDefaultBaseUrl;
+function getLocalDevBaseUrl(configuredBaseUrl?: string | null) {
+  if (typeof window === 'undefined') return normalizeBaseUrl(configuredBaseUrl) || devDefaultBaseUrl;
+
   const hostname = window.location.hostname.trim();
-  if (!isLoopbackHostname(hostname)) return devDefaultBaseUrl;
+  if (!isLoopbackHostname(hostname)) return normalizeBaseUrl(configuredBaseUrl) || devDefaultBaseUrl;
+
+  const normalizedConfiguredBaseUrl = normalizeBaseUrl(configuredBaseUrl);
+  if (normalizedConfiguredBaseUrl) {
+    try {
+      const url = new URL(normalizedConfiguredBaseUrl);
+      if (isLoopbackHostname(url.hostname)) {
+        url.hostname = hostname;
+        return url.toString().replace(/\/+$/, '');
+      }
+    } catch {
+      // usa o fallback padrao abaixo
+    }
+  }
+
   return `http://${formatHostnameForUrl(hostname)}:3001`;
 }
 
@@ -77,7 +92,7 @@ export function getApiBaseUrl() {
     }
 
     if (isLoopbackHostname(browserHostname)) {
-      return getLocalDevBaseUrl();
+      return getLocalDevBaseUrl(configuredBaseUrl);
     }
 
     if (configuredBaseUrl && !isLoopbackHostname(configuredHostname)) {

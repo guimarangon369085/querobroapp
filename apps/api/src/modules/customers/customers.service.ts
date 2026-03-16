@@ -136,6 +136,8 @@ export class CustomersService {
             name: reusableCustomer.name || fullName,
             firstName: reusableCustomer.firstName || firstName,
             lastName: reusableCustomer.lastName || lastName,
+            activeEmailKey: reusableCustomer.activeEmailKey || normalizedEmail,
+            activePhoneKey: reusableCustomer.activePhoneKey || normalizedPhone,
             email: reusableCustomer.email || normalizedEmail,
             phone: reusableCustomer.phone || normalizedPhone,
             address: reusableCustomer.address || normalizedAddress,
@@ -160,6 +162,8 @@ export class CustomersService {
           name: fullName,
           firstName,
           lastName,
+          activeEmailKey: normalizedEmail,
+          activePhoneKey: normalizedPhone,
           email: normalizedEmail,
           phone: normalizedPhone,
           address: normalizedAddress,
@@ -248,6 +252,8 @@ export class CustomersService {
         name: data.name ? normalizeTitle(data.name) ?? data.name : undefined,
         firstName,
         lastName,
+        activeEmailKey: normalizedEmail,
+        activePhoneKey: normalizedPhone,
         email: normalizedEmail,
         phone: normalizedPhone,
         address: data.address !== undefined ? normalizeTitle(data.address) ?? null : undefined,
@@ -274,7 +280,11 @@ export class CustomersService {
     }
     await this.prisma.customer.update({
       where: { id },
-      data: { deletedAt: new Date() }
+      data: {
+        deletedAt: new Date(),
+        activeEmailKey: null,
+        activePhoneKey: null
+      }
     });
   }
 }

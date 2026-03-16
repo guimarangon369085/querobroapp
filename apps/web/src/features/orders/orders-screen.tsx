@@ -10,7 +10,6 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type KeyboardEvent,
   type PointerEvent,
   type MouseEvent
 } from 'react';
@@ -1774,7 +1773,6 @@ function OrdersPageContent() {
 
     return NaN;
   };
-
   const customerMap = useMemo(() => {
     const map = new Map<number, Customer>();
     for (const customer of customers) {
@@ -2308,16 +2306,6 @@ function OrdersPageContent() {
     }
   };
 
-  const handleCalendarCardKeyDown = (
-    event: KeyboardEvent<HTMLDivElement>,
-    date: Date
-  ) => {
-    if (event.currentTarget !== event.target) return;
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    selectCalendarDate(date);
-  };
-
   const handleCalendarChipClick = (
     event: MouseEvent<HTMLButtonElement>,
     entry: CalendarOrderEntry
@@ -2459,6 +2447,31 @@ function OrdersPageContent() {
     },
     [latestOrderDraftByCustomerId, resetNewOrderDraftDetails, restoredLastOrderDraft]
   );
+  const syncNewOrderCustomerSelection = useCallback(
+    (value: string, options: Array<{ id: number; label: string }>) => {
+      const parsedId = parseIdFromLabel(value, options);
+      const nextCustomerId = Number.isFinite(parsedId) ? parsedId : '';
+      setNewOrderCustomerId((current) => (current === nextCustomerId ? current : nextCustomerId));
+      if (
+        nextCustomerId &&
+        restoredLastOrderDraft?.customerId === nextCustomerId &&
+        restoredLastOrderDraft.orderId === latestOrderDraftByCustomerId.get(nextCustomerId)?.orderId
+      ) {
+        return;
+      }
+      applyLastOrderDraftForCustomer(nextCustomerId);
+    },
+    [applyLastOrderDraftForCustomer, latestOrderDraftByCustomerId, restoredLastOrderDraft]
+  );
+  useEffect(() => {
+    if (!customerSearch.trim()) {
+      if (newOrderCustomerId) {
+        syncNewOrderCustomerSelection('', customerOptions);
+      }
+      return;
+    }
+    syncNewOrderCustomerSelection(customerSearch, customerOptions);
+  }, [customerOptions, customerSearch, newOrderCustomerId, syncNewOrderCustomerSelection]);
   const selectedOrderWorkflowStatus = toOrderWorkflowStatus(selectedOrder?.status);
   const selectedOrderWorkflowIndex = selectedOrderWorkflowStatus
     ? ORDER_WORKFLOW_STATUSES.indexOf(selectedOrderWorkflowStatus)
@@ -3149,12 +3162,12 @@ function OrdersPageContent() {
                     className={`orders-week-grid__day ${
                       cell.isToday ? 'orders-week-grid__day--today' : ''
                     } ${cell.isSelected ? 'orders-week-grid__day--selected' : ''}`}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => selectCalendarDate(cell.date)}
-                    onKeyDown={(event) => handleCalendarCardKeyDown(event, cell.date)}
                   >
-                    <div className="orders-week-grid__day-head">
+                    <button
+                      type="button"
+                      className="orders-week-grid__day-head w-full text-left"
+                      onClick={() => selectCalendarDate(cell.date)}
+                    >
                       <div>
                         <p className="orders-week-grid__weekday">
                           {formatCalendarWeekdayLabel(cell.date)}
@@ -3167,7 +3180,7 @@ function OrdersPageContent() {
                         </p>
                       </div>
                       <span className="orders-week-grid__count">{cell.entries.length}</span>
-                    </div>
+                    </button>
 
                     <div
                       className="orders-week-grid__canvas"
@@ -3265,19 +3278,19 @@ function OrdersPageContent() {
                       className={`orders-month-widget-day ${
                         cell.isSelected ? 'orders-month-widget-day--selected' : ''
                       } ${cell.isToday ? 'orders-month-widget-day--today' : ''}`}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => selectCalendarDate(cell.date)}
-                      onKeyDown={(event) => handleCalendarCardKeyDown(event, cell.date)}
                     >
-                      <div className="orders-month-widget-day__head">
+                      <button
+                        type="button"
+                        className="orders-month-widget-day__head w-full text-left"
+                        onClick={() => selectCalendarDate(cell.date)}
+                      >
                         <span className="orders-month-widget-day__date">
                           {cell.date.toLocaleDateString('pt-BR', { day: '2-digit' })}
                         </span>
                         {cell.entries.length > 0 ? (
                           <span className="orders-month-widget-day__count">{cell.entries.length}</span>
                         ) : null}
-                      </div>
+                      </button>
                       <div className="orders-month-widget-day__events">
                         {previewEntries.map((entry) => {
                           const status = resolveCalendarEntryStatus(entry);
@@ -3488,6 +3501,7 @@ function OrdersPageContent() {
               customerOptions={customerOptions}
               productsForCards={orderableProducts}
               customerSearch={customerSearch}
+              selectedCustomerId={newOrderCustomerId}
               restoredFromLastOrder={restoredLastOrderDraft}
               newOrderScheduledAt={newOrderScheduledAt}
               newOrderDiscount={newOrderDiscount}
@@ -3500,19 +3514,10 @@ function OrdersPageContent() {
               orderError={orderError}
               draftTotal={draftTotal}
               productMap={productMap}
-              onCustomerSearchChange={(value) => {
-                setCustomerSearch(value);
-                const parsedId = parseIdFromLabel(value, customerOptions);
-                const nextCustomerId = Number.isFinite(parsedId) ? parsedId : '';
-                setNewOrderCustomerId(nextCustomerId);
-                if (
-                  nextCustomerId &&
-                  restoredLastOrderDraft?.customerId === nextCustomerId &&
-                  restoredLastOrderDraft.orderId === latestOrderDraftByCustomerId.get(nextCustomerId)?.orderId
-                ) {
-                  return;
-                }
-                applyLastOrderDraftForCustomer(nextCustomerId);
+              onCustomerSearchChange={setCustomerSearch}
+              onCustomerOptionPick={(option) => {
+                setCustomerSearch(option.label);
+                syncNewOrderCustomerSelection(option.label, customerOptions);
               }}
               onScheduledAtChange={setNewOrderScheduledAt}
               onDiscountChange={setNewOrderDiscount}
