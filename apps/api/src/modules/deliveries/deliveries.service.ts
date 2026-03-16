@@ -86,6 +86,11 @@ type QuoteRecordPayload = {
 
 const DELIVERY_TRACKING_SCOPE = 'DELIVERY_TRACKING';
 const DELIVERY_QUOTE_SCOPE = 'DELIVERY_QUOTE';
+const FIXED_PICKUP_ADDRESS = 'Alameda Jau, 731 - Sao Paulo - SP, Brasil';
+const FIXED_PICKUP_ADDRESS_LINE1 = 'Alameda Jau, 731';
+const FIXED_PICKUP_CITY = 'Sao Paulo';
+const FIXED_PICKUP_STATE = 'SP';
+const FIXED_PICKUP_COUNTRY = 'BR';
 
 @Injectable()
 export class DeliveriesService {
@@ -552,12 +557,12 @@ export class DeliveriesService {
 
   private buildUberStructuredPickupAddress() {
     return [
-      process.env.UBER_DIRECT_PICKUP_ADDRESS_LINE1,
+      this.normalizeText(process.env.UBER_DIRECT_PICKUP_ADDRESS_LINE1) || FIXED_PICKUP_ADDRESS_LINE1,
       process.env.UBER_DIRECT_PICKUP_ADDRESS_LINE2,
-      process.env.UBER_DIRECT_PICKUP_CITY,
-      process.env.UBER_DIRECT_PICKUP_STATE,
+      this.normalizeText(process.env.UBER_DIRECT_PICKUP_CITY) || FIXED_PICKUP_CITY,
+      this.normalizeText(process.env.UBER_DIRECT_PICKUP_STATE) || FIXED_PICKUP_STATE,
       process.env.UBER_DIRECT_PICKUP_POSTAL_CODE,
-      process.env.UBER_DIRECT_PICKUP_COUNTRY
+      this.normalizeText(process.env.UBER_DIRECT_PICKUP_COUNTRY) || FIXED_PICKUP_COUNTRY
     ]
       .map((value) => this.normalizeText(value))
       .filter(Boolean)
@@ -583,8 +588,7 @@ export class DeliveriesService {
         this.normalizeText(process.env.UBER_DIRECT_PICKUP_PHONE) ||
         this.normalizeText(process.env.PIX_STATIC_KEY) ||
         '',
-      address:
-        this.normalizeText(process.env.DELIVERY_PICKUP_ADDRESS) || this.buildUberStructuredPickupAddress()
+      address: FIXED_PICKUP_ADDRESS
     };
   }
 
