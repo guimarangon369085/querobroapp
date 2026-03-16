@@ -7,6 +7,7 @@ import type { Product } from '@querobroapp/shared';
 import { AppIcon } from '@/components/app-icons';
 import { FormField } from '@/components/form/FormField';
 import { formatCurrencyBR } from '@/lib/format';
+import type { DeliveryQuote } from './orders-model';
 import {
   ORDER_BOX_UNITS,
   ORDER_FLAVOR_OFFICIAL_BOX_NAME_BY_CODE,
@@ -58,8 +59,11 @@ type OrderQuickCreateProps = {
   virtualBoxRemainingUnits: number;
   canCreateOrder: boolean;
   isCreatingOrder: boolean;
+  isQuotingDelivery: boolean;
   orderError: string | null;
   draftTotal: number;
+  deliveryQuote: DeliveryQuote | null;
+  deliveryQuoteError: string | null;
   productMap: Map<number, Product>;
   onCustomerSearchChange: (value: string) => void;
   onCustomerOptionPick: (option: SelectOption) => void;
@@ -68,6 +72,7 @@ type OrderQuickCreateProps = {
   onDiscountBlur: () => void;
   onNotesChange: (value: string) => void;
   onCreateOrder: () => void;
+  onRefreshDeliveryQuote: () => void;
   onClearDraft: () => void;
   onDecrementProduct: (productId: number) => void;
   onAddProductUnits: (productId: number, units: number) => void;
@@ -319,8 +324,11 @@ export function OrderQuickCreate({
   virtualBoxRemainingUnits,
   canCreateOrder,
   isCreatingOrder,
+  isQuotingDelivery,
   orderError,
   draftTotal,
+  deliveryQuote,
+  deliveryQuoteError,
   productMap,
   onCustomerSearchChange,
   onCustomerOptionPick,
@@ -329,6 +337,7 @@ export function OrderQuickCreate({
   onDiscountBlur,
   onNotesChange,
   onCreateOrder,
+  onRefreshDeliveryQuote,
   onClearDraft,
   onDecrementProduct,
   onAddProductUnits
@@ -338,6 +347,8 @@ export function OrderQuickCreate({
     newOrderItems.map((item) => [item.productId, item.quantity] as const)
   );
   const draftCustomerLabel = customerSearch.trim() || 'Escolha um cliente';
+  const deliveryFee = deliveryQuote?.fee ?? 0;
+  const draftGrandTotal = draftTotal + deliveryFee;
   const flavorShortcutProductIds = useMemo(
     () => resolveFlavorShortcutProductIds(productsForCards),
     [productsForCards]
@@ -440,7 +451,7 @@ export function OrderQuickCreate({
         </button>
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-3">
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3">
           <p className="text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">Cliente</p>
           <p className="mt-1 text-base font-semibold text-neutral-900">{draftCustomerLabel}</p>
@@ -455,8 +466,18 @@ export function OrderQuickCreate({
           </p>
         </div>
         <div className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">Frete</p>
+          <p className="mt-1 text-base font-semibold text-neutral-900">
+            {isQuotingDelivery
+              ? 'Cotando...'
+              : deliveryQuote
+                ? formatCurrencyBR(deliveryFee)
+                : 'A confirmar'}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3">
           <p className="text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">Total</p>
-          <p className="mt-1 text-base font-semibold text-neutral-900">{formatCurrencyBR(draftTotal)}</p>
+          <p className="mt-1 text-base font-semibold text-neutral-900">{formatCurrencyBR(draftGrandTotal)}</p>
         </div>
       </div>
 
@@ -534,6 +555,40 @@ export function OrderQuickCreate({
             />
           </div>
         </FormField>
+      </div>
+
+      <div className="rounded-2xl border border-white/80 bg-white/85 px-4 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">Frete Uber</p>
+            <p className="mt-1 text-base font-semibold text-neutral-900">
+              {isQuotingDelivery
+                ? 'Cotando Uber Envios...'
+                : deliveryQuote
+                  ? `${formatCurrencyBR(deliveryQuote.fee)}`
+                  : 'Aguardando cliente, horario e caixas'}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="app-button app-button-ghost text-xs"
+            onClick={onRefreshDeliveryQuote}
+            disabled={isQuotingDelivery || !selectedCustomerId || newOrderItems.length === 0}
+          >
+            {isQuotingDelivery ? 'Atualizando...' : 'Atualizar frete'}
+          </button>
+        </div>
+        {deliveryQuoteError ? (
+          <p className="mt-2 text-xs text-rose-700">{deliveryQuoteError}</p>
+        ) : deliveryQuote ? (
+          <p className="mt-2 text-xs text-neutral-600">
+            {deliveryQuote.breakdownLabel || 'Uber Envios'} {deliveryQuote.expiresAt ? 'pronto para uso neste pedido.' : 'cotado para este pedido.'}
+          </p>
+        ) : (
+          <p className="mt-2 text-xs text-neutral-600">
+            A criacao fica liberada quando a estimativa real da Uber Envios estiver pronta.
+          </p>
+        )}
       </div>
 
       {restoredFromLastOrder ? (
@@ -828,7 +883,17 @@ export function OrderQuickCreate({
       ) : null}
       {orderError ? <p className="text-xs text-red-600">{orderError}</p> : null}
       {!canCreateOrder && !orderError && !tutorialMode ? (
-        <p className="text-xs text-neutral-500">Escolha um cliente.</p>
+        <p className="text-xs text-neutral-500">
+          {!selectedCustomerId
+            ? 'Escolha um cliente.'
+            : newOrderItems.length === 0
+              ? 'Escolha ao menos uma caixa.'
+              : isQuotingDelivery
+                ? 'Aguarde a cotacao da Uber Envios.'
+                : !deliveryQuote?.quoteToken
+                  ? 'A cotacao da Uber Envios e obrigatoria para criar.'
+                  : 'Revise o pedido.'}
+        </p>
       ) : null}
     </div>
   );

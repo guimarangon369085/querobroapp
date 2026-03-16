@@ -12,6 +12,8 @@ import {
   DeliveryQuoteResponseSchema,
   DeliveryQuoteSelectionSchema,
   OrderFulfillmentModeEnum,
+  moneyFromMinorUnits,
+  moneyToMinorUnits,
   roundMoney
 } from '@querobroapp/shared';
 import { PrismaService } from '../../prisma.service.js';
@@ -92,12 +94,113 @@ export class DeliveriesService {
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async quoteDelivery(payload: unknown) {
+  async quoteDelivery(
+    payload: unknown,
+    options?: { enforceExternalSchedule?: boolean; allowManualFallback?: boolean }
+  ) {
     const draft = DeliveryQuoteDraftSchema.parse(payload);
-    return this.quoteForDraft(draft, {
-      enforceExternalSchedule: true,
-      allowManualFallback: false
+    try {
+      return await this.quoteForDraft(draft, {
+        enforceExternalSchedule: options?.enforceExternalSchedule ?? true,
+        allowManualFallback: options?.allowManualFallback ?? false
+      });
+    } catch (error) {
+      if (error instanceof BadRequestException || error instanceof BadGatewayException || error instanceof NotFoundException) {
+        throw error;
+      }
+      const detail = error instanceof Error ? error.message : 'unknown error';
+      throw new BadGatewayException(`Nao foi possivel calcular o frete agora. (${detail})`);
+    }
+  }
+
+  async refreshOrderQuote(orderId: number) {
+    const order = await this.getOrderForDelivery(orderId);
+    const payments = await this.prisma.payment.findMany({
+      where: { orderId },
+      orderBy: { id: 'desc' }
     });
+    const draft = this.buildOrderDraft(order);
+    const missingRequirements = this.collectMissingRequirements(order, draft);
+    if (missingRequirements.length > 0) {
+      throw new BadRequestException(
+        `Corrija os dados do pedido antes de recalcular: ${missingRequirements.join(' • ')}`
+      );
+    }
+
+    const quote = await this.quoteForDraft(
+      {
+        mode: order.fulfillmentMode === OrderFulfillmentModeEnum.enum.DELIVERY ? 'DELIVERY' : 'PICKUP',
+        scheduledAt: order.scheduledAt?.toISOString() || new Date().toISOString(),
+        customer: {
+          name: order.customer?.name ?? null,
+          phone: order.customer?.phone ?? null,
+          address: draft.dropoffAddress,
+          placeId: draft.dropoffPlaceId,
+          lat: draft.dropoffLat,
+          lng: draft.dropoffLng,
+          deliveryNotes: order.customer?.deliveryNotes ?? null
+        },
+        manifest: {
+          items: draft.items.map((item) => ({
+            name: item.name,
+            quantity: item.quantity
+          })),
+          subtotal: this.toMoney(order.subtotal ?? 0),
+          totalUnits: draft.items.reduce((sum, item) => sum + Math.max(Math.floor(item.quantity || 0), 0), 0)
+        }
+      },
+      {
+        forceRefresh: true,
+        enforceExternalSchedule: false,
+        allowManualFallback: false
+      }
+    );
+
+    const subtotalMinorUnits = moneyToMinorUnits(order.subtotal ?? 0);
+    const discountMinorUnits = moneyToMinorUnits(order.discount ?? 0);
+    const deliveryFeeMinorUnits = moneyToMinorUnits(quote.fee ?? 0);
+    const nextSubtotalAfterDiscount = Math.max(subtotalMinorUnits - discountMinorUnits, 0);
+    const nextTotal = moneyFromMinorUnits(nextSubtotalAfterDiscount + deliveryFeeMinorUnits);
+    const paidMinorUnits = payments.reduce((sum, payment) => {
+      if (payment.status === 'PAGO' || payment.paidAt) {
+        return sum + moneyToMinorUnits(payment.amount ?? 0);
+      }
+      return sum;
+    }, 0);
+    if (nextSubtotalAfterDiscount + deliveryFeeMinorUnits < paidMinorUnits) {
+      throw new BadRequestException('O frete recalculado deixaria o total abaixo do valor ja pago no pedido.');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.order.update({
+        where: { id: orderId },
+        data: {
+          deliveryFee: this.toMoney(quote.fee ?? 0),
+          deliveryProvider: quote.provider,
+          deliveryFeeSource: quote.source,
+          deliveryQuoteStatus: quote.status,
+          deliveryQuoteRef: quote.quoteToken ?? null,
+          deliveryQuoteExpiresAt: this.parseOptionalDateTime(quote.expiresAt ?? null),
+          total: nextTotal
+        }
+      });
+
+      await tx.payment.updateMany({
+        where: {
+          orderId,
+          method: 'pix',
+          paidAt: null,
+          status: {
+            not: 'PAGO'
+          }
+        },
+        data: {
+          amount: nextTotal
+        }
+      });
+    });
+
+    return quote;
   }
 
   async resolveDeliverySelection(
@@ -318,6 +421,12 @@ export class DeliveriesService {
       fallbackReason: null,
       breakdownLabel: 'Sem frete'
     });
+  }
+
+  private parseOptionalDateTime(value: string | null | undefined) {
+    if (!value) return null;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
 
   private async quoteForDraft(

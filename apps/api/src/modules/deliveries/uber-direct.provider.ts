@@ -372,6 +372,13 @@ export class UberDirectProvider implements DeliveryProvider {
     );
     const parsed = await this.readResponseBody(response);
     if (!response.ok) {
+      if ([400, 404, 409, 422].includes(response.status)) {
+        throw new BadRequestException({
+          message: 'Uber Envios recusou os dados da cotacao.',
+          statusCode: response.status,
+          provider: 'UBER_DIRECT'
+        });
+      }
       throw new BadGatewayException({
         message: 'Uber Direct respondeu com erro.',
         statusCode: response.status,

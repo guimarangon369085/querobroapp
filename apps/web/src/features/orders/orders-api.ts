@@ -84,6 +84,36 @@ export function fetchDeliveryQuote(payload: {
   });
 }
 
+export function fetchInternalDeliveryQuote(payload: {
+  mode: 'DELIVERY' | 'PICKUP';
+  scheduledAt: string;
+  customer: {
+    name?: string | null;
+    phone?: string | null;
+    address?: string | null;
+    placeId?: string | null;
+    lat?: number | null;
+    lng?: number | null;
+    deliveryNotes?: string | null;
+  };
+  manifest: {
+    items: Array<{ name: string; quantity: number }>;
+    subtotal: number;
+    totalUnits: number;
+  };
+}) {
+  return apiFetch<DeliveryQuote>('/deliveries/quotes/internal', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export function refreshOrderDeliveryQuote(orderId: number) {
+  return apiFetch<DeliveryQuote>(`/deliveries/orders/${orderId}/quote`, {
+    method: 'POST'
+  });
+}
+
 export function startOrderDelivery(orderId: number) {
   return apiFetch<{ reusedExisting: boolean; tracking: DeliveryTracking }>(`/deliveries/orders/${orderId}/start`, {
     method: 'POST'

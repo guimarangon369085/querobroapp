@@ -54,10 +54,12 @@ import {
   resolveOrderFlavorCodeFromName,
   type OrderFlavorCode
 } from './order-box-catalog';
-import { type MassPrepEvent, type OrderView } from './orders-model';
+import { type DeliveryQuote, type MassPrepEvent, type OrderView } from './orders-model';
 import {
+  fetchInternalDeliveryQuote,
   fetchOrderPixCharge,
   fetchOrdersWorkspace,
+  refreshOrderDeliveryQuote,
   sendOrderPixChargeWhatsApp,
   submitOrderIntake
 } from './orders-api';
@@ -392,6 +394,11 @@ function formatDeletionTimestampLabel(date?: string | null) {
     hour: '2-digit',
     minute: '2-digit'
   });
+}
+
+function isLoopbackBrowserHost(hostname: string) {
+  const normalized = (hostname || '').trim().toLowerCase();
+  return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1';
 }
 
 function compactCustomerLabelForCalendar(value?: string | null) {
@@ -747,12 +754,28 @@ function safeDateFromIso(iso?: string | null) {
 function formatDeliveryEstimateCaption(order?: OrderView | null) {
   if (!order || order.fulfillmentMode !== 'DELIVERY') return '';
 
+  const quoteStatus = order.deliveryQuoteStatus ?? 'NOT_REQUIRED';
   const deliveryFee = toMoney(order.deliveryFee ?? 0);
-  if (deliveryFee <= 0) {
-    return 'Frete a confirmar.';
+  const quoteExpiry = formatOrderDateTimeLabel(safeDateFromIso(order.deliveryQuoteExpiresAt ?? null));
+
+  if (quoteStatus === 'FAILED') {
+    return 'Cotacao da Uber Envios indisponivel. Revise os dados do cliente e atualize o frete.';
   }
 
-  const quoteExpiry = formatOrderDateTimeLabel(safeDateFromIso(order.deliveryQuoteExpiresAt ?? null));
+  if (quoteStatus === 'EXPIRED') {
+    return quoteExpiry
+      ? `Estimativa expirada em ${quoteExpiry}. Atualize o frete.`
+      : 'Estimativa expirada. Atualize o frete.';
+  }
+
+  if (quoteStatus === 'FALLBACK' || order.deliveryFeeSource === 'MANUAL_FALLBACK' || order.deliveryProvider === 'LOCAL') {
+    return 'Frete em fallback local. Atualize para buscar a estimativa real da Uber Envios.';
+  }
+
+  if (deliveryFee <= 0) {
+    return 'Frete Uber ainda nao cotado.';
+  }
+
   if (order.deliveryProvider === 'UBER_DIRECT') {
     return quoteExpiry ? `Estimativa Uber Envios valida ate ${quoteExpiry}.` : 'Estimativa Uber Envios registrada.';
   }
@@ -1018,6 +1041,9 @@ function OrdersPageContent() {
     orderId: number;
     referenceLabel: string;
   } | null>(null);
+  const [newOrderDeliveryQuote, setNewOrderDeliveryQuote] = useState<DeliveryQuote | null>(null);
+  const [newOrderDeliveryQuoteError, setNewOrderDeliveryQuoteError] = useState<string | null>(null);
+  const [isQuotingNewOrderDelivery, setIsQuotingNewOrderDelivery] = useState(false);
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1051,6 +1077,7 @@ function OrdersPageContent() {
   const [selectedOrderPixChargeLoading, setSelectedOrderPixChargeLoading] = useState(false);
   const [selectedOrderPixChargeError, setSelectedOrderPixChargeError] = useState<string | null>(null);
   const [isSendingSelectedOrderPixWhatsApp, setIsSendingSelectedOrderPixWhatsApp] = useState(false);
+  const [isRefreshingSelectedOrderDeliveryQuote, setIsRefreshingSelectedOrderDeliveryQuote] = useState(false);
   const [selectedOrderEditingBoxKey, setSelectedOrderEditingBoxKey] = useState<string | null>(null);
   const [selectedOrderEditingBoxDraftByProductId, setSelectedOrderEditingBoxDraftByProductId] = useState<
     Record<number, number>
@@ -1058,6 +1085,7 @@ function OrdersPageContent() {
   const [selectedOrderEditingBoxError, setSelectedOrderEditingBoxError] = useState<string | null>(null);
   const [isSavingSelectedOrderEditingBox, setIsSavingSelectedOrderEditingBox] = useState(false);
   const [isDeletingSelectedOrderEditingBox, setIsDeletingSelectedOrderEditingBox] = useState(false);
+  const newOrderQuoteRequestIdRef = useRef(0);
   const newOrderDialogRef = useRef<HTMLDivElement | null>(null);
   const orderDetailDialogRef = useRef<HTMLDivElement | null>(null);
   const massPrepDialogRef = useRef<HTMLDivElement | null>(null);
@@ -1534,6 +1562,7 @@ function OrdersPageContent() {
   };
 
   const clearDraft = () => {
+    newOrderQuoteRequestIdRef.current += 1;
     setNewOrderCustomerId('');
     setCustomerSearch('');
     setNewOrderItems([]);
@@ -1541,6 +1570,8 @@ function OrdersPageContent() {
     setNewOrderNotes(tutorialMode ? withTestDataTag('', 'Pedido do momento') : '');
     setNewOrderScheduledAt(defaultOrderDateTimeInput());
     setRestoredLastOrderDraft(null);
+    setNewOrderDeliveryQuote(null);
+    setNewOrderDeliveryQuoteError(null);
     setOrderError(null);
   };
 
@@ -1550,13 +1581,27 @@ function OrdersPageContent() {
       setOrderError('Selecione cliente e caixa.');
       return;
     }
-    const scheduledAt = parseDateTimeLocalInput(newOrderScheduledAt);
-    if (!scheduledAt) {
+    if (!newOrderScheduledAtDate) {
       setOrderError('Informe data e hora.');
       return;
     }
     if (draftDiscount < 0) {
       setOrderError('Desconto nao pode ser negativo.');
+      return;
+    }
+    if (isQuotingNewOrderDelivery) {
+      setOrderError('Aguarde a cotacao da Uber Envios terminar.');
+      return;
+    }
+    if (!newOrderDeliveryQuote) {
+      setOrderError(newOrderDeliveryQuoteError || 'A estimativa de frete e obrigatoria para criar.');
+      return;
+    }
+    if (
+      requiresLiveUberQuote &&
+      (newOrderDeliveryQuote.provider !== 'UBER_DIRECT' || newOrderDeliveryQuote.source !== 'UBER_QUOTE')
+    ) {
+      setOrderError(newOrderDeliveryQuoteError || 'A estimativa real da Uber Envios e obrigatoria para criar.');
       return;
     }
     setOrderError(null);
@@ -1570,7 +1615,15 @@ function OrdersPageContent() {
         },
         fulfillment: {
           mode: 'DELIVERY',
-          scheduledAt: scheduledAt.toISOString()
+          scheduledAt: newOrderScheduledAtDate.toISOString()
+        },
+        delivery: {
+          quoteToken: newOrderDeliveryQuote.quoteToken,
+          fee: newOrderDeliveryQuote.fee,
+          provider: newOrderDeliveryQuote.provider,
+          source: newOrderDeliveryQuote.source,
+          status: newOrderDeliveryQuote.status,
+          expiresAt: newOrderDeliveryQuote.expiresAt
         },
         order: {
           items: newOrderItems,
@@ -1582,7 +1635,7 @@ function OrdersPageContent() {
         payment: {
           method: 'pix',
           status: 'PENDENTE',
-          dueAt: scheduledAt.toISOString()
+          dueAt: newOrderScheduledAtDate.toISOString()
         },
         source: {
           channel: 'INTERNAL_DASHBOARD'
@@ -1597,6 +1650,8 @@ function OrdersPageContent() {
       setNewOrderNotes(tutorialMode ? withTestDataTag('', 'Pedido do momento') : '');
       setNewOrderScheduledAt(defaultOrderDateTimeInput());
       setRestoredLastOrderDraft(null);
+      setNewOrderDeliveryQuote(null);
+      setNewOrderDeliveryQuoteError(null);
       const refreshedOrders = await loadAll();
       const freshCreated = refreshedOrders.find((entry) => entry.id === createdOrder.id);
       notifySuccess(
@@ -1620,6 +1675,20 @@ function OrdersPageContent() {
       setIsCreatingOrder(false);
     }
   };
+
+  const refreshSelectedOrderQuote = useCallback(async () => {
+    if (!selectedOrder?.id || selectedOrder.fulfillmentMode !== 'DELIVERY') return;
+    setIsRefreshingSelectedOrderDeliveryQuote(true);
+    try {
+      await refreshOrderDeliveryQuote(selectedOrder.id);
+      await loadAll();
+      notifySuccess('Frete Uber atualizado.');
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : 'Nao foi possivel recalcular o frete.');
+    } finally {
+      setIsRefreshingSelectedOrderDeliveryQuote(false);
+    }
+  }, [loadAll, notifyError, notifySuccess, selectedOrder]);
 
   const removeOrder = async (orderId: number) => {
     const accepted = await confirm({
@@ -2325,7 +2394,42 @@ function OrdersPageContent() {
 
   const draftDiscount = useMemo(() => Math.max(parseCurrencyBR(newOrderDiscount), 0), [newOrderDiscount]);
   const draftTotal = Math.max(draftSubtotal - draftDiscount, 0);
-  const canCreateOrder = Boolean(newOrderCustomerId) && newOrderItems.length > 0;
+  const selectedNewOrderCustomer = useMemo(
+    () =>
+      typeof newOrderCustomerId === 'number'
+        ? customers.find((customer) => customer.id === newOrderCustomerId) || null
+        : null,
+    [customers, newOrderCustomerId]
+  );
+  const newOrderCustomerAddress = useMemo(
+    () => formatCustomerFullAddress(selectedNewOrderCustomer),
+    [selectedNewOrderCustomer]
+  );
+  const newOrderScheduledAtDate = useMemo(
+    () => parseDateTimeLocalInput(newOrderScheduledAt),
+    [newOrderScheduledAt]
+  );
+  const newOrderScheduledAtIso = useMemo(
+    () => newOrderScheduledAtDate?.toISOString() ?? null,
+    [newOrderScheduledAtDate]
+  );
+  const newOrderQuoteManifestItems = useMemo(
+    () =>
+      newOrderItems
+        .filter((item) => Math.max(Math.floor(item.quantity || 0), 0) > 0)
+        .map((item) => ({
+          name: compactOrderProductName(productMap.get(item.productId)?.name ?? `Produto ${item.productId}`),
+          quantity: Math.max(Math.floor(item.quantity || 0), 0)
+        })),
+    [newOrderItems, productMap]
+  );
+  const requiresLiveUberQuote =
+    typeof window === 'undefined' ? true : !isLoopbackBrowserHost(window.location.hostname);
+  const canCreateOrder =
+    Boolean(newOrderCustomerId) &&
+    newOrderItems.length > 0 &&
+    !isQuotingNewOrderDelivery &&
+    Boolean(newOrderDeliveryQuote?.quoteToken);
   const draftVirtualBoxRemainingUnits =
     draftTotalUnits > 0 ? unitsToCloseOrderBox(draftTotalUnits) : 0;
 
@@ -2472,6 +2576,124 @@ function OrdersPageContent() {
     }
     syncNewOrderCustomerSelection(customerSearch, customerOptions);
   }, [customerOptions, customerSearch, newOrderCustomerId, syncNewOrderCustomerSelection]);
+
+  const refreshNewOrderDeliveryQuote = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (!selectedNewOrderCustomer || !newOrderScheduledAtIso || newOrderQuoteManifestItems.length === 0 || draftSubtotal <= 0) {
+        setNewOrderDeliveryQuote(null);
+        setNewOrderDeliveryQuoteError(null);
+        setIsQuotingNewOrderDelivery(false);
+        return null;
+      }
+
+      if (!newOrderCustomerAddress.trim()) {
+        setNewOrderDeliveryQuote(null);
+        setNewOrderDeliveryQuoteError('Cliente sem endereco completo para cotacao da Uber Envios.');
+        setIsQuotingNewOrderDelivery(false);
+        return null;
+      }
+
+      setIsQuotingNewOrderDelivery(true);
+      if (!options?.silent) {
+        setNewOrderDeliveryQuoteError(null);
+      }
+      const requestId = ++newOrderQuoteRequestIdRef.current;
+
+      try {
+        const quote = await fetchInternalDeliveryQuote({
+          mode: 'DELIVERY',
+          scheduledAt: newOrderScheduledAtIso,
+          customer: {
+            name: selectedNewOrderCustomer.name,
+            phone: selectedNewOrderCustomer.phone ?? null,
+            address: newOrderCustomerAddress,
+            placeId: selectedNewOrderCustomer.placeId ?? null,
+            lat: typeof selectedNewOrderCustomer.lat === 'number' ? selectedNewOrderCustomer.lat : null,
+            lng: typeof selectedNewOrderCustomer.lng === 'number' ? selectedNewOrderCustomer.lng : null,
+            deliveryNotes: selectedNewOrderCustomer.deliveryNotes ?? null
+          },
+          manifest: {
+            items: newOrderQuoteManifestItems,
+            subtotal: draftSubtotal,
+            totalUnits: draftTotalUnits
+          }
+        });
+        if (requestId !== newOrderQuoteRequestIdRef.current) {
+          return quote;
+        }
+        setNewOrderDeliveryQuote(quote);
+        setNewOrderDeliveryQuoteError(null);
+        return quote;
+      } catch (error) {
+        if (requestId !== newOrderQuoteRequestIdRef.current) {
+          return null;
+        }
+        const message =
+          error instanceof Error ? error.message : 'Nao foi possivel calcular o frete com a Uber Envios.';
+        setNewOrderDeliveryQuote(null);
+        setNewOrderDeliveryQuoteError(message);
+        return null;
+      } finally {
+        if (requestId === newOrderQuoteRequestIdRef.current) {
+          setIsQuotingNewOrderDelivery(false);
+        }
+      }
+    },
+    [
+      draftSubtotal,
+      draftTotalUnits,
+      newOrderCustomerAddress,
+      newOrderQuoteManifestItems,
+      newOrderScheduledAtIso,
+      newOrderQuoteRequestIdRef,
+      selectedNewOrderCustomer
+    ]
+  );
+
+  useEffect(() => {
+    if (!selectedNewOrderCustomer || !newOrderCustomerId) {
+      newOrderQuoteRequestIdRef.current += 1;
+      setNewOrderDeliveryQuote(null);
+      setNewOrderDeliveryQuoteError(null);
+      setIsQuotingNewOrderDelivery(false);
+      return;
+    }
+
+    if (!newOrderScheduledAtIso || newOrderQuoteManifestItems.length === 0 || draftSubtotal <= 0) {
+      newOrderQuoteRequestIdRef.current += 1;
+      setNewOrderDeliveryQuote(null);
+      setNewOrderDeliveryQuoteError(null);
+      setIsQuotingNewOrderDelivery(false);
+      return;
+    }
+
+    if (!newOrderCustomerAddress.trim()) {
+      newOrderQuoteRequestIdRef.current += 1;
+      setNewOrderDeliveryQuote(null);
+      setNewOrderDeliveryQuoteError('Cliente sem endereco completo para cotacao da Uber Envios.');
+      setIsQuotingNewOrderDelivery(false);
+      return;
+    }
+
+    setNewOrderDeliveryQuote(null);
+    setIsQuotingNewOrderDelivery(true);
+    const timeout = window.setTimeout(() => {
+      void refreshNewOrderDeliveryQuote({ silent: true });
+    }, 350);
+
+    return () => {
+      newOrderQuoteRequestIdRef.current += 1;
+      window.clearTimeout(timeout);
+    };
+  }, [
+    draftSubtotal,
+    newOrderCustomerAddress,
+    newOrderCustomerId,
+    newOrderQuoteManifestItems,
+    newOrderScheduledAtIso,
+    refreshNewOrderDeliveryQuote,
+    selectedNewOrderCustomer
+  ]);
   const selectedOrderWorkflowStatus = toOrderWorkflowStatus(selectedOrder?.status);
   const selectedOrderWorkflowIndex = selectedOrderWorkflowStatus
     ? ORDER_WORKFLOW_STATUSES.indexOf(selectedOrderWorkflowStatus)
@@ -3511,8 +3733,11 @@ function OrdersPageContent() {
               virtualBoxRemainingUnits={draftVirtualBoxRemainingUnits}
               canCreateOrder={canCreateOrder}
               isCreatingOrder={isCreatingOrder}
+              isQuotingDelivery={isQuotingNewOrderDelivery}
               orderError={orderError}
               draftTotal={draftTotal}
+              deliveryQuote={newOrderDeliveryQuote}
+              deliveryQuoteError={newOrderDeliveryQuoteError}
               productMap={productMap}
               onCustomerSearchChange={setCustomerSearch}
               onCustomerOptionPick={(option) => {
@@ -3526,6 +3751,9 @@ function OrdersPageContent() {
               }
               onNotesChange={setNewOrderNotes}
               onCreateOrder={createOrder}
+              onRefreshDeliveryQuote={() => {
+                void refreshNewOrderDeliveryQuote();
+              }}
               onClearDraft={clearDraft}
               onDecrementProduct={decrementDraftItem}
               onAddProductUnits={addDraftItemUnits}
@@ -3692,11 +3920,11 @@ function OrdersPageContent() {
               Excluir
             </button>
           </div>
-          <div className="mt-3 grid gap-2 rounded-2xl border border-white/70 bg-white/80 p-3">
-            <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-start sm:justify-between">
-              <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
-                  FRETE
+            <div className="mt-3 grid gap-2 rounded-2xl border border-white/70 bg-white/80 p-3">
+              <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                    FRETE
                 </p>
                 <p className="text-sm font-semibold text-neutral-900">
                   {selectedOrder.fulfillmentMode === 'DELIVERY'
@@ -3707,9 +3935,25 @@ function OrdersPageContent() {
                 </p>
               </div>
               {selectedOrder.fulfillmentMode === 'DELIVERY' ? (
-                <span className="w-fit rounded-full border border-white/80 bg-white/86 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
-                  {selectedOrder.deliveryProvider === 'UBER_DIRECT' ? 'Uber Envios' : 'Estimativa'}
-                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="w-fit rounded-full border border-white/80 bg-white/86 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                    {selectedOrder.deliveryProvider === 'UBER_DIRECT'
+                      ? 'Uber Envios'
+                      : selectedOrder.deliveryQuoteStatus === 'FALLBACK'
+                        ? 'Fallback local'
+                        : 'Estimativa'}
+                  </span>
+                  <button
+                    type="button"
+                    className="app-button app-button-ghost text-xs"
+                    onClick={() => {
+                      void refreshSelectedOrderQuote();
+                    }}
+                    disabled={isRefreshingSelectedOrderDeliveryQuote}
+                  >
+                    {isRefreshingSelectedOrderDeliveryQuote ? 'Atualizando...' : 'Atualizar frete'}
+                  </button>
+                </div>
               ) : null}
             </div>
             {selectedOrder.fulfillmentMode === 'DELIVERY' ? (

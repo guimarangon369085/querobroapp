@@ -442,7 +442,7 @@ echo "QA Browser Smoke started."
 ensure_api_server
 ensure_web_server
 
-check_route "pedidos" "/pedidos" "Agenda"
+check_route "pedidos" "/pedidos" "PEDIDOS"
 check_route "clientes" "/clientes" "Clientes"
 check_route "produtos" "/produtos" "" "/estoque"
 check_route "estoque" "/estoque" "" "/estoque"

@@ -14,9 +14,22 @@ export class DeliveriesController {
     return this.service.quoteDelivery(body);
   }
 
+  @Post('quotes/internal')
+  quoteInternal(@Body() body: unknown) {
+    return this.service.quoteDelivery(body, {
+      enforceExternalSchedule: false,
+      allowManualFallback: false
+    });
+  }
+
   @Get('orders/:id/readiness')
   getReadiness(@Param('id') id: string) {
     return this.service.getReadiness(parseWithSchema(idSchema, id));
+  }
+
+  @Post('orders/:id/quote')
+  refreshOrderQuote(@Param('id') id: string) {
+    return this.service.refreshOrderQuote(parseWithSchema(idSchema, id));
   }
 
   @Post('orders/:id/start')
