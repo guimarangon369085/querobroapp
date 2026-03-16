@@ -1094,7 +1094,7 @@ function OrdersPageContent() {
   const newOrderTitleId = useId();
   const orderDetailTitleId = useId();
   const massPrepTitleId = useId();
-  const { confirm, notifyError, notifySuccess } = useFeedback();
+  const { confirm, notifyError, notifySuccess, presentSuccess } = useFeedback();
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -1654,12 +1654,13 @@ function OrdersPageContent() {
       setNewOrderDeliveryQuoteError(null);
       const refreshedOrders = await loadAll();
       const freshCreated = refreshedOrders.find((entry) => entry.id === createdOrder.id);
-      notifySuccess(
+      presentSuccess(
         created.intake.stage !== 'PIX_PENDING'
           ? 'Pedido criado.'
           : created.intake.pixCharge?.payable
-          ? 'Pedido criado com PIX pronto.'
-          : 'Pedido criado com PIX de desenvolvimento.'
+            ? 'Pedido criado com PIX pronto.'
+            : 'Pedido criado com PIX de desenvolvimento.',
+        `Pedido #${createdOrder.id}`
       );
       setIsNewOrderModalOpen(false);
       if (freshCreated) {
@@ -1720,7 +1721,11 @@ function OrdersPageContent() {
         body: JSON.stringify({ status }),
       });
       await loadAll();
-      notifySuccess(`Status atualizado para ${formatDisplayedOrderStatus(status)}.`);
+      if (status === 'ENTREGUE') {
+        presentSuccess('Pedido finalizado e movido para entregue.', `Pedido #${orderId}`);
+      } else {
+        notifySuccess(`Status atualizado para ${formatDisplayedOrderStatus(status)}.`);
+      }
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Nao foi possivel atualizar o status.');
     } finally {
@@ -3782,8 +3787,8 @@ function OrdersPageContent() {
             <div className="app-panel order-detail-modal__panel grid gap-4">
           <div className="rounded-2xl border border-white/70 bg-white/80 p-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
-              <div className="min-w-0 overflow-x-auto pb-1 sm:flex-1">
-                <ol className="flex min-w-max items-start">
+              <div className="min-w-0 sm:flex-1">
+                <ol className="order-workflow-strip">
                   {ORDER_WORKFLOW_STATUSES.map((status, index) => {
                     const stageMeta = orderWorkflowStatusMeta[status];
                     const isCurrent = selectedOrderWorkflowStatus === status;
@@ -3791,8 +3796,8 @@ function OrdersPageContent() {
                     const isConnectorActive = selectedOrderWorkflowIndex > index;
 
                     return (
-                      <li key={status} className="flex items-start">
-                        <div className="flex flex-col items-center text-center">
+                      <li key={status} className="order-workflow-strip__item">
+                        <div className="order-workflow-strip__step">
                           <span
                             className={`flex h-9 w-9 items-center justify-center rounded-full border ${
                               isCurrent
@@ -3826,7 +3831,7 @@ function OrdersPageContent() {
                         </div>
                         {index < ORDER_WORKFLOW_STATUSES.length - 1 ? (
                           <span
-                            className={`mx-2 mt-4 h-[2px] w-10 shrink-0 rounded-full ${
+                            className={`order-workflow-strip__connector mx-2 mt-4 h-[2px] w-10 shrink-0 rounded-full ${
                               isConnectorActive ? stageMeta.activeLineClassName : 'bg-neutral-200'
                             }`}
                           />
@@ -4353,8 +4358,8 @@ function OrdersPageContent() {
             <div className="app-panel order-detail-modal__panel grid gap-4">
               <div className="rounded-2xl border border-white/70 bg-white/80 p-3">
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
-                  <div className="min-w-0 overflow-x-auto pb-1 sm:flex-1">
-                    <ol className="flex min-w-max items-start">
+                  <div className="min-w-0 sm:flex-1">
+                    <ol className="order-workflow-strip">
                       {MASS_PREP_EVENT_STATUSES.map((status, index) => {
                         const stageMeta = massPrepWorkflowStatusMeta[status];
                         const isCurrent = selectedMassPrepStatus === status;
@@ -4362,8 +4367,8 @@ function OrdersPageContent() {
                         const isConnectorActive = selectedMassPrepWorkflowIndex > index;
 
                         return (
-                          <li key={status} className="flex items-start">
-                            <div className="flex flex-col items-center text-center">
+                          <li key={status} className="order-workflow-strip__item">
+                            <div className="order-workflow-strip__step">
                               <span
                                 className={`flex h-9 w-9 items-center justify-center rounded-full border ${
                                   isCurrent
@@ -4397,7 +4402,7 @@ function OrdersPageContent() {
                             </div>
                             {index < MASS_PREP_EVENT_STATUSES.length - 1 ? (
                               <span
-                                className={`mx-2 mt-4 h-[2px] w-10 shrink-0 rounded-full ${
+                                className={`order-workflow-strip__connector mx-2 mt-4 h-[2px] w-10 shrink-0 rounded-full ${
                                   isConnectorActive ? stageMeta.activeLineClassName : 'bg-neutral-200'
                                 }`}
                               />

@@ -316,7 +316,7 @@ function BrandGallery({ children }: { children?: ReactNode }) {
 }
 
 export function PublicOrderPage() {
-  const { notifyError, notifySuccess, notifyInfo } = useFeedback();
+  const { notifyError, notifyInfo, presentSuccess } = useFeedback();
   const [form, setForm] = useState<PublicOrderFormState>(initialFormState);
   const [customBoxes, setCustomBoxes] = useState<CustomBoxDraft[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -804,7 +804,7 @@ export function PublicOrderPage() {
         throw new Error(extractErrorMessage(data));
       }
       setResult(data as PublicOrderResult);
-      notifySuccess('Pedido enviado.');
+      presentSuccess('Seu pedido foi recebido. Confira o resumo e o PIX para concluir.', `Pedido #${(data as PublicOrderResult).order.id}`);
     } catch (submitError) {
       const message = submitError instanceof Error ? submitError.message : 'Nao foi possivel enviar o pedido.';
       setError(message);
@@ -1237,7 +1237,7 @@ export function PublicOrderPage() {
             </section>
 
             {error ? (
-              <div className="rounded-[24px] border border-rose-200 bg-[linear-gradient(160deg,rgba(255,245,245,0.96),rgba(255,235,235,0.92))] px-5 py-4 text-sm text-rose-700 shadow-[0_14px_32px_rgba(157,31,44,0.08)]">
+              <div className="app-inline-notice app-inline-notice--error rounded-[24px] px-5 py-4 shadow-[0_14px_32px_rgba(157,31,44,0.08)]">
                 {error}
               </div>
             ) : null}
@@ -1301,19 +1301,19 @@ export function PublicOrderPage() {
                 </div>
 
                 {form.fulfillmentMode === 'DELIVERY' && deliveryQuoteError ? (
-                  <div className="rounded-[20px] border border-amber-200 bg-[rgba(255,249,235,0.9)] px-4 py-3 text-sm text-amber-800 sm:rounded-[24px]">
+                  <div className="app-inline-notice app-inline-notice--warning rounded-[20px] px-4 py-3 sm:rounded-[24px]">
                     {deliveryQuoteError}
                   </div>
                 ) : null}
 
                 {form.fulfillmentMode === 'DELIVERY' && !deliveryQuoteError && isScheduleBelowMinimum && minimumSchedule ? (
-                  <div className="rounded-[20px] border border-amber-200 bg-[rgba(255,249,235,0.9)] px-4 py-3 text-sm text-amber-800 sm:rounded-[24px]">
+                  <div className="app-inline-notice app-inline-notice--warning rounded-[20px] px-4 py-3 sm:rounded-[24px]">
                     {buildPublicOrderScheduleErrorMessage(minimumSchedule)}
                   </div>
                 ) : null}
 
                 {incompleteCustomBoxes.length > 0 ? (
-                  <div className="rounded-[20px] border border-amber-200 bg-[rgba(255,249,235,0.9)] px-4 py-3 text-sm text-amber-800 sm:rounded-[24px]">
+                  <div className="app-inline-notice app-inline-notice--warning rounded-[20px] px-4 py-3 sm:rounded-[24px]">
                     {incompleteCustomBoxes.length === 1
                       ? 'Falta completar 1 Caixa Sabores.'
                       : `Faltam completar ${incompleteCustomBoxes.length} caixas Sabores.`}
