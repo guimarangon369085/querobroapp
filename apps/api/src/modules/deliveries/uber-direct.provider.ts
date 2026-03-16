@@ -1,5 +1,5 @@
 import { BadGatewayException, BadRequestException, GatewayTimeoutException } from '@nestjs/common';
-import { roundMoney } from '@querobroapp/shared';
+import { normalizePhoneNumber, roundMoney } from '@querobroapp/shared';
 import type {
   DeliveryDispatchInput,
   DeliveryDispatchOutput,
@@ -149,6 +149,8 @@ export class UberDirectProvider implements DeliveryProvider {
   }
 
   private buildQuotePayload(input: DeliveryQuoteInput) {
+    const pickupPhone = this.normalizeUberPhone(input.pickupPhone);
+    const dropoffPhone = this.normalizeUberPhone(input.dropoffPhone);
     if (this.usesCurrentOrdersApi()) {
       return {
         pickup: {
@@ -167,10 +169,10 @@ export class UberDirectProvider implements DeliveryProvider {
     return {
       pickup_address: input.pickupAddress,
       pickup_name: input.pickupName,
-      pickup_phone_number: input.pickupPhone,
+      pickup_phone_number: pickupPhone,
       dropoff_address: input.dropoffAddress,
       dropoff_name: input.dropoffName,
-      dropoff_phone_number: input.dropoffPhone,
+      dropoff_phone_number: dropoffPhone,
       manifest_total_value: Math.round(this.toMoney(input.orderTotal) * 100),
       manifest_reference: input.manifestSummary.slice(0, 256),
       manifest_items: input.items.map((item) => ({
@@ -184,6 +186,7 @@ export class UberDirectProvider implements DeliveryProvider {
   }
 
   private buildDeliveryPayload(input: DeliveryDispatchInput) {
+    const dropoffPhone = this.normalizeUberPhone(input.dropoffPhone);
     if (this.usesCurrentOrdersApi()) {
       return {
         quote_id: input.providerQuoteId || undefined,
@@ -195,7 +198,7 @@ export class UberDirectProvider implements DeliveryProvider {
         dropoff: {
           contact: {
             first_name: input.dropoffName || 'Cliente',
-            phone_number: input.dropoffPhone || undefined
+            phone_number: dropoffPhone || undefined
           },
           location: {
             address: this.buildCurrentApiAddressPayload(input)
@@ -374,9 +377,10 @@ export class UberDirectProvider implements DeliveryProvider {
     if (!response.ok) {
       if ([400, 404, 409, 422].includes(response.status)) {
         throw new BadRequestException({
-          message: 'Uber Envios recusou os dados da cotacao.',
+          message: this.resolveBadRequestMessage(parsed),
           statusCode: response.status,
-          provider: 'UBER_DIRECT'
+          provider: 'UBER_DIRECT',
+          details: parsed
         });
       }
       throw new BadGatewayException({
@@ -502,5 +506,38 @@ export class UberDirectProvider implements DeliveryProvider {
           : null,
       rawPayload: parsed
     };
+  }
+
+  private normalizeUberPhone(value?: string | null) {
+    const normalized = normalizePhoneNumber(value);
+    if (!normalized) return '';
+    if (normalized.length === 10 || normalized.length === 11) {
+      return `+55${normalized}`;
+    }
+    return `+${normalized}`;
+  }
+
+  private resolveBadRequestMessage(value: unknown) {
+    const code = this.getStringField(value, 'code').toLowerCase();
+    const message = this.getStringField(value, 'message');
+    const dropoffPhoneError = this.getNestedStringField(value, 'metadata', 'dropoff_phone_number');
+    const pickupPhoneError = this.getNestedStringField(value, 'metadata', 'pickup_phone_number');
+    const deliverableDetails = this.getNestedStringField(value, 'metadata', 'details');
+
+    if (code === 'address_undeliverable') {
+      return deliverableDetails
+        ? `Uber Envios nao atende este destino. ${deliverableDetails}`
+        : 'Uber Envios nao atende este destino.';
+    }
+
+    if (dropoffPhoneError || pickupPhoneError) {
+      return 'Telefone invalido para cotacao no Uber Envios.';
+    }
+
+    if (message) {
+      return `Uber Envios recusou os dados da cotacao: ${message}.`;
+    }
+
+    return 'Uber Envios recusou os dados da cotacao.';
   }
 }
