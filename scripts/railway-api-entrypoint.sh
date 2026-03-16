@@ -13,31 +13,10 @@ if [ -z "${DATABASE_URL:-}" ]; then
   exit 1
 fi
 
-has_prisma_migrations_table="$(pnpm --filter @querobroapp/api exec node <<'NODE'
-const { PrismaClient } = require('@prisma/client');
-
-const prisma = new PrismaClient();
-
-(async () => {
-  const rows = await prisma.$queryRawUnsafe(
-    "SELECT to_regclass('public._prisma_migrations')::text AS migration_table"
-  );
-  process.stdout.write(rows?.[0]?.migration_table || '');
-})()
-  .catch((error) => {
-    console.error('Falha ao verificar _prisma_migrations:', error);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
-NODE
-)"
-
-if [ "$has_prisma_migrations_table" = "public._prisma_migrations" ]; then
-  pnpm --filter @querobroapp/api exec prisma migrate deploy --schema prisma/schema.prod.prisma
+if pnpm --filter @querobroapp/api exec prisma migrate deploy --schema prisma/schema.prod.prisma; then
+  echo "Migrations aplicadas com prisma migrate deploy."
 else
-  echo "Banco sem historico de migrations; aplicando bootstrap com db push controlado."
+  echo "Falha no prisma migrate deploy; aplicando fallback controlado com db push."
   pnpm --filter @querobroapp/api exec prisma db push --accept-data-loss --schema prisma/schema.prod.prisma
   pnpm --filter @querobroapp/api exec prisma db execute --stdin --schema prisma/schema.prod.prisma <<'SQL'
 UPDATE "Customer"
