@@ -13,7 +13,7 @@ if [ -z "${DATABASE_URL:-}" ]; then
   exit 1
 fi
 
-has_prisma_migrations_table="$(node <<'NODE'
+has_prisma_migrations_table="$(pnpm --filter @querobroapp/api exec node <<'NODE'
 const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
