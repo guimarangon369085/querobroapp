@@ -2,6 +2,7 @@
 import {
   Suspense,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -9,6 +10,7 @@ import {
 } from 'react';
 import type { Customer, OrderIntake, OrderItem, Product } from '@querobroapp/shared';
 import { apiFetch } from '@/lib/api';
+import { useDialogA11y } from '@/lib/use-dialog-a11y';
 import {
   buildWhatsAppUrl,
   compactWhitespace,
@@ -206,9 +208,11 @@ function CustomersPageContent() {
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const addressInputRef = useRef<HTMLInputElement | null>(null);
   const modalAddressInputRef = useRef<HTMLInputElement | null>(null);
+  const customerDialogRef = useRef<HTMLDivElement | null>(null);
   const openedCustomerIdRef = useRef<number | null>(null);
   const customerAutofillRef = useRef(createCustomerAutofillState());
   const postalCodeLookupAbortRef = useRef<AbortController | null>(null);
+  const customerDialogTitleId = useId();
   const { confirm, notifyError, notifySuccess, notifyUndo } = useFeedback();
 
   const load = async () => {
@@ -697,6 +701,12 @@ function CustomersPageContent() {
     cancelEdit();
   };
 
+  useDialogA11y({
+    isOpen: Boolean(isCustomerModalOpen && selectedCustomer),
+    dialogRef: customerDialogRef,
+    onClose: closeCustomerModal
+  });
+
   const startRepeatOrder = (order: CustomerOrderPreview) => {
     setRepeatDraftOrderId(order.id);
     setRepeatDraftScheduledAt(defaultRepeatOrderDateTimeInput());
@@ -1147,11 +1157,16 @@ function CustomersPageContent() {
         <div className="order-detail-modal" role="presentation" onClick={closeCustomerModal}>
           <div
             className="order-detail-modal__dialog"
+            ref={customerDialogRef}
             role="dialog"
             aria-modal="true"
-            aria-label={`Cliente ${selectedCustomer.name}`}
+            aria-labelledby={customerDialogTitleId}
+            tabIndex={-1}
             onClick={(event) => event.stopPropagation()}
           >
+            <h2 id={customerDialogTitleId} className="sr-only">
+              Cliente {selectedCustomer.name}
+            </h2>
             <button type="button" className="order-detail-modal__close" onClick={closeCustomerModal}>
               <AppIcon name="close" className="h-4 w-4" />
               Fechar

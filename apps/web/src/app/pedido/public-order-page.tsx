@@ -396,6 +396,11 @@ export function PublicOrderPage() {
   const pixCharge: PixCharge | null = result?.intake.pixCharge ?? null;
   const deliveryFee = deliveryQuote?.fee ?? 0;
   const displayTotal = estimatedTotal + deliveryFee;
+  const parsedScheduledAt = useMemo(() => parseLocalDateTime(form.date, form.time), [form.date, form.time]);
+  const isScheduleBelowMinimum = useMemo(() => {
+    if (!minimumSchedule || !parsedScheduledAt) return false;
+    return parsedScheduledAt.getTime() < minimumSchedule.getTime();
+  }, [minimumSchedule, parsedScheduledAt]);
 
   useEffect(() => {
     const nextMinimum = resolvePublicOrderMinimumSchedule();
@@ -542,6 +547,13 @@ export function PublicOrderPage() {
       return;
     }
 
+    if (minimumSchedule && parsedScheduledAt && parsedScheduledAt.getTime() < minimumSchedule.getTime()) {
+      setDeliveryQuote(null);
+      setDeliveryQuoteError(buildPublicOrderScheduleErrorMessage(minimumSchedule));
+      setIsQuotingDelivery(false);
+      return;
+    }
+
     if (!form.address.trim() || !scheduledAtIso || totalBroas <= 0) {
       setDeliveryQuote(null);
       setDeliveryQuoteError(null);
@@ -614,6 +626,8 @@ export function PublicOrderPage() {
     form.name,
     form.phone,
     form.placeId,
+    minimumSchedule,
+    parsedScheduledAt,
     scheduledAtIso,
     selectedBoxes,
     totalBroas
@@ -1225,6 +1239,12 @@ export function PublicOrderPage() {
                 {form.fulfillmentMode === 'DELIVERY' && deliveryQuoteError ? (
                   <div className="rounded-[20px] border border-amber-200 bg-[rgba(255,249,235,0.9)] px-4 py-3 text-sm text-amber-800 sm:rounded-[24px]">
                     {deliveryQuoteError}
+                  </div>
+                ) : null}
+
+                {form.fulfillmentMode === 'DELIVERY' && !deliveryQuoteError && isScheduleBelowMinimum && minimumSchedule ? (
+                  <div className="rounded-[20px] border border-amber-200 bg-[rgba(255,249,235,0.9)] px-4 py-3 text-sm text-amber-800 sm:rounded-[24px]">
+                    {buildPublicOrderScheduleErrorMessage(minimumSchedule)}
                   </div>
                 ) : null}
 

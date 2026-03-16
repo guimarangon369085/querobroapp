@@ -2509,7 +2509,7 @@ input[type='radio'] {
 }
 
 .pac-container {
-  z-index: 25 !important;
+  z-index: 180 !important;
 }
 
 .app-confirm-backdrop {

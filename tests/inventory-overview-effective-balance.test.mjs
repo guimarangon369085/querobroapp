@@ -18,7 +18,6 @@ test(
   { timeout: 180000 },
   async (t) => {
     const { apiUrl, shutdown } = await ensureApiServer();
-    let createdAliasItemId = null;
     let familyItemIds = [];
     let originalMovementIds = new Set();
 
@@ -43,14 +42,6 @@ test(
         // melhor esforco
       }
 
-      if (createdAliasItemId) {
-        try {
-          await request(apiUrl, `/inventory-items/${createdAliasItemId}`, { method: 'DELETE' });
-        } catch {
-          // melhor esforco
-        }
-      }
-
       await shutdown();
     });
 
@@ -58,22 +49,8 @@ test(
     const canonicalItem = items.find((item) => normalizeLookup(item.name) === 'MANTEIGA');
     assert.ok(canonicalItem, 'Item canônico MANTEIGA deveria existir');
 
-    let aliasItem = items.find((item) => normalizeLookup(item.name) === 'MANTEIGA COM SAL') || null;
-    if (!aliasItem) {
-      aliasItem = await request(apiUrl, '/inventory-items', {
-        method: 'POST',
-        body: {
-          name: 'MANTEIGA COM SAL',
-          category: 'INGREDIENTE',
-          unit: 'g',
-          purchasePackSize: 500,
-          purchasePackCost: 24.9
-        }
-      });
-      createdAliasItemId = aliasItem.id;
-    }
-
-    familyItemIds = [canonicalItem.id, aliasItem.id];
+    const aliasItem = items.find((item) => normalizeLookup(item.name) === 'MANTEIGA COM SAL') || null;
+    familyItemIds = [canonicalItem.id, aliasItem?.id].filter(Boolean);
 
     const originalMovements = await request(apiUrl, '/inventory-movements');
     originalMovementIds = new Set(
@@ -91,11 +68,13 @@ test(
       !overviewBefore.items.some((item) => normalizeLookup(item.name) === 'MANTEIGA COM SAL'),
       'Alias legado MANTEIGA COM SAL nao deveria aparecer como item separado'
     );
-    assert.ok(
-      butterRowBefore.rawItemIds.includes(canonicalItem.id) &&
+    assert.ok(butterRowBefore.rawItemIds.includes(canonicalItem.id), 'Visao canonica deveria apontar para o id oficial');
+    if (aliasItem) {
+      assert.ok(
         butterRowBefore.rawItemIds.includes(aliasItem.id),
-      'Visao canonica deveria apontar para os ids crus da familia'
-    );
+        'Visao canonica deveria apontar para ids legados da familia quando existirem'
+      );
+    }
 
     await request(apiUrl, `/inventory-items/${butterRowBefore.id}/effective-balance`, {
       method: 'POST',

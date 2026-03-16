@@ -14,6 +14,10 @@ import {
   OrderFulfillmentModeEnum
 } from '@querobroapp/shared';
 import { PrismaService } from '../../prisma.service.js';
+import {
+  externalOrderScheduleErrorMessage,
+  isExternalOrderScheduleAllowed
+} from '../../common/external-order-schedule.js';
 import type { DeliveryDispatchInput, DeliveryProvider, DeliveryQuoteInput } from './delivery-provider.js';
 import { LocalDeliveryProvider } from './local-delivery.provider.js';
 import { UberDirectProvider } from './uber-direct.provider.js';
@@ -89,13 +93,23 @@ export class DeliveriesService {
 
   async quoteDelivery(payload: unknown) {
     const draft = DeliveryQuoteDraftSchema.parse(payload);
-    return this.quoteForDraft(draft);
+    return this.quoteForDraft(draft, {
+      enforceExternalSchedule: true,
+      allowManualFallback: false
+    });
   }
 
-  async resolveDeliverySelection(selectionPayload: unknown, draftPayload: DeliveryQuoteDraft) {
+  async resolveDeliverySelection(
+    selectionPayload: unknown,
+    draftPayload: DeliveryQuoteDraft,
+    options?: { enforceExternalSchedule?: boolean; allowManualFallback?: boolean }
+  ) {
     const draft = DeliveryQuoteDraftSchema.parse(draftPayload);
     if (draft.mode !== OrderFulfillmentModeEnum.enum.DELIVERY) {
       return this.buildNotRequiredQuote();
+    }
+    if (options?.enforceExternalSchedule) {
+      this.ensureExternalOrderQuoteScheduleAllowed(draft.scheduledAt);
     }
 
     const requestHash = this.quoteRequestHash(draft);
@@ -103,15 +117,28 @@ export class DeliveriesService {
     const quoteToken = selection.quoteToken?.trim();
 
     if (!quoteToken) {
-      return this.quoteForDraft(draft, { forceRefresh: true });
+      return this.quoteForDraft(draft, {
+        forceRefresh: true,
+        enforceExternalSchedule: options?.enforceExternalSchedule,
+        allowManualFallback: options?.allowManualFallback
+      });
     }
 
     const stored = await this.readQuoteRecord(quoteToken);
-    if (stored && stored.requestHash === requestHash && !this.isQuoteExpired(stored.quote)) {
+    if (
+      stored &&
+      stored.requestHash === requestHash &&
+      !this.isQuoteExpired(stored.quote) &&
+      this.isAcceptableDeliveryQuote(stored.quote, options?.allowManualFallback)
+    ) {
       return stored.quote;
     }
 
-    const refreshed = await this.quoteForDraft(draft, { forceRefresh: true });
+    const refreshed = await this.quoteForDraft(draft, {
+      forceRefresh: true,
+      enforceExternalSchedule: options?.enforceExternalSchedule,
+      allowManualFallback: options?.allowManualFallback
+    });
     throw new BadRequestException({
       code: 'DELIVERY_QUOTE_REFRESH_REQUIRED',
       message: 'Frete atualizado. Revise o valor antes de enviar novamente.',
@@ -292,23 +319,36 @@ export class DeliveriesService {
     });
   }
 
-  private async quoteForDraft(draftPayload: DeliveryQuoteDraft, options?: { forceRefresh?: boolean }) {
+  private async quoteForDraft(
+    draftPayload: DeliveryQuoteDraft,
+    options?: { forceRefresh?: boolean; enforceExternalSchedule?: boolean; allowManualFallback?: boolean }
+  ) {
     const draft = DeliveryQuoteDraftSchema.parse(draftPayload);
     if (draft.mode !== OrderFulfillmentModeEnum.enum.DELIVERY) {
       return this.buildNotRequiredQuote();
+    }
+    if (options?.enforceExternalSchedule) {
+      this.ensureExternalOrderQuoteScheduleAllowed(draft.scheduledAt);
     }
 
     const requestHash = this.quoteRequestHash(draft);
     const quoteToken = this.quoteToken(requestHash);
     if (!options?.forceRefresh) {
       const existing = await this.readQuoteRecord(quoteToken);
-      if (existing && existing.requestHash === requestHash && !this.isQuoteExpired(existing.quote)) {
+      if (
+        existing &&
+        existing.requestHash === requestHash &&
+        !this.isQuoteExpired(existing.quote) &&
+        this.isAcceptableDeliveryQuote(existing.quote, options?.allowManualFallback)
+      ) {
         return existing.quote;
       }
     }
 
     const input = this.buildQuoteInput(draft);
-    const quote = await this.fetchProviderQuote(input);
+    const quote = await this.fetchProviderQuote(input, {
+      allowManualFallback: options?.allowManualFallback ?? true
+    });
     const normalized = DeliveryQuoteResponseSchema.parse({
       provider: quote.provider,
       fee: this.toMoney(quote.fee),
@@ -325,7 +365,7 @@ export class DeliveriesService {
     return normalized;
   }
 
-  private async fetchProviderQuote(input: DeliveryQuoteInput) {
+  private async fetchProviderQuote(input: DeliveryQuoteInput, options?: { allowManualFallback?: boolean }) {
     if (!input.dropoffAddress.trim()) {
       throw new BadRequestException('Endereco de entrega obrigatorio para cotar frete.');
     }
@@ -334,7 +374,7 @@ export class DeliveriesService {
       try {
         return await this.uberProvider.quote(input);
       } catch (error) {
-        if (error instanceof BadGatewayException) {
+        if (options?.allowManualFallback !== false && error instanceof BadGatewayException) {
           return this.localProvider.quote(input);
         }
         throw error;
@@ -342,6 +382,21 @@ export class DeliveriesService {
     }
 
     return this.localProvider.quote(input);
+  }
+
+  private ensureExternalOrderQuoteScheduleAllowed(scheduledAt: string | null | undefined) {
+    const parsed = scheduledAt ? new Date(scheduledAt) : null;
+    if (!parsed || Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException('Data/hora do pedido invalida.');
+    }
+    if (isExternalOrderScheduleAllowed(parsed)) return;
+    throw new BadRequestException(externalOrderScheduleErrorMessage());
+  }
+
+  private isAcceptableDeliveryQuote(quote: DeliveryQuoteResponse, allowManualFallback = true) {
+    if (quote.provider === 'UBER_DIRECT' && quote.source === 'UBER_QUOTE') return true;
+    if (!allowManualFallback && this.uberProvider.isConfigured()) return false;
+    return quote.provider === 'LOCAL' && quote.source === 'MANUAL_FALLBACK';
   }
 
   private buildQuoteInput(draft: DeliveryQuoteDraft): DeliveryQuoteInput {

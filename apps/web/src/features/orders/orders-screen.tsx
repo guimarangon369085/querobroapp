@@ -5,6 +5,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -16,6 +17,7 @@ import {
 import type { Customer, InventoryItem, InventoryMovement, OrderIntake, PixCharge, Product } from '@querobroapp/shared';
 import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { useDialogA11y } from '@/lib/use-dialog-a11y';
 import {
   compactWhitespace,
   buildWhatsAppUrl,
@@ -1050,8 +1052,14 @@ function OrdersPageContent() {
   const [selectedOrderEditingBoxError, setSelectedOrderEditingBoxError] = useState<string | null>(null);
   const [isSavingSelectedOrderEditingBox, setIsSavingSelectedOrderEditingBox] = useState(false);
   const [isDeletingSelectedOrderEditingBox, setIsDeletingSelectedOrderEditingBox] = useState(false);
+  const newOrderDialogRef = useRef<HTMLDivElement | null>(null);
+  const orderDetailDialogRef = useRef<HTMLDivElement | null>(null);
+  const massPrepDialogRef = useRef<HTMLDivElement | null>(null);
   const selectedOrderId = selectedOrder?.id ?? null;
   const selectedMassPrepEventId = selectedMassPrepEvent?.id ?? null;
+  const newOrderTitleId = useId();
+  const orderDetailTitleId = useId();
+  const massPrepTitleId = useId();
   const { confirm, notifyError, notifySuccess } = useFeedback();
 
   const loadAll = useCallback(async () => {
@@ -1141,6 +1149,24 @@ function OrdersPageContent() {
     setMassPrepStockError(null);
     setMassPrepStockCards([]);
   }, []);
+
+  useDialogA11y({
+    isOpen: isNewOrderModalOpen,
+    dialogRef: newOrderDialogRef,
+    onClose: closeNewOrderModal
+  });
+
+  useDialogA11y({
+    isOpen: Boolean(selectedOrder && isOrderDetailModalOpen),
+    dialogRef: orderDetailDialogRef,
+    onClose: closeOrderDetail
+  });
+
+  useDialogA11y({
+    isOpen: isMassPrepStockModalOpen,
+    dialogRef: massPrepDialogRef,
+    onClose: closeMassPrepStockModal
+  });
 
   const loadMassPrepStockSnapshot = useCallback(async () => {
     const [inventoryItems, inventoryMovements] = await Promise.all([
@@ -1359,42 +1385,6 @@ function OrdersPageContent() {
       // erro tratado em loadError
     });
   }, [loadAll]);
-
-  useEffect(() => {
-    if (!isOrderDetailModalOpen && !isMassPrepStockModalOpen && !isNewOrderModalOpen) return;
-
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      if (isMassPrepStockModalOpen) {
-        closeMassPrepStockModal();
-        return;
-      }
-      if (isOrderDetailModalOpen) {
-        closeOrderDetail();
-        return;
-      }
-      if (isNewOrderModalOpen) {
-        closeNewOrderModal();
-      }
-    };
-
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    window.addEventListener('keydown', onKeyDown);
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, [
-    closeMassPrepStockModal,
-    closeNewOrderModal,
-    closeOrderDetail,
-    isMassPrepStockModalOpen,
-    isNewOrderModalOpen,
-    isOrderDetailModalOpen
-  ]);
 
   useEffect(() => {
     const focus = consumeFocusQueryParam(searchParams);
@@ -3475,11 +3465,16 @@ function OrdersPageContent() {
         <div className="order-detail-modal" role="presentation" onClick={closeNewOrderModal}>
           <div
             className="order-detail-modal__dialog"
+            ref={newOrderDialogRef}
             role="dialog"
             aria-modal="true"
-            aria-label="Novo pedido"
+            aria-labelledby={newOrderTitleId}
+            tabIndex={-1}
             onClick={(event) => event.stopPropagation()}
           >
+            <h2 id={newOrderTitleId} className="sr-only">
+              Novo pedido
+            </h2>
             <button type="button" className="order-detail-modal__close" onClick={closeNewOrderModal}>
               <AppIcon name="close" className="h-4 w-4" />
               Fechar
@@ -3533,11 +3528,16 @@ function OrdersPageContent() {
         <div className="order-detail-modal" role="presentation" onClick={closeOrderDetail}>
           <div
             className="order-detail-modal__dialog"
+            ref={orderDetailDialogRef}
             role="dialog"
             aria-modal="true"
-            aria-label={`Pedido #${selectedOrder.id}`}
+            aria-labelledby={orderDetailTitleId}
+            tabIndex={-1}
             onClick={(event) => event.stopPropagation()}
           >
+            <h2 id={orderDetailTitleId} className="sr-only">
+              Pedido #{selectedOrder.id}
+            </h2>
             <button type="button" className="order-detail-modal__close" onClick={closeOrderDetail}>
               <AppIcon name="close" className="h-4 w-4" />
               Fechar
@@ -4083,11 +4083,16 @@ function OrdersPageContent() {
         <div className="order-detail-modal" role="presentation" onClick={closeMassPrepStockModal}>
           <div
             className="order-detail-modal__dialog"
+            ref={massPrepDialogRef}
             role="dialog"
             aria-modal="true"
-            aria-label="Saldo atual de estoque para fazer massa"
+            aria-labelledby={massPrepTitleId}
+            tabIndex={-1}
             onClick={(event) => event.stopPropagation()}
           >
+            <h2 id={massPrepTitleId} className="sr-only">
+              Saldo atual de estoque para fazer massa
+            </h2>
             <button type="button" className="order-detail-modal__close" onClick={closeMassPrepStockModal}>
               <AppIcon name="close" className="h-4 w-4" />
               Fechar
