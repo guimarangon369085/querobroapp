@@ -64,29 +64,34 @@ test('payment guardrails: bloqueia overpayment e total abaixo do valor pago', as
     method: 'POST',
     body: {
       customerId: customer.id,
+      fulfillmentMode: 'PICKUP',
       items: [{ productId: product.id, quantity: 2 }]
     }
   });
   created.orderId = order.id;
   assert.ok(order.total > 0);
 
+  const firstPaymentAmount = Number((order.total - 5).toFixed(2));
+  const overpaymentAmount = Number((order.total - firstPaymentAmount + 0.01).toFixed(2));
+  const discountThatDropsBelowPaid = Number((order.total - (firstPaymentAmount - 1)).toFixed(2));
+
   const payment = await request(apiUrl, '/payments', {
     method: 'POST',
     body: {
       orderId: order.id,
-      amount: 10,
+      amount: firstPaymentAmount,
       method: 'pix',
       status: 'PAGO'
     }
   });
   created.paymentId = payment.id;
-  assert.equal(payment.amount, 10);
+  assert.equal(payment.amount, firstPaymentAmount);
 
   await requestExpectError(apiUrl, '/payments', 400, {
     method: 'POST',
     body: {
       orderId: order.id,
-      amount: 6,
+      amount: overpaymentAmount,
       method: 'pix',
       status: 'PAGO'
     }
@@ -95,13 +100,13 @@ test('payment guardrails: bloqueia overpayment e total abaixo do valor pago', as
   await requestExpectError(apiUrl, `/orders/${order.id}`, 400, {
     method: 'PUT',
     body: {
-      discount: 6
+      discount: discountThatDropsBelowPaid
     }
   });
 
   const finalOrder = await request(apiUrl, `/orders/${order.id}`);
   assert.equal(finalOrder.total, order.total);
-  assert.equal(finalOrder.amountPaid, 10);
-  assert.equal(finalOrder.balanceDue, Number((order.total - 10).toFixed(2)));
+  assert.equal(finalOrder.amountPaid, firstPaymentAmount);
+  assert.equal(finalOrder.balanceDue, Number((order.total - firstPaymentAmount).toFixed(2)));
   assert.equal(finalOrder.paymentStatus, 'PARCIAL');
 });
