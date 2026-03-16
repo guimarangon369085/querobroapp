@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { startTransition, useEffect, useState } from 'react';
+import { startTransition, useEffect, useId, useState } from 'react';
 
 type HeroImage = {
   accent: string;
@@ -61,6 +61,8 @@ function wrapIndex(index: number, total: number) {
 
 export function ImmersiveHomeHero() {
   const [activeIndex, setActiveIndex] = useState(INITIAL_INDEX);
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+  const instructionsId = useId();
 
   const activeImage = HOME_HERO_IMAGES[activeIndex];
 
@@ -71,6 +73,15 @@ export function ImmersiveHomeHero() {
   };
 
   useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const sync = () => setPrefersReducedMotion(mediaQuery.matches);
+    sync();
+    mediaQuery.addEventListener('change', sync);
+    return () => mediaQuery.removeEventListener('change', sync);
+  }, []);
+
+  useEffect(() => {
+    if (prefersReducedMotion) return;
     const autoplay = window.setInterval(() => {
       step(1);
     }, AUTOPLAY_MS);
@@ -78,17 +89,42 @@ export function ImmersiveHomeHero() {
     return () => {
       window.clearInterval(autoplay);
     };
-  }, []);
+  }, [prefersReducedMotion]);
 
   return (
     <main
       aria-label="Galeria da home da QUEROBROA"
+      aria-describedby={instructionsId}
+      aria-keyshortcuts="ArrowLeft ArrowRight Enter Space"
       className="relative min-h-screen overflow-hidden bg-[#120c07] text-white"
+      tabIndex={0}
       onClick={(event) => {
         if ((event.target as HTMLElement).closest('a, [data-home-cta]')) return;
         step(1);
       }}
+      onKeyDown={(event) => {
+        if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+          event.preventDefault();
+          step(1);
+          return;
+        }
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          step(-1);
+          return;
+        }
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          step(1);
+        }
+      }}
     >
+      <p id={instructionsId} className="sr-only">
+        Toque, clique ou use as setas do teclado para trocar a foto de fundo.
+      </p>
+      <p className="sr-only" aria-live="polite">
+        Foto {activeIndex + 1} de {HOME_HERO_IMAGES.length}
+      </p>
       <div className="absolute inset-0">
         {HOME_HERO_IMAGES.map((image, index) => {
           const active = index === activeIndex;
@@ -97,8 +133,12 @@ export function ImmersiveHomeHero() {
             <div
               key={image.src}
               aria-hidden={!active}
-              className={`absolute inset-[-3%] transition-[opacity,transform,filter] duration-[1800ms] ease-[cubic-bezier(.19,1,.22,1)] ${
-                active ? 'opacity-100 scale-[1.02]' : 'pointer-events-none opacity-0 scale-[1.08]'
+              className={`absolute inset-[-3%] transition-[opacity,transform,filter] ease-[cubic-bezier(.19,1,.22,1)] ${
+                prefersReducedMotion ? 'duration-100' : 'duration-[1800ms]'
+              } ${
+                active
+                  ? `opacity-100 ${prefersReducedMotion ? 'scale-100' : 'scale-[1.02]'}`
+                  : `pointer-events-none opacity-0 ${prefersReducedMotion ? 'scale-100' : 'scale-[1.08]'}`
               }`}
             >
               <Image
@@ -115,7 +155,9 @@ export function ImmersiveHomeHero() {
         })}
 
         <div
-          className="absolute inset-0 transition-[background] duration-[1800ms] ease-[cubic-bezier(.19,1,.22,1)]"
+          className={`absolute inset-0 transition-[background] ease-[cubic-bezier(.19,1,.22,1)] ${
+            prefersReducedMotion ? 'duration-100' : 'duration-[1800ms]'
+          }`}
           style={{
             background: `radial-gradient(circle at 18% 20%, ${activeImage.glow} 0%, transparent 30%), radial-gradient(circle at 82% 18%, ${activeImage.accent} 0%, transparent 24%), linear-gradient(90deg, rgba(15,9,4,0.68) 0%, rgba(15,9,4,0.28) 38%, rgba(15,9,4,0.16) 58%, rgba(15,9,4,0.62) 100%), linear-gradient(180deg, rgba(9,5,2,0.08) 0%, rgba(9,5,2,0.18) 38%, rgba(9,5,2,0.52) 74%, rgba(9,5,2,0.86) 100%)`
           }}

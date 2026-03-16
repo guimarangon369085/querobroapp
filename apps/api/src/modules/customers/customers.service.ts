@@ -3,6 +3,12 @@ import { PrismaService } from '../../prisma.service.js';
 import { CustomerSchema } from '@querobroapp/shared';
 import { normalizePhone, normalizeTitle, normalizeText } from '../../common/normalize.js';
 
+type CustomerPayload = ReturnType<typeof CustomerSchema.parse> & {
+  email?: string | null;
+};
+type CustomerCreatePayload = Omit<CustomerPayload, 'id' | 'createdAt'>;
+type CustomerUpdatePayload = Partial<CustomerCreatePayload>;
+
 @Injectable()
 export class CustomersService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
@@ -84,7 +90,7 @@ export class CustomersService {
   }
 
   create(payload: unknown) {
-    const data = CustomerSchema.omit({ id: true, createdAt: true }).parse(payload);
+    const data = CustomerSchema.omit({ id: true, createdAt: true }).parse(payload) as CustomerCreatePayload;
     const inferredName = this.inferNameParts(data.name);
     const fullName = inferredName.fullName || data.name;
     const firstName = this.pickPromotedTitle(data.firstName, inferredName.firstName) ?? inferredName.firstName;
@@ -99,6 +105,7 @@ export class CustomersService {
     const normalizedState = normalizeText(data.state ?? undefined)?.toUpperCase() ?? null;
     const normalizedPostalCode = normalizeText(data.postalCode ?? undefined);
     const normalizedCountry = normalizeTitle(data.country ?? undefined);
+    const normalizedEmail = normalizeText(data.email ?? undefined)?.toLowerCase() ?? null;
     const normalizedPlaceId = normalizeText(data.placeId ?? undefined);
     const normalizedDeliveryNotes = normalizeText(data.deliveryNotes ?? undefined);
 
@@ -109,27 +116,40 @@ export class CustomersService {
             orderBy: { id: 'desc' }
           })
         : null;
+      const existingByEmail = normalizedEmail
+        ? await tx.customer.findFirst({
+            where: { deletedAt: null, email: normalizedEmail },
+            orderBy: { id: 'desc' }
+          })
+        : null;
 
-      if (existingByPhone) {
+      if (existingByPhone && existingByEmail && existingByPhone.id !== existingByEmail.id) {
+        throw new BadRequestException(`Email ja vinculado ao cliente #${existingByEmail.id}.`);
+      }
+
+      const reusableCustomer = existingByPhone || existingByEmail;
+
+      if (reusableCustomer) {
         return tx.customer.update({
-          where: { id: existingByPhone.id },
+          where: { id: reusableCustomer.id },
           data: {
-            name: existingByPhone.name || fullName,
-            firstName: existingByPhone.firstName || firstName,
-            lastName: existingByPhone.lastName || lastName,
-            phone: existingByPhone.phone || normalizedPhone,
-            address: existingByPhone.address || normalizedAddress,
-            addressLine1: existingByPhone.addressLine1 || addressLine1,
-            addressLine2: existingByPhone.addressLine2 || normalizedAddressLine2,
-            neighborhood: existingByPhone.neighborhood || normalizedNeighborhood,
-            city: existingByPhone.city || normalizedCity,
-            state: existingByPhone.state || normalizedState,
-            postalCode: existingByPhone.postalCode || normalizedPostalCode,
-            country: existingByPhone.country || normalizedCountry,
-            placeId: existingByPhone.placeId || normalizedPlaceId,
-            lat: existingByPhone.lat ?? data.lat ?? null,
-            lng: existingByPhone.lng ?? data.lng ?? null,
-            deliveryNotes: existingByPhone.deliveryNotes || normalizedDeliveryNotes
+            name: reusableCustomer.name || fullName,
+            firstName: reusableCustomer.firstName || firstName,
+            lastName: reusableCustomer.lastName || lastName,
+            email: reusableCustomer.email || normalizedEmail,
+            phone: reusableCustomer.phone || normalizedPhone,
+            address: reusableCustomer.address || normalizedAddress,
+            addressLine1: reusableCustomer.addressLine1 || addressLine1,
+            addressLine2: reusableCustomer.addressLine2 || normalizedAddressLine2,
+            neighborhood: reusableCustomer.neighborhood || normalizedNeighborhood,
+            city: reusableCustomer.city || normalizedCity,
+            state: reusableCustomer.state || normalizedState,
+            postalCode: reusableCustomer.postalCode || normalizedPostalCode,
+            country: reusableCustomer.country || normalizedCountry,
+            placeId: reusableCustomer.placeId || normalizedPlaceId,
+            lat: reusableCustomer.lat ?? data.lat ?? null,
+            lng: reusableCustomer.lng ?? data.lng ?? null,
+            deliveryNotes: reusableCustomer.deliveryNotes || normalizedDeliveryNotes
           }
         });
       }
@@ -140,7 +160,7 @@ export class CustomersService {
           name: fullName,
           firstName,
           lastName,
-          email: null,
+          email: normalizedEmail,
           phone: normalizedPhone,
           address: normalizedAddress,
           addressLine1,
@@ -161,7 +181,7 @@ export class CustomersService {
 
   async update(id: number, payload: unknown) {
     const existing = await this.get(id);
-    const data = CustomerSchema.partial().omit({ id: true, createdAt: true }).parse(payload);
+    const data = CustomerSchema.partial().omit({ id: true, createdAt: true }).parse(payload) as CustomerUpdatePayload;
 
     const nextName = data.name !== undefined ? normalizeTitle(data.name) ?? data.name : existing.name;
     const inferredName = this.inferNameParts(nextName);
@@ -190,6 +210,8 @@ export class CustomersService {
         )
       : undefined;
     const normalizedPhone = data.phone !== undefined ? normalizePhone(data.phone) : undefined;
+    const normalizedEmail =
+      data.email !== undefined ? normalizeText(data.email ?? undefined)?.toLowerCase() ?? null : undefined;
 
     if (normalizedPhone) {
       const conflict = await this.prisma.customer.findFirst({
@@ -205,6 +227,20 @@ export class CustomersService {
       }
     }
 
+    if (normalizedEmail) {
+      const conflict = await this.prisma.customer.findFirst({
+        where: {
+          deletedAt: null,
+          email: normalizedEmail,
+          id: { not: id }
+        },
+        orderBy: { id: 'desc' }
+      });
+      if (conflict) {
+        throw new BadRequestException(`Email ja vinculado ao cliente #${conflict.id}.`);
+      }
+    }
+
     return this.prisma.customer.update({
       where: { id },
       data: {
@@ -212,7 +248,7 @@ export class CustomersService {
         name: data.name ? normalizeTitle(data.name) ?? data.name : undefined,
         firstName,
         lastName,
-        email: null,
+        email: normalizedEmail,
         phone: normalizedPhone,
         address: data.address !== undefined ? normalizeTitle(data.address) ?? null : undefined,
         addressLine1,

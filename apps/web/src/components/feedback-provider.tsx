@@ -5,11 +5,13 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
   type ReactNode
 } from 'react';
+import { useDialogA11y } from '@/lib/use-dialog-a11y';
 
 type ToastType = 'success' | 'error' | 'info';
 
@@ -75,6 +77,11 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const pendingConfirmRef = useRef<ConfirmState | null>(null);
+  const confirmDialogRef = useRef<HTMLDivElement | null>(null);
+  const confirmCancelRef = useRef<HTMLButtonElement | null>(null);
+  const confirmActionRef = useRef<HTMLButtonElement | null>(null);
+  const confirmTitleId = useId();
+  const confirmDescriptionId = useId();
 
   useEffect(() => {
     pendingConfirmRef.current = confirmState;
@@ -158,6 +165,13 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  useDialogA11y({
+    isOpen: Boolean(confirmState),
+    dialogRef: confirmDialogRef,
+    initialFocusRef: confirmCancelRef,
+    onClose: () => closeConfirm(false)
+  });
+
   const runToastAction = useCallback(
     async (toast: ToastItem) => {
       if (!toast.onAction) return;
@@ -192,10 +206,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
       if (event.defaultPrevented || event.isComposing) return;
 
       if (confirmState) {
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          closeConfirm(true);
-        } else if (event.key === 'Escape') {
+        if (event.key === 'Escape') {
           event.preventDefault();
           closeConfirm(false);
         }
@@ -270,19 +281,27 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
         <div className="app-confirm-backdrop" role="presentation" onClick={() => closeConfirm(false)}>
           <div
             className="app-confirm-modal"
+            ref={confirmDialogRef}
             role="dialog"
             aria-modal="true"
-            aria-label={confirmState.options.title}
+            aria-labelledby={confirmTitleId}
+            aria-describedby={confirmState.options.description ? confirmDescriptionId : undefined}
+            tabIndex={-1}
             onClick={(event) => event.stopPropagation()}
           >
-            <h4 className="app-confirm-modal__title">{confirmState.options.title}</h4>
+            <h4 id={confirmTitleId} className="app-confirm-modal__title">
+              {confirmState.options.title}
+            </h4>
             {confirmState.options.description ? (
-              <p className="app-confirm-modal__description">{confirmState.options.description}</p>
+              <p id={confirmDescriptionId} className="app-confirm-modal__description">
+                {confirmState.options.description}
+              </p>
             ) : null}
             <div className="app-confirm-modal__actions">
               <button
                 type="button"
                 className="app-button app-button-ghost"
+                ref={confirmCancelRef}
                 onClick={() => closeConfirm(false)}
               >
                 {confirmState.options.cancelLabel || 'Cancelar'}
@@ -292,6 +311,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
                 className={`app-button ${
                   confirmState.options.danger ? 'app-button-danger' : 'app-button-primary'
                 }`}
+                ref={confirmActionRef}
                 onClick={() => closeConfirm(true)}
               >
                 {confirmState.options.confirmLabel || 'Confirmar'}

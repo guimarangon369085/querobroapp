@@ -3360,18 +3360,9 @@ function OrdersPageContent() {
                     return (
                       <div
                         key={`list-${order.id ?? 'na'}`}
-                        className={`orders-list-panel__line app-panel app-panel--interactive app-panel--expandable grid gap-1 ${
+                        className={`orders-list-panel__line app-panel app-panel--expandable grid gap-1 ${
                           isActive ? 'app-panel--expanded' : ''
                         }`}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => openOrderDetail(order)}
-                        onKeyDown={(event) => {
-                          if (event.currentTarget !== event.target) return;
-                          if (event.key !== 'Enter' && event.key !== ' ') return;
-                          event.preventDefault();
-                          openOrderDetail(order);
-                        }}
                       >
                         <div className="flex flex-wrap items-start justify-between gap-1">
                           <div className="min-w-0">
@@ -3417,7 +3408,13 @@ function OrdersPageContent() {
                             <span className="orders-list-panel__line-total">
                               {formatCurrencyBR(order.total ?? 0)}
                             </span>
-                            <span className="app-panel__chevron" aria-hidden="true" />
+                            <button
+                              type="button"
+                              className="app-button app-button-ghost px-2 py-1 text-[11px]"
+                              onClick={() => openOrderDetail(order)}
+                            >
+                              Ver
+                            </button>
                             {!isOperationMode ? (
                               <button
                                 type="button"

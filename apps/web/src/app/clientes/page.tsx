@@ -5,8 +5,7 @@ import {
   useId,
   useMemo,
   useRef,
-  useState,
-  type KeyboardEvent
+  useState
 } from 'react';
 import type { Customer, OrderIntake, OrderItem, Product } from '@querobroapp/shared';
 import { apiFetch } from '@/lib/api';
@@ -40,10 +39,14 @@ import {
 import { loadGooglePlacesLibrary } from '@/lib/google-places';
 import { submitOrderIntake } from '@/features/orders/orders-api';
 
-const emptyCustomer: Partial<Customer> = {
+type CustomerRecord = Customer & { email?: string | null };
+type CustomerFormState = Partial<CustomerRecord>;
+
+const emptyCustomer: CustomerFormState = {
   name: '',
   firstName: '',
   lastName: '',
+  email: '',
   phone: '',
   address: '',
   addressLine1: '',
@@ -58,6 +61,9 @@ const emptyCustomer: Partial<Customer> = {
 
 const TEST_DATA_TAG = '[TESTE_E2E]';
 const TUTORIAL_QUERY_VALUE = 'primeira_vez';
+const REPEAT_ORDER_NEXT_DAY_CUTOFF_HOUR = 22;
+const REPEAT_ORDER_FIRST_SLOT_HOUR = 8;
+const REPEAT_ORDER_FIRST_SLOT_MINUTE = 0;
 const CUSTOMER_AUTOFILL_FIELDS = [
   'address',
   'addressLine1',
@@ -132,10 +138,15 @@ function parseDateTimeLocalInput(value: string) {
 }
 
 function defaultRepeatOrderDateTimeInput() {
-  const baseline = new Date();
-  baseline.setMinutes(baseline.getMinutes() + 30);
-  baseline.setSeconds(0, 0);
-  return formatDateTimeLocalValue(baseline);
+  return formatDateTimeLocalValue(resolveRepeatOrderMinimumDateTime());
+}
+
+function resolveRepeatOrderMinimumDateTime(reference = new Date()) {
+  const minimum = new Date(reference);
+  const dayOffset = minimum.getHours() >= REPEAT_ORDER_NEXT_DAY_CUTOFF_HOUR ? 2 : 1;
+  minimum.setDate(minimum.getDate() + dayOffset);
+  minimum.setHours(REPEAT_ORDER_FIRST_SLOT_HOUR, REPEAT_ORDER_FIRST_SLOT_MINUTE, 0, 0);
+  return minimum;
 }
 
 function formatOrderDateTimeLabel(isoValue?: string | null) {
@@ -186,12 +197,12 @@ function CustomersPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { tutorialMode, isSpotlightSlot } = useTutorialSpotlight(searchParams, TUTORIAL_QUERY_VALUE);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [form, setForm] = useState<Partial<Customer>>(emptyCustomer);
+  const [customers, setCustomers] = useState<CustomerRecord[]>([]);
+  const [form, setForm] = useState<CustomerFormState>(emptyCustomer);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerRecord | null>(null);
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const [customerRecentOrders, setCustomerRecentOrders] = useState<CustomerOrderPreview[]>([]);
   const [customerOrdersError, setCustomerOrdersError] = useState<string | null>(null);
@@ -201,6 +212,9 @@ function CustomersPageContent() {
   const [orderCountByCustomerId, setOrderCountByCustomerId] = useState<Record<number, number>>({});
   const [productNameById, setProductNameById] = useState<Record<number, string>>({});
   const [repeatDraftOrderId, setRepeatDraftOrderId] = useState<number | null>(null);
+  const [repeatDraftMinimumInput, setRepeatDraftMinimumInput] = useState(() =>
+    defaultRepeatOrderDateTimeInput()
+  );
   const [repeatDraftScheduledAt, setRepeatDraftScheduledAt] = useState(() => defaultRepeatOrderDateTimeInput());
   const [repeatDraftError, setRepeatDraftError] = useState<string | null>(null);
   const [isRepeatOrderPending, setIsRepeatOrderPending] = useState(false);
@@ -217,7 +231,7 @@ function CustomersPageContent() {
 
   const load = async () => {
     const [nextCustomers, orders] = await Promise.all([
-      apiFetch<Customer[]>('/customers'),
+      apiFetch<CustomerRecord[]>('/customers'),
       apiFetch<CustomerOrderPreview[]>('/orders')
     ]);
 
@@ -265,7 +279,7 @@ function CustomersPageContent() {
     const applyGooglePatch = (patch: ReturnType<typeof buildCustomerAddressAutofillFromGooglePlace>) => {
       if (Object.keys(patch).length === 0) return;
       setForm((prev) => {
-        const next: Partial<Customer> = {
+        const next: CustomerFormState = {
           ...prev,
           // Complemento permanece manual; nao e preenchido pelo endereco do Google.
           address: `${patch.address || ''}`,
@@ -362,9 +376,9 @@ function CustomersPageContent() {
   };
 
   const mergeCustomerAutofill = (
-    currentForm: Partial<Customer>,
+    currentForm: CustomerFormState,
     patch: CustomerAutofillPatch
-  ): Partial<Customer> => {
+  ): CustomerFormState => {
     let nextForm = currentForm;
 
     for (const field of CUSTOMER_AUTOFILL_FIELDS) {
@@ -391,7 +405,7 @@ function CustomersPageContent() {
     return nextForm;
   };
 
-  const seedCustomerAutofill = (currentForm: Partial<Customer>, patch: CustomerAutofillPatch) => {
+  const seedCustomerAutofill = (currentForm: CustomerFormState, patch: CustomerAutofillPatch) => {
     for (const field of CUSTOMER_AUTOFILL_FIELDS) {
       if (!(field in patch)) continue;
       const nextValue = `${(patch[field] as string | undefined) ?? ''}`;
@@ -400,7 +414,7 @@ function CustomersPageContent() {
     }
   };
 
-  const primeCustomerAutofill = (currentForm: Partial<Customer>) => {
+  const primeCustomerAutofill = (currentForm: CustomerFormState) => {
     customerAutofillRef.current = createCustomerAutofillState();
     seedCustomerAutofill(currentForm, buildCustomerNameAutofill(currentForm.name));
     seedCustomerAutofill(currentForm, buildCustomerAddressAutofill(currentForm.address));
@@ -519,7 +533,7 @@ function CustomersPageContent() {
       firstName: promotedFirstName ? titleCase(promotedFirstName) : fallbackFirst,
       lastName: promotedLastName ? titleCase(promotedLastName) : fallbackLast,
       phone: normalizePhone(form.phone || ''),
-      email: null,
+      email: compactWhitespace(form.email || '') || null,
       address: normalizeAddress(form.address || ''),
       addressLine1: normalizeAddress(promotedAddressLine1),
       addressLine2: normalizeAddress(form.addressLine2 || ''),
@@ -571,7 +585,7 @@ function CustomersPageContent() {
     }
   };
 
-  const startEdit = (customer: Customer, options?: { focusForm?: boolean }) => {
+  const startEdit = (customer: CustomerRecord, options?: { focusForm?: boolean }) => {
     const inferredNamePatch = buildCustomerNameAutofill(customer.name);
     const inferredAddressPatch = buildCustomerAddressAutofill(customer.address);
     const promotedFirstName = pickPromotedValue(customer.firstName, inferredNamePatch.firstName);
@@ -585,10 +599,11 @@ function CustomersPageContent() {
     );
 
     setEditingId(customer.id!);
-    const nextForm: Partial<Customer> = {
+    const nextForm: CustomerFormState = {
       name: customer.name,
       firstName: promotedFirstName,
       lastName: promotedLastName,
+      email: customer.email ?? '',
       phone: formatPhoneBR(customer.phone ?? ''),
       address: customer.address ?? '',
       addressLine1: promotedAddressLine1,
@@ -619,6 +634,7 @@ function CustomersPageContent() {
     setIsLoadingCustomerOrders(false);
     setIsCustomerInfoEditing(false);
     setRepeatDraftOrderId(null);
+    setRepeatDraftMinimumInput(defaultRepeatOrderDateTimeInput());
     setRepeatDraftError(null);
   };
 
@@ -679,7 +695,7 @@ function CustomersPageContent() {
   };
 
   const openCustomerModal = async (
-    customer: Customer,
+    customer: CustomerRecord,
     options?: { preselectRepeatOrderId?: number | null }
   ) => {
     startEdit(customer, { focusForm: false });
@@ -708,15 +724,19 @@ function CustomersPageContent() {
   });
 
   const startRepeatOrder = (order: CustomerOrderPreview) => {
+    const nextMinimumInput = defaultRepeatOrderDateTimeInput();
     setRepeatDraftOrderId(order.id);
-    setRepeatDraftScheduledAt(defaultRepeatOrderDateTimeInput());
+    setRepeatDraftMinimumInput(nextMinimumInput);
+    setRepeatDraftScheduledAt(nextMinimumInput);
     setRepeatDraftError(null);
   };
 
   const cancelRepeatOrder = () => {
+    const nextMinimumInput = defaultRepeatOrderDateTimeInput();
     setRepeatDraftOrderId(null);
     setRepeatDraftError(null);
-    setRepeatDraftScheduledAt(defaultRepeatOrderDateTimeInput());
+    setRepeatDraftMinimumInput(nextMinimumInput);
+    setRepeatDraftScheduledAt(nextMinimumInput);
   };
 
   const confirmRepeatOrder = async (order: CustomerOrderPreview) => {
@@ -725,6 +745,17 @@ function CustomersPageContent() {
     const parsedScheduledAt = parseDateTimeLocalInput(repeatDraftScheduledAt);
     if (!parsedScheduledAt) {
       setRepeatDraftError('Informe data e hora.');
+      return;
+    }
+    const minimumRepeatSchedule = parseDateTimeLocalInput(repeatDraftMinimumInput);
+    if (!minimumRepeatSchedule) {
+      setRepeatDraftError('Nao foi possivel validar o horario minimo.');
+      return;
+    }
+    if (parsedScheduledAt.getTime() < minimumRepeatSchedule.getTime()) {
+      setRepeatDraftError(
+        `Use uma data a partir de ${formatDateTimeLocalValue(minimumRepeatSchedule).replace('T', ' ')}.`
+      );
       return;
     }
 
@@ -824,7 +855,7 @@ function CustomersPageContent() {
               name: customerToRestore.name,
               firstName: customerToRestore.firstName ?? null,
               lastName: customerToRestore.lastName ?? null,
-              email: null,
+              email: customerToRestore.email ?? null,
               phone: customerToRestore.phone ?? null,
               address: customerToRestore.address ?? null,
               addressLine1: customerToRestore.addressLine1 ?? null,
@@ -847,16 +878,6 @@ function CustomersPageContent() {
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Nao foi possivel excluir.');
     }
-  };
-
-  const handleCustomerCardKeyDown = (
-    event: KeyboardEvent<HTMLDivElement>,
-    customer: Customer
-  ) => {
-    if (event.currentTarget !== event.target) return;
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    void openCustomerModal(customer);
   };
 
   const filteredCustomers = useMemo(() => {
@@ -927,6 +948,16 @@ function CustomersPageContent() {
               inputMode="tel"
               autoComplete="tel"
               onChange={(e) => setForm((prev) => ({ ...prev, phone: formatPhoneBR(e.target.value) }))}
+            />
+          </FormField>
+          <FormField label="Email">
+            <input
+              className="app-input"
+              type="email"
+              placeholder="cliente@exemplo.com"
+              value={form.email || ''}
+              autoComplete="email"
+              onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
             />
           </FormField>
           <FormField label="Endereço">
@@ -1101,16 +1132,7 @@ function CustomersPageContent() {
           const customerPhoneHref = buildWhatsAppUrl(customer.phone);
           const customerOrdersCount = customer.id ? orderCountByCustomerId[customer.id] || 0 : 0;
           return (
-            <div
-              key={customer.id}
-              className="app-panel app-panel--interactive"
-              role="button"
-              tabIndex={0}
-              onClick={() => {
-                void openCustomerModal(customer);
-              }}
-              onKeyDown={(event) => handleCustomerCardKeyDown(event, customer)}
-            >
+            <div key={customer.id} className="app-panel">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -1121,9 +1143,9 @@ function CustomersPageContent() {
                     </span>
                   </div>
                   <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-neutral-500">
-                    {customerPhoneHref ? (
-                      <a
-                        href={customerPhoneHref}
+                      {customerPhoneHref ? (
+                        <a
+                          href={customerPhoneHref}
                         target="_blank"
                         rel="noreferrer"
                         className="inline-flex min-w-0 items-center gap-1 break-all underline decoration-dotted underline-offset-2 hover:text-neutral-900"
@@ -1141,6 +1163,15 @@ function CustomersPageContent() {
                     </span>
                   </p>
                 </div>
+                <button
+                  type="button"
+                  className="app-button app-button-ghost w-full sm:w-auto"
+                  onClick={() => {
+                    void openCustomerModal(customer);
+                  }}
+                >
+                  Abrir
+                </button>
               </div>
             </div>
           );
@@ -1242,6 +1273,7 @@ function CustomersPageContent() {
                                 className="app-input"
                                 type="datetime-local"
                                 value={repeatDraftScheduledAt}
+                                min={repeatDraftMinimumInput}
                                 step={900}
                                 onChange={(event) => setRepeatDraftScheduledAt(event.target.value)}
                               />
@@ -1301,6 +1333,10 @@ function CustomersPageContent() {
                       {formatPhoneBR(form.phone || '') || 'Sem telefone'}
                     </p>
                     <p className="mt-1">
+                      <span className="font-semibold text-neutral-900">Email:</span>{' '}
+                      {form.email || 'Sem email'}
+                    </p>
+                    <p className="mt-1">
                       <span className="font-semibold text-neutral-900">Endereço:</span>{' '}
                       {[
                         form.address || form.addressLine1 || '',
@@ -1339,6 +1375,16 @@ function CustomersPageContent() {
                           onChange={(event) =>
                             setForm((prev) => ({ ...prev, phone: formatPhoneBR(event.target.value) }))
                           }
+                        />
+                      </FormField>
+                      <FormField label="Email">
+                        <input
+                          className="app-input"
+                          type="email"
+                          placeholder="cliente@exemplo.com"
+                          value={form.email || ''}
+                          autoComplete="email"
+                          onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
                         />
                       </FormField>
                       <FormField label="Endereço">
