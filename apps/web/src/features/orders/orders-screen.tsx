@@ -3548,8 +3548,8 @@ function OrdersPageContent() {
             </button>
             <div className="app-panel order-detail-modal__panel grid gap-4">
           <div className="rounded-2xl border border-white/70 bg-white/80 p-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0 flex-1 overflow-x-auto pb-1">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+              <div className="min-w-0 overflow-x-auto pb-1 sm:flex-1">
                 <ol className="flex min-w-max items-start">
                   {ORDER_WORKFLOW_STATUSES.map((status, index) => {
                     const stageMeta = orderWorkflowStatusMeta[status];
@@ -3603,10 +3603,10 @@ function OrdersPageContent() {
                   })}
                 </ol>
               </div>
-              <div className="flex shrink-0 items-center gap-2">
+              <div className="flex w-full items-center gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
                 <button
                   type="button"
-                  className="app-button app-button-ghost disabled:cursor-not-allowed disabled:opacity-60"
+                  className="app-button app-button-ghost flex-1 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none"
                   onClick={moveSelectedOrderStatusBackward}
                   disabled={
                     isStatusUpdatePending ||
@@ -3619,7 +3619,7 @@ function OrdersPageContent() {
                 </button>
                 <button
                   type="button"
-                  className="app-button app-button-primary disabled:cursor-not-allowed disabled:opacity-60"
+                  className="app-button app-button-primary flex-1 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none"
                   onClick={moveSelectedOrderStatusForward}
                   disabled={
                     isStatusUpdatePending ||
@@ -3638,8 +3638,8 @@ function OrdersPageContent() {
               </p>
             ) : null}
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
+          <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+            <div className="min-w-0">
               <h3 className="text-xl font-semibold">Pedido #{selectedOrder.id}</h3>
               <div className="mt-1 flex flex-wrap items-center gap-2">
                 <p className="text-sm font-semibold text-neutral-900">{selectedCustomerNameLabel}</p>
@@ -3652,18 +3652,18 @@ function OrdersPageContent() {
                   </Link>
                 ) : null}
               </div>
-              <p className="mt-0.5 text-xs text-neutral-600">{selectedCustomerAddressLabel}</p>
+              <p className="mt-0.5 break-words text-xs text-neutral-600">{selectedCustomerAddressLabel}</p>
               {selectedCustomerPhoneHref ? (
                 <a
                   href={selectedCustomerPhoneHref}
                   target="_blank"
                   rel="noreferrer"
-                  className="mt-0.5 inline-flex text-xs text-neutral-600 underline decoration-dotted underline-offset-2 hover:text-neutral-900"
+                  className="mt-0.5 inline-flex break-all text-xs text-neutral-600 underline decoration-dotted underline-offset-2 hover:text-neutral-900"
                 >
                   {selectedCustomerPhoneLabel}
                 </a>
               ) : (
-                <p className="mt-0.5 text-xs text-neutral-600">{selectedCustomerPhoneLabel}</p>
+                <p className="mt-0.5 break-words text-xs text-neutral-600">{selectedCustomerPhoneLabel}</p>
               )}
               <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-neutral-500">
                 <span
@@ -3681,15 +3681,15 @@ function OrdersPageContent() {
             </div>
             <button
               type="button"
-              className="app-button app-button-danger"
+              className="app-button app-button-danger w-full sm:w-auto"
               onClick={() => removeOrder(selectedOrder.id!)}
             >
               Excluir
             </button>
           </div>
           <div className="mt-3 grid gap-2 rounded-2xl border border-white/70 bg-white/80 p-3">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
+            <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-start sm:justify-between">
+              <div className="min-w-0">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
                   FRETE
                 </p>
@@ -3702,7 +3702,7 @@ function OrdersPageContent() {
                 </p>
               </div>
               {selectedOrder.fulfillmentMode === 'DELIVERY' ? (
-                <span className="rounded-full border border-white/80 bg-white/86 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                <span className="w-fit rounded-full border border-white/80 bg-white/86 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
                   {selectedOrder.deliveryProvider === 'UBER_DIRECT' ? 'Uber Envios' : 'Estimativa'}
                 </span>
               ) : null}
@@ -3712,8 +3712,8 @@ function OrdersPageContent() {
             ) : null}
           </div>
           <div className="mt-3 grid gap-2 rounded-2xl border border-white/70 bg-white/80 p-3">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
+            <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-start sm:justify-between">
+              <div className="min-w-0">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
                   COBRANCA PIX
                 </p>
@@ -3727,7 +3727,7 @@ function OrdersPageContent() {
               </div>
               <button
                 type="button"
-                className="app-button app-button-primary text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                className="app-button app-button-primary w-full text-xs disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                 onClick={() => {
                   void sendSelectedOrderPixWhatsApp();
                 }}
@@ -3828,11 +3828,11 @@ function OrdersPageContent() {
                 <p className="text-xs font-medium text-rose-700 md:col-span-3">{selectedOrderEditError}</p>
               ) : null}
             </div>
-            <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
               <h4 className="font-semibold">Caixas</h4>
               <button
                 type="button"
-                className="app-button app-button-ghost text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                className="app-button app-button-ghost w-full text-xs disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                 onClick={() => openSelectedOrderBoxEditor(selectedOrderNewEditableBox)}
                 disabled={
                   !selectedOrderAllowsBoxEdit ||
@@ -3858,20 +3858,20 @@ function OrdersPageContent() {
 
                   return (
                     <div key={box.key} className={`rounded-2xl border px-3 py-2 ${boxToneClass}`}>
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex min-w-0 items-center gap-2">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
                           <span
                             className={`text-xs font-semibold uppercase tracking-[0.14em] ${boxLabelToneClass}`}
                           >
                             {box.label}
                           </span>
-                          <span className={`truncate text-xs font-semibold ${boxTextToneClass}`}>
+                          <span className={`max-w-full break-words text-xs font-semibold sm:truncate ${boxTextToneClass}`}>
                             {box.officialName}
                           </span>
                         </div>
                         <button
                           type="button"
-                          className="app-button app-button-ghost text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                          className="app-button app-button-ghost w-full text-xs disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                           onClick={() => openSelectedOrderBoxEditor(box)}
                           disabled={
                             !selectedOrderAllowsBoxEdit ||
@@ -3912,10 +3912,12 @@ function OrdersPageContent() {
                               return (
                                 <div
                                   key={`selected-order-box-row-${box.key}-${row.productId}`}
-                                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/70 bg-white/80 px-2 py-1.5"
+                                  className="flex flex-col gap-2 rounded-lg border border-white/70 bg-white/80 px-2 py-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between"
                                 >
-                                  <span className="text-xs font-medium text-neutral-700">{row.productName}</span>
-                                  <div className="flex items-center gap-1">
+                                  <span className="break-words text-xs font-medium text-neutral-700">
+                                    {row.productName}
+                                  </span>
+                                  <div className="flex flex-wrap items-center gap-1 sm:justify-end">
                                     <button
                                       type="button"
                                       className="app-button app-button-ghost px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-60"
@@ -4023,10 +4025,10 @@ function OrdersPageContent() {
                               Esse status bloqueia a edicao das caixas.
                             </p>
                           ) : null}
-                          <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                             <button
                               type="button"
-                              className="app-button app-button-danger disabled:cursor-not-allowed disabled:opacity-60"
+                              className="app-button app-button-danger w-full disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                               onClick={() => {
                                 void removeSelectedOrderEditingBox();
                               }}
@@ -4044,7 +4046,7 @@ function OrdersPageContent() {
                             </button>
                             <button
                               type="button"
-                              className="app-button app-button-ghost disabled:cursor-not-allowed disabled:opacity-60"
+                              className="app-button app-button-ghost w-full disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                               onClick={() => openSelectedOrderBoxEditor(box)}
                               disabled={isSavingSelectedOrderEditingBox || isDeletingSelectedOrderEditingBox}
                             >
@@ -4052,7 +4054,7 @@ function OrdersPageContent() {
                             </button>
                             <button
                               type="button"
-                              className="app-button app-button-primary disabled:cursor-not-allowed disabled:opacity-60"
+                              className="app-button app-button-primary w-full disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                               onClick={() => {
                                 void saveSelectedOrderBoxEdit();
                               }}
@@ -4096,8 +4098,8 @@ function OrdersPageContent() {
             </button>
             <div className="app-panel order-detail-modal__panel grid gap-4">
               <div className="rounded-2xl border border-white/70 bg-white/80 p-3">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1 overflow-x-auto pb-1">
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+                  <div className="min-w-0 overflow-x-auto pb-1 sm:flex-1">
                     <ol className="flex min-w-max items-start">
                       {MASS_PREP_EVENT_STATUSES.map((status, index) => {
                         const stageMeta = massPrepWorkflowStatusMeta[status];
@@ -4169,10 +4171,10 @@ function OrdersPageContent() {
                       ) : null}
                     </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
+                  <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
                     <button
                       type="button"
-                      className="app-button app-button-ghost disabled:cursor-not-allowed disabled:opacity-60"
+                      className="app-button app-button-ghost flex-1 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none"
                       onClick={() => {
                         if (!selectedMassPrepPreviousWorkflowStatus) return;
                         void updateSelectedMassPrepEventStatus(selectedMassPrepPreviousWorkflowStatus);
@@ -4188,7 +4190,7 @@ function OrdersPageContent() {
                     </button>
                     <button
                       type="button"
-                      className="app-button app-button-primary disabled:cursor-not-allowed disabled:opacity-60"
+                      className="app-button app-button-primary flex-1 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none"
                       onClick={() => {
                         if (!selectedMassPrepNextWorkflowStatus) return;
                         void updateSelectedMassPrepEventStatus(selectedMassPrepNextWorkflowStatus);
@@ -4205,7 +4207,7 @@ function OrdersPageContent() {
                     </button>
                     <button
                       type="button"
-                      className="app-button app-button-danger disabled:cursor-not-allowed disabled:opacity-60"
+                      className="app-button app-button-danger w-full disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                       onClick={() => {
                         void removeSelectedMassPrepEvent();
                       }}

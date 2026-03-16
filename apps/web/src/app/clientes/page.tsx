@@ -1110,13 +1110,13 @@ function CustomersPageContent() {
                       {customer.neighborhood ? ` • ${customer.neighborhood}` : ''}
                     </span>
                   </div>
-                  <p className="mt-1 flex items-center gap-2 text-sm text-neutral-500">
+                  <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-neutral-500">
                     {customerPhoneHref ? (
                       <a
                         href={customerPhoneHref}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center gap-1 underline decoration-dotted underline-offset-2 hover:text-neutral-900"
+                        className="inline-flex min-w-0 items-center gap-1 break-all underline decoration-dotted underline-offset-2 hover:text-neutral-900"
                         onClick={(event) => event.stopPropagation()}
                         aria-label={`Abrir conversa no WhatsApp para ${customerPhoneLabel}`}
                       >
@@ -1126,7 +1126,7 @@ function CustomersPageContent() {
                     ) : (
                       <span>{customerPhoneLabel}</span>
                     )}
-                    <span className="text-xs font-semibold tracking-[0.08em] text-neutral-500">
+                    <span className="whitespace-nowrap text-xs font-semibold tracking-[0.08em] text-neutral-500">
                       {customerOrdersCount} {customerOrdersCount === 1 ? 'Pedido' : 'Pedidos'}
                     </span>
                   </p>
@@ -1158,14 +1158,14 @@ function CustomersPageContent() {
             </button>
 
             <div className="app-panel order-detail-modal__panel grid gap-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+                <div className="min-w-0">
                   <h3 className="text-lg font-semibold text-neutral-900">{selectedCustomer.name}</h3>
                 </div>
               </div>
 
               <section className="grid gap-3">
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                   <h4 className="text-sm font-semibold uppercase tracking-[0.14em] text-neutral-600">
                     Pedidos recentes
                   </h4>
@@ -1190,7 +1190,7 @@ function CustomersPageContent() {
                         key={order.id}
                         className="rounded-2xl border border-[color:var(--line-soft)] bg-white/85 p-3 shadow-sm"
                       >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-semibold text-neutral-900">Pedido #{order.id}</p>
                             <p className="mt-1 text-xs text-neutral-600">
@@ -1212,7 +1212,7 @@ function CustomersPageContent() {
                           </div>
                           <button
                             type="button"
-                            className="app-button app-button-primary"
+                            className="app-button app-button-primary w-full sm:w-auto"
                             onClick={() => startRepeatOrder(order)}
                             disabled={isRepeatOrderPending}
                           >
@@ -1234,10 +1234,10 @@ function CustomersPageContent() {
                             {repeatDraftError ? (
                               <p className="text-xs font-medium text-red-700">{repeatDraftError}</p>
                             ) : null}
-                            <div className="flex flex-wrap gap-2">
+                            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                               <button
                                 type="button"
-                                className="app-button app-button-primary"
+                                className="app-button app-button-primary w-full sm:w-auto"
                                 onClick={() => {
                                   void confirmRepeatOrder(order);
                                 }}
@@ -1247,7 +1247,7 @@ function CustomersPageContent() {
                               </button>
                               <button
                                 type="button"
-                                className="app-button app-button-ghost"
+                                className="app-button app-button-ghost w-full sm:w-auto"
                                 onClick={cancelRepeatOrder}
                                 disabled={isRepeatOrderPending}
                               >
@@ -1263,13 +1263,13 @@ function CustomersPageContent() {
               </section>
 
               <section className="grid gap-3">
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                   <h4 className="text-sm font-semibold uppercase tracking-[0.14em] text-neutral-600">
                     Dados
                   </h4>
                   <button
                     type="button"
-                    className="app-button app-button-ghost min-h-8 px-3 py-1.5 text-[0.7rem] normal-case tracking-[0.02em]"
+                    className="app-button app-button-ghost min-h-8 w-full px-3 py-1.5 text-[0.7rem] normal-case tracking-[0.02em] sm:w-auto"
                     onClick={() => setIsCustomerInfoEditing((current) => !current)}
                   >
                     {isCustomerInfoEditing ? 'Fechar edicao' : 'Editar'}

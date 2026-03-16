@@ -348,6 +348,10 @@ section {
   min-width: 0;
 }
 
+.app-main > * {
+  min-width: 0;
+}
+
 .app-topbar {
   display: flex;
   align-items: center;
@@ -606,6 +610,11 @@ section {
   display: grid;
   gap: 20px;
   width: min(100%, 1280px);
+  min-width: 0;
+}
+
+.app-content > * {
+  min-width: 0;
 }
 
 .app-panel {
@@ -614,6 +623,7 @@ section {
   border-radius: 20px;
   padding: 18px;
   box-shadow: var(--shadow-soft);
+  min-width: 0;
 }
 
 .app-panel--interactive {
@@ -1979,6 +1989,7 @@ input[type='radio'] {
 
 .app-spotlight-slot {
   position: relative;
+  min-width: 0;
 }
 
 .app-spotlight-slot--active {
@@ -2514,6 +2525,7 @@ input[type='radio'] {
 
 .app-confirm-modal {
   width: min(460px, 100%);
+  max-width: calc(100vw - 24px);
   border-radius: 18px;
   border: 1px solid var(--line-soft);
   background: rgba(255, 250, 244, 0.97);
@@ -2535,6 +2547,7 @@ input[type='radio'] {
 
 .app-confirm-modal__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 10px;
   margin-top: 4px;
@@ -2549,13 +2562,18 @@ input[type='radio'] {
   padding: 18px;
   background: rgba(24, 16, 10, 0.38);
   backdrop-filter: blur(4px);
+  overflow: hidden;
 }
 
 .order-detail-modal__dialog {
   position: relative;
   width: min(1120px, 100%);
-  max-height: min(92vh, 920px);
-  overflow: auto;
+  max-width: 100%;
+  max-height: min(calc(100dvh - 36px), 920px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
 }
 
 .order-detail-modal__close {
@@ -2580,6 +2598,12 @@ input[type='radio'] {
 
 .order-detail-modal__panel {
   background: rgba(255, 251, 246, 0.98);
+  min-width: 0;
+  overflow-x: clip;
+}
+
+.order-detail-modal__panel > * {
+  min-width: 0;
 }
 
 .mass-prep-stock-grid {
@@ -4127,6 +4151,26 @@ html.app-render-stability .app-topbar {
 }
 
 @media (max-width: 640px) {
+  .app-confirm-backdrop {
+    padding: 12px;
+  }
+
+  .app-confirm-modal {
+    width: 100%;
+    border-radius: 16px;
+    padding: 16px;
+  }
+
+  .app-confirm-modal__actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .app-confirm-modal__actions .app-button {
+    width: 100%;
+    justify-content: center;
+  }
+
   .app-shell {
     padding: 12px;
     gap: 12px;
@@ -4150,6 +4194,21 @@ html.app-render-stability .app-topbar {
 
   .app-topbar {
     padding: 10px 12px;
+  }
+
+  .order-detail-modal {
+    place-items: start center;
+    padding: 12px;
+  }
+
+  .order-detail-modal__dialog {
+    width: 100%;
+    max-height: calc(100dvh - 24px);
+  }
+
+  .order-detail-modal__close {
+    top: 2px;
+    padding: 7px 11px;
   }
 
   .app-content {
@@ -4264,13 +4323,22 @@ html.app-render-stability .app-topbar {
   }
 
   .order-quick-create__product-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
+    align-items: stretch;
   }
 
   .order-quick-create__qty-button {
     min-height: 34px;
     min-width: 36px;
     padding-inline: 8px;
+    width: 100%;
+  }
+
+  .order-quick-create__qty-value {
+    grid-column: 1 / -1;
+    min-width: 0;
   }
 
 
