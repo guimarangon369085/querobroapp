@@ -3,13 +3,17 @@ import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
 import {
+  compareMoney,
   ExternalOrderSubmissionSchema,
+  moneyFromMinorUnits,
+  moneyToMinorUnits,
   OrderIntakeMetaSchema,
   OrderIntakeSchema,
   OrderItemSchema,
   OrderSchema,
   OrderStatusEnum,
-  PixChargeSchema
+  PixChargeSchema,
+  roundMoney
 } from '@querobroapp/shared';
 import { z } from 'zod';
 import {
@@ -75,6 +79,11 @@ const ORDER_BOX_PRICE_TRADITIONAL = 40;
 const ORDER_BOX_PRICE_MIXED_GOIABADA = 45;
 const ORDER_BOX_PRICE_MIXED_OTHER = 47;
 const ORDER_BOX_PRICE_GOIABADA = 50;
+const ORDER_BOX_PRICE_CUSTOM_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRICE_CUSTOM);
+const ORDER_BOX_PRICE_TRADITIONAL_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRICE_TRADITIONAL);
+const ORDER_BOX_PRICE_MIXED_GOIABADA_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRICE_MIXED_GOIABADA);
+const ORDER_BOX_PRICE_MIXED_OTHER_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRICE_MIXED_OTHER);
+const ORDER_BOX_PRICE_GOIABADA_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRICE_GOIABADA);
 const MASS_PREP_SOURCE = 'MASS_PREP';
 const MASS_PREP_SOURCE_LABEL_PREFIX = 'ORDER_';
 const ORDER_FORMULA_SOURCE_MASS_READY = 'MASS_READY';
@@ -143,8 +152,7 @@ export class OrdersService {
   ) {}
 
   private toMoney(value: number) {
-    if (!Number.isFinite(value)) return 0;
-    return Math.round((value + Number.EPSILON) * 100) / 100;
+    return roundMoney(value);
   }
 
   private formatCurrencyBR(value: number) {
@@ -157,11 +165,15 @@ export class OrdersService {
   private toUnitPrice(value: number | null | undefined) {
     const parsed = Number(value ?? 0);
     if (!Number.isFinite(parsed) || parsed < 0) return 0;
-    return parsed;
+    return roundMoney(parsed);
   }
 
   private computeOrderTotal(subtotal: number, discount: number, deliveryFee: number) {
-    return this.toMoney(Math.max(this.toMoney(subtotal) - this.toMoney(discount), 0) + this.toMoney(deliveryFee));
+    const subtotalAfterDiscount = Math.max(
+      moneyToMinorUnits(subtotal) - moneyToMinorUnits(discount),
+      0
+    );
+    return moneyFromMinorUnits(subtotalAfterDiscount + moneyToMinorUnits(deliveryFee));
   }
 
   private toQty(value: number) {
@@ -320,7 +332,7 @@ export class OrdersService {
     const fullBoxes = Math.floor(totalUnits / ORDER_BOX_UNITS);
     const openUnits = totalUnits % ORDER_BOX_UNITS;
     if (fullBoxes <= 0) {
-      return this.toMoney((ORDER_BOX_PRICE_CUSTOM / ORDER_BOX_UNITS) * openUnits);
+      return moneyFromMinorUnits(Math.round((ORDER_BOX_PRICE_CUSTOM_MINOR_UNITS / ORDER_BOX_UNITS) * openUnits));
     }
 
     const countTraditional = Math.max(Math.floor(flavorCounts.T || 0), 0);
@@ -335,10 +347,11 @@ export class OrdersService {
       Math.floor(countQueijo / 3) +
       Math.floor(countRequeijao / 3);
 
-    const discountTraditional = ORDER_BOX_PRICE_CUSTOM - ORDER_BOX_PRICE_TRADITIONAL;
-    const discountMixedGoiabada = ORDER_BOX_PRICE_CUSTOM - ORDER_BOX_PRICE_MIXED_GOIABADA;
-    const discountMixedOther = ORDER_BOX_PRICE_CUSTOM - ORDER_BOX_PRICE_MIXED_OTHER;
-    const discountGoiabada = ORDER_BOX_PRICE_CUSTOM - ORDER_BOX_PRICE_GOIABADA;
+    const discountTraditional = ORDER_BOX_PRICE_CUSTOM_MINOR_UNITS - ORDER_BOX_PRICE_TRADITIONAL_MINOR_UNITS;
+    const discountMixedGoiabada =
+      ORDER_BOX_PRICE_CUSTOM_MINOR_UNITS - ORDER_BOX_PRICE_MIXED_GOIABADA_MINOR_UNITS;
+    const discountMixedOther = ORDER_BOX_PRICE_CUSTOM_MINOR_UNITS - ORDER_BOX_PRICE_MIXED_OTHER_MINOR_UNITS;
+    const discountGoiabada = ORDER_BOX_PRICE_CUSTOM_MINOR_UNITS - ORDER_BOX_PRICE_GOIABADA_MINOR_UNITS;
 
     let bestDiscount = 0;
 
@@ -384,11 +397,11 @@ export class OrdersService {
       }
     }
 
-    const fullBoxesSubtotal = fullBoxes * ORDER_BOX_PRICE_CUSTOM - bestDiscount;
+    const fullBoxesSubtotal = fullBoxes * ORDER_BOX_PRICE_CUSTOM_MINOR_UNITS - bestDiscount;
     const openBoxSubtotal =
-      openUnits > 0 ? this.toMoney((ORDER_BOX_PRICE_CUSTOM / ORDER_BOX_UNITS) * openUnits) : 0;
+      openUnits > 0 ? Math.round((ORDER_BOX_PRICE_CUSTOM_MINOR_UNITS / ORDER_BOX_UNITS) * openUnits) : 0;
 
-    return this.toMoney(fullBoxesSubtotal + openBoxSubtotal);
+    return moneyFromMinorUnits(fullBoxesSubtotal + openBoxSubtotal);
   }
 
   private async calculateOrderSubtotalFromItems(
@@ -1028,26 +1041,26 @@ export class OrdersService {
       paidAt: Date | null;
     }>
   ) {
-    return this.toMoney(
+    return moneyFromMinorUnits(
       payments.reduce((sum, payment) => {
         const isPaid = payment.status === 'PAGO' || Boolean(payment.paidAt);
-        return isPaid ? sum + payment.amount : sum;
+        return isPaid ? sum + moneyToMinorUnits(payment.amount) : sum;
       }, 0)
     );
   }
 
   private deriveOrderPaymentStatus(total: number, amountPaid: number) {
-    if (amountPaid <= 0) return 'PENDENTE';
-    if (amountPaid + 0.00001 >= total) return 'PAGO';
+    if (compareMoney(amountPaid, 0) <= 0) return 'PENDENTE';
+    if (compareMoney(amountPaid, total) >= 0) return 'PAGO';
     return 'PARCIAL';
   }
 
   private ensureOrderTotalCoversPaid(total: number, amountPaid: number) {
-    const normalizedTotal = this.toMoney(total);
-    const normalizedAmountPaid = this.toMoney(amountPaid);
-    if (normalizedAmountPaid > normalizedTotal + 0.00001) {
+    const normalizedTotal = moneyToMinorUnits(total);
+    const normalizedAmountPaid = moneyToMinorUnits(amountPaid);
+    if (normalizedAmountPaid > normalizedTotal) {
       throw new BadRequestException(
-        `Total do pedido nao pode ficar abaixo do valor ja pago. Total=${normalizedTotal} Pago=${normalizedAmountPaid}`
+        `Total do pedido nao pode ficar abaixo do valor ja pago. Total=${moneyFromMinorUnits(normalizedTotal)} Pago=${moneyFromMinorUnits(normalizedAmountPaid)}`
       );
     }
   }
@@ -1072,7 +1085,7 @@ export class OrdersService {
   private withFinancial(order: OrderWithRelations) {
     const total = this.toMoney(order.total ?? 0);
     const amountPaid = this.getPaidAmount(order.payments || []);
-    const balanceDue = this.toMoney(Math.max(total - amountPaid, 0));
+    const balanceDue = moneyFromMinorUnits(Math.max(moneyToMinorUnits(total) - moneyToMinorUnits(amountPaid), 0));
     const paymentStatus = this.deriveOrderPaymentStatus(total, amountPaid);
     return {
       ...order,
@@ -1247,6 +1260,110 @@ export class OrdersService {
     return normalizeTitle(value ?? undefined) ?? normalizeText(value ?? undefined) ?? null;
   }
 
+  private customerIdentityScore(customer: {
+    phone?: string | null;
+    address?: string | null;
+    placeId?: string | null;
+    lat?: number | null;
+    lng?: number | null;
+    deliveryNotes?: string | null;
+  }) {
+    let score = 0;
+    if (customer.phone) score += 4;
+    if (customer.placeId) score += 4;
+    if (customer.address) score += 3;
+    if (typeof customer.lat === 'number' && Number.isFinite(customer.lat)) score += 2;
+    if (typeof customer.lng === 'number' && Number.isFinite(customer.lng)) score += 2;
+    if (customer.deliveryNotes) score += 1;
+    return score;
+  }
+
+  private async mergeCustomersByPhone(
+    tx: TransactionClient,
+    customers: Array<{
+      id: number;
+      name: string;
+      firstName: string | null;
+      lastName: string | null;
+      email: string | null;
+      phone: string | null;
+      address: string | null;
+      addressLine1: string | null;
+      addressLine2: string | null;
+      neighborhood: string | null;
+      city: string | null;
+      state: string | null;
+      postalCode: string | null;
+      country: string | null;
+      placeId: string | null;
+      lat: number | null;
+      lng: number | null;
+      deliveryNotes: string | null;
+      createdAt: Date;
+      deletedAt: Date | null;
+    }>
+  ) {
+    if (customers.length === 0) return null;
+
+    const ordered = [...customers].sort((left, right) => {
+      const scoreDelta = this.customerIdentityScore(right) - this.customerIdentityScore(left);
+      if (scoreDelta !== 0) return scoreDelta;
+      return left.id - right.id;
+    });
+    const canonical = ordered[0];
+    const duplicates = ordered.slice(1);
+    if (duplicates.length === 0) return canonical;
+
+    const duplicateIds = duplicates.map((entry) => entry.id);
+    const merged = await tx.customer.update({
+      where: { id: canonical.id },
+      data: {
+        firstName: canonical.firstName || duplicates.map((entry) => entry.firstName).find(Boolean) || null,
+        lastName: canonical.lastName || duplicates.map((entry) => entry.lastName).find(Boolean) || null,
+        email: canonical.email || duplicates.map((entry) => entry.email).find(Boolean) || null,
+        phone: canonical.phone || duplicates.map((entry) => entry.phone).find(Boolean) || null,
+        address: canonical.address || duplicates.map((entry) => entry.address).find(Boolean) || null,
+        addressLine1:
+          canonical.addressLine1 || duplicates.map((entry) => entry.addressLine1).find(Boolean) || null,
+        addressLine2:
+          canonical.addressLine2 || duplicates.map((entry) => entry.addressLine2).find(Boolean) || null,
+        neighborhood:
+          canonical.neighborhood || duplicates.map((entry) => entry.neighborhood).find(Boolean) || null,
+        city: canonical.city || duplicates.map((entry) => entry.city).find(Boolean) || null,
+        state: canonical.state || duplicates.map((entry) => entry.state).find(Boolean) || null,
+        postalCode:
+          canonical.postalCode || duplicates.map((entry) => entry.postalCode).find(Boolean) || null,
+        country: canonical.country || duplicates.map((entry) => entry.country).find(Boolean) || null,
+        placeId: canonical.placeId || duplicates.map((entry) => entry.placeId).find(Boolean) || null,
+        lat:
+          canonical.lat ??
+          duplicates.find((entry) => typeof entry.lat === 'number' && Number.isFinite(entry.lat))?.lat ??
+          null,
+        lng:
+          canonical.lng ??
+          duplicates.find((entry) => typeof entry.lng === 'number' && Number.isFinite(entry.lng))?.lng ??
+          null,
+        deliveryNotes:
+          canonical.deliveryNotes || duplicates.map((entry) => entry.deliveryNotes).find(Boolean) || null
+      }
+    });
+
+    await tx.order.updateMany({
+      where: { customerId: { in: duplicateIds } },
+      data: { customerId: canonical.id }
+    });
+    await tx.customer.updateMany({
+      where: { id: { in: duplicateIds } },
+      data: {
+        deletedAt: new Date(),
+        phone: null,
+        placeId: null
+      }
+    });
+
+    return merged;
+  }
+
   private async resolveIntakeCustomer(
     tx: TransactionClient,
     customer: OrderIntakePayload['customer']
@@ -1275,20 +1392,33 @@ export class OrdersService {
     const normalizedDeliveryNotes = normalizeText(customer.deliveryNotes ?? undefined);
 
     let existing = normalizedPhone
-      ? await tx.customer.findFirst({
-          where: {
-            deletedAt: null,
-            phone: normalizedPhone
-          },
-          orderBy: { id: 'desc' }
-        })
+      ? await tx.customer
+          .findMany({
+            where: {
+              deletedAt: null,
+              phone: normalizedPhone
+            },
+            orderBy: [{ id: 'asc' }]
+          })
+          .then((records) => this.mergeCustomersByPhone(tx, records))
       : null;
 
-    if (!existing) {
+    if (!existing && normalizedPlaceId) {
       existing = await tx.customer.findFirst({
         where: {
           deletedAt: null,
-          name: normalizedName
+          placeId: normalizedPlaceId
+        },
+        orderBy: { id: 'desc' }
+      });
+    }
+
+    if (!existing && normalizedAddress) {
+      existing = await tx.customer.findFirst({
+        where: {
+          deletedAt: null,
+          name: normalizedName,
+          address: normalizedAddress
         },
         orderBy: { id: 'desc' }
       });
@@ -1789,8 +1919,8 @@ export class OrdersService {
         );
         const previousSubtotal = this.toMoney(order.subtotal ?? 0);
         const previousTotal = this.toMoney(order.total ?? 0);
-        const subtotalChanged = Math.abs(previousSubtotal - nextSubtotal) > 0.00001;
-        const totalChanged = Math.abs(previousTotal - nextTotal) > 0.00001;
+        const subtotalChanged = compareMoney(previousSubtotal, nextSubtotal) !== 0;
+        const totalChanged = compareMoney(previousTotal, nextTotal) !== 0;
 
         if (!subtotalChanged && !totalChanged) {
           unchanged += 1;
@@ -2215,9 +2345,9 @@ export class OrdersService {
 
       const total = this.toMoney(order.total ?? 0);
       const amountPaid = this.getPaidAmount(order.payments || []);
-      const balanceDue = this.toMoney(Math.max(total - amountPaid, 0));
+      const balanceDue = moneyFromMinorUnits(Math.max(moneyToMinorUnits(total) - moneyToMinorUnits(amountPaid), 0));
 
-      if (balanceDue <= 0) {
+      if (compareMoney(balanceDue, 0) <= 0) {
         return this.withFinancial(order);
       }
 
@@ -2226,7 +2356,7 @@ export class OrdersService {
           payment.status !== 'PAGO' &&
           !payment.paidAt &&
           payment.method.trim().toLowerCase() === 'pix' &&
-          Math.abs(this.toMoney(payment.amount) - balanceDue) <= 0.00001
+          compareMoney(payment.amount, balanceDue) === 0
       );
 
       if (reusablePendingPayment) {

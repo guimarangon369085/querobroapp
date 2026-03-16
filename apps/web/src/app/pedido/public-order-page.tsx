@@ -33,6 +33,7 @@ const PUBLIC_ORDER_NEXT_DAY_CUTOFF_HOUR = 22;
 const PUBLIC_ORDER_FIRST_SLOT_HOUR = 8;
 const PUBLIC_ORDER_FIRST_SLOT_MINUTE = 0;
 const PUBLIC_ORDER_TIME_STEP_SECONDS = 15 * 60;
+const PUBLIC_ORDER_DRAFT_SESSION_STORAGE_KEY = 'querobroapp:public-order-draft-session-id';
 
 type BoxCode = OrderBoxCode;
 type FlavorCode = OrderFlavorCode;
@@ -208,6 +209,34 @@ function createCustomBoxId() {
   return `custom-box-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function createPublicOrderDraftSessionId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `public-order-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function hashPublicOrderSubmission(value: unknown) {
+  const raw = JSON.stringify(value);
+  let hash = 2166136261;
+  for (let index = 0; index < raw.length; index += 1) {
+    hash ^= raw.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function resolvePublicOrderDraftSessionId() {
+  if (typeof window === 'undefined') {
+    return createPublicOrderDraftSessionId();
+  }
+  const existing = window.sessionStorage.getItem(PUBLIC_ORDER_DRAFT_SESSION_STORAGE_KEY)?.trim();
+  if (existing) return existing;
+  const created = createPublicOrderDraftSessionId();
+  window.sessionStorage.setItem(PUBLIC_ORDER_DRAFT_SESSION_STORAGE_KEY, created);
+  return created;
+}
+
 function createEmptyCustomBoxDraft(): CustomBoxDraft {
   return {
     id: createCustomBoxId(),
@@ -299,8 +328,14 @@ export function PublicOrderPage() {
   const [isQuotingDelivery, setIsQuotingDelivery] = useState(false);
   const addressInputRef = useRef<HTMLInputElement | null>(null);
   const [minimumSchedule, setMinimumSchedule] = useState<Date | null>(null);
+  const [draftSessionId, setDraftSessionId] = useState(() => resolvePublicOrderDraftSessionId());
   const minimumDateValue = minimumSchedule ? formatDateInputValue(minimumSchedule) : '';
   const minimumTimeValue = minimumSchedule ? formatTimeInputValue(minimumSchedule) : '';
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.sessionStorage.setItem(PUBLIC_ORDER_DRAFT_SESSION_STORAGE_KEY, draftSessionId);
+  }, [draftSessionId]);
 
   const parsedBoxCounts = useMemo(() => {
     return Object.fromEntries(
@@ -572,13 +607,10 @@ export function PublicOrderPage() {
             mode: form.fulfillmentMode,
             scheduledAt: scheduledAtIso,
             customer: {
-              name: form.name.trim() || null,
-              phone: form.phone.trim() || null,
               address: form.address.trim() || null,
               placeId: form.placeId.trim() || null,
               lat: typeof form.lat === 'number' ? form.lat : null,
-              lng: typeof form.lng === 'number' ? form.lng : null,
-              deliveryNotes: form.deliveryNotes.trim() || null
+              lng: typeof form.lng === 'number' ? form.lng : null
             },
             manifest: {
               items: selectedBoxes.map((entry) => ({
@@ -619,12 +651,9 @@ export function PublicOrderPage() {
   }, [
     estimatedTotal,
     form.address,
-    form.deliveryNotes,
     form.fulfillmentMode,
     form.lat,
     form.lng,
-    form.name,
-    form.phone,
     form.placeId,
     minimumSchedule,
     parsedScheduledAt,
@@ -687,7 +716,7 @@ export function PublicOrderPage() {
       }
     }
 
-    const payload: ExternalOrderSubmission = {
+    const payloadBase: ExternalOrderSubmission = {
       version: 1,
       customer: {
         name: form.name.trim(),
@@ -718,7 +747,24 @@ export function PublicOrderPage() {
       source: {
         channel: 'PUBLIC_FORM',
         originLabel: 'public-order-page',
-        externalId: `public-form:${Date.now()}:${form.phone.replace(/\D/g, '') || 'sem-telefone'}`
+        externalId: draftSessionId,
+        idempotencyKey: null
+      }
+    };
+
+    const submissionFingerprint = hashPublicOrderSubmission({
+      version: payloadBase.version,
+      customer: payloadBase.customer,
+      fulfillment: payloadBase.fulfillment,
+      delivery: payloadBase.delivery,
+      flavors: payloadBase.flavors,
+      notes: payloadBase.notes
+    });
+    const payload: ExternalOrderSubmission = {
+      ...payloadBase,
+      source: {
+        ...payloadBase.source,
+        idempotencyKey: `public-form:${draftSessionId}:${submissionFingerprint}`
       }
     };
 
@@ -766,6 +812,7 @@ export function PublicOrderPage() {
 
   const resetForm = () => {
     const nextMinimum = resolvePublicOrderMinimumSchedule();
+    setDraftSessionId(createPublicOrderDraftSessionId());
     setMinimumSchedule(nextMinimum);
     setForm({
       ...initialFormState,

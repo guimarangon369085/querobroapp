@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+export * from './lib/money.js';
+
 export const OrderStatusEnum = z.enum([
   'ABERTO',
   'CONFIRMADO',

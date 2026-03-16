@@ -14,7 +14,15 @@ import {
   type PointerEvent,
   type MouseEvent
 } from 'react';
-import type { Customer, InventoryItem, InventoryMovement, OrderIntake, PixCharge, Product } from '@querobroapp/shared';
+import {
+  roundMoney,
+  type Customer,
+  type InventoryItem,
+  type InventoryMovement,
+  type OrderIntake,
+  type PixCharge,
+  type Product
+} from '@querobroapp/shared';
 import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { useDialogA11y } from '@/lib/use-dialog-a11y';
@@ -397,8 +405,7 @@ function compactCustomerLabelForCalendar(value?: string | null) {
 }
 
 function toMoney(value: number) {
-  if (!Number.isFinite(value)) return 0;
-  return Math.round((value + Number.EPSILON) * 100) / 100;
+  return roundMoney(value);
 }
 
 function normalizeDraftOrderItems(items?: Array<{ productId?: number; quantity?: number }> | null) {

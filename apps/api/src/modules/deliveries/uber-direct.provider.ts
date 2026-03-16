@@ -1,4 +1,5 @@
 import { BadGatewayException, BadRequestException, GatewayTimeoutException } from '@nestjs/common';
+import { roundMoney } from '@querobroapp/shared';
 import type {
   DeliveryDispatchInput,
   DeliveryDispatchOutput,
@@ -16,8 +17,7 @@ export class UberDirectProvider implements DeliveryProvider {
   private accessTokenCache: { accessToken: string; expiresAt: number } | null = null;
 
   private toMoney(value: number) {
-    if (!Number.isFinite(value)) return 0;
-    return Math.round((value + Number.EPSILON) * 100) / 100;
+    return roundMoney(value);
   }
 
   private baseUrl() {

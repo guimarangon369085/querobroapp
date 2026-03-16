@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import { roundMoney } from '@querobroapp/shared';
 import type { DeliveryDispatchInput, DeliveryDispatchOutput, DeliveryProvider, DeliveryQuoteInput, DeliveryQuoteOutput } from './delivery-provider.js';
 
 export class LocalDeliveryProvider implements DeliveryProvider {
   private toMoney(value: number) {
-    if (!Number.isFinite(value)) return 0;
-    return Math.round((value + Number.EPSILON) * 100) / 100;
+    return roundMoney(value);
   }
 
   private fallbackFee() {

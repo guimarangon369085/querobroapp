@@ -1,4 +1,4 @@
-import { normalizePhoneNumber } from '@querobroapp/shared';
+import { normalizePhoneNumber, roundMoney } from '@querobroapp/shared';
 
 export function normalizePhone(value?: string | null) {
   return normalizePhoneNumber(value);
@@ -18,8 +18,7 @@ export function normalizeTitle(value?: string | null) {
 }
 
 export function normalizeMoney(value: number) {
-  if (!Number.isFinite(value)) return 0;
-  return Math.round(value * 100) / 100;
+  return roundMoney(value);
 }
 
 export function parseLocaleNumber(value: string | number | null | undefined) {

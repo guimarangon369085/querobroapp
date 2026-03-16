@@ -1,4 +1,4 @@
-import type { Bom, Customer, Order, Payment, Product } from '@querobroapp/shared';
+import { roundMoney, type Bom, type Customer, type Order, type Payment, type Product } from '@querobroapp/shared';
 import { formatCurrencyBR } from '@/lib/format';
 
 export type OperationFlowRaw = {
@@ -78,8 +78,7 @@ const statusRank: Record<string, number> = {
 };
 
 function toMoney(value: number | null | undefined) {
-  if (!Number.isFinite(value)) return 0;
-  return Math.round(((value || 0) + Number.EPSILON) * 100) / 100;
+  return roundMoney(value || 0);
 }
 
 function pickMainOrder(orders: Order[]) {

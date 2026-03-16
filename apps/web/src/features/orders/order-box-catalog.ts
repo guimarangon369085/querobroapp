@@ -1,4 +1,8 @@
-import type { Product } from '@querobroapp/shared';
+import {
+  moneyFromMinorUnits,
+  moneyToMinorUnits,
+  type Product
+} from '@querobroapp/shared';
 
 export const ORDER_BOX_UNITS = 7;
 export const ORDER_BOX_PRICE_CUSTOM = 52;
@@ -6,6 +10,12 @@ export const ORDER_BOX_PRICE_TRADITIONAL = 40;
 export const ORDER_BOX_PRICE_MIXED_GOIABADA = 45;
 export const ORDER_BOX_PRICE_MIXED_OTHER = 47;
 export const ORDER_BOX_PRICE_GOIABADA = 50;
+
+const ORDER_BOX_PRICE_CUSTOM_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRICE_CUSTOM);
+const ORDER_BOX_PRICE_TRADITIONAL_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRICE_TRADITIONAL);
+const ORDER_BOX_PRICE_MIXED_GOIABADA_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRICE_MIXED_GOIABADA);
+const ORDER_BOX_PRICE_MIXED_OTHER_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRICE_MIXED_OTHER);
+const ORDER_BOX_PRICE_GOIABADA_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRICE_GOIABADA);
 
 export const ORDER_MISTA_SHORTCUT_CODES = ['G', 'D', 'Q', 'R'] as const;
 export const ORDER_FLAVOR_CODES = ['T', 'G', 'D', 'Q', 'R'] as const;
@@ -237,10 +247,6 @@ export function sumOrderFlavorCounts(counts: Record<OrderFlavorCode, number>) {
   return ORDER_FLAVOR_CODES.reduce((sum, code) => sum + Math.max(Math.floor(counts[code] || 0), 0), 0);
 }
 
-function toMoney(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
-}
-
 export function calculateOrderSubtotalFromFlavorSummary(params: {
   totalUnits: number;
   flavorCounts: Record<OrderFlavorCode, number>;
@@ -251,7 +257,7 @@ export function calculateOrderSubtotalFromFlavorSummary(params: {
   const fullBoxes = Math.floor(totalUnits / ORDER_BOX_UNITS);
   const openUnits = totalUnits % ORDER_BOX_UNITS;
   if (fullBoxes <= 0) {
-    return toMoney((ORDER_BOX_PRICE_CUSTOM / ORDER_BOX_UNITS) * openUnits);
+    return moneyFromMinorUnits(Math.round((ORDER_BOX_PRICE_CUSTOM_MINOR_UNITS / ORDER_BOX_UNITS) * openUnits));
   }
 
   const countTraditional = Math.max(Math.floor(flavorCounts.T || 0), 0);
@@ -264,10 +270,11 @@ export function calculateOrderSubtotalFromFlavorSummary(params: {
   const otherTriplets =
     Math.floor(countDoce / 3) + Math.floor(countQueijo / 3) + Math.floor(countRequeijao / 3);
 
-  const discountTraditional = ORDER_BOX_PRICE_CUSTOM - ORDER_BOX_PRICE_TRADITIONAL;
-  const discountMixedGoiabada = ORDER_BOX_PRICE_CUSTOM - ORDER_BOX_PRICE_MIXED_GOIABADA;
-  const discountMixedOther = ORDER_BOX_PRICE_CUSTOM - ORDER_BOX_PRICE_MIXED_OTHER;
-  const discountGoiabada = ORDER_BOX_PRICE_CUSTOM - ORDER_BOX_PRICE_GOIABADA;
+  const discountTraditional = ORDER_BOX_PRICE_CUSTOM_MINOR_UNITS - ORDER_BOX_PRICE_TRADITIONAL_MINOR_UNITS;
+  const discountMixedGoiabada =
+    ORDER_BOX_PRICE_CUSTOM_MINOR_UNITS - ORDER_BOX_PRICE_MIXED_GOIABADA_MINOR_UNITS;
+  const discountMixedOther = ORDER_BOX_PRICE_CUSTOM_MINOR_UNITS - ORDER_BOX_PRICE_MIXED_OTHER_MINOR_UNITS;
+  const discountGoiabada = ORDER_BOX_PRICE_CUSTOM_MINOR_UNITS - ORDER_BOX_PRICE_GOIABADA_MINOR_UNITS;
 
   let bestDiscount = 0;
   const maxMixedGoiabada = Math.min(goiabadaTriplets, Math.floor(countTraditional / 4), fullBoxes);
@@ -309,11 +316,10 @@ export function calculateOrderSubtotalFromFlavorSummary(params: {
     }
   }
 
-  const fullBoxesSubtotal = fullBoxes * ORDER_BOX_PRICE_CUSTOM - bestDiscount;
-  const openSubtotal =
-    openUnits > 0 ? toMoney((ORDER_BOX_PRICE_CUSTOM / ORDER_BOX_UNITS) * openUnits) : 0;
+  const fullBoxesSubtotal = fullBoxes * ORDER_BOX_PRICE_CUSTOM_MINOR_UNITS - bestDiscount;
+  const openSubtotal = openUnits > 0 ? Math.round((ORDER_BOX_PRICE_CUSTOM_MINOR_UNITS / ORDER_BOX_UNITS) * openUnits) : 0;
 
-  return toMoney(fullBoxesSubtotal + openSubtotal);
+  return moneyFromMinorUnits(fullBoxesSubtotal + openSubtotal);
 }
 
 export function buildOrderFlavorSummaryFromItems(

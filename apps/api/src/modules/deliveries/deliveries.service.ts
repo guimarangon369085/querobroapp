@@ -11,7 +11,8 @@ import {
   DeliveryQuoteDraftSchema,
   DeliveryQuoteResponseSchema,
   DeliveryQuoteSelectionSchema,
-  OrderFulfillmentModeEnum
+  OrderFulfillmentModeEnum,
+  roundMoney
 } from '@querobroapp/shared';
 import { PrismaService } from '../../prisma.service.js';
 import {
@@ -623,8 +624,7 @@ export class DeliveriesService {
   }
 
   private toMoney(value: number) {
-    if (!Number.isFinite(value)) return 0;
-    return Math.round((value + Number.EPSILON) * 100) / 100;
+    return roundMoney(value);
   }
 
   private buildCustomerAddress(customer?: OrderWithDeliveryContext['customer'] | null) {

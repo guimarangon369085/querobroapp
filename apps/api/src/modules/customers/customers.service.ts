@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, Inject } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Inject } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service.js';
 import { CustomerSchema } from '@querobroapp/shared';
 import { normalizePhone, normalizeTitle, normalizeText } from '../../common/normalize.js';
@@ -89,31 +89,73 @@ export class CustomersService {
     const fullName = inferredName.fullName || data.name;
     const firstName = this.pickPromotedTitle(data.firstName, inferredName.firstName) ?? inferredName.firstName;
     const lastName = this.pickPromotedTitle(data.lastName, inferredName.lastName) ?? inferredName.lastName;
+    const normalizedPhone = normalizePhone(data.phone);
     const normalizedAddress = normalizeTitle(data.address ?? undefined);
     const inferredAddressLine1 = this.inferAddressLine1(normalizedAddress);
     const addressLine1 = this.pickPromotedTitle(data.addressLine1, inferredAddressLine1) ?? inferredAddressLine1;
+    const normalizedAddressLine2 = normalizeTitle(data.addressLine2 ?? undefined);
+    const normalizedNeighborhood = normalizeTitle(data.neighborhood ?? undefined);
+    const normalizedCity = normalizeTitle(data.city ?? undefined);
+    const normalizedState = normalizeText(data.state ?? undefined)?.toUpperCase() ?? null;
+    const normalizedPostalCode = normalizeText(data.postalCode ?? undefined);
+    const normalizedCountry = normalizeTitle(data.country ?? undefined);
+    const normalizedPlaceId = normalizeText(data.placeId ?? undefined);
+    const normalizedDeliveryNotes = normalizeText(data.deliveryNotes ?? undefined);
 
-    return this.prisma.customer.create({
-      data: {
-        ...data,
-        name: fullName,
-        firstName,
-        lastName,
-        email: null,
-        phone: normalizePhone(data.phone),
-        address: normalizedAddress,
-        addressLine1,
-        addressLine2: normalizeTitle(data.addressLine2 ?? undefined),
-        neighborhood: normalizeTitle(data.neighborhood ?? undefined),
-        city: normalizeTitle(data.city ?? undefined),
-        state: normalizeText(data.state ?? undefined)?.toUpperCase() ?? null,
-        postalCode: normalizeText(data.postalCode ?? undefined),
-        country: normalizeTitle(data.country ?? undefined),
-        placeId: normalizeText(data.placeId ?? undefined),
-        lat: data.lat ?? null,
-        lng: data.lng ?? null,
-        deliveryNotes: normalizeText(data.deliveryNotes ?? undefined)
+    return this.prisma.$transaction(async (tx) => {
+      const existingByPhone = normalizedPhone
+        ? await tx.customer.findFirst({
+            where: { deletedAt: null, phone: normalizedPhone },
+            orderBy: { id: 'desc' }
+          })
+        : null;
+
+      if (existingByPhone) {
+        return tx.customer.update({
+          where: { id: existingByPhone.id },
+          data: {
+            name: existingByPhone.name || fullName,
+            firstName: existingByPhone.firstName || firstName,
+            lastName: existingByPhone.lastName || lastName,
+            phone: existingByPhone.phone || normalizedPhone,
+            address: existingByPhone.address || normalizedAddress,
+            addressLine1: existingByPhone.addressLine1 || addressLine1,
+            addressLine2: existingByPhone.addressLine2 || normalizedAddressLine2,
+            neighborhood: existingByPhone.neighborhood || normalizedNeighborhood,
+            city: existingByPhone.city || normalizedCity,
+            state: existingByPhone.state || normalizedState,
+            postalCode: existingByPhone.postalCode || normalizedPostalCode,
+            country: existingByPhone.country || normalizedCountry,
+            placeId: existingByPhone.placeId || normalizedPlaceId,
+            lat: existingByPhone.lat ?? data.lat ?? null,
+            lng: existingByPhone.lng ?? data.lng ?? null,
+            deliveryNotes: existingByPhone.deliveryNotes || normalizedDeliveryNotes
+          }
+        });
       }
+
+      return tx.customer.create({
+        data: {
+          ...data,
+          name: fullName,
+          firstName,
+          lastName,
+          email: null,
+          phone: normalizedPhone,
+          address: normalizedAddress,
+          addressLine1,
+          addressLine2: normalizedAddressLine2,
+          neighborhood: normalizedNeighborhood,
+          city: normalizedCity,
+          state: normalizedState,
+          postalCode: normalizedPostalCode,
+          country: normalizedCountry,
+          placeId: normalizedPlaceId,
+          lat: data.lat ?? null,
+          lng: data.lng ?? null,
+          deliveryNotes: normalizedDeliveryNotes
+        }
+      });
     });
   }
 
@@ -147,6 +189,21 @@ export class CustomersService {
           inferredAddressLine1
         )
       : undefined;
+    const normalizedPhone = data.phone !== undefined ? normalizePhone(data.phone) : undefined;
+
+    if (normalizedPhone) {
+      const conflict = await this.prisma.customer.findFirst({
+        where: {
+          deletedAt: null,
+          phone: normalizedPhone,
+          id: { not: id }
+        },
+        orderBy: { id: 'desc' }
+      });
+      if (conflict) {
+        throw new BadRequestException(`Telefone ja vinculado ao cliente #${conflict.id}.`);
+      }
+    }
 
     return this.prisma.customer.update({
       where: { id },
@@ -156,7 +213,7 @@ export class CustomersService {
         firstName,
         lastName,
         email: null,
-        phone: data.phone !== undefined ? normalizePhone(data.phone) : undefined,
+        phone: normalizedPhone,
         address: data.address !== undefined ? normalizeTitle(data.address) ?? null : undefined,
         addressLine1,
         addressLine2: data.addressLine2 !== undefined ? normalizeTitle(data.addressLine2) ?? null : undefined,

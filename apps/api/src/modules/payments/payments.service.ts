@@ -1,7 +1,13 @@
 import { BadRequestException, Injectable, NotFoundException, Inject } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
-import { PaymentSchema, PaymentStatusEnum, PixChargeSchema } from '@querobroapp/shared';
+import {
+  moneyToMinorUnits,
+  PaymentSchema,
+  PaymentStatusEnum,
+  PixChargeSchema,
+  roundMoney
+} from '@querobroapp/shared';
 
 type TransactionClient = Prisma.TransactionClient;
 type PaymentRecord = {
@@ -20,8 +26,7 @@ export class PaymentsService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   private toMoney(value: number) {
-    if (!Number.isFinite(value)) return 0;
-    return Math.round((value + Number.EPSILON) * 100) / 100;
+    return roundMoney(value);
   }
 
   private getConfiguredPixProvider() {
@@ -213,8 +218,8 @@ export class PaymentsService {
   }
 
   private ensureWithinOrderTotal(orderTotal: number, paidCurrent: number, amountToAdd: number) {
-    const nextPaid = this.toMoney(paidCurrent + amountToAdd);
-    if (nextPaid > this.toMoney(orderTotal) + 0.00001) {
+    const nextPaid = moneyToMinorUnits(paidCurrent) + moneyToMinorUnits(amountToAdd);
+    if (nextPaid > moneyToMinorUnits(orderTotal)) {
       throw new BadRequestException(
         `Pagamento excede o total do pedido. Total=${this.toMoney(orderTotal)} PagoAtual=${paidCurrent} NovoPagamento=${amountToAdd}`
       );
