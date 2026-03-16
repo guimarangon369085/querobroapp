@@ -1106,12 +1106,8 @@ function OrdersPageContent() {
     if (!selectedOrder?.id) return;
     setIsSendingSelectedOrderPixWhatsApp(true);
     try {
-      const response = await sendOrderPixChargeWhatsApp(selectedOrder.id);
-      notifySuccess(
-        response.messages.length >= 2
-          ? 'PIX enviado em 2 mensagens no WhatsApp.'
-          : 'PIX enviado no WhatsApp.'
-      );
+      await sendOrderPixChargeWhatsApp(selectedOrder.id);
+      notifySuccess('PIX enviado no WhatsApp.');
     } catch (error) {
       notifyError(error instanceof Error ? error.message : 'Nao foi possivel enviar o PIX no WhatsApp.');
     } finally {
@@ -3751,7 +3747,7 @@ function OrdersPageContent() {
             ) : selectedOrderPixCharge ? (
               <>
                 <p className="text-xs text-neutral-600">
-                  O envio faz 2 mensagens seguidas: a primeira com o contexto do pedido e a segunda so com a chave PIX.
+                  O envio leva uma mensagem completa com o contexto do pedido e o codigo PIX copia e cola.
                 </p>
                 {!selectedCustomer?.phone ? (
                   <p className="text-xs font-medium text-rose-700">Cliente sem telefone valido para WhatsApp.</p>

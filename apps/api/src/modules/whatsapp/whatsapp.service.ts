@@ -110,23 +110,20 @@ export class WhatsAppService {
   }): Promise<WhatsAppPixDispatch> {
     const to = this.normalizeRecipientPhone(input.phone);
     const customerLabel = input.customerName.trim() || 'cliente';
-    const summaryLines = [
+    const messageLines = [
       `Oi, ${customerLabel}.`,
       `Segue o PIX do pedido #${input.orderId}.`,
       `Valor: ${input.amountLabel}.`,
-      'Vou enviar a chave na proxima mensagem para copiar e colar direto no app do banco.'
+      '',
+      'Codigo PIX copia e cola:',
+      input.copyPasteCode.trim()
     ];
 
     const messages = [
       await this.postTextMessage({
         to,
         kind: 'SUMMARY',
-        body: summaryLines.join('\n')
-      }),
-      await this.postTextMessage({
-        to,
-        kind: 'PIX_CODE',
-        body: input.copyPasteCode.trim()
+        body: messageLines.join('\n')
       })
     ];
 
