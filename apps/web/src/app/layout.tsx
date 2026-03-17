@@ -17,10 +17,18 @@ export const metadata: Metadata = {
   description: 'Operacao diaria da Broa com pedidos, clientes e estoque.',
   applicationName: 'QUEROBROAPP',
   manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'QUEROBROA'
+  },
   icons: {
-    icon: '/broa-mark.svg',
-    shortcut: '/broa-mark.svg',
-    apple: '/broa-mark.svg'
+    icon: [
+      { url: '/querobroa-brand/icons/querobroa-icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/querobroa-brand/icons/querobroa-icon-512.png', sizes: '512x512', type: 'image/png' }
+    ],
+    shortcut: '/querobroa-brand/icons/querobroa-icon-192.png',
+    apple: '/querobroa-brand/icons/apple-touch-icon.png'
   },
   openGraph: {
     siteName: 'QUEROBROAPP',

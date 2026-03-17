@@ -14,6 +14,7 @@ import {
   type MouseEvent
 } from 'react';
 import {
+  resolveDisplayNumber,
   roundMoney,
   type Customer,
   type InventoryItem,
@@ -467,6 +468,14 @@ function formatMassPrepStatus(status?: MassPrepEventStatus | null) {
   if (status === 'NO_FORNO') return 'NO FORNO';
   if (status === 'PRONTA') return 'PRONTA';
   return status;
+}
+
+function displayOrderNumber(order?: { id?: number | null; publicNumber?: number | null } | null) {
+  return resolveDisplayNumber(order) ?? order?.id ?? '-';
+}
+
+function displayCustomerNumber(customer?: { id?: number | null; publicNumber?: number | null } | null) {
+  return resolveDisplayNumber(customer) ?? customer?.id ?? '-';
 }
 
 function formatCustomerFullAddress(customer?: Customer | null) {
@@ -1685,7 +1694,7 @@ function OrdersPageContent() {
           : created.intake.pixCharge?.payable
             ? 'Pedido criado com PIX pronto.'
             : 'Pedido criado com PIX de desenvolvimento.',
-        `Pedido #${createdOrder.id}`
+        `Pedido #${displayOrderNumber(createdOrder)}`
       );
       setIsNewOrderModalOpen(false);
       if (freshCreated) {
@@ -1741,13 +1750,14 @@ function OrdersPageContent() {
     if (isStatusUpdatePending) return;
     setIsStatusUpdatePending(true);
     try {
+      const currentOrder = orders.find((entry) => entry.id === orderId) ?? selectedOrder;
       await apiFetch(`/orders/${orderId}/status`, {
         method: 'PATCH',
         body: JSON.stringify({ status }),
       });
       await loadAll();
       if (status === 'ENTREGUE') {
-        presentSuccess('Pedido finalizado e movido para entregue.', `Pedido #${orderId}`);
+        presentSuccess('Pedido finalizado e movido para entregue.', `Pedido #${displayOrderNumber(currentOrder)}`);
       } else {
         notifySuccess(`Status atualizado para ${formatDisplayedOrderStatus(status)}.`);
       }
@@ -1918,7 +1928,11 @@ function OrdersPageContent() {
         continue;
       }
 
-      const customerName = customerMap.get(customerId)?.name || order.customer?.name || `Cliente #${customerId}`;
+      const fallbackCustomer = customerMap.get(customerId) || order.customer || null;
+      const customerName =
+        customerMap.get(customerId)?.name ||
+        order.customer?.name ||
+        `Cliente #${displayCustomerNumber(fallbackCustomer)}`;
       map.set(customerId, {
         customerId,
         customerName,
@@ -3662,7 +3676,7 @@ function OrdersPageContent() {
                             </div>
                             <p className="orders-list-panel__line-customer">{customerName}</p>
                             <p className="orders-list-panel__line-meta">
-                              Pedido #{order.id ?? '-'} • {dateLabel}
+                              Pedido #{displayOrderNumber(order)} • {dateLabel}
                             </p>
                             {historyOrderNote ? (
                               <p className="orders-list-panel__line-note">{historyOrderNote}</p>
@@ -3818,7 +3832,7 @@ function OrdersPageContent() {
             onClick={(event) => event.stopPropagation()}
           >
             <h2 id={orderDetailTitleId} className="sr-only">
-              Pedido #{selectedOrder.id}
+              Pedido #{displayOrderNumber(selectedOrder)}
             </h2>
             <button type="button" className="order-detail-modal__close" onClick={closeOrderDetail}>
               <AppIcon name="close" className="h-4 w-4" />
@@ -3918,7 +3932,7 @@ function OrdersPageContent() {
           </div>
           <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <div className="min-w-0">
-              <h3 className="text-xl font-semibold">Pedido #{selectedOrder.id}</h3>
+              <h3 className="text-xl font-semibold">Pedido #{displayOrderNumber(selectedOrder)}</h3>
               <div className="mt-1 flex flex-wrap items-center gap-2">
                 <p className="text-sm font-semibold text-neutral-900">{selectedCustomerNameLabel}</p>
                 {selectedCustomer?.id ? (

@@ -7,6 +7,7 @@ import type {
   ProductionRequirementWarning,
   ProductionRequirementsResponse,
 } from '@querobroapp/shared';
+import { resolveDisplayNumber } from '@querobroapp/shared';
 import { PrismaService } from '../../prisma.service.js';
 import { DeliveriesService } from '../deliveries/deliveries.service.js';
 import {
@@ -671,6 +672,7 @@ export class ProductionService {
           warnings.push({
             type: 'BOM_MISSING',
             orderId: order.id,
+            orderPublicNumber: resolveDisplayNumber(order),
             productId: item.productId,
             productName: item.product?.name || `Produto ${item.productId}`,
             message: 'Produto sem BOM cadastrada para calcular necessidade D+1.',
@@ -695,6 +697,7 @@ export class ProductionService {
             warnings.push({
               type: 'BOM_ITEM_MISSING_QTY',
               orderId: order.id,
+              orderPublicNumber: resolveDisplayNumber(order),
               productId: item.productId,
               productName: item.product?.name || `Produto ${item.productId}`,
               message: `BOM sem quantidade definida para o insumo ${bomItem.item?.name || bomItem.itemId}.`,

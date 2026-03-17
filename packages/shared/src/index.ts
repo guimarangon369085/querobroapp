@@ -3,6 +3,25 @@ import { z } from 'zod';
 export * from './lib/money.js';
 export * from './lib/external-order-schedule.js';
 
+type DisplayNumberSubject = {
+  id?: number | null;
+  publicNumber?: number | null;
+};
+
+export function resolveDisplayNumber(subject: DisplayNumberSubject | null | undefined) {
+  const publicNumber = subject?.publicNumber;
+  if (typeof publicNumber === 'number' && Number.isInteger(publicNumber) && publicNumber > 0) {
+    return publicNumber;
+  }
+
+  const id = subject?.id;
+  if (typeof id === 'number' && Number.isInteger(id) && id > 0) {
+    return id;
+  }
+
+  return null;
+}
+
 export const OrderStatusEnum = z.enum([
   'ABERTO',
   'CONFIRMADO',
@@ -55,6 +74,7 @@ export const WhatsAppPixDispatchSchema = z.object({
 
 export const CustomerSchema = z.object({
   id: z.number().int().positive().optional(),
+  publicNumber: z.number().int().positive().optional().nullable(),
   name: z.string().min(1),
   firstName: z.string().optional().nullable(),
   lastName: z.string().optional().nullable(),
@@ -97,6 +117,7 @@ export const OrderItemSchema = z.object({
 
 export const OrderSchema = z.object({
   id: z.number().int().positive().optional(),
+  publicNumber: z.number().int().positive().optional().nullable(),
   customerId: z.number().int().positive(),
   status: OrderStatusEnum.default('ABERTO'),
   fulfillmentMode: OrderFulfillmentModeEnum.default('DELIVERY'),
@@ -427,6 +448,7 @@ export const ProductionRequirementRowSchema = z.object({
 export const ProductionRequirementWarningSchema = z.object({
   type: z.enum(['BOM_MISSING', 'BOM_ITEM_MISSING_QTY']),
   orderId: z.number().int().positive(),
+  orderPublicNumber: z.number().int().positive().optional().nullable(),
   productId: z.number().int().positive(),
   productName: z.string(),
   message: z.string()

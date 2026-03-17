@@ -1473,7 +1473,7 @@ function StockPageContent() {
                           key={`${warning.orderId}-${warning.productId}-${index}`}
                           className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
                         >
-                          Pedido #{warning.orderId} • {warning.productName}: {warning.message}
+                          Pedido #{warning.orderPublicNumber ?? warning.orderId} • {warning.productName}: {warning.message}
                         </div>
                       ))}
                     </div>

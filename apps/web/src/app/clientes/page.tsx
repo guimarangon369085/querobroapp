@@ -7,7 +7,7 @@ import {
   useRef,
   useState
 } from 'react';
-import type { Customer, OrderIntake, OrderItem, Product } from '@querobroapp/shared';
+import { resolveDisplayNumber, type Customer, type OrderIntake, type OrderItem, type Product } from '@querobroapp/shared';
 import { apiFetch } from '@/lib/api';
 import { useDialogA11y } from '@/lib/use-dialog-a11y';
 import {
@@ -1144,6 +1144,9 @@ function CustomersPageContent() {
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                     <p className="text-lg font-semibold">{customer.name}</p>
+                    <span className="rounded-full border border-[color:var(--line-soft)] bg-[color:var(--surface-cream)] px-2 py-0.5 text-[0.65rem] font-semibold tracking-[0.12em] text-[color:var(--ink-muted)]">
+                      Cliente #{resolveDisplayNumber(customer) ?? customer.id}
+                    </span>
                     <span className="min-w-0 truncate text-xs font-semibold tracking-[0.12em] text-neutral-500">
                       {customer.address || 'Sem endereco'}
                       {customer.neighborhood ? ` • ${customer.neighborhood}` : ''}
@@ -1203,7 +1206,7 @@ function CustomersPageContent() {
             onClick={(event) => event.stopPropagation()}
           >
             <h2 id={customerDialogTitleId} className="sr-only">
-              Cliente {selectedCustomer.name}
+              Cliente #{resolveDisplayNumber(selectedCustomer) ?? selectedCustomer.id} {selectedCustomer.name}
             </h2>
             <button type="button" className="order-detail-modal__close" onClick={closeCustomerModal}>
               <AppIcon name="close" className="h-4 w-4" />
@@ -1214,6 +1217,9 @@ function CustomersPageContent() {
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <h3 className="text-lg font-semibold text-neutral-900">{selectedCustomer.name}</h3>
+                  <p className="mt-1 text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                    Cliente #{resolveDisplayNumber(selectedCustomer) ?? selectedCustomer.id}
+                  </p>
                 </div>
               </div>
 
@@ -1245,7 +1251,9 @@ function CustomersPageContent() {
                       >
                         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
                           <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold text-neutral-900">Pedido #{order.id}</p>
+                            <p className="text-sm font-semibold text-neutral-900">
+                              Pedido #{resolveDisplayNumber(order) ?? order.id}
+                            </p>
                             <p className="mt-1 text-xs text-neutral-600">
                               {formatOrderDateTimeLabel(order.scheduledAt || order.createdAt)}
                             </p>

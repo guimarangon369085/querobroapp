@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { roundMoney } from '@querobroapp/shared';
+import { resolveDisplayNumber, roundMoney } from '@querobroapp/shared';
 import { PrismaService } from '../../prisma.service.js';
 
 type LoadedOrder = Awaited<ReturnType<DashboardService['loadOrders']>>[number];
@@ -542,8 +542,10 @@ export class DashboardService {
 
       if (balanceDue > 0.009) {
         pendingReceivables.push({
-          orderId: order.id,
-          customerName: order.customer?.name || `Cliente #${order.customerId}`,
+          orderId: resolveDisplayNumber(order) ?? order.id,
+          customerName:
+            order.customer?.name ||
+            `Cliente #${resolveDisplayNumber(order.customer) ?? order.customerId}`,
           amount: round2(balanceDue),
           status: order.status,
           dueDate:

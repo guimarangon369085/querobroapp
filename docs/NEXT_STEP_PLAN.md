@@ -51,6 +51,8 @@ Criterio de pronto:
 - Continuar reduzindo densidade visual e scroll na visao `Dia`.
 - Continuar a extracao dos blocos grandes restantes de `orders-screen` para componentes menores.
 - Manter o catalogo de caixas/sabores centralizado entre `/pedido`, `quick create` e `/pedidos`.
+- Manter a numeracao publica sequencial de clientes/pedidos como unico numero exposto na interface.
+- Validar em producao o atalho mobile da home, o prefill local de `/pedido` e o fluxo `Refazer ultimo pedido`.
 - Seguir limpando redundancias em `Estoque` agora que `Produtos` saiu da navegação.
 - Validar estados vazios e mudanca de dia em desktop e mobile width.
 - Fechado neste lote: `/dashboard` e analytics ficaram blindados por bridge/token, e `PICKUP` passou a ser respeitado em `/clientes` e no quick create de `/pedidos`.

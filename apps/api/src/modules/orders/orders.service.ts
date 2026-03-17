@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException, Inject } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import type { Prisma } from '@prisma/client';
+import type { Customer as PrismaCustomer, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
 import {
   compareMoney,
@@ -39,12 +39,13 @@ import {
   externalOrderScheduleErrorMessage,
   isExternalOrderScheduleAllowed
 } from '../../common/external-order-schedule.js';
+import { allocateNextPublicNumber } from '../../common/public-sequence.js';
 import { PaymentsService } from '../payments/payments.service.js';
 import { WhatsAppService } from '../whatsapp/whatsapp.service.js';
 import { DeliveriesService } from '../deliveries/deliveries.service.js';
 import { OrderNotificationsService } from './order-notifications.service.js';
 
-const updateSchema = OrderSchema.partial().omit({ id: true, createdAt: true, items: true });
+const updateSchema = OrderSchema.partial().omit({ id: true, publicNumber: true, createdAt: true, items: true });
 const replaceItemsSchema = z.object({
   items: z.array(OrderItemSchema.pick({ productId: true, quantity: true })).min(1)
 });
@@ -1293,6 +1294,16 @@ export class OrdersService {
     return normalizeTitle(value ?? undefined) ?? normalizeText(value ?? undefined) ?? null;
   }
 
+  private async ensureCustomerPublicNumber(tx: TransactionClient, customer: PrismaCustomer) {
+    if (customer.publicNumber) return customer;
+    return tx.customer.update({
+      where: { id: customer.id },
+      data: {
+        publicNumber: await allocateNextPublicNumber(tx, 'CUSTOMER')
+      }
+    });
+  }
+
   private customerIdentityScore(customer: {
     phone?: string | null;
     address?: string | null;
@@ -1315,6 +1326,7 @@ export class OrdersService {
     tx: TransactionClient,
     customers: Array<{
       id: number;
+      publicNumber: number | null;
       name: string;
       firstName: string | null;
       lastName: string | null;
@@ -1415,7 +1427,7 @@ export class OrdersService {
       if (existing.deletedAt) {
         throw new BadRequestException('Cliente foi excluido e nao pode receber novos pedidos.');
       }
-      return existing;
+      return this.ensureCustomerPublicNumber(tx, existing);
     }
 
     const normalizedName = this.normalizeCustomerName(customer.name);
@@ -1478,6 +1490,7 @@ export class OrdersService {
       return tx.customer.update({
         where: { id: existing.id },
         data: {
+          publicNumber: existing.publicNumber ?? (await allocateNextPublicNumber(tx, 'CUSTOMER')),
           activePhoneKey: existing.activePhoneKey || normalizedPhone,
           phone: existing.phone || normalizedPhone,
           address: existing.address || normalizedAddress,
@@ -1491,6 +1504,7 @@ export class OrdersService {
 
     return tx.customer.create({
       data: {
+        publicNumber: await allocateNextPublicNumber(tx, 'CUSTOMER'),
         name: normalizedName,
         firstName: normalizedName.split(' ')[0] || null,
         lastName: normalizedName.includes(' ') ? normalizedName.split(' ').slice(1).join(' ') : null,
@@ -1772,6 +1786,7 @@ export class OrdersService {
 
       const createdOrder = await tx.order.create({
         data: {
+          publicNumber: await allocateNextPublicNumber(tx, 'ORDER'),
           customerId: customer.id,
           status: 'ABERTO',
           fulfillmentMode: data.fulfillment.mode,
@@ -1949,7 +1964,7 @@ export class OrdersService {
   async list() {
     const orders = await this.prisma.order.findMany({
       include: { items: true, customer: true, payments: true },
-      orderBy: { id: 'desc' }
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
     });
     return orders.map((order) => this.withFinancial(order));
   }

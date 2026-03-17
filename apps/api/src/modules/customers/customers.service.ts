@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException, Inject } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service.js';
-import { CustomerSchema } from '@querobroapp/shared';
+import { CustomerSchema, resolveDisplayNumber } from '@querobroapp/shared';
 import { normalizePhone, normalizeTitle, normalizeText } from '../../common/normalize.js';
+import { allocateNextPublicNumber } from '../../common/public-sequence.js';
 
 type CustomerPayload = ReturnType<typeof CustomerSchema.parse> & {
   email?: string | null;
@@ -78,7 +79,7 @@ export class CustomersService {
     return this.prisma.customer
       .findMany({
       where: { deletedAt: null },
-      orderBy: { id: 'desc' }
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
       })
       .then((customers) => customers.map((customer) => this.normalizeCustomerAutofillView(customer)));
   }
@@ -90,7 +91,7 @@ export class CustomersService {
   }
 
   create(payload: unknown) {
-    const data = CustomerSchema.omit({ id: true, createdAt: true }).parse(payload) as CustomerCreatePayload;
+    const data = CustomerSchema.omit({ id: true, publicNumber: true, createdAt: true }).parse(payload) as CustomerCreatePayload;
     const inferredName = this.inferNameParts(data.name);
     const fullName = inferredName.fullName || data.name;
     const firstName = this.pickPromotedTitle(data.firstName, inferredName.firstName) ?? inferredName.firstName;
@@ -124,7 +125,9 @@ export class CustomersService {
         : null;
 
       if (existingByPhone && existingByEmail && existingByPhone.id !== existingByEmail.id) {
-        throw new BadRequestException(`Email ja vinculado ao cliente #${existingByEmail.id}.`);
+        throw new BadRequestException(
+          `Email ja vinculado ao cliente #${resolveDisplayNumber(existingByEmail) ?? existingByEmail.id}.`
+        );
       }
 
       const reusableCustomer = existingByPhone || existingByEmail;
@@ -133,6 +136,7 @@ export class CustomersService {
         return tx.customer.update({
           where: { id: reusableCustomer.id },
           data: {
+            publicNumber: reusableCustomer.publicNumber ?? (await allocateNextPublicNumber(tx, 'CUSTOMER')),
             name: reusableCustomer.name || fullName,
             firstName: reusableCustomer.firstName || firstName,
             lastName: reusableCustomer.lastName || lastName,
@@ -159,6 +163,7 @@ export class CustomersService {
       return tx.customer.create({
         data: {
           ...data,
+          publicNumber: await allocateNextPublicNumber(tx, 'CUSTOMER'),
           name: fullName,
           firstName,
           lastName,
@@ -185,7 +190,9 @@ export class CustomersService {
 
   async update(id: number, payload: unknown) {
     const existing = await this.get(id);
-    const data = CustomerSchema.partial().omit({ id: true, createdAt: true }).parse(payload) as CustomerUpdatePayload;
+    const data = CustomerSchema.partial()
+      .omit({ id: true, publicNumber: true, createdAt: true })
+      .parse(payload) as CustomerUpdatePayload;
 
     const nextName = data.name !== undefined ? normalizeTitle(data.name) ?? data.name : existing.name;
     const inferredName = this.inferNameParts(nextName);
@@ -227,7 +234,9 @@ export class CustomersService {
         orderBy: { id: 'desc' }
       });
       if (conflict) {
-        throw new BadRequestException(`Telefone ja vinculado ao cliente #${conflict.id}.`);
+        throw new BadRequestException(
+          `Telefone ja vinculado ao cliente #${resolveDisplayNumber(conflict) ?? conflict.id}.`
+        );
       }
     }
 
@@ -241,7 +250,9 @@ export class CustomersService {
         orderBy: { id: 'desc' }
       });
       if (conflict) {
-        throw new BadRequestException(`Email ja vinculado ao cliente #${conflict.id}.`);
+        throw new BadRequestException(
+          `Email ja vinculado ao cliente #${resolveDisplayNumber(conflict) ?? conflict.id}.`
+        );
       }
     }
 

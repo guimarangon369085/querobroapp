@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
   formatExternalOrderMinimumSchedule,
+  resolveDisplayNumber,
   resolveExternalOrderMinimumSchedule,
   type ExternalOrderSubmission,
   type OrderIntakeMeta,
@@ -39,6 +40,8 @@ const FLAVOR_CODES = ORDER_FLAVOR_CODES;
 const GOOGLE_MAPS_API_KEY = (process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '').trim();
 const PUBLIC_ORDER_TIME_STEP_SECONDS = 15 * 60;
 const PUBLIC_ORDER_DRAFT_SESSION_STORAGE_KEY = 'querobroapp:public-order-draft-session-id';
+const PUBLIC_ORDER_PROFILE_STORAGE_KEY = 'querobroapp:public-order-profile';
+const PUBLIC_ORDER_LAST_ORDER_STORAGE_KEY = 'querobroapp:public-order-last-order';
 const PUBLIC_ORDER_PICKUP_ADDRESS = 'Alameda Jaú, 731';
 
 type BoxCode = OrderBoxCode;
@@ -73,10 +76,31 @@ type PublicOrderFormState = {
 type PublicOrderResult = {
   order: {
     id: number;
+    publicNumber?: number | null;
     total?: number;
     scheduledAt?: string | null;
   };
   intake: OrderIntakeMeta;
+};
+
+type StoredPublicOrderProfile = {
+  version: 1;
+  name: string;
+  phone: string;
+  fulfillmentMode: 'DELIVERY' | 'PICKUP';
+  address: string;
+  placeId: string;
+  lat: number | null;
+  lng: number | null;
+  deliveryNotes: string;
+};
+
+type StoredPublicOrderSnapshot = {
+  version: 1;
+  savedAt: string;
+  boxes: Record<BoxCode, string>;
+  customBoxes: Array<Record<FlavorCode, number>>;
+  notes: string;
 };
 
 type DeliveryQuote = {
@@ -115,6 +139,73 @@ const initialFormState: PublicOrderFormState = {
     MR: ''
   }
 };
+
+function sanitizeStoredBoxCounts(value: unknown) {
+  const source = value && typeof value === 'object' ? (value as Partial<Record<BoxCode, unknown>>) : {};
+  const next = { ...initialFormState.boxes };
+  for (const code of Object.keys(initialFormState.boxes) as BoxCode[]) {
+    const quantity = parseCountValue(String(source[code] ?? ''));
+    next[code] = quantity > 0 ? String(quantity) : '';
+  }
+  return next;
+}
+
+function sanitizeStoredCustomBox(value: unknown) {
+  const source = value && typeof value === 'object' ? (value as Partial<Record<FlavorCode, unknown>>) : {};
+  return FLAVOR_CODES.reduce(
+    (accumulator, code) => {
+      accumulator[code] = Math.max(Math.floor(Number(source[code] ?? 0) || 0), 0);
+      return accumulator;
+    },
+    { T: 0, G: 0, D: 0, Q: 0, R: 0 } as Record<FlavorCode, number>
+  );
+}
+
+function readStoredPublicOrderProfile(): StoredPublicOrderProfile | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(PUBLIC_ORDER_PROFILE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredPublicOrderProfile> | null;
+    if (!parsed || parsed.version !== 1) return null;
+    const fulfillmentMode = parsed.fulfillmentMode === 'PICKUP' ? 'PICKUP' : 'DELIVERY';
+    return {
+      version: 1 as const,
+      name: String(parsed.name || '').trim(),
+      phone: String(parsed.phone || '').trim(),
+      fulfillmentMode,
+      address:
+        fulfillmentMode === 'PICKUP'
+          ? PUBLIC_ORDER_PICKUP_ADDRESS
+          : String(parsed.address || '').trim(),
+      placeId: fulfillmentMode === 'DELIVERY' ? String(parsed.placeId || '').trim() : '',
+      lat: typeof parsed.lat === 'number' && Number.isFinite(parsed.lat) ? parsed.lat : null,
+      lng: typeof parsed.lng === 'number' && Number.isFinite(parsed.lng) ? parsed.lng : null,
+      deliveryNotes: String(parsed.deliveryNotes || '').trim()
+    };
+  } catch {
+    return null;
+  }
+}
+
+function readStoredPublicOrderSnapshot(): StoredPublicOrderSnapshot | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(PUBLIC_ORDER_LAST_ORDER_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredPublicOrderSnapshot> | null;
+    if (!parsed || parsed.version !== 1) return null;
+    return {
+      version: 1 as const,
+      savedAt: String(parsed.savedAt || '').trim() || new Date().toISOString(),
+      boxes: sanitizeStoredBoxCounts(parsed.boxes),
+      customBoxes: Array.isArray(parsed.customBoxes) ? parsed.customBoxes.map(sanitizeStoredCustomBox) : [],
+      notes: String(parsed.notes || '').trim()
+    };
+  } catch {
+    return null;
+  }
+}
 
 function formatDateInputValue(date: Date) {
   const year = date.getFullYear();
@@ -311,6 +402,7 @@ export function PublicOrderPage() {
   const { notifyError, notifyInfo, presentSuccess } = useFeedback();
   const [form, setForm] = useState<PublicOrderFormState>(initialFormState);
   const [customBoxes, setCustomBoxes] = useState<CustomBoxDraft[]>([]);
+  const [lastSavedOrder, setLastSavedOrder] = useState<StoredPublicOrderSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<PublicOrderResult | null>(null);
@@ -337,6 +429,65 @@ export function PublicOrderPage() {
     if (typeof window === 'undefined') return;
     window.sessionStorage.setItem(PUBLIC_ORDER_DRAFT_SESSION_STORAGE_KEY, draftSessionId);
   }, [draftSessionId]);
+
+  useEffect(() => {
+    const storedProfile = readStoredPublicOrderProfile();
+    const storedOrder = readStoredPublicOrderSnapshot();
+    if (storedProfile) {
+      deliveryAddressDraftRef.current = {
+        address: storedProfile.fulfillmentMode === 'DELIVERY' ? storedProfile.address : '',
+        placeId: storedProfile.fulfillmentMode === 'DELIVERY' ? storedProfile.placeId : '',
+        lat: storedProfile.fulfillmentMode === 'DELIVERY' ? storedProfile.lat : null,
+        lng: storedProfile.fulfillmentMode === 'DELIVERY' ? storedProfile.lng : null
+      };
+      setForm((current) => ({
+        ...current,
+        name: storedProfile.name || current.name,
+        phone: storedProfile.phone || current.phone,
+        fulfillmentMode: storedProfile.fulfillmentMode,
+        address: storedProfile.address || current.address,
+        placeId: storedProfile.placeId,
+        lat: storedProfile.lat,
+        lng: storedProfile.lng,
+        deliveryNotes: storedProfile.deliveryNotes || current.deliveryNotes
+      }));
+    }
+    setLastSavedOrder(storedOrder);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const normalizedProfile: StoredPublicOrderProfile = {
+      version: 1,
+      name: form.name.trim(),
+      phone: form.phone.trim(),
+      fulfillmentMode: form.fulfillmentMode,
+      address: form.fulfillmentMode === 'PICKUP' ? PUBLIC_ORDER_PICKUP_ADDRESS : form.address.trim(),
+      placeId: form.fulfillmentMode === 'DELIVERY' ? form.placeId.trim() : '',
+      lat: form.fulfillmentMode === 'DELIVERY' && typeof form.lat === 'number' ? form.lat : null,
+      lng: form.fulfillmentMode === 'DELIVERY' && typeof form.lng === 'number' ? form.lng : null,
+      deliveryNotes: form.deliveryNotes.trim()
+    };
+    const hasMeaningfulProfile =
+      normalizedProfile.name ||
+      normalizedProfile.phone ||
+      normalizedProfile.address ||
+      normalizedProfile.deliveryNotes;
+    if (!hasMeaningfulProfile) {
+      window.localStorage.removeItem(PUBLIC_ORDER_PROFILE_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(PUBLIC_ORDER_PROFILE_STORAGE_KEY, JSON.stringify(normalizedProfile));
+  }, [
+    form.address,
+    form.deliveryNotes,
+    form.fulfillmentMode,
+    form.lat,
+    form.lng,
+    form.name,
+    form.phone,
+    form.placeId
+  ]);
 
   const rememberDeliveryLocation = useCallback(
     (patch: Partial<Pick<PublicOrderFormState, 'address' | 'placeId' | 'lat' | 'lng'>>) => {
@@ -882,6 +1033,28 @@ export function PublicOrderPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
+  const applyLastSavedOrder = useCallback(() => {
+    if (!lastSavedOrder) return;
+    setForm((current) => ({
+      ...current,
+      notes: lastSavedOrder.notes,
+      boxes: {
+        ...initialFormState.boxes,
+        ...lastSavedOrder.boxes
+      }
+    }));
+    setCustomBoxes(lastSavedOrder.customBoxes.map((entry) => ({ id: createCustomBoxId(), flavors: entry })));
+    setError(null);
+    setResult(null);
+    setDeliveryQuote(null);
+    setDeliveryQuoteError(null);
+    notifyInfo('Ultimo pedido carregado.');
+    window.requestAnimationFrame(() => {
+      const boxesSection = orderFormRef.current?.querySelector('[data-order-boxes-section]') as HTMLElement | null;
+      boxesSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, [lastSavedOrder, notifyInfo]);
+
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -1006,6 +1179,15 @@ export function PublicOrderPage() {
         }
         throw new Error(extractErrorMessage(data));
       }
+      const storedOrderSnapshot: StoredPublicOrderSnapshot = {
+        version: 1,
+        savedAt: new Date().toISOString(),
+        boxes: sanitizeStoredBoxCounts(form.boxes),
+        customBoxes: customBoxes.map((entry) => sanitizeStoredCustomBox(entry.flavors)),
+        notes: form.notes.trim()
+      };
+      window.localStorage.setItem(PUBLIC_ORDER_LAST_ORDER_STORAGE_KEY, JSON.stringify(storedOrderSnapshot));
+      setLastSavedOrder(storedOrderSnapshot);
       setResult(data as PublicOrderResult);
       trackAnalyticsEvent({
         sessionId: resolveAnalyticsSessionId(),
@@ -1019,7 +1201,10 @@ export function PublicOrderPage() {
           orderDraftSessionId: draftSessionId
         }
       });
-      presentSuccess('Seu pedido foi recebido. Confira o resumo e o PIX para concluir.', `Pedido #${(data as PublicOrderResult).order.id}`);
+      presentSuccess(
+        'Seu pedido foi recebido. Confira o resumo e o PIX para concluir.',
+        `Pedido #${resolveDisplayNumber((data as PublicOrderResult).order) ?? (data as PublicOrderResult).order.id}`
+      );
     } catch (submitError) {
       const message = submitError instanceof Error ? submitError.message : 'Nao foi possivel enviar o pedido.';
       setError(message);
@@ -1104,6 +1289,28 @@ export function PublicOrderPage() {
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(255,240,220,0.95),transparent_32%),radial-gradient(circle_at_top_right,rgba(219,234,222,0.9),transparent_28%),linear-gradient(180deg,#f8efe5_0%,#f4eadc_100%)]">
       <div className="mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:py-8" ref={pageTopRef}>
+        <div className="sticky top-[calc(env(safe-area-inset-top)+8px)] z-30 mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.88)] px-4 py-3 shadow-[0_18px_34px_rgba(70,44,26,0.08)] backdrop-blur-md sm:px-5">
+            <div className="min-w-0">
+              <p className="brand-wordmark brand-wordmark--micro text-[0.78rem] text-[color:var(--ink-strong)]">
+                @QUEROBROA
+              </p>
+              <p className="mt-1 text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
+                {form.fulfillmentMode === 'DELIVERY' ? 'Entrega' : 'Retirada'} • Subtotal {formatCurrencyBRL(estimatedTotal)}
+              </p>
+            </div>
+            {lastSavedOrder ? (
+              <button
+                className="app-button app-button-ghost w-full sm:w-auto"
+                onClick={applyLastSavedOrder}
+                type="button"
+              >
+                Refazer ultimo pedido
+              </button>
+            ) : null}
+          </div>
+        </div>
+
         <section className="grid gap-4 lg:gap-6 xl:grid-cols-[minmax(0,0.94fr)_minmax(420px,1.06fr)] xl:items-stretch">
           <div className="overflow-hidden rounded-[30px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(145deg,rgba(255,252,247,0.92),rgba(246,235,221,0.9))] p-5 shadow-[0_20px_64px_rgba(70,44,26,0.12)] sm:rounded-[34px] sm:p-6 lg:p-7 lg:shadow-[0_24px_84px_rgba(70,44,26,0.12)]">
             <p className="brand-wordmark brand-wordmark--display text-[1.7rem] text-[color:var(--ink-strong)] sm:text-[2.35rem]">
@@ -1123,7 +1330,10 @@ export function PublicOrderPage() {
             onSubmit={onSubmit}
             ref={orderFormRef}
           >
-            <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6">
+            <section
+              className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6"
+              data-order-boxes-section
+            >
               <div className="mb-4 flex items-center justify-between gap-4 sm:mb-5">
                 <div>
                   <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-[color:var(--ink-muted)]">
@@ -1515,6 +1725,27 @@ export function PublicOrderPage() {
               </div>
             ) : null}
 
+            {!result ? (
+              <div className="app-form-actions app-form-actions--mobile-sticky xl:hidden">
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
+                    Total
+                  </span>
+                  <strong className="text-base text-[color:var(--ink-strong)]">{formatCurrencyBRL(displayTotal)}</strong>
+                </div>
+                <button
+                  className="app-button app-button-primary"
+                  disabled={isSubmitting || isQuotingDelivery}
+                  onClick={() => {
+                    void handlePrimaryAction();
+                  }}
+                  type="button"
+                >
+                  {primaryActionLabel}
+                </button>
+              </div>
+            ) : null}
+
           </form>
 
           <aside className="grid gap-4 self-start sm:gap-5 xl:sticky xl:top-8">
@@ -1655,7 +1886,9 @@ export function PublicOrderPage() {
                   <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-emerald-700">
                     Pedido recebido
                   </p>
-                  <h2 className="mt-1.5 text-[1.55rem] font-semibold text-[color:var(--ink-strong)] sm:mt-2 sm:text-3xl">Pedido #{result.order.id}</h2>
+                  <h2 className="mt-1.5 text-[1.55rem] font-semibold text-[color:var(--ink-strong)] sm:mt-2 sm:text-3xl">
+                    Pedido #{resolveDisplayNumber(result.order) ?? result.order.id}
+                  </h2>
                   <p className="mt-2 text-[0.88rem] leading-6 text-[color:var(--ink-muted)] sm:text-sm">
                     Programado para {formatScheduledAt(result.order.scheduledAt)}.
                   </p>

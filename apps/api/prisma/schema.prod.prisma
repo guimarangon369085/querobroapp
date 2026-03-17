@@ -9,6 +9,7 @@ datasource db {
 
 model Customer {
   id            Int      @id @default(autoincrement())
+  publicNumber  Int?     @unique
   name          String
   firstName     String?
   lastName      String?
@@ -55,6 +56,7 @@ model Product {
 
 model Order {
   id                 Int                 @id @default(autoincrement())
+  publicNumber       Int?                @unique
   customerId         Int
   status             String              @default("ABERTO")
   fulfillmentMode    String              @default("DELIVERY")
@@ -214,4 +216,9 @@ model SiteAnalyticsEvent {
   @@index([eventType, createdAt])
   @@index([sessionId, createdAt])
   @@index([path, createdAt])
+}
+
+model PublicSequenceCounter {
+  name      String @id
+  nextValue Int
 }

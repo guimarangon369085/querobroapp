@@ -178,7 +178,7 @@ test('order created alert: publica no ntfy uma vez so mesmo com retry idempotent
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert.equal(hits.length, 1);
   assert.equal(hits[0].url, '/qbapp-orders-topic');
-  assert.equal(hits[0].headers.title, `Novo pedido #${first.order.id}`);
+  assert.equal(hits[0].headers.title, `Novo pedido #${first.order.publicNumber ?? first.order.id}`);
   assert.equal(hits[0].headers.priority, '5');
   assert.equal(hits[0].headers.click, 'https://querobroa.com.br/pedidos');
   assert.match(hits[0].body, /Novo pedido #/);

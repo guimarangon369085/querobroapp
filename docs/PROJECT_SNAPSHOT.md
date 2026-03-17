@@ -10,7 +10,8 @@ Ultima atualizacao: 2026-03-17
 - `Pedidos` e a entrada principal; agenda `Dia/Semana/Mes` na mesma tela, com criacao de pedido no proprio painel e lista completa de pedidos logo abaixo do calendario.
 - CTAs contextuais por tela: `Pedidos` usa acao `Criar` no painel, `Clientes/Produtos` usam acao inline/sticky e `Estoque` usa botao flutuante `Nova movimentacao`.
 - `Calendario`, `Inicio`, `Jornada`, `Resumo` e `Builder` nao existem mais como superficies operacionais.
-- Marca lateral usa o mark vetorial interno e favicon/shortcut usam `broa-mark.svg`, com o nome QUEROBROAPP.
+- Marca lateral usa o mark vetorial interno e o atalho/PWA publico agora usa os icones raster dedicados da marca, com abertura direta em `/pedido`.
+- Numeracao exibida de `Clientes` e `Pedidos` agora usa `publicNumber` sequencial, preenchido por ordem cronologica e desacoplado do `id` interno do banco.
 - API cobre pedido, pagamento, estoque, BOM, D+1, producao, `Uber Direct`, `Loggi` e fallback local interno.
 - O processo de qualidade atual inclui `qa:trust`, `qa:browser-smoke`, `qa:critical-e2e`, drift check e testes raiz.
 - Gate operacional de religamento foi validado em 2026-03-11 com `stop-all -> dev-all`, health da API e execucao de smoke + E2E critico.
@@ -19,6 +20,8 @@ Ultima atualizacao: 2026-03-17
 - Pedidos de `Entrega` agora podem receber cotacao de frete antes do submit final, com o valor incorporado ao total e ao PIX.
 - `/pedido`, `quick create` e a logica de caixas em `Pedidos` passaram a compartilhar o mesmo catalogo de caixas/sabores e as mesmas imagens originais da marca.
 - Em `/pedido`, quando `Retirada` e selecionada, o ponto de retirada agora e preenchido automaticamente como `Alameda Jau, 731` e fica bloqueado para edicao pelo cliente.
+- `/pedido` agora salva localmente os dados do cliente neste aparelho, oferece `Refazer ultimo pedido` e ganhou camadas fixas para topo/subtotal/CTA em mobile.
+- A home publica `/` agora expone um fluxo de instalacao de atalho para celular, com manifesto/icone dedicados para abrir direto em `/pedido`.
 - O frete agora opera em modo hibrido: `Uber Direct` como cotacao primaria dentro da cobertura da conta e `Loggi` como fallback automatico quando a Uber recusa por raio/cobertura.
 - A cotacao agora protege o caso `origem = destino`, usa hash de quote mais fiel ao payload real e calcula pacote Loggi por caixa fechada em vez de inflar o peso por unidade interna do dashboard.
 - `/pedido` e o modal de novo pedido em `/pedidos` agora usam o mesmo fluxo em duas etapas para entrega: `Calcular frete` antes de `Finalizar pedido/Criar pedido`.
@@ -52,6 +55,7 @@ Ultima atualizacao: 2026-03-17
 - `/pedido`: pagina publica do cliente com submit para o intake canonico, cotacao previa de frete e exibicao do PIX copia e cola.
 - `/pedido`: CTA principal abaixo do bloco `Resumo`; em `Entrega` ele calcula o frete antes da finalizacao, e em `Retirada` o frete zera.
 - `/`: landing publica fullscreen da marca, preparada para `www.querobroa.com.br`.
+- `/`: landing publica fullscreen da marca com CTA de atalho mobile para instalar/acessar `Pedido rapido`.
 - `/pedidos`: agenda do dia, criacao de pedido, status, producao, entrega e pagamento.
 - `/pedidos`: modal `Novo pedido` alinhado visualmente com `/pedido`, sem miniatura redundante e com CTA de frete abaixo do resumo.
 - `/clientes`: cadastro e edicao rapida.
@@ -87,6 +91,7 @@ Ultima atualizacao: 2026-03-17
 - O workflow principal de CI no GitHub agora roda `check:prisma-drift` e `qa:trust` com lint habilitado.
 - O browser smoke garante o redirect legado de `/produtos` e cobre as telas operacionais principais.
 - O app agora produz analytics first-party sem GA4 previa, usando o proprio banco para sessao, page view, link click e web vitals.
+- O PWA/atalho mobile agora usa icones raster dedicados da marca (`apple-touch-icon` + `manifest` 192/512).
 
 ## Validacao operacional mais recente
 

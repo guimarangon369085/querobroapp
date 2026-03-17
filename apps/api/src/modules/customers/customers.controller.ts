@@ -22,14 +22,14 @@ export class CustomersController {
 
   @Post()
   create(@Body() body: unknown) {
-    const payload = CustomerSchema.omit({ id: true, createdAt: true }).parse(body);
+    const payload = CustomerSchema.omit({ id: true, publicNumber: true, createdAt: true }).parse(body);
     return this.service.create(payload);
   }
 
   @Put(':id')
   update(@Param('id') id: string, @Body() body: unknown) {
     const customerId = parseWithSchema(idSchema, id);
-    const payload = CustomerSchema.partial().omit({ id: true, createdAt: true }).parse(body);
+    const payload = CustomerSchema.partial().omit({ id: true, publicNumber: true, createdAt: true }).parse(body);
     return this.service.update(customerId, payload);
   }
 

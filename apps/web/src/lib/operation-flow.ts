@@ -1,4 +1,12 @@
-import { roundMoney, type Bom, type Customer, type Order, type Payment, type Product } from '@querobroapp/shared';
+import {
+  resolveDisplayNumber,
+  roundMoney,
+  type Bom,
+  type Customer,
+  type Order,
+  type Payment,
+  type Product
+} from '@querobroapp/shared';
 import { formatCurrencyBR } from '@/lib/format';
 
 export type OperationFlowRaw = {
@@ -82,7 +90,9 @@ function toMoney(value: number | null | undefined) {
 }
 
 function pickMainOrder(orders: Order[]) {
-  const sorted = [...orders].sort((a, b) => (b.id || 0) - (a.id || 0));
+  const sorted = [...orders].sort(
+    (a, b) => (resolveDisplayNumber(b) ?? b.id ?? 0) - (resolveDisplayNumber(a) ?? a.id ?? 0)
+  );
   return sorted.find((entry) => entry.status !== 'CANCELADO') || null;
 }
 
@@ -141,10 +151,15 @@ export function deriveOperationFlow(raw: OperationFlowRaw): OperationFlow {
   const orderRank = currentOrder ? statusRank[currentOrder.status || 'ABERTO'] ?? 0 : -1;
   const paymentStatus = currentOrder ? resolveOrderPaymentStatus(currentOrder, raw.payments) : 'PENDENTE';
   const pendingCurrentOrder = currentOrder ? resolveOrderBalance(currentOrder, raw.payments) : 0;
-  const currentCustomerName = currentOrder?.customerId
-    ? raw.customers.find((entry) => entry.id === currentOrder.customerId)?.name ||
-      `cliente #${currentOrder.customerId}`
-    : 'sem cliente';
+  const currentCustomer = currentOrder?.customerId
+    ? raw.customers.find((entry) => entry.id === currentOrder.customerId) || null
+    : null;
+  const currentCustomerName = currentCustomer?.name
+    ? currentCustomer.name
+    : currentOrder?.customerId
+      ? `cliente #${resolveDisplayNumber(currentCustomer) ?? currentOrder.customerId}`
+      : 'sem cliente';
+  const currentOrderNumber = resolveDisplayNumber(currentOrder) ?? currentOrder?.id ?? null;
 
   const hasProducts = raw.products.length > 0;
   const hasBom = raw.boms.length > 0;
@@ -200,7 +215,9 @@ export function deriveOperationFlow(raw: OperationFlowRaw): OperationFlow {
       title: 'Compromisso criado',
       compact: 'venda do dia',
       question: 'O compromisso principal do dia ja entrou?',
-      detail: hasOrder ? `Pedido #${currentOrder?.id} para ${currentCustomerName}.` : 'Crie o primeiro compromisso.',
+      detail: hasOrder
+        ? `Pedido #${currentOrderNumber ?? '-'} para ${currentCustomerName}.`
+        : 'Crie o primeiro compromisso.',
       actionLabel: hasOrder ? 'Abrir hoje' : 'Criar compromisso',
       href: '/hoje',
       statusLabel: hasOrder ? 'OK' : 'faltando',

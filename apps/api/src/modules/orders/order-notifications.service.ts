@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import type { OrderIntakeMeta } from '@querobroapp/shared';
+import { resolveDisplayNumber, type OrderIntakeMeta } from '@querobroapp/shared';
 import { WhatsAppService } from '../whatsapp/whatsapp.service.js';
 
 type OrderAlertOrder = {
   id: number;
+  publicNumber?: number | null;
   fulfillmentMode: string;
   status: string;
   subtotal?: number | null;
@@ -15,6 +16,7 @@ type OrderAlertOrder = {
   notes?: string | null;
   customer: {
     id?: number | null;
+    publicNumber?: number | null;
     name: string;
     phone?: string | null;
     address?: string | null;
@@ -125,8 +127,9 @@ export class OrderNotificationsService {
 
   private buildWhatsAppBody(input: OrderAlertInput, operationsUrl: string) {
     const { order, intake } = input;
+    const orderNumber = resolveDisplayNumber(order) ?? order.id;
     const lines = [
-      `Novo pedido #${order.id}`,
+      `Novo pedido #${orderNumber}`,
       `${this.formatChannel(intake.channel)} | ${this.formatMode(order.fulfillmentMode)}`,
       `Cliente: ${order.customer.name.trim()}`,
       order.customer.phone ? `Telefone: ${order.customer.phone}` : null,
@@ -155,6 +158,7 @@ export class OrderNotificationsService {
       operationsUrl,
       order: {
         id: order.id,
+        publicNumber: resolveDisplayNumber(order),
         status: order.status,
         fulfillmentMode: order.fulfillmentMode,
         scheduledAt:
@@ -171,6 +175,7 @@ export class OrderNotificationsService {
       },
       customer: {
         id: Number(order.customer.id || intake.customerId || 0) || null,
+        publicNumber: resolveDisplayNumber(order.customer),
         name: order.customer.name,
         phone: order.customer.phone || null,
         address: order.customer.address || null,
@@ -268,7 +273,7 @@ export class OrderNotificationsService {
     const message = this.buildWhatsAppBody(input, config.operationsUrl);
     const webhookPayload = this.buildWebhookPayload(input, config.operationsUrl, message);
     const tasks: Array<Promise<unknown>> = [];
-    const title = `Novo pedido #${input.order.id}`;
+    const title = `Novo pedido #${resolveDisplayNumber(input.order) ?? input.order.id}`;
 
     if (config.ntfyTopicUrl) {
       tasks.push(
