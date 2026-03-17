@@ -28,6 +28,9 @@ type OrderAlertInput = {
 };
 
 type OrderAlertConfig = {
+  ntfyTopicUrl: string;
+  ntfyPriority: string;
+  ntfyTags: string;
   whatsappRecipients: string[];
   webhookUrls: string[];
   webhookBearerToken: string;
@@ -61,6 +64,11 @@ export class OrderNotificationsService {
 
     const webhookTimeoutMs = Number.parseInt(String(process.env.ORDER_ALERT_WEBHOOK_TIMEOUT_MS || '7000'), 10);
     return {
+      ntfyTopicUrl: String(process.env.ORDER_ALERT_NTFY_TOPIC_URL || '')
+        .trim()
+        .replace(/\/+$/, ''),
+      ntfyPriority: String(process.env.ORDER_ALERT_NTFY_PRIORITY || '5').trim() || '5',
+      ntfyTags: String(process.env.ORDER_ALERT_NTFY_TAGS || 'bread,shopping_cart').trim() || 'bread,shopping_cart',
       whatsappRecipients: Array.from(new Set(parseList(process.env.ORDER_ALERT_WHATSAPP_TO))),
       webhookUrls: Array.from(new Set(parseList(process.env.ORDER_ALERT_WEBHOOK_URL))),
       webhookBearerToken: String(process.env.ORDER_ALERT_WEBHOOK_BEARER_TOKEN || '').trim(),
@@ -179,7 +187,7 @@ export class OrderNotificationsService {
     };
   }
 
-  private logFailure(channel: 'WHATSAPP' | 'WEBHOOK', error: unknown, context: Record<string, unknown>) {
+  private logFailure(channel: 'NTFY' | 'WHATSAPP' | 'WEBHOOK', error: unknown, context: Record<string, unknown>) {
     const detail =
       error instanceof Error
         ? {
@@ -226,13 +234,49 @@ export class OrderNotificationsService {
     }
   }
 
+  private async postNtfy(title: string, message: string, config: OrderAlertConfig) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), config.webhookTimeoutMs);
+
+    try {
+      const response = await fetch(config.ntfyTopicUrl, {
+        method: 'POST',
+        headers: {
+          'content-type': 'text/plain; charset=utf-8',
+          title,
+          priority: config.ntfyPriority,
+          tags: config.ntfyTags,
+          click: config.operationsUrl
+        },
+        body: message,
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        throw new Error(body.trim() || `HTTP ${response.status}`);
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async notifyNewOrder(input: OrderAlertInput) {
     const config = this.getConfig();
-    if (config.whatsappRecipients.length === 0 && config.webhookUrls.length === 0) return;
+    if (!config.ntfyTopicUrl && config.whatsappRecipients.length === 0 && config.webhookUrls.length === 0) return;
 
     const message = this.buildWhatsAppBody(input, config.operationsUrl);
     const webhookPayload = this.buildWebhookPayload(input, config.operationsUrl, message);
     const tasks: Array<Promise<unknown>> = [];
+    const title = `Novo pedido #${input.order.id}`;
+
+    if (config.ntfyTopicUrl) {
+      tasks.push(
+        this.postNtfy(title, message, config).catch((error) => {
+          this.logFailure('NTFY', error, { orderId: input.order.id, topicUrl: config.ntfyTopicUrl });
+        })
+      );
+    }
 
     for (const recipient of config.whatsappRecipients) {
       tasks.push(

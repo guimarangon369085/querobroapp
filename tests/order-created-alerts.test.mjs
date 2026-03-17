@@ -38,6 +38,9 @@ function waitFor(fn, timeoutMs = 4000, intervalMs = 50) {
 
 function applyAlertEnv(env) {
   const keys = [
+    'ORDER_ALERT_NTFY_TOPIC_URL',
+    'ORDER_ALERT_NTFY_PRIORITY',
+    'ORDER_ALERT_NTFY_TAGS',
     'ORDER_ALERT_WHATSAPP_TO',
     'ORDER_ALERT_WEBHOOK_URL',
     'ORDER_ALERT_WEBHOOK_BEARER_TOKEN',
@@ -67,22 +70,26 @@ function applyAlertEnv(env) {
   };
 }
 
-test('order created alert: dispara webhook uma vez so mesmo com retry idempotente', async (t) => {
+test('order created alert: publica no ntfy uma vez so mesmo com retry idempotente', async (t) => {
   const hits = [];
   const webhook = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     const body = Buffer.concat(chunks).toString('utf8');
     hits.push({
+      headers: req.headers,
       url: req.url,
-      body: body ? JSON.parse(body) : null
+      body
     });
     res.writeHead(204).end();
   });
   const address = await listen(webhook);
   const restoreEnv = applyAlertEnv({
+    ORDER_ALERT_NTFY_TOPIC_URL: `http://127.0.0.1:${address.port}/qbapp-orders-topic`,
+    ORDER_ALERT_NTFY_PRIORITY: '5',
+    ORDER_ALERT_NTFY_TAGS: 'bread,shopping_cart',
     ORDER_ALERT_WHATSAPP_TO: '',
-    ORDER_ALERT_WEBHOOK_URL: `http://127.0.0.1:${address.port}/order-created`,
+    ORDER_ALERT_WEBHOOK_URL: '',
     ORDER_ALERT_WEBHOOK_TIMEOUT_MS: '1500',
     ORDER_ALERT_OPERATIONS_URL: 'https://querobroa.com.br/pedidos'
   });
@@ -170,13 +177,15 @@ test('order created alert: dispara webhook uma vez so mesmo com retry idempotent
   await waitFor(() => hits.length > 0);
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert.equal(hits.length, 1);
-  assert.equal(hits[0].body.event, 'order.created');
-  assert.equal(hits[0].body.order.id, first.order.id);
-  assert.equal(hits[0].body.intake.channel, 'WHATSAPP_FLOW');
-  assert.match(hits[0].body.message, /Novo pedido #/);
+  assert.equal(hits[0].url, '/qbapp-orders-topic');
+  assert.equal(hits[0].headers.title, `Novo pedido #${first.order.id}`);
+  assert.equal(hits[0].headers.priority, '5');
+  assert.equal(hits[0].headers.click, 'https://querobroa.com.br/pedidos');
+  assert.match(hits[0].body, /Novo pedido #/);
+  assert.match(hits[0].body, /Cliente:/);
 });
 
-test('order created alert: falha no webhook nao bloqueia o pedido', async (t) => {
+test('order created alert: falha no ntfy nao bloqueia o pedido', async (t) => {
   let hitCount = 0;
   const failingWebhook = http.createServer(async (_req, res) => {
     hitCount += 1;
@@ -185,8 +194,10 @@ test('order created alert: falha no webhook nao bloqueia o pedido', async (t) =>
   });
   const address = await listen(failingWebhook);
   const restoreEnv = applyAlertEnv({
+    ORDER_ALERT_NTFY_TOPIC_URL: `http://127.0.0.1:${address.port}/qbapp-orders-topic`,
+    ORDER_ALERT_NTFY_PRIORITY: '5',
     ORDER_ALERT_WHATSAPP_TO: '',
-    ORDER_ALERT_WEBHOOK_URL: `http://127.0.0.1:${address.port}/broken`,
+    ORDER_ALERT_WEBHOOK_URL: '',
     ORDER_ALERT_WEBHOOK_TIMEOUT_MS: '1500'
   });
 
