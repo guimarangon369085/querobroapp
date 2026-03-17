@@ -4078,11 +4078,20 @@ input[type='radio'] {
 }
 
 .order-quick-create__product-card {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   padding: 12px;
 }
 
 .order-quick-create__product-actions {
   gap: 6px;
+}
+
+.order-quick-create__product-primary,
+.order-quick-create__product-secondary {
+  position: relative;
+  z-index: 1;
 }
 
 .order-quick-create__qty-button {
@@ -4654,6 +4663,14 @@ html.app-render-stability .app-topbar {
     align-items: stretch;
   }
 
+  .order-quick-create__product-primary {
+    grid-template-columns: 46px minmax(0, 1fr) 46px;
+  }
+
+  .order-quick-create__product-secondary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .order-quick-create__qty-button {
     min-height: 34px;
     min-width: 36px;
@@ -4748,5 +4765,27 @@ html.app-render-stability .app-topbar {
 
   .builder-stock-rule-item__grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 1280px) {
+  .order-detail-modal__dialog {
+    width: min(
+      1280px,
+      calc(
+        var(--app-viewport-width) - var(--app-safe-area-left) - var(--app-safe-area-right) -
+          max(24px, calc(2 * var(--app-overlay-gap)))
+      )
+    );
+  }
+
+  .order-quick-create__product-card {
+    padding: 16px;
+  }
+
+  .order-quick-create__qty-button {
+    min-height: 38px;
+    min-width: 40px;
+    font-size: 0.78rem;
   }
 }

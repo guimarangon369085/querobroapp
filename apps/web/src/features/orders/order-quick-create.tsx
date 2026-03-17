@@ -689,7 +689,7 @@ export function OrderQuickCreate({
         ) : null}
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3">
         {productsForCards.map((product) => {
           const selectedQty = quantityByProductId.get(product.id!) || 0;
           const isSelected = selectedQty > 0;
@@ -704,24 +704,24 @@ export function OrderQuickCreate({
                   : 'border-white/80 bg-white/80'
               }`}
             >
-              <div className="flex flex-wrap items-start gap-3">
-                <div className="relative h-[72px] w-[72px] shrink-0">
-                  <div className="relative h-full w-full overflow-hidden rounded-[20px] border border-white/80 bg-white/80 shadow-[0_12px_28px_rgba(70,44,26,0.1)]">
+              <div className="grid grid-cols-[84px_minmax(0,1fr)] items-start gap-4">
+                <div className="relative h-[84px] w-[84px] shrink-0">
+                  <div className="relative h-full w-full overflow-hidden rounded-[22px] border border-white/80 bg-white/80 shadow-[0_12px_28px_rgba(70,44,26,0.1)]">
                     <OrderCardArtwork
                       alt={compactOrderProductName(product.name)}
                       art={productArt}
-                      sizes="72px"
+                      sizes="84px"
                     />
                   </div>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-[color:var(--ink-strong)]">
+                <div className="min-w-0">
+                  <p className="text-[0.96rem] font-semibold leading-tight text-[color:var(--ink-strong)]">
                     {compactOrderProductName(product.name)}
                   </p>
                 </div>
               </div>
-              <div className="mt-3 grid gap-2">
-                <div className="order-quick-create__product-actions flex flex-wrap items-center gap-2">
+              <div className="mt-4 grid gap-2 border-t border-[rgba(126,79,45,0.08)] pt-4">
+                <div className="order-quick-create__product-primary grid grid-cols-[54px_minmax(0,1fr)_54px] items-center gap-2">
                   <button
                     type="button"
                     className="order-quick-create__qty-button app-button app-button-ghost"
@@ -730,7 +730,7 @@ export function OrderQuickCreate({
                   >
                     -
                   </button>
-                  <span className="order-quick-create__qty-value min-w-10 text-center text-sm font-semibold text-neutral-900">
+                  <span className="order-quick-create__qty-value rounded-2xl border border-white/80 bg-white/88 px-3 py-2.5 text-center text-sm font-semibold text-neutral-900">
                     {selectedQty}
                   </span>
                   <button
@@ -740,6 +740,8 @@ export function OrderQuickCreate({
                   >
                     +1
                   </button>
+                </div>
+                <div className="order-quick-create__product-secondary grid grid-cols-3 gap-2">
                   <button
                     type="button"
                     className="order-quick-create__qty-button app-button app-button-ghost"
@@ -779,48 +781,49 @@ export function OrderQuickCreate({
             </div>
           );
         })}
-        <div
-          data-quick-order-product-id="mista"
-          className={`order-quick-create__product-card rounded-2xl border p-3 transition ${
-            mistaShortcutStack.length > 0
-              ? 'border-amber-200 bg-amber-50/80 shadow-[0_10px_26px_rgba(168,112,42,0.12)]'
-              : 'border-white/80 bg-white/80'
-          }`}
-        >
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-[color:var(--ink-strong)]">Caixas mistas</p>
-            </div>
-            <span className="rounded-full border border-white/80 bg-white/86 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
-              {mistaShortcutStack.length} mista{mistaShortcutStack.length === 1 ? '' : 's'}
-            </span>
+      </div>
+
+      <div
+        data-quick-order-product-id="mista"
+        className={`order-quick-create__product-card rounded-2xl border p-4 transition ${
+          mistaShortcutStack.length > 0
+            ? 'border-amber-200 bg-amber-50/80 shadow-[0_10px_26px_rgba(168,112,42,0.12)]'
+            : 'border-white/80 bg-white/80'
+        }`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[0.96rem] font-semibold text-[color:var(--ink-strong)]">Caixas mistas</p>
           </div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            {mistaShortcutOptions.map(({ code, art, label }) => {
-              const canApplyShortcut = Boolean(flavorShortcutProductIds.T && flavorShortcutProductIds[code]);
-              return (
-                <button
-                  key={`mista-shortcut-${code}`}
-                  type="button"
-                  className="flex items-center gap-3 rounded-2xl border border-white/80 bg-white/82 px-3 py-2 text-left transition hover:border-[rgba(126,79,45,0.18)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55"
-                  onClick={() => applyMistaShortcut(code)}
-                  disabled={!canApplyShortcut}
-                >
-                  <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-2xl border border-white/85 bg-white shadow-[0_10px_22px_rgba(70,44,26,0.08)]">
-                    <OrderCardArtwork alt={label} art={art} sizes="48px" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
-                      {code}
-                    </p>
-                    <p className="line-clamp-2 text-sm font-semibold text-[color:var(--ink-strong)]">
-                      {label.replace(/^Mista\s+/i, '')}
-                    </p>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+          <span className="rounded-full border border-white/80 bg-white/86 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
+            {mistaShortcutStack.length} mista{mistaShortcutStack.length === 1 ? '' : 's'}
+          </span>
+        </div>
+        <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {mistaShortcutOptions.map(({ code, art, label }) => {
+            const canApplyShortcut = Boolean(flavorShortcutProductIds.T && flavorShortcutProductIds[code]);
+            return (
+              <button
+                key={`mista-shortcut-${code}`}
+                type="button"
+                className="flex items-center gap-3 rounded-2xl border border-white/80 bg-white/82 px-3 py-3 text-left transition hover:border-[rgba(126,79,45,0.18)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55"
+                onClick={() => applyMistaShortcut(code)}
+                disabled={!canApplyShortcut}
+              >
+                <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-2xl border border-white/85 bg-white shadow-[0_10px_22px_rgba(70,44,26,0.08)]">
+                  <OrderCardArtwork alt={label} art={art} sizes="48px" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
+                    {code}
+                  </p>
+                  <p className="line-clamp-2 text-sm font-semibold text-[color:var(--ink-strong)]">
+                    {label.replace(/^Mista\s+/i, '')}
+                  </p>
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
