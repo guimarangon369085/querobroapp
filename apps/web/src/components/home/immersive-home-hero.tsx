@@ -322,8 +322,8 @@ export function ImmersiveHomeHero() {
                     transitionTimingFunction,
                     background:
                       columnIndex === 1
-                        ? 'linear-gradient(180deg, rgba(7,5,3,0.08) 0%, rgba(7,5,3,0.26) 48%, rgba(7,5,3,0.62) 100%)'
-                        : 'linear-gradient(180deg, rgba(7,5,3,0.12) 0%, rgba(7,5,3,0.34) 52%, rgba(7,5,3,0.72) 100%)'
+                        ? 'linear-gradient(180deg, rgba(7,5,3,0.04) 0%, rgba(7,5,3,0.14) 48%, rgba(7,5,3,0.4) 100%)'
+                        : 'linear-gradient(180deg, rgba(7,5,3,0.06) 0%, rgba(7,5,3,0.2) 52%, rgba(7,5,3,0.48) 100%)'
                   }}
                 />
                 <div
@@ -342,7 +342,7 @@ export function ImmersiveHomeHero() {
           style={{
             transitionDuration,
             transitionTimingFunction,
-            background: `radial-gradient(circle at 18% 20%, ${activeImage.glow} 0%, transparent 30%), radial-gradient(circle at 82% 18%, ${activeImage.accent} 0%, transparent 24%), linear-gradient(90deg, rgba(15,9,4,0.68) 0%, rgba(15,9,4,0.28) 38%, rgba(15,9,4,0.16) 58%, rgba(15,9,4,0.62) 100%), linear-gradient(180deg, rgba(9,5,2,0.08) 0%, rgba(9,5,2,0.18) 38%, rgba(9,5,2,0.52) 74%, rgba(9,5,2,0.86) 100%)`
+            background: `radial-gradient(circle at 18% 20%, ${activeImage.glow} 0%, transparent 30%), radial-gradient(circle at 82% 18%, ${activeImage.accent} 0%, transparent 24%), linear-gradient(90deg, rgba(15,9,4,0.46) 0%, rgba(15,9,4,0.16) 38%, rgba(15,9,4,0.08) 58%, rgba(15,9,4,0.34) 100%), linear-gradient(180deg, rgba(9,5,2,0.04) 0%, rgba(9,5,2,0.1) 38%, rgba(9,5,2,0.28) 74%, rgba(9,5,2,0.58) 100%)`
           }}
         />
         <div className="pointer-events-none absolute inset-y-0 left-1/3 hidden w-px -translate-x-1/2 bg-white/14 lg:block" />

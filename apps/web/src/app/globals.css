@@ -276,13 +276,15 @@ section {
 .app-nav__link {
   display: flex;
   align-items: center;
-  padding: 10px 12px;
-  border-radius: 14px;
+  min-height: 50px;
+  padding: 13px 16px;
+  border-radius: 16px;
   background: rgba(255, 255, 255, 0.64);
   border: 1px solid rgba(255, 255, 255, 0.74);
   color: color-mix(in srgb, var(--ink-strong), black 8%);
-  font-size: 0.86rem;
-  box-shadow: 0 10px 22px rgba(61, 39, 25, 0.08);
+  font-size: 0.94rem;
+  font-weight: 600;
+  box-shadow: 0 14px 28px rgba(61, 39, 25, 0.09);
 }
 
 .app-nav__content {

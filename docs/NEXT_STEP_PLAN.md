@@ -61,6 +61,7 @@ Criterio de pronto:
   Copy atual: `Sua vida + broa :) 🙂`.
 - Manter na home desktop o fundo em 3 colunas sincronizadas e sem repeticao, evitando crop agressivo de uma unica imagem em widescreen.
 - Manter na home desktop as trocas de coluna defasadas entre si, sem blackout simultaneo nas 3 faixas.
+- Manter na home o contraste mais leve sobre as fotos e a navegacao desktop com botoes maiores, sem voltar a achatar o impacto visual.
 - Manter o desktop de `/pedido` mais direto, sem blocos introdutorios redundantes acima do formulario.
 - Manter `/pedido` abrindo direto em `Dados`, sem header/resumo duplicado no topo e sem labels redundantes de seção.
 - Manter `/dashboard` acessivel no menu principal sem voltar a aplicar trava de host no web por engano.

@@ -101,6 +101,7 @@ Ultima atualizacao: 2026-03-17
 - Os previews sociais das rotas publicas (`/` e `/pedido`) agora usam a descricao curta `Sua vida + broa :) 🙂`, evitando copy tecnica no compartilhamento via WhatsApp.
 - A home desktop agora usa 3 colunas simultaneas no fundo, com rotacao distribuida sem repeticao entre as imagens visiveis, em vez de estourar uma unica foto widescreen.
 - A transicao da home desktop agora acontece em timings diferentes por coluna, com crossfade proprio em cada painel, evitando apagao/preto simultaneo na troca.
+- A navegacao desktop ganhou botoes maiores na sidebar, e o fade escuro da home foi reduzido em mobile e desktop para deixar as fotos entrarem com mais brilho no primeiro impacto.
 
 ## Validacao operacional mais recente
 
