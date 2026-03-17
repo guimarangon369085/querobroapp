@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { startTransition, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { startTransition, useEffect, useId, useRef, useState } from 'react';
 
 type HeroImage = {
   accent: string;
@@ -54,42 +54,21 @@ const HOME_HERO_IMAGES: HeroImage[] = Array.from({ length: HERO_IMAGE_COUNT }, (
 
 const AUTOPLAY_MS = 6000;
 const INITIAL_INDEX = 4;
-const HOME_PARALLAX_X_LIMIT = 16;
-const HOME_PARALLAX_Y_LIMIT = 12;
-
-type MotionPermissionState = 'idle' | 'pending' | 'granted' | 'denied' | 'unsupported';
-
-type DeviceOrientationPermissionApi = typeof DeviceOrientationEvent & {
-  requestPermission?: () => Promise<'granted' | 'denied'>;
-};
 
 function wrapIndex(index: number, total: number) {
   return (index + total) % total;
-}
-
-function clampMotion(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
 }
 
 export function ImmersiveHomeHero() {
   const [activeIndex, setActiveIndex] = useState(INITIAL_INDEX);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const [viewportHeight, setViewportHeight] = useState<number | null>(null);
-  const [motionPermissionState, setMotionPermissionState] = useState<MotionPermissionState>('idle');
   const instructionsId = useId();
   const rootRef = useRef<HTMLElement | null>(null);
-  const hasAttemptedMotionPermissionRef = useRef(false);
 
   const activeImage = HOME_HERO_IMAGES[activeIndex];
   const transitionDuration = prefersReducedMotion ? '100ms' : '1800ms';
   const transitionTimingFunction = 'cubic-bezier(.19,1,.22,1)';
-
-  const applyParallax = useCallback((x: number, y: number) => {
-    const root = rootRef.current;
-    if (!root) return;
-    root.style.setProperty('--home-parallax-x', `${x.toFixed(2)}px`);
-    root.style.setProperty('--home-parallax-y', `${y.toFixed(2)}px`);
-  }, []);
 
   const step = (delta = 1) => {
     startTransition(() => {
@@ -115,21 +94,6 @@ export function ImmersiveHomeHero() {
       window.clearInterval(autoplay);
     };
   }, [prefersReducedMotion]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof DeviceOrientationEvent === 'undefined') {
-      setMotionPermissionState('unsupported');
-      return;
-    }
-
-    const permissionApi = DeviceOrientationEvent as DeviceOrientationPermissionApi;
-    if (typeof permissionApi.requestPermission === 'function') {
-      setMotionPermissionState('idle');
-      return;
-    }
-
-    setMotionPermissionState('granted');
-  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -183,48 +147,6 @@ export function ImmersiveHomeHero() {
     };
   }, []);
 
-  useEffect(() => {
-    if (prefersReducedMotion || motionPermissionState !== 'granted') {
-      applyParallax(0, 0);
-      return;
-    }
-
-    const handleOrientation = (event: DeviceOrientationEvent) => {
-      const gamma = typeof event.gamma === 'number' ? clampMotion(event.gamma, -22, 22) : 0;
-      const beta = typeof event.beta === 'number' ? clampMotion(event.beta, -18, 18) : 0;
-      const x = (gamma / 22) * HOME_PARALLAX_X_LIMIT;
-      const y = (beta / 18) * HOME_PARALLAX_Y_LIMIT * -1;
-      applyParallax(x, y);
-    };
-
-    window.addEventListener('deviceorientation', handleOrientation, true);
-    return () => {
-      window.removeEventListener('deviceorientation', handleOrientation, true);
-      applyParallax(0, 0);
-    };
-  }, [applyParallax, motionPermissionState, prefersReducedMotion]);
-
-  const maybeEnableMotion = useCallback(() => {
-    if (prefersReducedMotion) return;
-    if (hasAttemptedMotionPermissionRef.current) return;
-    if (typeof window === 'undefined' || typeof DeviceOrientationEvent === 'undefined') return;
-
-    const permissionApi = DeviceOrientationEvent as DeviceOrientationPermissionApi;
-    if (typeof permissionApi.requestPermission !== 'function') return;
-
-    hasAttemptedMotionPermissionRef.current = true;
-    setMotionPermissionState('pending');
-
-    void permissionApi
-      .requestPermission()
-      .then((state) => {
-        setMotionPermissionState(state === 'granted' ? 'granted' : 'denied');
-      })
-      .catch(() => {
-        setMotionPermissionState('denied');
-      });
-  }, [prefersReducedMotion]);
-
   return (
     <main
       ref={rootRef}
@@ -234,14 +156,11 @@ export function ImmersiveHomeHero() {
       className="fixed inset-0 overflow-hidden bg-[#120c07] text-white"
       style={{
         height: viewportHeight ? `${viewportHeight}px` : '100svh',
-        minHeight: viewportHeight ? `${viewportHeight}px` : '100svh',
-        ['--home-parallax-x' as string]: '0px',
-        ['--home-parallax-y' as string]: '0px'
+        minHeight: viewportHeight ? `${viewportHeight}px` : '100svh'
       }}
       tabIndex={0}
       onClick={(event) => {
         if ((event.target as HTMLElement).closest('a, [data-home-cta]')) return;
-        maybeEnableMotion();
         step(1);
       }}
       onKeyDown={(event) => {
@@ -270,19 +189,17 @@ export function ImmersiveHomeHero() {
       <div className="absolute inset-0">
         {HOME_HERO_IMAGES.map((image, index) => {
           const active = index === activeIndex;
-          const scale = active ? (prefersReducedMotion ? 1 : 1.02) : prefersReducedMotion ? 1 : 1.08;
-          const translateX = active ? 'var(--home-parallax-x)' : 'calc(var(--home-parallax-x) * 1.55)';
-          const translateY = active ? 'var(--home-parallax-y)' : 'calc(var(--home-parallax-y) * 1.55)';
 
           return (
             <div
               key={image.src}
               aria-hidden={!active}
               className={`absolute inset-[-3%] transition-[opacity,transform,filter] ${
-                active ? 'opacity-100' : 'pointer-events-none opacity-0'
+                active
+                  ? `opacity-100 ${prefersReducedMotion ? 'scale-100' : 'scale-[1.02]'}`
+                  : `pointer-events-none opacity-0 ${prefersReducedMotion ? 'scale-100' : 'scale-[1.08]'}`
               }`}
               style={{
-                transform: `translate3d(${translateX}, ${translateY}, 0) scale(${scale})`,
                 transitionDuration,
                 transitionTimingFunction
               }}
@@ -301,10 +218,8 @@ export function ImmersiveHomeHero() {
         })}
 
         <div
-          className="absolute inset-0 transition-[background,transform]"
+          className="absolute inset-0 transition-[background]"
           style={{
-            transform:
-              'translate3d(calc(var(--home-parallax-x) * -0.35), calc(var(--home-parallax-y) * -0.35), 0) scale(1.02)',
             transitionDuration,
             transitionTimingFunction,
             background: `radial-gradient(circle at 18% 20%, ${activeImage.glow} 0%, transparent 30%), radial-gradient(circle at 82% 18%, ${activeImage.accent} 0%, transparent 24%), linear-gradient(90deg, rgba(15,9,4,0.68) 0%, rgba(15,9,4,0.28) 38%, rgba(15,9,4,0.16) 58%, rgba(15,9,4,0.62) 100%), linear-gradient(180deg, rgba(9,5,2,0.08) 0%, rgba(9,5,2,0.18) 38%, rgba(9,5,2,0.52) 74%, rgba(9,5,2,0.86) 100%)`
