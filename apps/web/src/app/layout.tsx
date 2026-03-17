@@ -1,11 +1,12 @@
 import './globals.css';
 import type { Metadata } from 'next';
-import type { ReactNode } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import { BuilderRuntimeTheme } from '@/components/builder-runtime-theme';
 import { FeedbackProvider } from '@/components/feedback-provider';
 import { RuntimeRecovery } from '@/components/runtime-recovery';
 import { RenderStabilityGuard } from '@/components/render-stability-guard';
 import { AppFrame } from '@/components/app-frame';
+import { AnalyticsTracker } from '@/components/analytics-tracker';
 import { getPublicAppOrigin } from '@/lib/public-site-config';
 
 const metadataBase = getPublicAppOrigin({ allowLocalFallback: process.env.NODE_ENV !== 'production' });
@@ -38,6 +39,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <RenderStabilityGuard />
         <RuntimeRecovery />
         <BuilderRuntimeTheme />
+        <Suspense fallback={null}>
+          <AnalyticsTracker />
+        </Suspense>
         <FeedbackProvider>
           <AppFrame>{children}</AppFrame>
         </FeedbackProvider>

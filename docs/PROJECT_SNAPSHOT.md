@@ -21,6 +21,8 @@ Ultima atualizacao: 2026-03-16
 - O provider principal de frete/entrega do app agora e `Loggi`, substituindo a integracao anterior com `Uber Direct`.
 - `/pedido` e o modal de novo pedido em `/pedidos` agora usam o mesmo fluxo em duas etapas para entrega: `Calcular frete` antes de `Finalizar pedido/Criar pedido`.
 - As caixas mistas passaram a usar composicao visual unica no mesmo quadrante, padronizada entre a captura publica e a operacao interna.
+- `/dashboard` voltou a existir como rota oculta interna, agora com painel real de analytics first-party do site, vitals e performance financeira/operacional da broa.
+- O web passou a instrumentar navegacao, links, funil e web vitals por coleta propria, gravando esses eventos na API para leitura imediata no dashboard.
 
 ## O que um usuario consegue fazer hoje
 
@@ -47,7 +49,8 @@ Ultima atualizacao: 2026-03-16
 - `/estoque`: saldo, D+1, compras e leitura operacional.
 - `/produtos`: redirect legado para `/estoque`.
 - `/calendario`: redirect permanente para `/pedidos`.
-- Rotas antigas (`/`, `/dashboard`, `/hoje`, `/jornada`, `/inicio`, `/resumo`, `/base`, `/producao`, `/saidas`, `/caixa`) convergem para `Pedidos`.
+- `/dashboard`: pagina oculta interna com trafego, navegacao, vitals, funil e financeiro completo.
+- Rotas antigas (`/`, `/hoje`, `/jornada`, `/inicio`, `/resumo`, `/base`, `/producao`, `/saidas`, `/caixa`) convergem para `Pedidos`.
 - Alias legado de captura (`/whatsapp-flow/pedido/:sessionId`) ainda converte para `Pedidos` ate a troca do canal.
 - `/builder`: redirect para `/pedidos`; o runtime interno segue exposto por `GET /runtime-config`.
 
@@ -59,6 +62,8 @@ Ultima atualizacao: 2026-03-16
 - Intake externo: `orders/intake`, `orders/intake/customer-form`, `orders/intake/google-form`, `orders/intake/whatsapp-flow`
 - Cotacao de frete: `deliveries/quotes` + proxy interno do web em `/api/delivery-quote`
 - Proxy de `Google Forms`: web exposto em `/api/google-form` para receber o Apps Script sem abrir a API inteira publicamente
+- Analytics first-party: `analytics/events` na API + proxy interno do web em `/api/analytics/track`
+- Dashboard: `dashboard/summary` para trafego, vitals, financeiro, mix de produtos e recebiveis
 - Suporte interno: `runtime-config` (read-only) e redirects legados controlados no web
 
 ## Qualidade tecnica
@@ -70,6 +75,7 @@ Ultima atualizacao: 2026-03-16
 - Os flows de QA que sobem um web temporario agora usam dist dirs dedicados do Next, para nao disputar o `.next` do `next dev`.
 - O workflow principal de CI no GitHub agora roda `check:prisma-drift` e `qa:trust` com lint habilitado.
 - O browser smoke garante o redirect legado de `/produtos` e cobre as telas operacionais principais.
+- O app agora produz analytics first-party sem GA4 previa, usando o proprio banco para sessao, page view, link click e web vitals.
 
 ## Validacao operacional mais recente
 
@@ -86,6 +92,7 @@ Ultima atualizacao: 2026-03-16
 4. A integracao Loggi ja substituiu o provider anterior no codigo e no runtime, mas ainda vale validar o disparo real de shipment em producao sem criar entrega acidental.
 5. Mobile segue atras do web no fluxo operacional novo.
 6. Ainda vale ampliar cobertura de testes alem dos gates atuais, principalmente em cenarios de edge case de dominio.
+7. O dashboard interno de analytics parte do zero sem historico legado; ele comeca a refletir navegacao nova a partir desta instrumentacao first-party.
 
 ## Como religar e validar rapido
 

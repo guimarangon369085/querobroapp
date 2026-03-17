@@ -181,3 +181,37 @@ model IdempotencyRecord {
   @@unique([scope, idemKey])
   @@index([expiresAt])
 }
+
+model SiteAnalyticsEvent {
+  id             Int      @id @default(autoincrement())
+  sessionId      String
+  eventType      String
+  path           String?
+  href           String?
+  label          String?
+  referrerHost   String?
+  referrerUrl    String?
+  source         String?
+  medium         String?
+  campaign       String?
+  deviceType     String?
+  browser        String?
+  os             String?
+  locale         String?
+  timezone       String?
+  viewportWidth  Int?
+  viewportHeight Int?
+  screenWidth    Int?
+  screenHeight   Int?
+  metricName     String?
+  metricValue    Float?
+  metricUnit     String?
+  navigationType String?
+  metaJson       String?
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([eventType, createdAt])
+  @@index([sessionId, createdAt])
+  @@index([path, createdAt])
+}

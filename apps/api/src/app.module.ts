@@ -11,6 +11,8 @@ import { InventoryModule } from './modules/inventory/inventory.module.js';
 import { BomModule } from './modules/bom/bom.module.js';
 import { ProductionModule } from './modules/production/production.module.js';
 import { RuntimeConfigModule } from './modules/runtime-config/runtime-config.module.js';
+import { AnalyticsModule } from './modules/analytics/analytics.module.js';
+import { DashboardModule } from './modules/dashboard/dashboard.module.js';
 import { AuthGuard } from './security/auth.guard.js';
 import { RbacGuard } from './security/rbac.guard.js';
 
@@ -33,7 +35,9 @@ import { RbacGuard } from './security/rbac.guard.js';
     InventoryModule,
     BomModule,
     ProductionModule,
-    RuntimeConfigModule
+    RuntimeConfigModule,
+    AnalyticsModule,
+    DashboardModule
   ],
   controllers: [AppController],
   providers: [

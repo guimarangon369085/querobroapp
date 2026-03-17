@@ -13,25 +13,22 @@ export async function POST(request: Request) {
     body = await request.json();
   } catch {
     return buildErrorResponse(400, {
-      message: 'Payload invalido para envio do pedido.'
+      message: 'Payload invalido para analytics.'
     });
-  }
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json'
-  };
-  const bridgeToken = String(process.env.ORDER_FORM_BRIDGE_TOKEN || '').trim();
-  if (bridgeToken) {
-    headers.Authorization = `Bearer ${bridgeToken}`;
   }
 
   try {
-    const response = await fetch(`${resolveServerBridgeApiBaseUrl(request, process.env.ORDER_FORM_API_URL)}/orders/intake/customer-form`, {
+    const response = await fetch(
+      `${resolveServerBridgeApiBaseUrl(request, process.env.ORDER_FORM_API_URL)}/analytics/events`,
+      {
       method: 'POST',
-      headers,
+      headers: {
+        'Content-Type': 'application/json'
+      },
       body: JSON.stringify(body),
       cache: 'no-store'
-    });
+      }
+    );
 
     const raw = await response.text();
     const contentType = response.headers.get('content-type') || 'application/json';
@@ -51,8 +48,8 @@ export async function POST(request: Request) {
     return buildErrorResponse(502, {
       message:
         error instanceof Error
-          ? `Falha ao conectar o formulario com a API: ${error.message}`
-          : 'Falha ao conectar o formulario com a API.'
+          ? `Falha ao conectar analytics com a API: ${error.message}`
+          : 'Falha ao conectar analytics com a API.'
     });
   }
 }

@@ -1,14 +1,7 @@
 import { NextResponse } from 'next/server';
-import { devDefaultBaseUrl, getApiBaseUrl } from '@/lib/api-base-url';
+import { resolveServerBridgeApiBaseUrl } from '@/lib/server-bridge-api-base-url';
 
 export const dynamic = 'force-dynamic';
-
-function resolveOrderFormApiBaseUrl() {
-  const explicit = String(process.env.ORDER_FORM_API_URL || '').trim();
-  if (explicit) return explicit.replace(/\/+$/, '');
-  if ((process.env.NODE_ENV || 'development') !== 'production') return devDefaultBaseUrl;
-  return getApiBaseUrl().replace(/\/+$/, '');
-}
 
 function buildErrorResponse(status: number, payload: unknown) {
   return NextResponse.json(payload, { status });
@@ -33,7 +26,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const response = await fetch(`${resolveOrderFormApiBaseUrl()}/orders/intake/google-form`, {
+    const response = await fetch(`${resolveServerBridgeApiBaseUrl(request, process.env.ORDER_FORM_API_URL)}/orders/intake/google-form`, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),

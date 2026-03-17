@@ -12,6 +12,7 @@ import {
 } from '@querobroapp/shared';
 import { FormField } from '@/components/form/FormField';
 import { useFeedback } from '@/components/feedback-provider';
+import { resolveAnalyticsSessionId, trackAnalyticsEvent } from '@/lib/analytics';
 import {
   buildCustomerAddressAutofillFromGooglePlace,
   type GooglePlaceResultLike
@@ -606,6 +607,7 @@ export function PublicOrderPage() {
     setDeliveryQuoteError(null);
     setIsQuotingDelivery(false);
   }, [
+    draftSessionId,
     estimatedTotal,
     form.address,
     form.fulfillmentMode,
@@ -669,6 +671,19 @@ export function PublicOrderPage() {
 
     setIsQuotingDelivery(true);
     setDeliveryQuoteError(null);
+    const analyticsSessionId = resolveAnalyticsSessionId();
+    trackAnalyticsEvent({
+      sessionId: analyticsSessionId,
+      eventType: 'FUNNEL',
+      path: '/pedido',
+      label: 'public_order_quote_requested',
+      meta: {
+        fulfillmentMode: form.fulfillmentMode,
+        totalBroas,
+        estimatedTotal,
+        orderDraftSessionId: draftSessionId
+      }
+    });
 
     try {
       const response = await fetch('/api/delivery-quote', {
@@ -702,17 +717,40 @@ export function PublicOrderPage() {
 
       setDeliveryQuote(data);
       setDeliveryQuoteError(null);
+      trackAnalyticsEvent({
+        sessionId: analyticsSessionId,
+        eventType: 'FUNNEL',
+        path: '/pedido',
+        label: 'public_order_quote_success',
+        meta: {
+          provider: data.provider,
+          fee: data.fee,
+          source: data.source,
+          orderDraftSessionId: draftSessionId
+        }
+      });
       return data;
     } catch (quoteError) {
       const message =
         quoteError instanceof Error ? quoteError.message : 'Nao foi possivel calcular o frete agora.';
       setDeliveryQuote(null);
       setDeliveryQuoteError(message);
+      trackAnalyticsEvent({
+        sessionId: analyticsSessionId,
+        eventType: 'FUNNEL',
+        path: '/pedido',
+        label: 'public_order_quote_failed',
+        meta: {
+          message,
+          orderDraftSessionId: draftSessionId
+        }
+      });
       return null;
     } finally {
       setIsQuotingDelivery(false);
     }
   }, [
+    draftSessionId,
     estimatedTotal,
     form.address,
     form.fulfillmentMode,
@@ -871,10 +909,32 @@ export function PublicOrderPage() {
         throw new Error(extractErrorMessage(data));
       }
       setResult(data as PublicOrderResult);
+      trackAnalyticsEvent({
+        sessionId: resolveAnalyticsSessionId(),
+        eventType: 'FUNNEL',
+        path: '/pedido',
+        label: 'public_order_submitted',
+        meta: {
+          orderId: (data as PublicOrderResult).order.id,
+          total: (data as PublicOrderResult).order.total ?? estimatedTotal,
+          fulfillmentMode: form.fulfillmentMode,
+          orderDraftSessionId: draftSessionId
+        }
+      });
       presentSuccess('Seu pedido foi recebido. Confira o resumo e o PIX para concluir.', `Pedido #${(data as PublicOrderResult).order.id}`);
     } catch (submitError) {
       const message = submitError instanceof Error ? submitError.message : 'Nao foi possivel enviar o pedido.';
       setError(message);
+      trackAnalyticsEvent({
+        sessionId: resolveAnalyticsSessionId(),
+        eventType: 'FUNNEL',
+        path: '/pedido',
+        label: 'public_order_submit_failed',
+        meta: {
+          message,
+          orderDraftSessionId: draftSessionId
+        }
+      });
       notifyError(message);
     } finally {
       setIsSubmitting(false);
