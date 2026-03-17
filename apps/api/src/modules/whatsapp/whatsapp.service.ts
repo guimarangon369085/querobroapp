@@ -5,7 +5,7 @@ import {
   type WhatsAppPixDispatch
 } from '@querobroapp/shared';
 
-type WhatsAppCloudMessageKind = 'SUMMARY' | 'PIX_CODE';
+type WhatsAppCloudMessageKind = 'SUMMARY' | 'PIX_CODE' | 'ORDER_ALERT';
 
 type WhatsAppCloudApiResponse = {
   messages?: Array<{ id?: string }>;
@@ -133,5 +133,21 @@ export class WhatsAppService {
       sentAt: new Date().toISOString(),
       messages
     });
+  }
+
+  async sendOrderAlert(input: { phone: string; body: string }) {
+    const to = this.normalizeRecipientPhone(input.phone);
+    const message = await this.postTextMessage({
+      to,
+      kind: 'ORDER_ALERT',
+      body: input.body.trim()
+    });
+
+    return {
+      provider: 'WHATSAPP_CLOUD_API' as const,
+      to,
+      sentAt: new Date().toISOString(),
+      message
+    };
   }
 }

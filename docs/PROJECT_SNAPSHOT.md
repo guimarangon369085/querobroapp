@@ -30,6 +30,7 @@ Ultima atualizacao: 2026-03-17
 - `/dashboard` deixou de depender so de obscuridade: agora abre apenas em host operacional/loopback, usa bridge protegido no web e a API exige token de bridge.
 - Analytics first-party deixou de gravar URLs completas com query/hash e passou a aceitar ingest apenas por bridge same-origin autenticado.
 - `Repetir pedido` em `/clientes` e `Novo pedido` em `/pedidos` agora preservam `PICKUP` em vez de forcar `DELIVERY`.
+- A criacao de pedido agora dispara alerta operacional assicrono no backend, com canal via WhatsApp Cloud e webhook opcional para iOS/Pushcut/Shortcuts.
 
 ## O que um usuario consegue fazer hoje
 
@@ -103,6 +104,7 @@ Ultima atualizacao: 2026-03-17
 6. Ainda vale ampliar cobertura de testes alem dos gates atuais, principalmente em cenarios de edge case de dominio.
 7. O dashboard interno de analytics parte do zero sem historico legado; ele comeca a refletir navegacao nova a partir desta instrumentacao first-party.
 8. O dashboard ainda faz leituras pesadas e pode pedir agregacao/caching dedicado antes do go-live pleno.
+9. O alerta imediato de novo pedido ja esta pronto no codigo, mas ainda depende da configuracao do destinatario final (`ORDER_ALERT_WHATSAPP_TO` e/ou `ORDER_ALERT_WEBHOOK_URL`) no ambiente de producao.
 
 ## Como religar e validar rapido
 

@@ -42,6 +42,7 @@ import {
 import { PaymentsService } from '../payments/payments.service.js';
 import { WhatsAppService } from '../whatsapp/whatsapp.service.js';
 import { DeliveriesService } from '../deliveries/deliveries.service.js';
+import { OrderNotificationsService } from './order-notifications.service.js';
 
 const updateSchema = OrderSchema.partial().omit({ id: true, createdAt: true, items: true });
 const replaceItemsSchema = z.object({
@@ -148,7 +149,8 @@ export class OrdersService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(PaymentsService) private readonly paymentsService: PaymentsService,
     @Inject(WhatsAppService) private readonly whatsAppService: WhatsAppService,
-    @Inject(DeliveriesService) private readonly deliveriesService: DeliveriesService
+    @Inject(DeliveriesService) private readonly deliveriesService: DeliveriesService,
+    @Inject(OrderNotificationsService) private readonly orderNotificationsService: OrderNotificationsService
   ) {}
 
   private toMoney(value: number) {
@@ -1732,7 +1734,14 @@ export class OrdersService {
       }
     );
 
-    return this.prisma.$transaction(async (tx) => {
+    let createdFreshResult:
+      | {
+          order: ReturnType<OrdersService['withFinancial']>;
+          intake: OrderIntakeMeta;
+        }
+      | null = null;
+
+    const result = await this.prisma.$transaction(async (tx) => {
       const idemKey = this.intakeIdemKey(data);
       const requestHash = this.intakeRequestHash(data);
 
@@ -1846,12 +1855,22 @@ export class OrdersService {
         intake: this.buildOrderIntakeMeta(data, order, latestPayment, pixCharge)
       };
 
+      if (data.intent !== 'DRAFT') {
+        createdFreshResult = result;
+      }
+
       if (idemKey) {
         await this.saveIntakeResult(tx, idemKey, requestHash, result);
       }
 
       return result;
     });
+
+    if (createdFreshResult) {
+      void this.orderNotificationsService.notifyNewOrder(createdFreshResult);
+    }
+
+    return result;
   }
 
   async intakeWhatsAppFlow(payload: unknown) {
