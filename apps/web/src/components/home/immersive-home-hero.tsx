@@ -54,6 +54,7 @@ const HOME_HERO_IMAGES: HeroImage[] = Array.from({ length: HERO_IMAGE_COUNT }, (
 
 const AUTOPLAY_MS = 6000;
 const INITIAL_INDEX = 4;
+const DESKTOP_COLUMN_OFFSETS = [0, 3, 6] as const;
 
 function wrapIndex(index: number, total: number) {
   return (index + total) % total;
@@ -69,6 +70,10 @@ export function ImmersiveHomeHero() {
   const activeImage = HOME_HERO_IMAGES[activeIndex];
   const transitionDuration = prefersReducedMotion ? '100ms' : '1800ms';
   const transitionTimingFunction = 'cubic-bezier(.19,1,.22,1)';
+  const desktopColumnImages = DESKTOP_COLUMN_OFFSETS.map((offset) => ({
+    image: HOME_HERO_IMAGES[wrapIndex(activeIndex + offset, HOME_HERO_IMAGES.length)],
+    offset
+  }));
 
   const step = (delta = 1) => {
     startTransition(() => {
@@ -187,35 +192,90 @@ export function ImmersiveHomeHero() {
         Foto {activeIndex + 1} de {HOME_HERO_IMAGES.length}
       </p>
       <div className="absolute inset-0">
-        {HOME_HERO_IMAGES.map((image, index) => {
-          const active = index === activeIndex;
+        <div className="absolute inset-0 lg:hidden">
+          {HOME_HERO_IMAGES.map((image, index) => {
+            const active = index === activeIndex;
 
-          return (
-            <div
-              key={image.src}
-              aria-hidden={!active}
-              className={`absolute inset-[-3%] transition-[opacity,transform,filter] ${
-                active
-                  ? `opacity-100 ${prefersReducedMotion ? 'scale-100' : 'scale-[1.02]'}`
-                  : `pointer-events-none opacity-0 ${prefersReducedMotion ? 'scale-100' : 'scale-[1.08]'}`
-              }`}
-              style={{
-                transitionDuration,
-                transitionTimingFunction
-              }}
-            >
-              <Image
-                alt={image.alt}
-                className="object-cover"
-                fill
-                priority={index === INITIAL_INDEX}
-                quality={86}
-                sizes="100vw"
-                src={image.src}
-              />
-            </div>
-          );
-        })}
+            return (
+              <div
+                key={image.src}
+                aria-hidden={!active}
+                className={`absolute inset-[-3%] transition-[opacity,transform,filter] ${
+                  active
+                    ? `opacity-100 ${prefersReducedMotion ? 'scale-100' : 'scale-[1.02]'}`
+                    : `pointer-events-none opacity-0 ${prefersReducedMotion ? 'scale-100' : 'scale-[1.08]'}`
+                }`}
+                style={{
+                  transitionDuration,
+                  transitionTimingFunction
+                }}
+              >
+                <Image
+                  alt={image.alt}
+                  className="object-cover"
+                  fill
+                  priority={index === INITIAL_INDEX}
+                  quality={86}
+                  sizes="100vw"
+                  src={image.src}
+                />
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="absolute inset-0 hidden grid-cols-3 gap-[1.2vw] px-[1.2vw] py-[1.2vw] lg:grid">
+          {desktopColumnImages.map(({ image, offset }, columnIndex) => {
+            const translateY = prefersReducedMotion ? '0px' : `${(columnIndex - 1) * 18}px`;
+            const rotate = prefersReducedMotion ? '0deg' : `${(columnIndex - 1) * 1.35}deg`;
+            const scale = prefersReducedMotion ? '1' : columnIndex === 1 ? '1.015' : '1.03';
+            const originX = columnIndex === 0 ? '18%' : columnIndex === 1 ? '50%' : '82%';
+
+            return (
+              <div
+                key={`${image.src}-${offset}`}
+                className="relative overflow-hidden rounded-[2.4vw] border border-white/10 bg-[rgba(17,10,6,0.28)] shadow-[0_24px_70px_rgba(8,5,2,0.28)]"
+              >
+                <div
+                  className="absolute inset-0 transition-[transform,filter]"
+                  style={{
+                    transform: `translate3d(0, ${translateY}, 0) rotate(${rotate}) scale(${scale})`,
+                    transformOrigin: `${originX} 52%`,
+                    transitionDuration,
+                    transitionTimingFunction
+                  }}
+                >
+                  <Image
+                    alt={image.alt}
+                    className="object-cover"
+                    fill
+                    priority={columnIndex === 1}
+                    quality={86}
+                    sizes="33vw"
+                    src={image.src}
+                  />
+                </div>
+                <div
+                  className="absolute inset-0 transition-[background,opacity]"
+                  style={{
+                    transitionDuration,
+                    transitionTimingFunction,
+                    background:
+                      columnIndex === 1
+                        ? 'linear-gradient(180deg, rgba(7,5,3,0.08) 0%, rgba(7,5,3,0.26) 48%, rgba(7,5,3,0.62) 100%)'
+                        : 'linear-gradient(180deg, rgba(7,5,3,0.12) 0%, rgba(7,5,3,0.34) 52%, rgba(7,5,3,0.72) 100%)'
+                  }}
+                />
+                <div
+                  className="absolute inset-0 opacity-90 mix-blend-screen"
+                  style={{
+                    background: `radial-gradient(circle at 50% 16%, ${image.glow} 0%, transparent 38%), radial-gradient(circle at 50% 88%, ${image.accent} 0%, transparent 34%)`
+                  }}
+                />
+              </div>
+            );
+          })}
+        </div>
 
         <div
           className="absolute inset-0 transition-[background]"
@@ -225,6 +285,8 @@ export function ImmersiveHomeHero() {
             background: `radial-gradient(circle at 18% 20%, ${activeImage.glow} 0%, transparent 30%), radial-gradient(circle at 82% 18%, ${activeImage.accent} 0%, transparent 24%), linear-gradient(90deg, rgba(15,9,4,0.68) 0%, rgba(15,9,4,0.28) 38%, rgba(15,9,4,0.16) 58%, rgba(15,9,4,0.62) 100%), linear-gradient(180deg, rgba(9,5,2,0.08) 0%, rgba(9,5,2,0.18) 38%, rgba(9,5,2,0.52) 74%, rgba(9,5,2,0.86) 100%)`
           }}
         />
+        <div className="pointer-events-none absolute inset-y-0 left-1/3 hidden w-px -translate-x-1/2 bg-white/14 lg:block" />
+        <div className="pointer-events-none absolute inset-y-0 left-2/3 hidden w-px -translate-x-1/2 bg-white/14 lg:block" />
       </div>
 
       <section

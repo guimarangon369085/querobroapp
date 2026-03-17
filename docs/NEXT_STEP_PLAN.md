@@ -59,6 +59,7 @@ Criterio de pronto:
 - Manter o restante do app no mesmo modelo de viewport real da home, com modais, toasts, avisos e barras sticky respeitando `visualViewport` e safe areas do navegador.
 - Manter as rotas publicas com copy social curta e editorial no compartilhamento, sem texto tecnico de operacao no preview.
   Copy atual: `Sua vida + broa :) 🙂`.
+- Manter na home desktop o fundo em 3 colunas sincronizadas e sem repeticao, evitando crop agressivo de uma unica imagem em widescreen.
 - Manter o desktop de `/pedido` mais direto, sem blocos introdutorios redundantes acima do formulario.
 - Manter `/pedido` abrindo direto em `Dados`, sem header/resumo duplicado no topo e sem labels redundantes de seção.
 - Manter `/dashboard` acessivel no menu principal sem voltar a aplicar trava de host no web por engano.
