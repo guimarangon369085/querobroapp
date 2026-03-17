@@ -6,9 +6,60 @@ type LoadedOrder = Awaited<ReturnType<DashboardService['loadOrders']>>[number];
 type LoadedAnalyticsEvent = Awaited<ReturnType<DashboardService['loadAnalyticsEvents']>>[number];
 
 const SAO_PAULO_TIMEZONE = 'America/Sao_Paulo';
+const saoPauloFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: SAO_PAULO_TIMEZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23'
+});
+
+type ZonedDateParts = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+};
 
 function round2(value: number) {
   return roundMoney(value);
+}
+
+function readSaoPauloParts(reference: Date): ZonedDateParts {
+  const rawParts = saoPauloFormatter.formatToParts(reference);
+  const map = Object.fromEntries(rawParts.map((entry) => [entry.type, entry.value]));
+  return {
+    year: Number(map.year),
+    month: Number(map.month),
+    day: Number(map.day),
+    hour: Number(map.hour),
+    minute: Number(map.minute),
+    second: Number(map.second)
+  };
+}
+
+function resolveSaoPauloOffsetMilliseconds(reference: Date) {
+  const zoned = readSaoPauloParts(reference);
+  const zonedAsUtc = Date.UTC(zoned.year, zoned.month - 1, zoned.day, zoned.hour, zoned.minute, zoned.second, 0);
+  return zonedAsUtc - reference.getTime();
+}
+
+function saoPauloDateTimeToUtc(
+  parts: Pick<ZonedDateParts, 'year' | 'month' | 'day' | 'hour' | 'minute'> & { second?: number }
+) {
+  const utcGuess = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second ?? 0, 0);
+  const firstOffset = resolveSaoPauloOffsetMilliseconds(new Date(utcGuess));
+  let adjusted = utcGuess - firstOffset;
+  const secondOffset = resolveSaoPauloOffsetMilliseconds(new Date(adjusted));
+  if (secondOffset !== firstOffset) {
+    adjusted = utcGuess - secondOffset;
+  }
+  return new Date(adjusted);
 }
 
 function toDayKey(value: Date) {
@@ -20,16 +71,32 @@ function toDayKey(value: Date) {
   }).format(value);
 }
 
-function startOfToday() {
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  return now;
+function startOfToday(reference = new Date()) {
+  const zonedReference = readSaoPauloParts(reference);
+  return saoPauloDateTimeToUtc({
+    year: zonedReference.year,
+    month: zonedReference.month,
+    day: zonedReference.day,
+    hour: 0,
+    minute: 0,
+    second: 0
+  });
 }
 
-function createRangeStart(days: number) {
-  const start = startOfToday();
-  start.setDate(start.getDate() - (days - 1));
-  return start;
+function createRangeStart(days: number, reference = new Date()) {
+  const zonedReference = readSaoPauloParts(reference);
+  const targetAnchor = new Date(
+    Date.UTC(zonedReference.year, zonedReference.month - 1, zonedReference.day - (days - 1), 12, 0, 0, 0)
+  );
+  const targetDay = readSaoPauloParts(targetAnchor);
+  return saoPauloDateTimeToUtc({
+    year: targetDay.year,
+    month: targetDay.month,
+    day: targetDay.day,
+    hour: 0,
+    minute: 0,
+    second: 0
+  });
 }
 
 function isPublicPath(path?: string | null) {

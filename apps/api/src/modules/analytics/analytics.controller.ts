@@ -1,7 +1,8 @@
-import { Body, Controller, Inject, Post } from '@nestjs/common';
+import { Body, Controller, Headers, Inject, Post, UnauthorizedException } from '@nestjs/common';
 import { z } from 'zod';
 import { parseWithSchema } from '../../common/validation.js';
 import { Public } from '../../security/public.decorator.js';
+import { getSecurityRuntimeConfig } from '../../security/security-config.js';
 import { AnalyticsService } from './analytics.service.js';
 
 const analyticsEventInputSchema = z.object({
@@ -35,13 +36,43 @@ const analyticsTrackRequestSchema = z.object({
   events: z.array(analyticsEventInputSchema).min(1).max(50)
 });
 
+function extractBearerToken(authHeader?: string | null) {
+  const value = String(authHeader || '').trim();
+  if (!value) return '';
+  const match = value.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || '';
+}
+
 @Controller('analytics')
 export class AnalyticsController {
   constructor(@Inject(AnalyticsService) private readonly service: AnalyticsService) {}
 
+  private assertAnalyticsAccess(authorization?: string | null, explicitToken?: string | null) {
+    const configuredToken =
+      String(process.env.ANALYTICS_BRIDGE_TOKEN || '').trim() ||
+      String(process.env.ORDER_FORM_BRIDGE_TOKEN || '').trim();
+    const providedToken = String(explicitToken || '').trim() || extractBearerToken(authorization);
+
+    if (configuredToken) {
+      if (providedToken === configuredToken) return;
+      throw new UnauthorizedException('Token do bridge de analytics invalido.');
+    }
+
+    if ((process.env.NODE_ENV || 'development') === 'production' || getSecurityRuntimeConfig().enabled) {
+      throw new UnauthorizedException(
+        'ANALYTICS_BRIDGE_TOKEN ou ORDER_FORM_BRIDGE_TOKEN obrigatorio para expor analytics.'
+      );
+    }
+  }
+
   @Public()
   @Post('events')
-  ingest(@Body() body: unknown) {
+  ingest(
+    @Body() body: unknown,
+    @Headers('authorization') authorization?: string,
+    @Headers('x-analytics-token') analyticsToken?: string
+  ) {
+    this.assertAnalyticsAccess(authorization, analyticsToken);
     return this.service.ingest(parseWithSchema(analyticsTrackRequestSchema, body));
   }
 }

@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { apiFetch } from '@/lib/api';
 import { formatCurrencyBR } from '@/lib/format';
 import { useFeedback } from '@/components/feedback-provider';
 
@@ -245,7 +244,27 @@ export default function DashboardScreen() {
         setLoading(true);
       }
       try {
-        const data = await apiFetch<DashboardSummary>(`/dashboard/summary?days=${rangeDays}`);
+        const response = await fetch(`/api/dashboard-summary?days=${rangeDays}`, {
+          cache: 'no-store'
+        });
+        const raw = await response.text();
+        let payload: unknown = null;
+        try {
+          payload = raw ? JSON.parse(raw) : null;
+        } catch {
+          payload = raw ? { message: raw } : null;
+        }
+        if (!response.ok) {
+          const message =
+            payload &&
+            typeof payload === 'object' &&
+            'message' in payload &&
+            typeof (payload as { message?: unknown }).message === 'string'
+              ? (payload as { message: string }).message
+              : 'Nao foi possivel carregar o dashboard.';
+          throw new Error(message);
+        }
+        const data = payload as DashboardSummary;
         setSummary(data);
         setError(null);
       } catch (loadError) {
@@ -268,8 +287,10 @@ export default function DashboardScreen() {
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      void load({ silent: true });
-    }, 60_000);
+      if (document.visibilityState === 'visible') {
+        void load({ silent: true });
+      }
+    }, 180_000);
     return () => window.clearInterval(timer);
   }, [load]);
 

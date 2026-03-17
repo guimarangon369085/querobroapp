@@ -44,6 +44,7 @@ type OrderQuickCreateProps = {
   tutorialMode: boolean;
   customerOptions: SelectOption[];
   productsForCards: Product[];
+  fulfillmentMode: 'DELIVERY' | 'PICKUP';
   customerSearch: string;
   selectedCustomerId: number | '';
   restoredFromLastOrder?: {
@@ -65,6 +66,7 @@ type OrderQuickCreateProps = {
   deliveryQuote: DeliveryQuote | null;
   deliveryQuoteError: string | null;
   productMap: Map<number, Product>;
+  onFulfillmentModeChange: (value: 'DELIVERY' | 'PICKUP') => void;
   onCustomerSearchChange: (value: string) => void;
   onCustomerOptionPick: (option: SelectOption) => void;
   onScheduledAtChange: (value: string) => void;
@@ -321,6 +323,7 @@ export function OrderQuickCreate({
   customerOptions,
   productsForCards,
   customerSearch,
+  fulfillmentMode,
   selectedCustomerId,
   restoredFromLastOrder,
   newOrderScheduledAt,
@@ -337,6 +340,7 @@ export function OrderQuickCreate({
   deliveryQuote,
   deliveryQuoteError,
   productMap,
+  onFulfillmentModeChange,
   onCustomerSearchChange,
   onCustomerOptionPick,
   onScheduledAtChange,
@@ -354,20 +358,21 @@ export function OrderQuickCreate({
     newOrderItems.map((item) => [item.productId, item.quantity] as const)
   );
   const draftCustomerLabel = customerSearch.trim() || 'Escolha um cliente';
-  const deliveryFee = deliveryQuote?.fee ?? 0;
+  const requiresDeliveryQuote = fulfillmentMode === 'DELIVERY';
+  const deliveryFee = requiresDeliveryQuote ? deliveryQuote?.fee ?? 0 : 0;
   const draftGrandTotal = draftTotal + deliveryFee;
-  const hasReadyDeliveryQuote = Boolean(deliveryQuote?.quoteToken);
+  const hasReadyDeliveryQuote = !requiresDeliveryQuote || Boolean(deliveryQuote?.quoteToken);
   const deliveryProviderLabel = formatDeliveryProviderLabel(deliveryQuote);
   const primaryActionLabel = isCreatingOrder
     ? 'Criando pedido...'
-    : isQuotingDelivery
+    : requiresDeliveryQuote && isQuotingDelivery
       ? 'Calculando frete...'
       : hasReadyDeliveryQuote
         ? 'Criar pedido'
         : 'Calcular frete';
   const primaryActionDisabled =
     isCreatingOrder ||
-    isQuotingDelivery ||
+    (requiresDeliveryQuote && isQuotingDelivery) ||
     (hasReadyDeliveryQuote
       ? !canCreateOrder
       : !selectedCustomerId || newOrderItems.length === 0);
@@ -491,6 +496,25 @@ export function OrderQuickCreate({
       </div>
 
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3 sm:col-span-2 xl:col-span-1">
+          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">Atendimento</p>
+          <div className="mt-2 inline-flex rounded-full border border-[color:var(--line-soft)] bg-[rgba(255,251,246,0.92)] p-1">
+            {(['DELIVERY', 'PICKUP'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                  fulfillmentMode === mode
+                    ? 'bg-[color:var(--ink-strong)] text-white'
+                    : 'text-neutral-600'
+                }`}
+                onClick={() => onFulfillmentModeChange(mode)}
+              >
+                {mode === 'DELIVERY' ? 'Entrega' : 'Retirada'}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3">
           <p className="text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">Cliente</p>
           <p className="mt-1 text-base font-semibold text-neutral-900">{draftCustomerLabel}</p>
@@ -507,7 +531,9 @@ export function OrderQuickCreate({
         <div className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3">
           <p className="text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">Frete</p>
           <p className="mt-1 text-base font-semibold text-neutral-900">
-            {isQuotingDelivery
+            {!requiresDeliveryQuote
+              ? 'Sem frete'
+              : isQuotingDelivery
               ? 'Cotando...'
               : deliveryQuote
                 ? formatCurrencyBR(deliveryFee)
@@ -819,7 +845,9 @@ export function OrderQuickCreate({
             <div className="flex items-center justify-between gap-3">
               <span>Frete estimado</span>
               <strong className="text-[color:var(--ink-strong)]">
-                {isQuotingDelivery
+                {!requiresDeliveryQuote
+                  ? 'Sem frete'
+                  : isQuotingDelivery
                   ? 'Calculando...'
                   : deliveryQuote
                     ? formatCurrencyBR(deliveryFee)
@@ -882,14 +910,18 @@ export function OrderQuickCreate({
             </div>
           )}
 
-          {deliveryQuoteError ? (
+          {requiresDeliveryQuote && deliveryQuoteError ? (
             <div className="app-inline-notice app-inline-notice--warning rounded-[20px] px-4 py-3">
               {deliveryQuoteError}
             </div>
-          ) : deliveryQuote ? (
+          ) : requiresDeliveryQuote && deliveryQuote ? (
             <div className="rounded-[20px] border border-[rgba(126,79,45,0.08)] bg-white/80 px-4 py-3 text-xs leading-5 text-[color:var(--ink-muted)]">
               {deliveryProviderLabel +
                 (deliveryQuote.expiresAt ? ' pronto para uso neste pedido.' : ' cotado para este pedido.')}
+            </div>
+          ) : !requiresDeliveryQuote ? (
+            <div className="rounded-[20px] border border-[rgba(126,79,45,0.08)] bg-white/80 px-4 py-3 text-xs leading-5 text-[color:var(--ink-muted)]">
+              Pedido de retirada sem frete.
             </div>
           ) : null}
         </div>
@@ -911,9 +943,9 @@ export function OrderQuickCreate({
             ? 'Escolha um cliente.'
             : newOrderItems.length === 0
               ? 'Escolha ao menos uma caixa.'
-              : isQuotingDelivery
+              : requiresDeliveryQuote && isQuotingDelivery
                 ? 'Aguarde a cotacao do frete.'
-                : !hasReadyDeliveryQuote
+                : requiresDeliveryQuote && !hasReadyDeliveryQuote
                   ? 'Calcule o frete para liberar a criacao.'
                   : 'Revise o pedido.'}
         </p>

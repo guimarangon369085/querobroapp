@@ -37,14 +37,36 @@ export function buildPublicAppUrl(pathname: string, options?: { allowLocalFallba
   return new URL(pathname, origin).toString();
 }
 
-function normalizeHost(value?: string | null) {
+export function normalizeHost(value?: string | null) {
   return String(value || '')
     .trim()
     .toLowerCase()
     .replace(/:\d+$/, '');
 }
 
+export function isLoopbackHost(hostname?: string | null) {
+  const normalized = normalizeHost(hostname);
+  return (
+    normalized === 'localhost' ||
+    normalized === '127.0.0.1' ||
+    normalized === '::1' ||
+    normalized === '[::1]'
+  );
+}
+
 export function isOpsHost(hostname?: string | null) {
   const normalized = normalizeHost(hostname);
   return normalized === 'ops.querobroa.com.br' || normalized.startsWith('ops.');
+}
+
+export function isOpsOrLoopbackHost(hostname?: string | null) {
+  return isOpsHost(hostname) || isLoopbackHost(hostname);
+}
+
+export function resolveRequestHostFromHeaders(headersLike: Pick<Headers, 'get'>) {
+  return normalizeHost(
+    headersLike.get('x-forwarded-host') ||
+      headersLike.get('host') ||
+      headersLike.get('x-forwarded-server')
+  );
 }

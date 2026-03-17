@@ -25,6 +25,9 @@ Ultima atualizacao: 2026-03-17
 - As caixas mistas agora usam corte seco entre as duas imagens, sem a faixa branca intermediaria.
 - `/dashboard` voltou a existir como rota oculta interna, agora com painel real de analytics first-party do site, vitals e performance financeira/operacional da broa.
 - O web passou a instrumentar navegacao, links, funil e web vitals por coleta propria, gravando esses eventos na API para leitura imediata no dashboard.
+- `/dashboard` deixou de depender so de obscuridade: agora abre apenas em host operacional/loopback, usa bridge protegido no web e a API exige token de bridge.
+- Analytics first-party deixou de gravar URLs completas com query/hash e passou a aceitar ingest apenas por bridge same-origin autenticado.
+- `Repetir pedido` em `/clientes` e `Novo pedido` em `/pedidos` agora preservam `PICKUP` em vez de forcar `DELIVERY`.
 
 ## O que um usuario consegue fazer hoje
 
@@ -48,10 +51,12 @@ Ultima atualizacao: 2026-03-17
 - `/pedidos`: agenda do dia, criacao de pedido, status, producao, entrega e pagamento.
 - `/pedidos`: modal `Novo pedido` alinhado visualmente com `/pedido`, sem miniatura redundante e com CTA de frete abaixo do resumo.
 - `/clientes`: cadastro e edicao rapida.
+- `/clientes`: repetir pedido respeita o modo original de atendimento.
 - `/estoque`: saldo, D+1, compras e leitura operacional.
 - `/produtos`: redirect legado para `/estoque`.
 - `/calendario`: redirect permanente para `/pedidos`.
 - `/dashboard`: pagina oculta interna com trafego, navegacao, vitals, funil e financeiro completo.
+- `/dashboard`: exposta so em host operacional/loopback, via bridge interno do web.
 - Rotas antigas (`/`, `/hoje`, `/jornada`, `/inicio`, `/resumo`, `/base`, `/producao`, `/saidas`, `/caixa`) convergem para `Pedidos`.
 - Alias legado de captura (`/whatsapp-flow/pedido/:sessionId`) ainda converte para `Pedidos` ate a troca do canal.
 - `/builder`: redirect para `/pedidos`; o runtime interno segue exposto por `GET /runtime-config`.
@@ -84,7 +89,7 @@ Ultima atualizacao: 2026-03-17
 - Data: 2026-03-17
 - Ciclo executado: `./scripts/stop-all.sh` -> `./scripts/dev-all.sh` -> `curl http://127.0.0.1:3001/health`
 - QA executado: `pnpm lint`, `pnpm test`, `pnpm qa:browser-smoke` e `pnpm qa:critical-e2e`
-- Resultado: todos os gates passaram; o E2E critico concluiu a jornada com o pedido `#1012` validado como `ENTREGUE` e `PAGO`.
+- Resultado: todos os gates passaram; o E2E critico concluiu a jornada com o pedido `#1014` validado como `ENTREGUE` e `PAGO`.
 
 ## Gaps abertos
 
@@ -95,6 +100,7 @@ Ultima atualizacao: 2026-03-17
 5. Mobile segue atras do web no fluxo operacional novo.
 6. Ainda vale ampliar cobertura de testes alem dos gates atuais, principalmente em cenarios de edge case de dominio.
 7. O dashboard interno de analytics parte do zero sem historico legado; ele comeca a refletir navegacao nova a partir desta instrumentacao first-party.
+8. O dashboard ainda faz leituras pesadas e pode pedir agregacao/caching dedicado antes do go-live pleno.
 
 ## Como religar e validar rapido
 

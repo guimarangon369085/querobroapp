@@ -89,7 +89,6 @@ export function AnalyticsTracker() {
     const sessionId = resolveAnalyticsSessionId();
     const acquisition = resolveAnalyticsAcquisition();
     const { browser, os } = resolveBrowserAndOs();
-    const path = `${pathname || '/'}${searchParams?.toString() ? `?${searchParams.toString()}` : ''}`;
     currentPathRef.current = pathname || '/';
 
     trackAnalyticsEvent({
@@ -116,7 +115,7 @@ export function AnalyticsTracker() {
           ? (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming).type
           : 'spa',
       meta: {
-        fullPath: path
+        path: pathname || '/'
       }
     });
   }, [pathname, searchParams]);

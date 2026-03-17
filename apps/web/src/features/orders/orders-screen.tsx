@@ -122,6 +122,7 @@ type CustomerLastOrderDraft = {
   orderId: number;
   referenceLabel: string;
   referenceTime: number;
+  fulfillmentMode: 'DELIVERY' | 'PICKUP';
   items: DraftOrderItem[];
   discount: number;
   notes: string;
@@ -1045,6 +1046,7 @@ function OrdersPageContent() {
   const [isOrderDetailModalOpen, setIsOrderDetailModalOpen] = useState(false);
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
   const [newOrderCustomerId, setNewOrderCustomerId] = useState<number | ''>('');
+  const [newOrderFulfillmentMode, setNewOrderFulfillmentMode] = useState<'DELIVERY' | 'PICKUP'>('DELIVERY');
   const [customerSearch, setCustomerSearch] = useState('');
   const [newOrderItems, setNewOrderItems] = useState<Array<{ productId: number; quantity: number }>>([]);
   const [newOrderDiscount, setNewOrderDiscount] = useState<string>('0,00');
@@ -1579,6 +1581,7 @@ function OrdersPageContent() {
   const clearDraft = () => {
     newOrderQuoteRequestIdRef.current += 1;
     setNewOrderCustomerId('');
+    setNewOrderFulfillmentMode('DELIVERY');
     setCustomerSearch('');
     setNewOrderItems([]);
     setNewOrderDiscount('0,00');
@@ -1608,11 +1611,16 @@ function OrdersPageContent() {
       setOrderError('Aguarde a cotacao do frete terminar.');
       return;
     }
-    if (!newOrderDeliveryQuote) {
+    if (newOrderFulfillmentMode === 'DELIVERY' && !newOrderDeliveryQuote) {
       setOrderError(newOrderDeliveryQuoteError || 'A estimativa de frete e obrigatoria para criar.');
       return;
     }
-    if (requiresLiveCarrierQuote && !isLiveCarrierQuote(newOrderDeliveryQuote)) {
+    if (
+      newOrderFulfillmentMode === 'DELIVERY' &&
+      requiresLiveCarrierQuote &&
+      newOrderDeliveryQuote &&
+      !isLiveCarrierQuote(newOrderDeliveryQuote)
+    ) {
       setOrderError(newOrderDeliveryQuoteError || 'A estimativa real do frete e obrigatoria para criar.');
       return;
     }
@@ -1626,17 +1634,21 @@ function OrdersPageContent() {
           customerId: Number(newOrderCustomerId)
         },
         fulfillment: {
-          mode: 'DELIVERY',
+          mode: newOrderFulfillmentMode,
           scheduledAt: newOrderScheduledAtDate.toISOString()
         },
-        delivery: {
-          quoteToken: newOrderDeliveryQuote.quoteToken,
-          fee: newOrderDeliveryQuote.fee,
-          provider: newOrderDeliveryQuote.provider as NonNullable<OrderIntake['delivery']>['provider'],
-          source: newOrderDeliveryQuote.source as NonNullable<OrderIntake['delivery']>['source'],
-          status: newOrderDeliveryQuote.status,
-          expiresAt: newOrderDeliveryQuote.expiresAt
-        },
+        ...(newOrderFulfillmentMode === 'DELIVERY' && newOrderDeliveryQuote
+          ? {
+              delivery: {
+                quoteToken: newOrderDeliveryQuote.quoteToken,
+                fee: newOrderDeliveryQuote.fee,
+                provider: newOrderDeliveryQuote.provider as NonNullable<OrderIntake['delivery']>['provider'],
+                source: newOrderDeliveryQuote.source as NonNullable<OrderIntake['delivery']>['source'],
+                status: newOrderDeliveryQuote.status,
+                expiresAt: newOrderDeliveryQuote.expiresAt
+              }
+            }
+          : {}),
         order: {
           items: newOrderItems,
           discount: parseCurrencyBR(newOrderDiscount),
@@ -1656,6 +1668,7 @@ function OrdersPageContent() {
       const created = await submitOrderIntake(payload);
       const createdOrder = created.order;
       setNewOrderCustomerId('');
+      setNewOrderFulfillmentMode('DELIVERY');
       setCustomerSearch('');
       setNewOrderItems([]);
       setNewOrderDiscount('0,00');
@@ -1912,6 +1925,7 @@ function OrdersPageContent() {
         orderId: order.id ?? 0,
         referenceLabel: formatOrderDateTimeLabel(referenceDate),
         referenceTime,
+        fulfillmentMode: order.fulfillmentMode === 'PICKUP' ? 'PICKUP' : 'DELIVERY',
         items,
         discount: typeof order.discount === 'number' ? order.discount : 0,
         notes: order.notes || ''
@@ -2442,11 +2456,12 @@ function OrdersPageContent() {
   );
   const requiresLiveCarrierQuote =
     typeof window === 'undefined' ? true : !isLoopbackBrowserHost(window.location.hostname);
+  const requiresNewOrderDeliveryQuote = newOrderFulfillmentMode === 'DELIVERY';
   const canCreateOrder =
     Boolean(newOrderCustomerId) &&
     newOrderItems.length > 0 &&
-    !isQuotingNewOrderDelivery &&
-    Boolean(newOrderDeliveryQuote?.quoteToken);
+    (!requiresNewOrderDeliveryQuote || Boolean(newOrderDeliveryQuote?.quoteToken)) &&
+    !(requiresNewOrderDeliveryQuote && isQuotingNewOrderDelivery);
   const draftVirtualBoxRemainingUnits =
     draftTotalUnits > 0 ? unitsToCloseOrderBox(draftTotalUnits) : 0;
 
@@ -2556,6 +2571,7 @@ function OrdersPageContent() {
       }
 
       setNewOrderItems(lastOrderDraft.items);
+      setNewOrderFulfillmentMode(lastOrderDraft.fulfillmentMode);
       setNewOrderDiscount(formatMoneyInputBR(lastOrderDraft.discount) || '0,00');
       setNewOrderNotes(lastOrderDraft.notes);
       setOrderError(null);
@@ -2596,6 +2612,14 @@ function OrdersPageContent() {
 
   const refreshNewOrderDeliveryQuote = useCallback(
     async (options?: { silent?: boolean }) => {
+      if (newOrderFulfillmentMode !== 'DELIVERY') {
+        newOrderQuoteRequestIdRef.current += 1;
+        setNewOrderDeliveryQuote(null);
+        setNewOrderDeliveryQuoteError(null);
+        setIsQuotingNewOrderDelivery(false);
+        return null;
+      }
+
       if (!selectedNewOrderCustomer || !newOrderScheduledAtIso || newOrderQuoteManifestItems.length === 0 || draftSubtotal <= 0) {
         setNewOrderDeliveryQuote(null);
         setNewOrderDeliveryQuoteError(null);
@@ -2659,6 +2683,7 @@ function OrdersPageContent() {
       draftSubtotal,
       draftTotalUnits,
       newOrderCustomerAddress,
+      newOrderFulfillmentMode,
       newOrderQuoteManifestItems,
       newOrderScheduledAtIso,
       newOrderQuoteRequestIdRef,
@@ -2667,6 +2692,14 @@ function OrdersPageContent() {
   );
 
   useEffect(() => {
+    if (newOrderFulfillmentMode !== 'DELIVERY') {
+      newOrderQuoteRequestIdRef.current += 1;
+      setNewOrderDeliveryQuote(null);
+      setNewOrderDeliveryQuoteError(null);
+      setIsQuotingNewOrderDelivery(false);
+      return;
+    }
+
     if (!selectedNewOrderCustomer || !newOrderCustomerId) {
       newOrderQuoteRequestIdRef.current += 1;
       setNewOrderDeliveryQuote(null);
@@ -2697,6 +2730,7 @@ function OrdersPageContent() {
     setIsQuotingNewOrderDelivery(false);
   }, [
     draftSubtotal,
+    newOrderFulfillmentMode,
     newOrderCustomerAddress,
     newOrderCustomerId,
     newOrderQuoteManifestItems,
@@ -3731,6 +3765,7 @@ function OrdersPageContent() {
               tutorialMode={tutorialMode}
               customerOptions={customerOptions}
               productsForCards={orderableProducts}
+              fulfillmentMode={newOrderFulfillmentMode}
               customerSearch={customerSearch}
               selectedCustomerId={newOrderCustomerId}
               restoredFromLastOrder={restoredLastOrderDraft}
@@ -3748,6 +3783,7 @@ function OrdersPageContent() {
               deliveryQuote={newOrderDeliveryQuote}
               deliveryQuoteError={newOrderDeliveryQuoteError}
               productMap={productMap}
+              onFulfillmentModeChange={setNewOrderFulfillmentMode}
               onCustomerSearchChange={setCustomerSearch}
               onCustomerOptionPick={(option) => {
                 setCustomerSearch(option.label);

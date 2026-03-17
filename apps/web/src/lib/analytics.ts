@@ -61,6 +61,33 @@ function resolveReferrerHost(referrerUrl: string | null | undefined) {
   }
 }
 
+function sanitizeTrackedUrl(value: string | null | undefined, options?: { preferPathnameForSameOrigin?: boolean }) {
+  const normalized = normalizeText(value, 2048);
+  if (!normalized) return null;
+
+  if (normalized.startsWith('/')) {
+    const stripped = normalized.split('#')[0]?.split('?')[0]?.trim();
+    return stripped ? stripped.slice(0, 2048) : null;
+  }
+
+  try {
+    const parsed = new URL(normalized, typeof window !== 'undefined' ? window.location.origin : undefined);
+    parsed.hash = '';
+    parsed.search = '';
+    const pathname = parsed.pathname || '/';
+    const sameOrigin =
+      typeof window !== 'undefined' &&
+      normalizeText(parsed.origin, 2048) === normalizeText(window.location.origin, 2048);
+    if (options?.preferPathnameForSameOrigin && sameOrigin) {
+      return pathname.slice(0, 2048);
+    }
+    return `${parsed.origin}${pathname}`.slice(0, 2048);
+  } catch {
+    const stripped = normalized.split('#')[0]?.split('?')[0]?.trim();
+    return stripped ? stripped.slice(0, 2048) : null;
+  }
+}
+
 export function resolveAnalyticsSessionId() {
   if (typeof window === 'undefined') return 'server';
 
@@ -84,7 +111,7 @@ export function resolveAnalyticsAcquisition() {
   }
 
   const params = new URLSearchParams(window.location.search);
-  const currentReferrerUrl = normalizeText(document.referrer, 2048);
+  const currentReferrerUrl = sanitizeTrackedUrl(document.referrer);
   const source = normalizeText(params.get('utm_source'));
   const medium = normalizeText(params.get('utm_medium'));
   const campaign = normalizeText(params.get('utm_campaign'));
@@ -111,7 +138,7 @@ export function resolveAnalyticsAcquisition() {
       medium: normalizeText(parsed.medium),
       campaign: normalizeText(parsed.campaign),
       referrerHost: normalizeText(parsed.referrerHost),
-      referrerUrl: normalizeText(parsed.referrerUrl, 2048)
+      referrerUrl: sanitizeTrackedUrl(parsed.referrerUrl)
     };
   } catch {
     return current;
@@ -161,10 +188,10 @@ export function trackAnalyticsEvent(event: AnalyticsEventInput) {
     ...event,
     sessionId: normalizeText(event.sessionId, 160) || resolveAnalyticsSessionId(),
     path: normalizeText(event.path, 1024),
-    href: normalizeText(event.href, 2048),
+    href: sanitizeTrackedUrl(event.href, { preferPathnameForSameOrigin: true }),
     label: normalizeText(event.label, 240),
     referrerHost: normalizeText(event.referrerHost, 240),
-    referrerUrl: normalizeText(event.referrerUrl, 2048),
+    referrerUrl: sanitizeTrackedUrl(event.referrerUrl),
     source: normalizeText(event.source, 240),
     medium: normalizeText(event.medium, 240),
     campaign: normalizeText(event.campaign, 240),

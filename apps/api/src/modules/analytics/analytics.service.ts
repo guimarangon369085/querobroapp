@@ -48,6 +48,26 @@ function normalizeOptionalFloat(value: number | null | undefined) {
   return value;
 }
 
+function sanitizeTrackedUrl(value: string | null | undefined, maxLength: number) {
+  const normalized = normalizeOptionalText(value, maxLength);
+  if (!normalized) return null;
+
+  if (normalized.startsWith('/')) {
+    const stripped = normalized.split('#')[0]?.split('?')[0]?.trim();
+    return stripped ? stripped.slice(0, maxLength) : null;
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    const pathname = parsed.pathname || '/';
+    const compact = `${parsed.origin}${pathname}`.slice(0, maxLength);
+    return compact || null;
+  } catch {
+    const stripped = normalized.split('#')[0]?.split('?')[0]?.trim();
+    return stripped ? stripped.slice(0, maxLength) : null;
+  }
+}
+
 function normalizeMetaJson(value: unknown) {
   if (value == null) return null;
   try {
@@ -68,11 +88,11 @@ export class AnalyticsService {
       .map((event) => ({
         sessionId: normalizeOptionalText(event.sessionId, 160) || 'unknown',
         eventType: event.eventType,
-        path: normalizeOptionalText(event.path, 1024),
-        href: normalizeOptionalText(event.href, 2048),
+        path: sanitizeTrackedUrl(event.path, 1024),
+        href: sanitizeTrackedUrl(event.href, 2048),
         label: normalizeOptionalText(event.label, 240),
         referrerHost: normalizeOptionalText(event.referrerHost, 240),
-        referrerUrl: normalizeOptionalText(event.referrerUrl, 2048),
+        referrerUrl: sanitizeTrackedUrl(event.referrerUrl, 2048),
         source: normalizeOptionalText(event.source, 240),
         medium: normalizeOptionalText(event.medium, 240),
         campaign: normalizeOptionalText(event.campaign, 240),

@@ -103,6 +103,7 @@ type CustomerOrderPreview = {
   id: number;
   customerId: number;
   status: string;
+  fulfillmentMode?: 'DELIVERY' | 'PICKUP';
   createdAt?: string | null;
   scheduledAt?: string | null;
   notes?: string | null;
@@ -256,8 +257,12 @@ function CustomersPageContent() {
   };
 
   useEffect(() => {
-    load().catch(console.error);
-  }, []);
+    load().catch((loadError) => {
+      const message = loadError instanceof Error ? loadError.message : 'Nao foi possivel carregar os clientes.';
+      setCustomerOrdersError(message);
+      notifyError(message);
+    });
+  }, [notifyError]);
 
   useEffect(() => {
     return () => {
@@ -771,6 +776,8 @@ function CustomersPageContent() {
       return;
     }
 
+    const fulfillmentMode = order.fulfillmentMode === 'PICKUP' ? 'PICKUP' : 'DELIVERY';
+
     setRepeatDraftError(null);
     setIsRepeatOrderPending(true);
     try {
@@ -781,7 +788,7 @@ function CustomersPageContent() {
           customerId: selectedCustomer.id
         },
         fulfillment: {
-          mode: 'DELIVERY',
+          mode: fulfillmentMode,
           scheduledAt: parsedScheduledAt.toISOString()
         },
         order: {
@@ -1244,6 +1251,9 @@ function CustomersPageContent() {
                             </p>
                             <p className="mt-1 text-xs text-neutral-500">
                               Status: {formatOrderStatusLabel(order.status)}
+                            </p>
+                            <p className="mt-1 text-xs text-neutral-500">
+                              {order.fulfillmentMode === 'PICKUP' ? 'Retirada' : 'Entrega'}
                             </p>
                             <p className="mt-2 text-xs text-neutral-700">{formatOrderItemsSummary(order.items)}</p>
                             <p className="mt-1 text-xs text-neutral-500">

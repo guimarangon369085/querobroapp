@@ -53,6 +53,7 @@ Criterio de pronto:
 - Manter o catalogo de caixas/sabores centralizado entre `/pedido`, `quick create` e `/pedidos`.
 - Seguir limpando redundancias em `Estoque` agora que `Produtos` saiu da navegação.
 - Validar estados vazios e mudanca de dia em desktop e mobile width.
+- Fechado neste lote: `/dashboard` e analytics ficaram blindados por bridge/token, e `PICKUP` passou a ser respeitado em `/clientes` e no quick create de `/pedidos`.
 
 Criterio de pronto:
 - operador navega o dia, cria pedido e atualiza status sem friccao nem ambiguidades.
@@ -73,7 +74,7 @@ Criterio de pronto:
 
 1. Publicar o dominio real e validar `/`, `/pedido` e `/pedidos`.
 2. Teste real de `/pedido` e do `Google Forms`, incluindo `Entrega`.
-3. Refino final de `Estoque` e `Pedidos`.
+3. Refino final de `Estoque` e `Pedidos`, com foco agora em performance/agregacao do dashboard e fatiamento de `orders-screen`.
 4. Migracao futura para `WhatsApp Flow` sobre o mesmo contrato externo.
 
 ## Riscos de nao fazer

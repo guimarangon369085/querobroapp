@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { resolveServerBridgeApiBaseUrl } from '@/lib/server-bridge-api-base-url';
-import { isTrustedSameOriginBridgeRequest } from '@/lib/server-bridge-access';
+import { isTrustedDashboardBridgeRequest } from '@/lib/server-bridge-access';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,39 +8,28 @@ function buildErrorResponse(status: number, payload: unknown) {
   return NextResponse.json(payload, { status });
 }
 
-export async function POST(request: Request) {
-  if (!isTrustedSameOriginBridgeRequest(request)) {
-    return buildErrorResponse(403, {
-      message: 'Origem de analytics nao autorizada.'
-    });
+export async function GET(request: Request) {
+  if (!isTrustedDashboardBridgeRequest(request)) {
+    return buildErrorResponse(404, { message: 'Nao encontrado.' });
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return buildErrorResponse(400, {
-      message: 'Payload invalido para analytics.'
-    });
-  }
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json'
-  };
   const bridgeToken =
-    String(process.env.ANALYTICS_BRIDGE_TOKEN || '').trim() ||
+    String(process.env.DASHBOARD_BRIDGE_TOKEN || '').trim() ||
     String(process.env.ORDER_FORM_BRIDGE_TOKEN || '').trim();
+
+  const requestUrl = new URL(request.url);
+  const days = requestUrl.searchParams.get('days') || '30';
+  const headers: Record<string, string> = {};
   if (bridgeToken) {
     headers.Authorization = `Bearer ${bridgeToken}`;
   }
 
   try {
     const response = await fetch(
-      `${resolveServerBridgeApiBaseUrl(request, process.env.ORDER_FORM_API_URL)}/analytics/events`,
+      `${resolveServerBridgeApiBaseUrl(request, process.env.ORDER_FORM_API_URL)}/dashboard/summary?days=${encodeURIComponent(days)}`,
       {
-        method: 'POST',
+        method: 'GET',
         headers,
-        body: JSON.stringify(body),
         cache: 'no-store'
       }
     );
@@ -63,8 +52,8 @@ export async function POST(request: Request) {
     return buildErrorResponse(502, {
       message:
         error instanceof Error
-          ? `Falha ao conectar analytics com a API: ${error.message}`
-          : 'Falha ao conectar analytics com a API.'
+          ? `Falha ao conectar o dashboard com a API: ${error.message}`
+          : 'Falha ao conectar o dashboard com a API.'
     });
   }
 }
