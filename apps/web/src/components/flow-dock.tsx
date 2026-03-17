@@ -61,7 +61,7 @@ export function FlowDock() {
 
       <div className="flow-dock__actions">
         <Link href="/pedidos" className="app-primary">
-          Pedidos
+          PEDIDOS
         </Link>
         <span>{formatCurrencyBR(flow.metrics.pendingValue)} PIX pendente</span>
       </div>

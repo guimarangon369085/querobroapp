@@ -16,26 +16,26 @@ export type AppNavSection = {
 export const primaryNavItems: AppNavItem[] = [
   {
     href: '/pedidos',
-    label: 'Agenda',
-    title: 'Agenda',
+    label: 'PEDIDOS',
+    title: 'PEDIDOS',
     icon: 'pedidos'
   },
   {
     href: '/clientes',
-    label: 'Clientes',
-    title: 'Clientes',
+    label: 'CLIENTES',
+    title: 'CLIENTES',
     icon: 'clientes'
   },
   {
     href: '/estoque',
-    label: 'Estoque',
-    title: 'Estoque',
+    label: 'ESTOQUE',
+    title: 'ESTOQUE',
     icon: 'estoque'
   },
   {
     href: '/dashboard',
-    label: 'Dashboard',
-    title: 'Dashboard',
+    label: 'DASHBOARD',
+    title: 'DASHBOARD',
     icon: 'pedidos'
   }
 ];
@@ -66,7 +66,7 @@ function pickItems(hrefs: string[]) {
 export const navSections: AppNavSection[] = [
   {
     id: 'principal',
-    label: 'Principal',
+    label: 'PRINCIPAL',
     items: pickItems(['/pedidos', '/clientes', '/estoque', '/dashboard'])
   }
 ];
