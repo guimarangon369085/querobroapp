@@ -185,25 +185,6 @@ function readStoredPublicOrderProfile(): StoredPublicOrderProfile | null {
   }
 }
 
-function readStoredPublicOrderSnapshot(): StoredPublicOrderSnapshot | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(PUBLIC_ORDER_LAST_ORDER_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<StoredPublicOrderSnapshot> | null;
-    if (!parsed || parsed.version !== 1) return null;
-    return {
-      version: 1 as const,
-      savedAt: String(parsed.savedAt || '').trim() || new Date().toISOString(),
-      boxes: sanitizeStoredBoxCounts(parsed.boxes),
-      customBoxes: Array.isArray(parsed.customBoxes) ? parsed.customBoxes.map(sanitizeStoredCustomBox) : [],
-      notes: String(parsed.notes || '').trim()
-    };
-  } catch {
-    return null;
-  }
-}
-
 function formatDateInputValue(date: Date) {
   const year = date.getFullYear();
   const month = `${date.getMonth() + 1}`.padStart(2, '0');
@@ -339,7 +320,6 @@ export function PublicOrderPage() {
   const { notifyError, notifyInfo, presentSuccess } = useFeedback();
   const [form, setForm] = useState<PublicOrderFormState>(initialFormState);
   const [customBoxes, setCustomBoxes] = useState<CustomBoxDraft[]>([]);
-  const [lastSavedOrder, setLastSavedOrder] = useState<StoredPublicOrderSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<PublicOrderResult | null>(null);
@@ -369,7 +349,6 @@ export function PublicOrderPage() {
 
   useEffect(() => {
     const storedProfile = readStoredPublicOrderProfile();
-    const storedOrder = readStoredPublicOrderSnapshot();
     if (storedProfile) {
       deliveryAddressDraftRef.current = {
         address: storedProfile.fulfillmentMode === 'DELIVERY' ? storedProfile.address : '',
@@ -389,7 +368,6 @@ export function PublicOrderPage() {
         deliveryNotes: storedProfile.deliveryNotes || current.deliveryNotes
       }));
     }
-    setLastSavedOrder(storedOrder);
   }, []);
 
   useEffect(() => {
@@ -970,28 +948,6 @@ export function PublicOrderPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
-  const applyLastSavedOrder = useCallback(() => {
-    if (!lastSavedOrder) return;
-    setForm((current) => ({
-      ...current,
-      notes: lastSavedOrder.notes,
-      boxes: {
-        ...initialFormState.boxes,
-        ...lastSavedOrder.boxes
-      }
-    }));
-    setCustomBoxes(lastSavedOrder.customBoxes.map((entry) => ({ id: createCustomBoxId(), flavors: entry })));
-    setError(null);
-    setResult(null);
-    setDeliveryQuote(null);
-    setDeliveryQuoteError(null);
-    notifyInfo('Ultimo pedido carregado.');
-    window.requestAnimationFrame(() => {
-      const boxesSection = orderFormRef.current?.querySelector('[data-order-boxes-section]') as HTMLElement | null;
-      boxesSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-  }, [lastSavedOrder, notifyInfo]);
-
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -1124,7 +1080,6 @@ export function PublicOrderPage() {
         notes: form.notes.trim()
       };
       window.localStorage.setItem(PUBLIC_ORDER_LAST_ORDER_STORAGE_KEY, JSON.stringify(storedOrderSnapshot));
-      setLastSavedOrder(storedOrderSnapshot);
       setResult(data as PublicOrderResult);
       trackAnalyticsEvent({
         sessionId: resolveAnalyticsSessionId(),

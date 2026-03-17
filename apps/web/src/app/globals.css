@@ -53,6 +53,24 @@
   --builder-input-padding-x: 14px;
   --builder-input-border-width: 1px;
   --builder-checkbox-accent: var(--tomato-500);
+
+  --app-viewport-width: 100vw;
+  --app-viewport-height: 100dvh;
+  --app-viewport-offset-top: 0px;
+  --app-viewport-offset-right: 0px;
+  --app-viewport-offset-bottom: 0px;
+  --app-viewport-offset-left: 0px;
+  --app-safe-top: env(safe-area-inset-top, 0px);
+  --app-safe-right: env(safe-area-inset-right, 0px);
+  --app-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --app-safe-left: env(safe-area-inset-left, 0px);
+  --app-safe-area-top: max(var(--app-safe-top), var(--app-viewport-offset-top));
+  --app-safe-area-right: max(var(--app-safe-right), var(--app-viewport-offset-right));
+  --app-safe-area-bottom: max(var(--app-safe-bottom), var(--app-viewport-offset-bottom));
+  --app-safe-area-left: max(var(--app-safe-left), var(--app-viewport-offset-left));
+  --app-page-inline-gap: clamp(12px, 1.8vw, 20px);
+  --app-page-block-gap: clamp(12px, 1.8vw, 16px);
+  --app-overlay-gap: clamp(12px, 2vw, 18px);
 }
 
 * {
@@ -88,7 +106,7 @@ body {
       transparent 68%
     ),
     var(--bg-base);
-  min-height: 100vh;
+  min-height: max(100vh, var(--app-viewport-height));
   overflow-x: hidden;
   overflow-x: clip;
 }
@@ -137,15 +155,19 @@ section {
   display: grid;
   grid-template-columns: minmax(224px, 17vw) minmax(0, 1fr);
   gap: 18px;
-  min-height: 100vh;
+  min-height: max(100vh, var(--app-viewport-height));
   width: min(1680px, 100%);
   margin: 0 auto;
-  padding: 16px clamp(12px, 1.8vw, 20px);
+  padding:
+    calc(var(--app-page-block-gap) + var(--app-safe-area-top))
+    max(var(--app-page-inline-gap), calc(12px + var(--app-safe-area-right)))
+    calc(var(--app-page-block-gap) + var(--app-safe-area-bottom))
+    max(var(--app-page-inline-gap), calc(12px + var(--app-safe-area-left)));
 }
 
 .app-sidebar {
   position: sticky;
-  top: 12px;
+  top: calc(12px + var(--app-safe-area-top));
   align-self: start;
   display: flex;
   flex-direction: column;
@@ -376,7 +398,7 @@ section {
   box-shadow: var(--shadow-soft);
   backdrop-filter: blur(14px);
   position: sticky;
-  top: 12px;
+  top: calc(12px + var(--app-safe-area-top));
   z-index: 30;
 }
 
@@ -448,7 +470,7 @@ section {
   border: 1px solid color-mix(in srgb, var(--line-soft), var(--mint-500) 18%);
   box-shadow: var(--shadow-soft);
   position: sticky;
-  top: 104px;
+  top: calc(104px + var(--app-safe-area-top));
   z-index: 20;
 }
 
@@ -2417,13 +2439,13 @@ input[type='radio'] {
 
 .app-toast-stack {
   position: fixed;
-  right: 18px;
-  bottom: 18px;
+  right: max(18px, calc(12px + var(--app-safe-area-right)));
+  bottom: max(18px, calc(12px + var(--app-safe-area-bottom)));
   z-index: 130;
   display: grid;
   gap: 10px;
-  width: min(380px, calc(100vw - 36px));
-  max-width: calc(100vw - 24px);
+  width: min(380px, calc(var(--app-viewport-width) - var(--app-safe-area-left) - var(--app-safe-area-right) - 36px));
+  max-width: calc(var(--app-viewport-width) - var(--app-safe-area-left) - var(--app-safe-area-right) - 24px);
 }
 
 .app-toast {
@@ -2497,6 +2519,7 @@ input[type='radio'] {
   align-items: center;
   gap: 8px;
   margin-top: 6px;
+  flex-wrap: wrap;
 }
 
 .app-toast__timer {
@@ -2568,12 +2591,17 @@ input[type='radio'] {
   backdrop-filter: blur(8px);
   display: grid;
   place-items: center;
-  padding: 18px;
+  padding:
+    max(18px, calc(12px + var(--app-safe-area-top)))
+    max(18px, calc(12px + var(--app-safe-area-right)))
+    max(18px, calc(12px + var(--app-safe-area-bottom)))
+    max(18px, calc(12px + var(--app-safe-area-left)));
 }
 
 .app-confirm-modal {
   width: min(460px, 100%);
-  max-width: calc(100vw - 24px);
+  max-width: calc(var(--app-viewport-width) - var(--app-safe-area-left) - var(--app-safe-area-right) - 24px);
+  max-height: calc(var(--app-viewport-height) - max(24px, calc(2 * var(--app-overlay-gap))));
   border-radius: 24px;
   border: 1px solid color-mix(in srgb, var(--line-soft), white 18%);
   background:
@@ -2583,6 +2611,10 @@ input[type='radio'] {
   padding: 20px;
   display: grid;
   gap: 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .app-confirm-modal__title {
@@ -2615,12 +2647,17 @@ input[type='radio'] {
   backdrop-filter: blur(10px);
   display: grid;
   place-items: center;
-  padding: 18px;
+  padding:
+    max(18px, calc(12px + var(--app-safe-area-top)))
+    max(18px, calc(12px + var(--app-safe-area-right)))
+    max(18px, calc(12px + var(--app-safe-area-bottom)))
+    max(18px, calc(12px + var(--app-safe-area-left)));
 }
 
 .app-alert-modal {
   width: min(520px, 100%);
-  max-width: calc(100vw - 24px);
+  max-width: calc(var(--app-viewport-width) - var(--app-safe-area-left) - var(--app-safe-area-right) - 24px);
+  max-height: calc(var(--app-viewport-height) - max(24px, calc(2 * var(--app-overlay-gap))));
   border-radius: 28px;
   border: 1px solid color-mix(in srgb, var(--line-soft), white 18%);
   background:
@@ -2630,6 +2667,10 @@ input[type='radio'] {
   padding: 24px;
   display: grid;
   gap: 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .app-alert-modal--success {
@@ -2684,6 +2725,7 @@ input[type='radio'] {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 4px;
+  flex-wrap: wrap;
 }
 
 .order-detail-modal {
@@ -2692,7 +2734,11 @@ input[type='radio'] {
   z-index: 110;
   display: grid;
   place-items: center;
-  padding: 18px;
+  padding:
+    max(18px, calc(12px + var(--app-safe-area-top)))
+    max(18px, calc(12px + var(--app-safe-area-right)))
+    max(18px, calc(12px + var(--app-safe-area-bottom)))
+    max(18px, calc(12px + var(--app-safe-area-left)));
   background: rgba(24, 16, 10, 0.38);
   backdrop-filter: blur(4px);
   overflow: hidden;
@@ -2700,9 +2746,9 @@ input[type='radio'] {
 
 .order-detail-modal__dialog {
   position: relative;
-  width: min(1120px, 100%);
+  width: min(1120px, calc(var(--app-viewport-width) - var(--app-safe-area-left) - var(--app-safe-area-right) - max(24px, calc(2 * var(--app-overlay-gap)))));
   max-width: 100%;
-  max-height: min(calc(100dvh - 36px), 920px);
+  max-height: min(calc(var(--app-viewport-height) - max(24px, calc(2 * var(--app-overlay-gap)))), 920px);
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -4064,15 +4110,15 @@ input[type='radio'] {
 
 .orders-new-order-floating {
   position: fixed;
-  right: clamp(16px, 2vw, 28px);
-  bottom: clamp(18px, 2vw, 28px);
+  right: max(clamp(16px, 2vw, 28px), calc(12px + var(--app-safe-area-right)));
+  bottom: max(clamp(18px, 2vw, 28px), calc(12px + var(--app-safe-area-bottom)));
   z-index: 100;
 }
 
 .app-fab {
   position: fixed;
-  bottom: clamp(18px, 2vw, 28px);
-  right: clamp(16px, 2vw, 28px);
+  bottom: max(clamp(18px, 2vw, 28px), calc(12px + var(--app-safe-area-bottom)));
+  right: max(clamp(16px, 2vw, 28px), calc(12px + var(--app-safe-area-right)));
   border: none;
   border-radius: 999px;
   background: linear-gradient(135deg, #f6c8a2, #f2793f);
@@ -4324,7 +4370,11 @@ html.app-render-stability .app-topbar {
 
 @media (max-width: 640px) {
   .app-confirm-backdrop {
-    padding: 12px;
+    padding:
+      max(12px, calc(8px + var(--app-safe-area-top)))
+      max(12px, calc(8px + var(--app-safe-area-right)))
+      max(12px, calc(8px + var(--app-safe-area-bottom)))
+      max(12px, calc(8px + var(--app-safe-area-left)));
   }
 
   .app-confirm-modal {
@@ -4344,7 +4394,11 @@ html.app-render-stability .app-topbar {
   }
 
   .app-alert-backdrop {
-    padding: 12px;
+    padding:
+      max(12px, calc(8px + var(--app-safe-area-top)))
+      max(12px, calc(8px + var(--app-safe-area-right)))
+      max(12px, calc(8px + var(--app-safe-area-bottom)))
+      max(12px, calc(8px + var(--app-safe-area-left)));
   }
 
   .app-alert-modal {
@@ -4363,7 +4417,11 @@ html.app-render-stability .app-topbar {
   }
 
   .app-shell {
-    padding: 12px;
+    padding:
+      max(12px, calc(8px + var(--app-safe-area-top)))
+      max(12px, calc(8px + var(--app-safe-area-right)))
+      max(12px, calc(8px + var(--app-safe-area-bottom)))
+      max(12px, calc(8px + var(--app-safe-area-left)));
     gap: 12px;
   }
 
@@ -4376,7 +4434,7 @@ html.app-render-stability .app-topbar {
   .app-sidebar {
     padding: 12px;
     gap: 10px;
-    top: 8px;
+    top: calc(8px + var(--app-safe-area-top));
     z-index: 60;
     background: linear-gradient(170deg, rgba(255, 251, 247, 0.9), rgba(250, 236, 221, 0.84));
     box-shadow: 0 14px 24px rgba(73, 43, 22, 0.16);
@@ -4389,12 +4447,16 @@ html.app-render-stability .app-topbar {
 
   .order-detail-modal {
     place-items: start center;
-    padding: 12px;
+    padding:
+      max(12px, calc(8px + var(--app-safe-area-top)))
+      max(12px, calc(8px + var(--app-safe-area-right)))
+      max(12px, calc(8px + var(--app-safe-area-bottom)))
+      max(12px, calc(8px + var(--app-safe-area-left)));
   }
 
   .order-detail-modal__dialog {
     width: 100%;
-    max-height: calc(100dvh - 24px);
+    max-height: calc(var(--app-viewport-height) - max(24px, calc(2 * var(--app-overlay-gap))));
   }
 
   .order-detail-modal__close {
@@ -4567,9 +4629,9 @@ html.app-render-stability .app-topbar {
   }
 
   .app-toast-stack {
-    left: 12px;
-    right: 12px;
-    bottom: 12px;
+    left: max(12px, calc(8px + var(--app-safe-area-left)));
+    right: max(12px, calc(8px + var(--app-safe-area-right)));
+    bottom: max(12px, calc(8px + var(--app-safe-area-bottom)));
     width: auto;
     max-width: none;
   }
@@ -4641,7 +4703,7 @@ html.app-render-stability .app-topbar {
 
   .app-form-actions--mobile-sticky {
     position: sticky;
-    bottom: calc(8px + env(safe-area-inset-bottom));
+    bottom: max(8px, calc(8px + var(--app-safe-area-bottom)));
     z-index: 20;
     margin-top: 2px;
     padding: 10px;

@@ -56,6 +56,7 @@ Criterio de pronto:
 - Manter a home sem CTA de instalacao/atalho enquanto iPhone/iOS nao permitir um fluxo realmente coerente por clique direto.
 - Manter a home travada ao viewport visivel real, sem qualquer rolagem residual causada por `100vh` ou barras do navegador.
 - Manter a home sem bounce/scroll residual em iPhone, mesmo com barras dinamicas do navegador, e validar isso no dominio publico.
+- Manter o restante do app no mesmo modelo de viewport real da home, com modais, toasts, avisos e barras sticky respeitando `visualViewport` e safe areas do navegador.
 - Manter o desktop de `/pedido` mais direto, sem blocos introdutorios redundantes acima do formulario.
 - Manter `/pedido` abrindo direto em `Dados`, sem header/resumo duplicado no topo e sem labels redundantes de seção.
 - Manter `/dashboard` acessivel no menu principal sem voltar a aplicar trava de host no web por engano.
