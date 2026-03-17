@@ -2680,23 +2680,16 @@ function OrdersPageContent() {
       return;
     }
 
+    newOrderQuoteRequestIdRef.current += 1;
     setNewOrderDeliveryQuote(null);
-    setIsQuotingNewOrderDelivery(true);
-    const timeout = window.setTimeout(() => {
-      void refreshNewOrderDeliveryQuote({ silent: true });
-    }, 350);
-
-    return () => {
-      newOrderQuoteRequestIdRef.current += 1;
-      window.clearTimeout(timeout);
-    };
+    setNewOrderDeliveryQuoteError(null);
+    setIsQuotingNewOrderDelivery(false);
   }, [
     draftSubtotal,
     newOrderCustomerAddress,
     newOrderCustomerId,
     newOrderQuoteManifestItems,
     newOrderScheduledAtIso,
-    refreshNewOrderDeliveryQuote,
     selectedNewOrderCustomer
   ]);
   const selectedOrderWorkflowStatus = toOrderWorkflowStatus(selectedOrder?.status);

@@ -1,24 +1,24 @@
 'use client';
 
-import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import type { Product } from '@querobroapp/shared';
 import { AppIcon } from '@/components/app-icons';
 import { FormField } from '@/components/form/FormField';
 import { formatCurrencyBR } from '@/lib/format';
+import { OrderCardArtwork } from './order-card-artwork';
 import type { DeliveryQuote } from './orders-model';
 import {
+  ORDER_BOX_CATALOG,
   ORDER_BOX_UNITS,
   ORDER_FLAVOR_OFFICIAL_BOX_NAME_BY_CODE,
   ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE,
   ORDER_MISTA_SHORTCUT_CODES,
-  ORDER_SABORES_REFERENCE_IMAGE,
   compactOrderProductName,
   normalizeOrderFlavorName,
-  resolveOrderCardImage,
+  resolveOrderCardArt,
+  resolveOrderMistaCardArt,
   resolveOrderFlavorCodeFromName,
-  resolveOrderReferenceImage,
   type OrderFlavorCode,
   type OrderMistaShortcutCode
 } from './order-box-catalog';
@@ -349,9 +349,32 @@ export function OrderQuickCreate({
   const draftCustomerLabel = customerSearch.trim() || 'Escolha um cliente';
   const deliveryFee = deliveryQuote?.fee ?? 0;
   const draftGrandTotal = draftTotal + deliveryFee;
+  const hasReadyDeliveryQuote = Boolean(deliveryQuote?.quoteToken);
+  const primaryActionLabel = isCreatingOrder
+    ? 'Criando pedido...'
+    : isQuotingDelivery
+      ? 'Calculando frete...'
+      : hasReadyDeliveryQuote
+        ? 'Criar pedido'
+        : 'Calcular frete';
+  const primaryActionDisabled =
+    isCreatingOrder ||
+    isQuotingDelivery ||
+    (hasReadyDeliveryQuote
+      ? !canCreateOrder
+      : !selectedCustomerId || newOrderItems.length === 0);
   const flavorShortcutProductIds = useMemo(
     () => resolveFlavorShortcutProductIds(productsForCards),
     [productsForCards]
+  );
+  const mistaShortcutOptions = useMemo(
+    () =>
+      MISTA_SHORTCUT_CODES.map((code) => ({
+        code,
+        art: resolveOrderMistaCardArt(code),
+        label: ORDER_BOX_CATALOG[`M${code}`].label
+      })),
+    []
   );
   const virtualBoxPartitions = useMemo(() => {
     const remainingByProductId = new Map<number, number>(
@@ -432,6 +455,14 @@ export function OrderQuickCreate({
     onAddProductUnits(traditionalId, 4);
     onAddProductUnits(flavorId, 3);
     setMistaShortcutStack((current) => [...current, code]);
+  };
+
+  const handlePrimaryAction = () => {
+    if (!hasReadyDeliveryQuote) {
+      onRefreshDeliveryQuote();
+      return;
+    }
+    onCreateOrder();
   };
 
   return (
@@ -557,40 +588,6 @@ export function OrderQuickCreate({
         </FormField>
       </div>
 
-      <div className="rounded-2xl border border-white/80 bg-white/85 px-4 py-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">Frete Loggi</p>
-            <p className="mt-1 text-base font-semibold text-neutral-900">
-              {isQuotingDelivery
-                ? 'Cotando Loggi...'
-                : deliveryQuote
-                  ? `${formatCurrencyBR(deliveryQuote.fee)}`
-                  : 'Aguardando cliente, horario e caixas'}
-            </p>
-          </div>
-          <button
-            type="button"
-            className="app-button app-button-ghost text-xs"
-            onClick={onRefreshDeliveryQuote}
-            disabled={isQuotingDelivery || !selectedCustomerId || newOrderItems.length === 0}
-          >
-            {isQuotingDelivery ? 'Atualizando...' : 'Atualizar frete'}
-          </button>
-        </div>
-        {deliveryQuoteError ? (
-          <p className="mt-2 text-xs text-rose-700">{deliveryQuoteError}</p>
-        ) : deliveryQuote ? (
-          <p className="mt-2 text-xs text-neutral-600">
-            {deliveryQuote.breakdownLabel || 'Loggi'} {deliveryQuote.expiresAt ? 'pronto para uso neste pedido.' : 'cotado para este pedido.'}
-          </p>
-        ) : (
-          <p className="mt-2 text-xs text-neutral-600">
-            A criacao fica liberada quando a estimativa real da Loggi estiver pronta.
-          </p>
-        )}
-      </div>
-
       {restoredFromLastOrder ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
           <div className="flex items-start gap-3">
@@ -662,8 +659,7 @@ export function OrderQuickCreate({
         {productsForCards.map((product) => {
           const selectedQty = quantityByProductId.get(product.id!) || 0;
           const isSelected = selectedQty > 0;
-          const productImage = resolveOrderCardImage(product.name);
-          const productReferenceImage = resolveOrderReferenceImage(product.name);
+          const productArt = resolveOrderCardArt(product.name);
           return (
             <div
               key={product.id}
@@ -675,30 +671,19 @@ export function OrderQuickCreate({
               }`}
             >
               <div className="flex flex-wrap items-start gap-3">
-                <div className="relative h-16 w-16 shrink-0">
-                  <div className="relative h-full w-full overflow-hidden rounded-2xl border border-white/80 bg-white/80 shadow-[0_10px_24px_rgba(70,44,26,0.08)]">
-                    <Image
+                <div className="relative h-[72px] w-[72px] shrink-0">
+                  <div className="relative h-full w-full overflow-hidden rounded-[20px] border border-white/80 bg-white/80 shadow-[0_12px_28px_rgba(70,44,26,0.1)]">
+                    <OrderCardArtwork
                       alt={compactOrderProductName(product.name)}
-                      className="h-full w-full object-cover"
-                      fill
-                      sizes="64px"
-                      src={productImage}
+                      art={productArt}
+                      sizes="72px"
                     />
-                    <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_24%,rgba(46,29,20,0.12)_100%)]" />
-                  </div>
-                  <div className="absolute -bottom-1 -right-1 h-10 w-8 overflow-hidden rounded-xl border border-white/90 bg-white/90 shadow-[0_10px_18px_rgba(70,44,26,0.16)]">
-                    <Image
-                      alt={`${compactOrderProductName(product.name)} no cardapio oficial`}
-                      className="h-full w-full object-cover"
-                      fill
-                      sizes="32px"
-                      src={productReferenceImage}
-                    />
-                    <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_34%,rgba(46,29,20,0.06)_100%)]" />
                   </div>
                 </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-neutral-900">{compactOrderProductName(product.name)}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-[color:var(--ink-strong)]">
+                    {compactOrderProductName(product.name)}
+                  </p>
                 </div>
               </div>
               <div className="mt-3 grid gap-2">
@@ -768,77 +753,82 @@ export function OrderQuickCreate({
               : 'border-white/80 bg-white/80'
           }`}
         >
-          <div className="flex flex-wrap items-start gap-3">
-            <div className="relative h-16 w-16 shrink-0">
-              <div className="relative h-full w-full overflow-hidden rounded-2xl border border-white/80 bg-white/80 shadow-[0_10px_24px_rgba(70,44,26,0.08)]">
-                <Image
-                  alt="Caixa mista"
-                  className="h-full w-full object-cover"
-                  fill
-                  sizes="64px"
-                  src={ORDER_SABORES_REFERENCE_IMAGE}
-                />
-                <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_24%,rgba(46,29,20,0.12)_100%)]" />
-              </div>
-              <div className="absolute -bottom-1 -right-1 h-10 w-8 overflow-hidden rounded-xl border border-white/90 bg-white/90 shadow-[0_10px_18px_rgba(70,44,26,0.16)]">
-                <Image
-                  alt="Sabores no cardapio oficial"
-                  className="h-full w-full object-cover"
-                  fill
-                  sizes="32px"
-                  src={ORDER_SABORES_REFERENCE_IMAGE}
-                />
-                <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_34%,rgba(46,29,20,0.06)_100%)]" />
-              </div>
-            </div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-neutral-900">Mista (M)</p>
+              <p className="text-sm font-semibold text-[color:var(--ink-strong)]">Caixas mistas</p>
             </div>
+            <span className="rounded-full border border-white/80 bg-white/86 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
+              {mistaShortcutStack.length} mista{mistaShortcutStack.length === 1 ? '' : 's'}
+            </span>
           </div>
-          <div className="mt-3 grid gap-2">
-            <div className="order-quick-create__product-actions flex flex-wrap items-center gap-2">
-              <span className="order-quick-create__qty-value min-w-10 text-center text-sm font-semibold text-neutral-900">
-                {mistaShortcutStack.length}
-              </span>
-              {MISTA_SHORTCUT_CODES.map((code) => {
-                const canApplyShortcut = Boolean(
-                  flavorShortcutProductIds.T && flavorShortcutProductIds[code]
-                );
-                return (
-                  <button
-                    key={`mista-shortcut-${code}`}
-                    type="button"
-                    className="order-quick-create__qty-button app-button app-button-ghost"
-                    onClick={() => applyMistaShortcut(code)}
-                    disabled={!canApplyShortcut}
-                  >
-                    {code}
-                  </button>
-                );
-              })}
-            </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {mistaShortcutOptions.map(({ code, art, label }) => {
+              const canApplyShortcut = Boolean(flavorShortcutProductIds.T && flavorShortcutProductIds[code]);
+              return (
+                <button
+                  key={`mista-shortcut-${code}`}
+                  type="button"
+                  className="flex items-center gap-3 rounded-2xl border border-white/80 bg-white/82 px-3 py-2 text-left transition hover:border-[rgba(126,79,45,0.18)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55"
+                  onClick={() => applyMistaShortcut(code)}
+                  disabled={!canApplyShortcut}
+                >
+                  <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-2xl border border-white/85 bg-white shadow-[0_10px_22px_rgba(70,44,26,0.08)]">
+                    <OrderCardArtwork alt={label} art={art} sizes="48px" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
+                      {code}
+                    </p>
+                    <p className="line-clamp-2 text-sm font-semibold text-[color:var(--ink-strong)]">
+                      {label.replace(/^Mista\s+/i, '')}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
 
-      <div className="app-form-actions">
-        <button
-          className="order-quick-create__submit app-button app-button-primary w-full md:w-auto disabled:cursor-not-allowed disabled:opacity-60"
-          onClick={onCreateOrder}
-          disabled={!canCreateOrder || isCreatingOrder}
-        >
-          {isCreatingOrder ? 'Criando...' : 'Criar'}
-        </button>
-      </div>
+      <div className="grid gap-2 text-sm text-[color:var(--ink-muted)]">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
+          Resumo
+        </p>
+        <div className="grid gap-3 rounded-[24px] border border-white/75 bg-[linear-gradient(160deg,rgba(255,251,246,0.94),rgba(243,231,216,0.9))] p-4 shadow-[0_14px_34px_rgba(70,44,26,0.08)]">
+          <div className="grid gap-2 rounded-[20px] bg-white/80 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <span>Caixas fechadas</span>
+              <strong className="text-[color:var(--ink-strong)]">{virtualBoxPartitions.boxes.length}</strong>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span>Broas calculadas</span>
+              <strong className="text-[color:var(--ink-strong)]">{displayTotalUnits}</strong>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span>Produtos</span>
+              <strong className="text-[color:var(--ink-strong)]">{formatCurrencyBR(draftTotal)}</strong>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span>Frete estimado</span>
+              <strong className="text-[color:var(--ink-strong)]">
+                {isQuotingDelivery
+                  ? 'Calculando...'
+                  : deliveryQuote
+                    ? formatCurrencyBR(deliveryFee)
+                    : 'A confirmar'}
+              </strong>
+            </div>
+            <div className="flex items-center justify-between gap-3 border-t border-[rgba(126,79,45,0.08)] pt-3">
+              <span className="font-semibold text-[color:var(--ink-strong)]">Total</span>
+              <strong className="text-base text-[color:var(--ink-strong)]">
+                {formatCurrencyBR(draftGrandTotal)}
+              </strong>
+            </div>
+          </div>
 
-      {newOrderItems.length > 0 ? (
-        <div className="grid gap-2 text-sm text-neutral-600">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-neutral-500">
-            Resumo
-          </p>
           {virtualBoxPartitions.boxes.length > 0 || virtualBoxPartitions.openBox.length > 0 ? (
             <div className="grid gap-2 rounded-2xl border border-white/70 bg-white/80 p-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-neutral-500">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
                 Caixas
               </p>
               {virtualBoxPartitions.boxes.map((box, index) => (
@@ -878,9 +868,34 @@ export function OrderQuickCreate({
                 </div>
               ) : null}
             </div>
+          ) : (
+            <div className="rounded-2xl border border-white/70 bg-white/80 px-4 py-3 text-sm">
+              Nenhuma caixa ainda.
+            </div>
+          )}
+
+          {deliveryQuoteError ? (
+            <div className="app-inline-notice app-inline-notice--warning rounded-[20px] px-4 py-3">
+              {deliveryQuoteError}
+            </div>
+          ) : deliveryQuote ? (
+            <div className="rounded-[20px] border border-[rgba(126,79,45,0.08)] bg-white/80 px-4 py-3 text-xs leading-5 text-[color:var(--ink-muted)]">
+              {(deliveryQuote.breakdownLabel || 'Loggi') +
+                (deliveryQuote.expiresAt ? ' pronto para uso neste pedido.' : ' cotado para este pedido.')}
+            </div>
           ) : null}
         </div>
-      ) : null}
+      </div>
+
+      <div className="app-form-actions">
+        <button
+          className="order-quick-create__submit app-button app-button-primary w-full disabled:cursor-not-allowed disabled:opacity-60"
+          onClick={handlePrimaryAction}
+          disabled={primaryActionDisabled}
+        >
+          {primaryActionLabel}
+        </button>
+      </div>
       {orderError ? <p className="text-xs text-red-600">{orderError}</p> : null}
       {!canCreateOrder && !orderError && !tutorialMode ? (
         <p className="text-xs text-neutral-500">
@@ -890,8 +905,8 @@ export function OrderQuickCreate({
               ? 'Escolha ao menos uma caixa.'
               : isQuotingDelivery
                 ? 'Aguarde a cotacao da Loggi.'
-                : !deliveryQuote?.quoteToken
-                  ? 'A cotacao da Loggi e obrigatoria para criar.'
+                : !hasReadyDeliveryQuote
+                  ? 'Calcule o frete para liberar a criacao.'
                   : 'Revise o pedido.'}
         </p>
       ) : null}

@@ -4,6 +4,20 @@ import {
   type Product
 } from '@querobroapp/shared';
 
+export type OrderCardArt =
+  | {
+      mode: 'single';
+      src: string;
+      objectPosition?: string;
+    }
+  | {
+      mode: 'split';
+      leftSrc: string;
+      rightSrc: string;
+      leftObjectPosition?: string;
+      rightObjectPosition?: string;
+    };
+
 export const ORDER_BOX_UNITS = 7;
 export const ORDER_BOX_PRICE_CUSTOM = 52;
 export const ORDER_BOX_PRICE_TRADITIONAL = 40;
@@ -39,35 +53,86 @@ export const ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE: Record<OrderMistaShortcutCod
 };
 
 const ORDER_CARDAPIO_IMAGE_PATHS = {
+  traditionalSplit: '/querobroa-brand/half-broa.jpg',
   traditional: '/querobroa-brand/cardapio/tradicional.jpg',
   goiabada: '/querobroa-brand/cardapio/goiabada.jpg',
-  mistaGoiabada: '/querobroa-brand/cardapio/mista-goiabada.jpg',
   doceDeLeite: '/querobroa-brand/cardapio/doce-de-leite.jpg',
   queijoDoSerro: '/querobroa-brand/cardapio/queijo-do-serro-camadas.jpg',
-  mistaDoceDeLeite: '/querobroa-brand/cardapio/mista-doce-de-leite.jpg',
-  mistaQueijoDoSerro: '/querobroa-brand/cardapio/mista-queijo-do-serro.jpg',
-  mistaRequeijaoDeCorte: '/querobroa-brand/cardapio/mista-requeijao-de-corte.jpg',
   requeijaoDeCorte: '/querobroa-brand/cardapio/requeijao-de-corte.jpg',
   sabores: '/querobroa-brand/cardapio/sabores-caixa.jpg'
 } as const;
 
-export const ORDER_FLAVOR_CARD_IMAGE_BY_CODE: Record<OrderFlavorCode, string> = {
-  T: ORDER_CARDAPIO_IMAGE_PATHS.traditional,
-  G: ORDER_CARDAPIO_IMAGE_PATHS.goiabada,
-  D: ORDER_CARDAPIO_IMAGE_PATHS.doceDeLeite,
-  Q: ORDER_CARDAPIO_IMAGE_PATHS.queijoDoSerro,
-  R: ORDER_CARDAPIO_IMAGE_PATHS.requeijaoDeCorte
+export const ORDER_SABORES_REFERENCE_IMAGE = ORDER_CARDAPIO_IMAGE_PATHS.sabores;
+export const ORDER_GENERIC_CARD_ART: OrderCardArt = {
+  mode: 'single',
+  src: ORDER_SABORES_REFERENCE_IMAGE
 };
 
-export const ORDER_SABORES_REFERENCE_IMAGE = ORDER_CARDAPIO_IMAGE_PATHS.sabores;
+export const ORDER_FLAVOR_CARD_ART_BY_CODE: Record<OrderFlavorCode, OrderCardArt> = {
+  T: {
+    mode: 'single',
+    src: ORDER_CARDAPIO_IMAGE_PATHS.traditional,
+    objectPosition: 'center center'
+  },
+  G: {
+    mode: 'single',
+    src: ORDER_CARDAPIO_IMAGE_PATHS.goiabada,
+    objectPosition: 'center center'
+  },
+  D: {
+    mode: 'single',
+    src: ORDER_CARDAPIO_IMAGE_PATHS.doceDeLeite,
+    objectPosition: 'center center'
+  },
+  Q: {
+    mode: 'single',
+    src: ORDER_CARDAPIO_IMAGE_PATHS.queijoDoSerro,
+    objectPosition: 'center center'
+  },
+  R: {
+    mode: 'single',
+    src: ORDER_CARDAPIO_IMAGE_PATHS.requeijaoDeCorte,
+    objectPosition: 'center center'
+  }
+};
+
+const ORDER_MISTA_CARD_ART_BY_CODE: Record<OrderMistaShortcutCode, OrderCardArt> = {
+  G: {
+    mode: 'split',
+    leftSrc: ORDER_CARDAPIO_IMAGE_PATHS.traditionalSplit,
+    rightSrc: ORDER_CARDAPIO_IMAGE_PATHS.goiabada,
+    leftObjectPosition: '44% center',
+    rightObjectPosition: 'center center'
+  },
+  D: {
+    mode: 'split',
+    leftSrc: ORDER_CARDAPIO_IMAGE_PATHS.traditionalSplit,
+    rightSrc: ORDER_CARDAPIO_IMAGE_PATHS.doceDeLeite,
+    leftObjectPosition: '44% center',
+    rightObjectPosition: 'center center'
+  },
+  Q: {
+    mode: 'split',
+    leftSrc: ORDER_CARDAPIO_IMAGE_PATHS.traditionalSplit,
+    rightSrc: ORDER_CARDAPIO_IMAGE_PATHS.queijoDoSerro,
+    leftObjectPosition: '44% center',
+    rightObjectPosition: 'center center'
+  },
+  R: {
+    mode: 'split',
+    leftSrc: ORDER_CARDAPIO_IMAGE_PATHS.traditionalSplit,
+    rightSrc: ORDER_CARDAPIO_IMAGE_PATHS.requeijaoDeCorte,
+    leftObjectPosition: '44% center',
+    rightObjectPosition: 'center center'
+  }
+};
 
 export const ORDER_BOX_CATALOG = {
   T: {
     label: 'Tradicional',
     codeLabel: 'T',
     detail: '1 caixa = 7 broas tradicionais',
-    image: ORDER_CARDAPIO_IMAGE_PATHS.traditional,
-    referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.traditional,
+    art: ORDER_FLAVOR_CARD_ART_BY_CODE.T,
     accentClassName:
       'border-[rgba(176,120,66,0.16)] bg-[linear-gradient(165deg,rgba(255,249,241,0.98),rgba(247,232,213,0.9))]',
     units: { T: 7, G: 0, D: 0, Q: 0, R: 0 },
@@ -77,8 +142,7 @@ export const ORDER_BOX_CATALOG = {
     label: 'Goiabada',
     codeLabel: 'G',
     detail: '1 caixa = 7 broas de goiabada',
-    image: ORDER_CARDAPIO_IMAGE_PATHS.goiabada,
-    referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.goiabada,
+    art: ORDER_FLAVOR_CARD_ART_BY_CODE.G,
     accentClassName:
       'border-[rgba(190,84,108,0.18)] bg-[linear-gradient(165deg,rgba(255,246,248,0.98),rgba(249,228,234,0.9))]',
     units: { T: 0, G: 7, D: 0, Q: 0, R: 0 },
@@ -88,8 +152,7 @@ export const ORDER_BOX_CATALOG = {
     label: 'Doce de Leite',
     codeLabel: 'D',
     detail: '1 caixa = 7 broas de doce de leite',
-    image: ORDER_CARDAPIO_IMAGE_PATHS.doceDeLeite,
-    referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.doceDeLeite,
+    art: ORDER_FLAVOR_CARD_ART_BY_CODE.D,
     accentClassName:
       'border-[rgba(172,116,61,0.16)] bg-[linear-gradient(165deg,rgba(255,248,241,0.98),rgba(247,236,224,0.9))]',
     units: { T: 0, G: 0, D: 7, Q: 0, R: 0 },
@@ -98,20 +161,18 @@ export const ORDER_BOX_CATALOG = {
   Q: {
     label: 'Queijo do Serro',
     codeLabel: 'Q',
-    detail: '1 caixa = 7 broas de queijo',
-    image: ORDER_CARDAPIO_IMAGE_PATHS.queijoDoSerro,
-    referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.queijoDoSerro,
+    detail: '1 caixa = 7 broas de queijo do serro',
+    art: ORDER_FLAVOR_CARD_ART_BY_CODE.Q,
     accentClassName:
       'border-[rgba(110,95,71,0.18)] bg-[linear-gradient(165deg,rgba(251,247,242,0.98),rgba(240,230,218,0.92))]',
     units: { T: 0, G: 0, D: 0, Q: 7, R: 0 },
     priceEstimate: 52
   },
   R: {
-    label: 'Requeijao de Corte',
+    label: 'Requeijão de Corte',
     codeLabel: 'R',
-    detail: '1 caixa = 7 broas de requeijao',
-    image: ORDER_CARDAPIO_IMAGE_PATHS.requeijaoDeCorte,
-    referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.requeijaoDeCorte,
+    detail: '1 caixa = 7 broas de requeijão de corte',
+    art: ORDER_FLAVOR_CARD_ART_BY_CODE.R,
     accentClassName:
       'border-[rgba(150,122,83,0.18)] bg-[linear-gradient(165deg,rgba(255,250,242,0.98),rgba(247,238,223,0.92))]',
     units: { T: 0, G: 0, D: 0, Q: 0, R: 7 },
@@ -121,8 +182,7 @@ export const ORDER_BOX_CATALOG = {
     label: 'Mista Goiabada',
     codeLabel: 'MG',
     detail: '1 caixa = 4 tradicionais + 3 goiabada',
-    image: ORDER_CARDAPIO_IMAGE_PATHS.mistaGoiabada,
-    referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.mistaGoiabada,
+    art: ORDER_MISTA_CARD_ART_BY_CODE.G,
     accentClassName:
       'border-[rgba(190,84,108,0.18)] bg-[linear-gradient(165deg,rgba(255,247,243,0.98),rgba(251,232,228,0.92))]',
     units: { T: 4, G: 3, D: 0, Q: 0, R: 0 },
@@ -132,8 +192,7 @@ export const ORDER_BOX_CATALOG = {
     label: 'Mista Doce de Leite',
     codeLabel: 'MD',
     detail: '1 caixa = 4 tradicionais + 3 doce de leite',
-    image: ORDER_CARDAPIO_IMAGE_PATHS.mistaDoceDeLeite,
-    referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.mistaDoceDeLeite,
+    art: ORDER_MISTA_CARD_ART_BY_CODE.D,
     accentClassName:
       'border-[rgba(172,116,61,0.16)] bg-[linear-gradient(165deg,rgba(255,248,243,0.98),rgba(247,235,225,0.92))]',
     units: { T: 4, G: 0, D: 3, Q: 0, R: 0 },
@@ -143,8 +202,7 @@ export const ORDER_BOX_CATALOG = {
     label: 'Mista Queijo do Serro',
     codeLabel: 'MQ',
     detail: '1 caixa = 4 tradicionais + 3 queijo do serro',
-    image: ORDER_CARDAPIO_IMAGE_PATHS.mistaQueijoDoSerro,
-    referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.mistaQueijoDoSerro,
+    art: ORDER_MISTA_CARD_ART_BY_CODE.Q,
     accentClassName:
       'border-[rgba(110,95,71,0.18)] bg-[linear-gradient(165deg,rgba(252,248,244,0.98),rgba(242,233,223,0.92))]',
     units: { T: 4, G: 0, D: 0, Q: 3, R: 0 },
@@ -154,8 +212,7 @@ export const ORDER_BOX_CATALOG = {
     label: 'Mista Requeijão de Corte',
     codeLabel: 'MR',
     detail: '1 caixa = 4 tradicionais + 3 requeijão de corte',
-    image: ORDER_CARDAPIO_IMAGE_PATHS.mistaRequeijaoDeCorte,
-    referenceImage: ORDER_CARDAPIO_IMAGE_PATHS.mistaRequeijaoDeCorte,
+    art: ORDER_MISTA_CARD_ART_BY_CODE.R,
     accentClassName:
       'border-[rgba(150,122,83,0.18)] bg-[linear-gradient(165deg,rgba(255,250,243,0.98),rgba(245,236,223,0.92))]',
     units: { T: 4, G: 0, D: 0, Q: 0, R: 3 },
@@ -220,12 +277,18 @@ export function resolveOrderFlavorCodeFromName(value?: string | null): OrderFlav
 
 export function resolveOrderCardImage(productName?: string | null) {
   const code = resolveOrderFlavorCodeFromName(productName);
-  return code ? ORDER_FLAVOR_CARD_IMAGE_BY_CODE[code] : ORDER_SABORES_REFERENCE_IMAGE;
+  if (!code) return ORDER_SABORES_REFERENCE_IMAGE;
+  const art = ORDER_FLAVOR_CARD_ART_BY_CODE[code];
+  return art.mode === 'single' ? art.src : art.rightSrc;
 }
 
-export function resolveOrderReferenceImage(productName?: string | null) {
+export function resolveOrderCardArt(productName?: string | null) {
   const code = resolveOrderFlavorCodeFromName(productName);
-  return code ? ORDER_BOX_CATALOG[code].referenceImage : ORDER_SABORES_REFERENCE_IMAGE;
+  return code ? ORDER_FLAVOR_CARD_ART_BY_CODE[code] : ORDER_GENERIC_CARD_ART;
+}
+
+export function resolveOrderMistaCardArt(code: OrderMistaShortcutCode) {
+  return ORDER_MISTA_CARD_ART_BY_CODE[code];
 }
 
 export function deriveFlavorUnitsFromBoxCounts(boxCounts: Record<OrderBoxCode, number>) {

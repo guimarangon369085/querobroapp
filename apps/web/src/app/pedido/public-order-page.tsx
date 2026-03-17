@@ -17,6 +17,7 @@ import {
   type GooglePlaceResultLike
 } from '@/lib/customer-autofill';
 import { loadGooglePlacesLibrary } from '@/lib/google-places';
+import { OrderCardArtwork } from '@/features/orders/order-card-artwork';
 import {
   ORDER_BOX_CATALOG,
   ORDER_BOX_UNITS,
@@ -316,6 +317,7 @@ export function PublicOrderPage() {
   const [deliveryQuoteError, setDeliveryQuoteError] = useState<string | null>(null);
   const [isQuotingDelivery, setIsQuotingDelivery] = useState(false);
   const addressInputRef = useRef<HTMLInputElement | null>(null);
+  const orderFormRef = useRef<HTMLFormElement | null>(null);
   const [minimumSchedule, setMinimumSchedule] = useState<Date | null>(null);
   const [draftSessionId, setDraftSessionId] = useState(() => resolvePublicOrderDraftSessionId());
   const minimumDateValue = minimumSchedule ? formatDateInputValue(minimumSchedule) : '';
@@ -590,70 +592,19 @@ export function PublicOrderPage() {
 
     if (minimumSchedule && parsedScheduledAt && parsedScheduledAt.getTime() < minimumSchedule.getTime()) {
       setDeliveryQuote(null);
-      setDeliveryQuoteError(buildPublicOrderScheduleErrorMessage(minimumSchedule));
       setIsQuotingDelivery(false);
       return;
     }
 
-    if (!form.address.trim() || !scheduledAtIso || totalBroas <= 0) {
+    if (!form.address.trim() || !scheduledAtIso || totalBroas <= 0 || incompleteCustomBoxes.length > 0) {
       setDeliveryQuote(null);
       setDeliveryQuoteError(null);
       setIsQuotingDelivery(false);
       return;
     }
-
-    const controller = new AbortController();
-    const timeout = window.setTimeout(async () => {
-      setIsQuotingDelivery(true);
-      try {
-        const response = await fetch('/api/delivery-quote', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            mode: form.fulfillmentMode,
-            scheduledAt: scheduledAtIso,
-            customer: {
-              address: form.address.trim() || null,
-              placeId: form.placeId.trim() || null,
-              lat: typeof form.lat === 'number' ? form.lat : null,
-              lng: typeof form.lng === 'number' ? form.lng : null
-            },
-            manifest: {
-              items: selectedBoxes.map((entry) => ({
-                name: entry.label,
-                quantity: entry.quantity
-              })),
-              subtotal: estimatedTotal,
-              totalUnits: totalBroas
-            }
-          }),
-          signal: controller.signal
-        });
-
-        const raw = await response.text();
-        const data = raw ? (JSON.parse(raw) as DeliveryQuote) : null;
-        if (!response.ok || !data) {
-          throw new Error(extractErrorMessage(data));
-        }
-        setDeliveryQuote(data);
-        setDeliveryQuoteError(null);
-      } catch (quoteError) {
-        if (controller.signal.aborted) return;
-        const message =
-          quoteError instanceof Error ? quoteError.message : 'Nao foi possivel calcular o frete agora.';
-        setDeliveryQuote(null);
-        setDeliveryQuoteError(message);
-      } finally {
-        if (!controller.signal.aborted) {
-          setIsQuotingDelivery(false);
-        }
-      }
-    }, 450);
-
-    return () => {
-      controller.abort();
-      window.clearTimeout(timeout);
-    };
+    setDeliveryQuote(null);
+    setDeliveryQuoteError(null);
+    setIsQuotingDelivery(false);
   }, [
     estimatedTotal,
     form.address,
@@ -665,8 +616,135 @@ export function PublicOrderPage() {
     parsedScheduledAt,
     scheduledAtIso,
     selectedBoxes,
+    totalBroas,
+    incompleteCustomBoxes.length
+  ]);
+
+  const requestDeliveryQuote = useCallback(async () => {
+    if (form.fulfillmentMode !== 'DELIVERY') {
+      setDeliveryQuote({
+        provider: 'NONE',
+        fee: 0,
+        currencyCode: 'BRL',
+        source: 'NONE',
+        status: 'NOT_REQUIRED',
+        quoteToken: null,
+        expiresAt: null,
+        fallbackReason: null,
+        breakdownLabel: 'Sem frete'
+      });
+      setDeliveryQuoteError(null);
+      return null;
+    }
+
+    if (!form.address.trim()) {
+      setDeliveryQuote(null);
+      setDeliveryQuoteError('Informe o endereco para calcular o frete.');
+      return null;
+    }
+
+    if (!scheduledAtIso) {
+      setDeliveryQuote(null);
+      setDeliveryQuoteError('Escolha data e horario validos para calcular o frete.');
+      return null;
+    }
+
+    if (totalBroas <= 0) {
+      setDeliveryQuote(null);
+      setDeliveryQuoteError('Escolha ao menos 1 caixa antes de calcular o frete.');
+      return null;
+    }
+
+    if (incompleteCustomBoxes.length > 0) {
+      setDeliveryQuote(null);
+      setDeliveryQuoteError('Complete todas as caixas Sabores antes de calcular o frete.');
+      return null;
+    }
+
+    if (minimumSchedule && parsedScheduledAt && parsedScheduledAt.getTime() < minimumSchedule.getTime()) {
+      setDeliveryQuote(null);
+      setDeliveryQuoteError(buildPublicOrderScheduleErrorMessage(minimumSchedule));
+      return null;
+    }
+
+    setIsQuotingDelivery(true);
+    setDeliveryQuoteError(null);
+
+    try {
+      const response = await fetch('/api/delivery-quote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: form.fulfillmentMode,
+          scheduledAt: scheduledAtIso,
+          customer: {
+            address: form.address.trim() || null,
+            placeId: form.placeId.trim() || null,
+            lat: typeof form.lat === 'number' ? form.lat : null,
+            lng: typeof form.lng === 'number' ? form.lng : null
+          },
+          manifest: {
+            items: selectedBoxes.map((entry) => ({
+              name: entry.label,
+              quantity: entry.quantity
+            })),
+            subtotal: estimatedTotal,
+            totalUnits: totalBroas
+          }
+        })
+      });
+
+      const raw = await response.text();
+      const data = raw ? (JSON.parse(raw) as DeliveryQuote) : null;
+      if (!response.ok || !data) {
+        throw new Error(extractErrorMessage(data));
+      }
+
+      setDeliveryQuote(data);
+      setDeliveryQuoteError(null);
+      return data;
+    } catch (quoteError) {
+      const message =
+        quoteError instanceof Error ? quoteError.message : 'Nao foi possivel calcular o frete agora.';
+      setDeliveryQuote(null);
+      setDeliveryQuoteError(message);
+      return null;
+    } finally {
+      setIsQuotingDelivery(false);
+    }
+  }, [
+    estimatedTotal,
+    form.address,
+    form.fulfillmentMode,
+    form.lat,
+    form.lng,
+    form.placeId,
+    incompleteCustomBoxes.length,
+    minimumSchedule,
+    parsedScheduledAt,
+    scheduledAtIso,
+    selectedBoxes,
     totalBroas
   ]);
+
+  const hasDeliveryQuoteReady =
+    form.fulfillmentMode !== 'DELIVERY' || Boolean(deliveryQuote?.quoteToken);
+  const primaryActionLabel = isSubmitting
+    ? 'FINALIZANDO...'
+    : form.fulfillmentMode === 'DELIVERY' && !hasDeliveryQuoteReady
+      ? isQuotingDelivery
+        ? 'CALCULANDO FRETE...'
+        : 'CALCULAR FRETE'
+      : 'FINALIZAR PEDIDO';
+
+  const handlePrimaryAction = async () => {
+    if (isSubmitting) return;
+    if (form.fulfillmentMode === 'DELIVERY' && !hasDeliveryQuoteReady) {
+      await requestDeliveryQuote();
+      return;
+    }
+    orderFormRef.current?.requestSubmit();
+  };
 
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -852,6 +930,7 @@ export function PublicOrderPage() {
             autoComplete="on"
             className="grid gap-4 rounded-[26px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.88)] p-4 shadow-[0_22px_60px_rgba(70,44,26,0.12)] sm:gap-5 sm:rounded-[32px] sm:p-6 sm:shadow-[0_26px_90px_rgba(70,44,26,0.12)]"
             onSubmit={onSubmit}
+            ref={orderFormRef}
           >
             <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6">
               <div className="mb-4 flex items-center justify-between gap-4 sm:mb-5">
@@ -1028,8 +1107,11 @@ export function PublicOrderPage() {
                       <div className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-3 sm:gap-4 sm:grid-cols-[118px_minmax(0,1fr)]">
                         <div className="relative h-[96px] w-[96px] shrink-0 sm:h-[118px] sm:w-[118px]">
                           <div className="relative h-full w-full overflow-hidden rounded-[18px] border border-white/80 bg-white/70 shadow-[0_12px_24px_rgba(74,47,31,0.12)] transition-transform duration-300 group-hover:translate-y-[-2px] sm:rounded-[22px] sm:shadow-[0_14px_28px_rgba(74,47,31,0.12)]">
-                            <Image alt={meta.label} className="h-full w-full object-cover" fill sizes="(max-width: 640px) 96px, 118px" src={meta.image} />
-                            <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_26%,rgba(46,29,20,0.12)_100%)]" />
+                            <OrderCardArtwork
+                              alt={meta.label}
+                              art={meta.art}
+                              sizes="(max-width: 640px) 96px, 118px"
+                            />
                           </div>
                         </div>
                         <div className="min-w-0">
@@ -1150,7 +1232,7 @@ export function PublicOrderPage() {
                                 <div className="min-w-0 flex items-center gap-2">
                                   <div className="relative h-10 w-10 shrink-0">
                                     <div className="relative h-full w-full overflow-hidden rounded-xl border border-white/80 bg-white shadow-[0_8px_18px_rgba(70,44,26,0.08)]">
-                                      <Image alt={meta.label} className="h-full w-full object-cover" fill sizes="40px" src={meta.image} />
+                                      <OrderCardArtwork alt={meta.label} art={meta.art} sizes="40px" />
                                     </div>
                                   </div>
                                   <p className="truncate text-[0.82rem] font-semibold text-[color:var(--ink-strong)] sm:text-sm">
@@ -1231,16 +1313,6 @@ export function PublicOrderPage() {
               </div>
             ) : null}
 
-            <div className="flex justify-end">
-              <div className="app-form-actions">
-                <button className="app-button app-button-primary" disabled={isSubmitting} type="submit">
-                  {isSubmitting ? 'Enviando pedido...' : 'Enviar pedido'}
-                </button>
-                <button className="app-button app-button-ghost" onClick={resetForm} type="button">
-                  Limpar
-                </button>
-              </div>
-            </div>
           </form>
 
           <aside className="grid gap-4 self-start sm:gap-5 xl:sticky xl:top-8">
@@ -1354,6 +1426,24 @@ export function PublicOrderPage() {
                     {formatOrderFlavorComposition(computedUnits)}
                   </p>
                 </div>
+
+                {!result ? (
+                  <div className="grid gap-2 rounded-[20px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(160deg,rgba(255,248,241,0.94),rgba(244,231,216,0.88))] p-4 shadow-[0_18px_34px_rgba(70,44,26,0.08)] sm:rounded-[24px]">
+                    <button
+                      className="app-button app-button-primary w-full"
+                      disabled={isSubmitting || isQuotingDelivery}
+                      onClick={() => {
+                        void handlePrimaryAction();
+                      }}
+                      type="button"
+                    >
+                      {primaryActionLabel}
+                    </button>
+                    <button className="app-button app-button-ghost w-full" onClick={resetForm} type="button">
+                      Limpar
+                    </button>
+                  </div>
+                ) : null}
               </div>
             </section>
 

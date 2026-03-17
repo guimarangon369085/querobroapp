@@ -25,7 +25,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
       <aside className="app-sidebar">
         <div className="app-brand">
           <div className="app-brand__logo">
-            <h1 className="app-brand__name">@QUEROBROApp</h1>
+            <h1 className="app-brand__name brand-wordmark brand-wordmark--micro">@QUEROBROA</h1>
           </div>
         </div>
         <Nav />

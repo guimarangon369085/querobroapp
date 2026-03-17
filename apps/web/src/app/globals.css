@@ -4,26 +4,26 @@
 
 :root {
   color-scheme: light;
-  --bg-base: #f6efe4;
-  --bg-warm: #efd4b1;
-  --bg-fresh: #d2e2d6;
-  --bg-card: rgba(255, 251, 246, 0.78);
-  --surface-strong: rgba(255, 248, 241, 0.92);
+  --bg-base: #f2e3d2;
+  --bg-warm: #c59b67;
+  --bg-fresh: #a1a68e;
+  --bg-card: rgba(255, 250, 244, 0.82);
+  --surface-strong: rgba(252, 246, 239, 0.94);
 
-  --ink-strong: #2a1d14;
-  --ink-muted: #715848;
+  --ink-strong: #26170f;
+  --ink-muted: #6f5745;
 
-  --tomato-700: #a0141a;
-  --tomato-500: #c9242f;
-  --crust-500: #c9712f;
-  --crust-400: #de8e44;
-  --mint-500: #8fb098;
-  --cream-300: #f8e9d8;
+  --tomato-700: #7f2d1f;
+  --tomato-500: #a55235;
+  --crust-500: #bc9e67;
+  --crust-400: #d1ae78;
+  --mint-500: #9c9163;
+  --cream-300: #f1deca;
 
-  --line-soft: rgba(91, 57, 37, 0.14);
+  --line-soft: rgba(93, 57, 35, 0.14);
   --line-strong: rgba(107, 61, 35, 0.3);
-  --shadow-soft: 0 26px 60px rgba(57, 33, 20, 0.14);
-  --shadow-strong: 0 34px 84px rgba(42, 27, 18, 0.18);
+  --shadow-soft: 0 24px 56px rgba(57, 33, 20, 0.14);
+  --shadow-strong: 0 38px 96px rgba(42, 27, 18, 0.2);
   --font-body:
     "Aptos",
     "Segoe UI",
@@ -32,8 +32,9 @@
     Arial,
     sans-serif;
   --font-wordmark:
+    "Impact",
     "Aptos Narrow",
-    "Arial Narrow",
+    "Arial Narrow Bold",
     "Franklin Gothic Demi Cond",
     "Franklin Gothic Medium",
     "Bahnschrift Condensed",
@@ -170,11 +171,11 @@ section {
 }
 
 .app-brand__name {
-  font-size: 1.26rem;
+  font-size: 1.18rem;
   line-height: 1;
-  font-weight: 600;
+  font-weight: 800;
   margin: 0;
-  letter-spacing: -0.04em;
+  letter-spacing: 0.08em;
 }
 
 .app-brand__logo {
@@ -211,20 +212,20 @@ section {
 
 .brand-wordmark {
   font-family: var(--font-wordmark, var(--font-body, ui-sans-serif, system-ui, sans-serif));
-  font-weight: 800;
+  font-weight: 900;
   font-stretch: condensed;
-  font-variation-settings: "wdth" 92;
-  letter-spacing: 0.07em;
-  line-height: 0.92;
+  letter-spacing: 0.11em;
+  line-height: 0.88;
   text-transform: uppercase;
+  text-wrap: balance;
 }
 
 .brand-wordmark--micro {
-  letter-spacing: 0.16em;
+  letter-spacing: 0.18em;
 }
 
 .brand-wordmark--display {
-  letter-spacing: 0.05em;
+  letter-spacing: 0.09em;
 }
 
 .app-nav {
@@ -1820,13 +1821,14 @@ input[type='radio'] {
   justify-content: center;
   gap: 8px;
   border-radius: 999px;
-  min-height: 40px;
-  padding: 9px 15px;
+  min-height: 42px;
+  padding: 10px 16px;
   font-size: clamp(0.8rem, 0.77rem + 0.08vw, 0.88rem);
-  font-weight: 600;
-  letter-spacing: 0.05em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   border: 1px solid transparent;
+  backdrop-filter: blur(10px);
 }
 
 .app-button:disabled {
@@ -1843,9 +1845,11 @@ input[type='radio'] {
 
 .app-button-primary {
   color: #fff;
-  background: linear-gradient(140deg, var(--tomato-500), var(--crust-500));
-  border-color: rgba(255, 255, 255, 0.2);
-  box-shadow: 0 14px 28px rgba(187, 58, 34, 0.28);
+  background:
+    linear-gradient(140deg, color-mix(in srgb, var(--tomato-500), black 6%), var(--crust-500)),
+    rgba(0, 0, 0, 0.1);
+  border-color: rgba(255, 248, 238, 0.24);
+  box-shadow: 0 16px 32px rgba(133, 61, 33, 0.28);
 }
 
 .app-button-primary:hover:not(:disabled),
@@ -1856,14 +1860,14 @@ input[type='radio'] {
     color-mix(in srgb, var(--tomato-500), black 14%),
     color-mix(in srgb, var(--crust-500), black 12%)
   );
-  border-color: rgba(255, 255, 255, 0.3);
-  box-shadow: 0 16px 30px rgba(151, 42, 25, 0.34);
+  border-color: rgba(255, 248, 238, 0.34);
+  box-shadow: 0 18px 34px rgba(121, 47, 24, 0.34);
 }
 
 .app-button-ghost {
-  color: color-mix(in srgb, var(--ink-strong), black 8%);
-  background: rgba(255, 255, 255, 0.66);
-  border: 1px solid var(--line-soft);
+  color: color-mix(in srgb, var(--ink-strong), black 6%);
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.72), rgba(248, 238, 227, 0.78));
+  border: 1px solid color-mix(in srgb, var(--line-soft), white 22%);
 }
 
 .app-button-ghost:hover:not(:disabled),
@@ -2427,10 +2431,12 @@ input[type='radio'] {
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
-  border-radius: 16px;
-  padding: 12px 12px 12px 14px;
+  border-radius: 20px;
+  padding: 14px 14px 14px 16px;
   border: 1px solid var(--line-soft);
-  background: rgba(255, 255, 255, 0.95);
+  background:
+    radial-gradient(circle at top right, rgba(255, 245, 234, 0.92), transparent 40%),
+    rgba(255, 252, 248, 0.96);
   box-shadow: var(--shadow-soft);
   backdrop-filter: blur(10px);
   min-width: 0;
@@ -2539,15 +2545,15 @@ input[type='radio'] {
 }
 
 .app-inline-notice--error {
-  border-color: rgb(254 205 211);
-  background: linear-gradient(160deg, rgba(255, 245, 245, 0.96), rgba(255, 235, 235, 0.92));
-  color: rgb(190 24 93);
+  border-color: color-mix(in srgb, var(--tomato-500), white 54%);
+  background: linear-gradient(160deg, rgba(255, 246, 243, 0.98), rgba(252, 233, 225, 0.94));
+  color: color-mix(in srgb, var(--tomato-700), black 6%);
 }
 
 .app-inline-notice--warning {
-  border-color: rgb(253 224 71 / 0.48);
-  background: rgba(255, 249, 235, 0.9);
-  color: rgb(146 64 14);
+  border-color: color-mix(in srgb, var(--crust-500), white 36%);
+  background: linear-gradient(160deg, rgba(255, 248, 235, 0.96), rgba(247, 233, 207, 0.92));
+  color: color-mix(in srgb, var(--ink-strong), var(--crust-500) 34%);
 }
 
 .pac-container {
@@ -2558,8 +2564,8 @@ input[type='radio'] {
   position: fixed;
   inset: 0;
   z-index: 140;
-  background: rgba(24, 16, 10, 0.42);
-  backdrop-filter: blur(4px);
+  background: rgba(24, 16, 10, 0.5);
+  backdrop-filter: blur(8px);
   display: grid;
   place-items: center;
   padding: 18px;
@@ -2568,18 +2574,21 @@ input[type='radio'] {
 .app-confirm-modal {
   width: min(460px, 100%);
   max-width: calc(100vw - 24px);
-  border-radius: 18px;
-  border: 1px solid var(--line-soft);
-  background: rgba(255, 250, 244, 0.97);
+  border-radius: 24px;
+  border: 1px solid color-mix(in srgb, var(--line-soft), white 18%);
+  background:
+    radial-gradient(circle at top right, rgba(188, 158, 103, 0.16), transparent 34%),
+    linear-gradient(168deg, rgba(255, 252, 248, 0.98), rgba(244, 231, 216, 0.94));
   box-shadow: var(--shadow-strong);
-  padding: 18px;
+  padding: 20px;
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .app-confirm-modal__title {
-  font-size: 1.1rem;
-  font-weight: 600;
+  font-size: clamp(1.12rem, 1rem + 0.36vw, 1.4rem);
+  font-weight: 700;
+  line-height: 1.1;
 }
 
 .app-confirm-modal__description {
@@ -2602,8 +2611,8 @@ input[type='radio'] {
   position: fixed;
   inset: 0;
   z-index: 145;
-  background: rgba(24, 16, 10, 0.42);
-  backdrop-filter: blur(5px);
+  background: rgba(24, 16, 10, 0.52);
+  backdrop-filter: blur(10px);
   display: grid;
   place-items: center;
   padding: 18px;
@@ -2612,13 +2621,15 @@ input[type='radio'] {
 .app-alert-modal {
   width: min(520px, 100%);
   max-width: calc(100vw - 24px);
-  border-radius: 22px;
-  border: 1px solid var(--line-soft);
-  background: rgba(255, 252, 248, 0.98);
+  border-radius: 28px;
+  border: 1px solid color-mix(in srgb, var(--line-soft), white 18%);
+  background:
+    radial-gradient(circle at top right, rgba(188, 158, 103, 0.14), transparent 34%),
+    linear-gradient(168deg, rgba(255, 252, 248, 0.99), rgba(244, 231, 216, 0.95));
   box-shadow: var(--shadow-strong);
-  padding: 20px;
+  padding: 24px;
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .app-alert-modal--success {
@@ -2646,15 +2657,15 @@ input[type='radio'] {
   margin: 0;
   font-size: 0.72rem;
   font-weight: 700;
-  letter-spacing: 0.22em;
+  letter-spacing: 0.28em;
   text-transform: uppercase;
-  color: var(--ink-muted);
+  color: color-mix(in srgb, var(--ink-muted), black 8%);
 }
 
 .app-alert-modal__title {
   font-size: clamp(1.14rem, 1.02rem + 0.42vw, 1.5rem);
   font-weight: 700;
-  line-height: 1.1;
+  line-height: 1.04;
   color: var(--ink-strong);
   overflow-wrap: anywhere;
   text-wrap: balance;

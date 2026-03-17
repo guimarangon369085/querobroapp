@@ -1,6 +1,6 @@
 # PROJECT_SNAPSHOT
 
-Ultima atualizacao: 2026-03-13
+Ultima atualizacao: 2026-03-16
 
 ## Estado atual
 
@@ -18,6 +18,9 @@ Ultima atualizacao: 2026-03-13
 - Existe agora uma captura publica de pedido em `/pedido`, usando o mesmo intake externo que vai servir para `Google Forms`, pagina propria e futuro `WhatsApp Flow`.
 - Pedidos de `Entrega` agora podem receber cotacao de frete antes do submit final, com o valor incorporado ao total e ao PIX.
 - `/pedido`, `quick create` e a logica de caixas em `Pedidos` passaram a compartilhar o mesmo catalogo de caixas/sabores e as mesmas imagens originais da marca.
+- O provider principal de frete/entrega do app agora e `Loggi`, substituindo a integracao anterior com `Uber Direct`.
+- `/pedido` e o modal de novo pedido em `/pedidos` agora usam o mesmo fluxo em duas etapas para entrega: `Calcular frete` antes de `Finalizar pedido/Criar pedido`.
+- As caixas mistas passaram a usar composicao visual unica no mesmo quadrante, padronizada entre a captura publica e a operacao interna.
 
 ## O que um usuario consegue fazer hoje
 
@@ -36,8 +39,10 @@ Ultima atualizacao: 2026-03-13
 ## Telas web
 
 - `/pedido`: pagina publica do cliente com submit para o intake canonico, cotacao previa de frete e exibicao do PIX copia e cola.
+- `/pedido`: CTA principal abaixo do bloco `Resumo`; em `Entrega` ele calcula o frete antes da finalizacao, e em `Retirada` o frete zera.
 - `/`: landing publica fullscreen da marca, preparada para `www.querobroa.com.br`.
 - `/pedidos`: agenda do dia, criacao de pedido, status, producao, entrega e pagamento.
+- `/pedidos`: modal `Novo pedido` alinhado visualmente com `/pedido`, sem miniatura redundante e com CTA de frete abaixo do resumo.
 - `/clientes`: cadastro e edicao rapida.
 - `/estoque`: saldo, D+1, compras e leitura operacional.
 - `/produtos`: redirect legado para `/estoque`.
@@ -78,7 +83,7 @@ Ultima atualizacao: 2026-03-13
 1. `Google Forms` ja e viavel como canal temporario, mas ainda falta configuracao real do Apps Script e URL publica final.
 2. O dominio publico ja responde em `querobroa.com.br`, `www`, `ops` e `api`, mas o web ainda precisa publicar o bundle corrigido para `/pedidos` e `/pedido` nao cairem em fallback de `127.0.0.1` quando o client bundle estiver defasado.
 3. `WhatsApp Flow` segue sem numero dedicado; a migracao futura deve reutilizar o contrato externo atual.
-4. A integracao Uber/entrega real ainda depende de credenciais do provider; hoje existe cotacao e fallback server-side preparados.
+4. A integracao Loggi ja substituiu o provider anterior no codigo e no runtime, mas ainda vale validar o disparo real de shipment em producao sem criar entrega acidental.
 5. Mobile segue atras do web no fluxo operacional novo.
 6. Ainda vale ampliar cobertura de testes alem dos gates atuais, principalmente em cenarios de edge case de dominio.
 
