@@ -655,6 +655,19 @@ export class DeliveriesService {
   }
 
   private quoteRequestHash(draft: DeliveryQuoteDraft) {
+    const itemSignature = draft.manifest.items
+      .map((item) => ({
+        signature: this.resolveManifestItemSignature(item.name),
+        quantity: Math.max(Number(item.quantity) || 0, 0)
+      }))
+      .filter((item) => item.quantity > 0)
+      .sort((left, right) => {
+        if (left.signature === right.signature) {
+          return left.quantity - right.quantity;
+        }
+        return left.signature.localeCompare(right.signature);
+      });
+
     return createHash('sha256')
       .update(
         JSON.stringify({
@@ -669,13 +682,27 @@ export class DeliveriesService {
             typeof draft.customer.lng === 'number' && Number.isFinite(draft.customer.lng) ? draft.customer.lng : null,
           subtotal: this.toMoney(draft.manifest.subtotal),
           totalUnits: draft.manifest.totalUnits,
-          items: draft.manifest.items.map((item) => ({
-            name: this.normalizeText(item.name),
-            quantity: Math.max(Number(item.quantity) || 0, 0)
-          }))
+          items: itemSignature
         })
       )
       .digest('hex');
+  }
+
+  private resolveManifestItemSignature(value: string | null | undefined) {
+    const normalized = this.normalizeText(value)
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+
+    if (!normalized) return 'ITEM';
+    if (normalized.includes('goiabad')) return 'FLAVOR_G';
+    if (normalized.includes('doce') && normalized.includes('leite')) return 'FLAVOR_D';
+    if (normalized.includes('requeij')) return 'FLAVOR_R';
+    if (normalized.includes('queijo') || normalized.includes('serro')) return 'FLAVOR_Q';
+    if (normalized.includes('tradicion')) return 'FLAVOR_T';
+    return normalized;
   }
 
   private quoteToken(requestHash: string) {

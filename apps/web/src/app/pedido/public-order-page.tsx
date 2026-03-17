@@ -319,6 +319,7 @@ export function PublicOrderPage() {
   const [isQuotingDelivery, setIsQuotingDelivery] = useState(false);
   const addressInputRef = useRef<HTMLInputElement | null>(null);
   const orderFormRef = useRef<HTMLFormElement | null>(null);
+  const pageTopRef = useRef<HTMLDivElement | null>(null);
   const [minimumSchedule, setMinimumSchedule] = useState<Date | null>(null);
   const [draftSessionId, setDraftSessionId] = useState(() => resolvePublicOrderDraftSessionId());
   const minimumDateValue = minimumSchedule ? formatDateInputValue(minimumSchedule) : '';
@@ -419,6 +420,14 @@ export function PublicOrderPage() {
       }))
     ],
     [activeCustomBoxes, parsedBoxCounts]
+  );
+  const flavorManifestItems = useMemo(
+    () =>
+      FLAVOR_CODES.map((code) => ({
+        name: boxCatalog[code].label,
+        quantity: computedUnits[code]
+      })).filter((entry) => entry.quantity > 0),
+    [computedUnits]
   );
   const pixCharge: PixCharge | null = result?.intake.pixCharge ?? null;
   const deliveryFee = deliveryQuote?.fee ?? 0;
@@ -699,10 +708,7 @@ export function PublicOrderPage() {
             lng: typeof form.lng === 'number' ? form.lng : null
           },
           manifest: {
-            items: selectedBoxes.map((entry) => ({
-              name: entry.label,
-              quantity: entry.quantity
-            })),
+            items: flavorManifestItems,
             subtotal: estimatedTotal,
             totalUnits: totalBroas
           }
@@ -761,7 +767,7 @@ export function PublicOrderPage() {
     minimumSchedule,
     parsedScheduledAt,
     scheduledAtIso,
-    selectedBoxes,
+    flavorManifestItems,
     totalBroas
   ]);
 
@@ -783,6 +789,14 @@ export function PublicOrderPage() {
     }
     orderFormRef.current?.requestSubmit();
   };
+
+  const scrollToTop = useCallback(() => {
+    if (pageTopRef.current) {
+      pageTopRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
 
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -970,9 +984,36 @@ export function PublicOrderPage() {
     setDeliveryQuoteError(null);
   };
 
+  const startAnotherOrder = () => {
+    const nextMinimum = resolveExternalOrderMinimumSchedule();
+    const preservedScheduledAt = parseLocalDateTime(form.date, form.time);
+    const nextScheduledAt =
+      preservedScheduledAt && preservedScheduledAt.getTime() >= nextMinimum.getTime()
+        ? preservedScheduledAt
+        : nextMinimum;
+
+    setDraftSessionId(createPublicOrderDraftSessionId());
+    setMinimumSchedule(nextMinimum);
+    setForm((current) => ({
+      ...current,
+      date: formatDateInputValue(nextScheduledAt),
+      time: formatTimeInputValue(nextScheduledAt),
+      notes: '',
+      boxes: {
+        ...initialFormState.boxes
+      }
+    }));
+    setCustomBoxes([]);
+    setError(null);
+    setResult(null);
+    setDeliveryQuote(null);
+    setDeliveryQuoteError(null);
+    scrollToTop();
+  };
+
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(255,240,220,0.95),transparent_32%),radial-gradient(circle_at_top_right,rgba(219,234,222,0.9),transparent_28%),linear-gradient(180deg,#f8efe5_0%,#f4eadc_100%)]">
-      <div className="mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:py-8">
+      <div className="mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:py-8" ref={pageTopRef}>
         <section className="grid gap-4 lg:gap-6 xl:grid-cols-[minmax(0,0.94fr)_minmax(420px,1.06fr)] xl:items-stretch">
           <div className="overflow-hidden rounded-[30px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(145deg,rgba(255,252,247,0.92),rgba(246,235,221,0.9))] p-5 shadow-[0_20px_64px_rgba(70,44,26,0.12)] sm:rounded-[34px] sm:p-6 lg:p-7 lg:shadow-[0_24px_84px_rgba(70,44,26,0.12)]">
             <p className="brand-wordmark brand-wordmark--display text-[1.7rem] text-[color:var(--ink-strong)] sm:text-[2.35rem]">
@@ -1561,7 +1602,7 @@ export function PublicOrderPage() {
                       >
                         {isCopyingPix ? 'Copiando...' : 'Copiar codigo PIX'}
                       </button>
-                      <button className="app-button app-button-ghost" onClick={resetForm} type="button">
+                      <button className="app-button app-button-ghost" onClick={startAnotherOrder} type="button">
                         Fazer outro pedido
                       </button>
                     </div>

@@ -21,6 +21,8 @@ Ultima atualizacao: 2026-03-17
 - O frete agora opera em modo hibrido: `Uber Direct` como cotacao primaria dentro da cobertura da conta e `Loggi` como fallback automatico quando a Uber recusa por raio/cobertura.
 - A cotacao agora protege o caso `origem = destino`, usa hash de quote mais fiel ao payload real e calcula pacote Loggi por caixa fechada em vez de inflar o peso por unidade interna do dashboard.
 - `/pedido` e o modal de novo pedido em `/pedidos` agora usam o mesmo fluxo em duas etapas para entrega: `Calcular frete` antes de `Finalizar pedido/Criar pedido`.
+- `/pedido` passou a preservar o cadastro ao usar `Fazer outro pedido`, limpando apenas a composicao do pedido e rolando de volta ao topo para uma nova montagem.
+- A cotacao publica de `/pedido` agora usa a assinatura canonica dos sabores para casar com o intake final e evitar refresh indevido do frete na primeira finalizacao.
 - As caixas mistas passaram a usar composicao visual unica no mesmo quadrante, padronizada entre a captura publica e a operacao interna.
 - As caixas mistas agora usam corte seco entre as duas imagens, sem a faixa branca intermediaria.
 - `/dashboard` voltou a existir como rota oculta interna, agora com painel real de analytics first-party do site, vitals e performance financeira/operacional da broa.
