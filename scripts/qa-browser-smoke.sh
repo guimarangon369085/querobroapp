@@ -365,7 +365,7 @@ assert_network_clean() {
   filtered_log="$source_log"
   if [[ "$USING_EXISTING_WEB" == "1" ]]; then
     filtered_log="$OUTPUT_DIR/${route_name}-network-filtered.log"
-    grep -Ev '/favicon\.ico|/apple-touch-icon(\.png)?|/_next/static/webpack/.*\.hot-update\.(js|json) => \[FAILED\] net::ERR_ABORTED|\?_rsc=.*=> \[FAILED\] net::ERR_ABORTED' "$source_log" >"$filtered_log" || true
+    grep -Ev '/favicon\.ico|/apple-touch-icon(\.png)?|/_next/static/webpack/.*\.hot-update\.(js|json) => \[FAILED\] net::ERR_ABORTED|\?_rsc=.*=> \[FAILED\] net::ERR_ABORTED|/api/analytics/track => \[FAILED\] net::ERR_ABORTED' "$source_log" >"$filtered_log" || true
   fi
 
   if grep -Eq '=> \[(FAILED|4[0-9]{2}|5[0-9]{2})\]' "$filtered_log"; then
@@ -379,8 +379,15 @@ assert_page_contains() {
   local route_name="$1"
   local expected_text="$2"
   local evaluation
+  local attempt
 
-  evaluation="$("$PWCLI" eval "document.body.innerText.includes('${expected_text}')")"
+  for attempt in 1 2 3; do
+    evaluation="$("$PWCLI" eval "document.body.innerText.includes('${expected_text}')" 2>&1 || true)"
+    if [[ "$evaluation" != *"Execution context was destroyed"* ]]; then
+      break
+    fi
+    "$PWCLI" run-code "try { await page.waitForLoadState('domcontentloaded', { timeout: 2000 }); } catch {} await page.waitForTimeout(400);" >/dev/null
+  done
   printf '%s\n' "$evaluation" >"$OUTPUT_DIR/${route_name}-contains.txt"
 
   if ! printf '%s\n' "$evaluation" | grep -q '^true$'; then
@@ -394,8 +401,15 @@ assert_path_contains() {
   local route_name="$1"
   local expected_path_fragment="$2"
   local evaluation
+  local attempt
 
-  evaluation="$("$PWCLI" eval "window.location.pathname.includes('${expected_path_fragment}')")"
+  for attempt in 1 2 3; do
+    evaluation="$("$PWCLI" eval "window.location.pathname.includes('${expected_path_fragment}')" 2>&1 || true)"
+    if [[ "$evaluation" != *"Execution context was destroyed"* ]]; then
+      break
+    fi
+    "$PWCLI" run-code "try { await page.waitForLoadState('domcontentloaded', { timeout: 2000 }); } catch {} await page.waitForTimeout(400);" >/dev/null
+  done
   printf '%s\n' "$evaluation" >"$OUTPUT_DIR/${route_name}-path-contains.txt"
 
   if ! printf '%s\n' "$evaluation" | grep -q '^true$'; then

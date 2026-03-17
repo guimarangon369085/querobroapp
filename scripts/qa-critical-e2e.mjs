@@ -494,7 +494,21 @@ async function runCriticalFlow() {
 
           await productCard.waitFor({ state: 'visible', timeout: 10000 });
           await productCard.getByRole('button', { name: '+1', exact: true }).click();
-          await newOrderSlot.getByRole('button', { name: 'Criar', exact: true }).click();
+          const submitButton = newOrderSlot.locator('.order-quick-create__submit').first();
+          await submitButton.waitFor({ state: 'visible', timeout: 10000 });
+          const initialLabel = (await submitButton.innerText()).trim();
+          await submitButton.click();
+          if (/calcular frete/i.test(initialLabel)) {
+            await page.waitForFunction(
+              (selector) => {
+                const button = document.querySelector(selector);
+                return !!button && /criar pedido/i.test(button.textContent || '');
+              },
+              '.order-quick-create__submit',
+              { timeout: 10000 }
+            );
+            await submitButton.click();
+          }
         } else {
           const openNewOrderButton = page.getByRole('button', { name: /novo pedido/i }).first();
           await openNewOrderButton.waitFor({ state: 'visible', timeout: 10000 });
@@ -509,7 +523,21 @@ async function runCriticalFlow() {
           );
           await productCard.waitFor({ state: 'visible', timeout: 10000 });
           await productCard.getByRole('button', { name: '+1', exact: true }).click();
-          await newOrderModal.getByRole('button', { name: 'Criar', exact: true }).click();
+          const submitButton = newOrderModal.locator('.order-quick-create__submit').first();
+          await submitButton.waitFor({ state: 'visible', timeout: 10000 });
+          const initialLabel = (await submitButton.innerText()).trim();
+          await submitButton.click();
+          if (/calcular frete/i.test(initialLabel)) {
+            await page.waitForFunction(
+              (selector) => {
+                const button = document.querySelector(selector);
+                return !!button && /criar pedido/i.test(button.textContent || '');
+              },
+              '.order-quick-create__submit',
+              { timeout: 10000 }
+            );
+            await submitButton.click();
+          }
         }
       }
       await page.waitForTimeout(1000);

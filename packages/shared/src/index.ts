@@ -16,8 +16,8 @@ export const PaymentStatusEnum = z.enum(['PENDENTE', 'PAGO', 'CANCELADO']);
 export const OrderPaymentStatusEnum = z.enum(['PENDENTE', 'PARCIAL', 'PAGO']);
 export const PixChargeProviderEnum = z.enum(['STATIC_PIX', 'LOCAL_DEV']);
 export const OrderFulfillmentModeEnum = z.enum(['DELIVERY', 'PICKUP']);
-export const DeliveryProviderEnum = z.enum(['NONE', 'LOCAL', 'LOGGI']);
-export const DeliveryFeeSourceEnum = z.enum(['NONE', 'LOGGI_QUOTE', 'MANUAL_FALLBACK']);
+export const DeliveryProviderEnum = z.enum(['NONE', 'LOCAL', 'UBER_DIRECT', 'LOGGI']);
+export const DeliveryFeeSourceEnum = z.enum(['NONE', 'UBER_QUOTE', 'LOGGI_QUOTE', 'MANUAL_FALLBACK']);
 export const DeliveryQuoteStatusEnum = z.enum(['NOT_REQUIRED', 'PENDING', 'QUOTED', 'FALLBACK', 'EXPIRED', 'FAILED']);
 export const DeliveryJobStatusEnum = z.enum([
   'NOT_REQUESTED',

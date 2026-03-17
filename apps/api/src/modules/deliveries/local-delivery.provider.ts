@@ -22,7 +22,7 @@ export class LocalDeliveryProvider implements DeliveryProvider {
       status: 'FALLBACK',
       providerQuoteId: null,
       expiresAt: null,
-      fallbackReason: 'Cotacao Loggi indisponivel. Frete provisório aplicado.',
+      fallbackReason: 'Cotacao dos provedores indisponivel. Frete provisório aplicado.',
       breakdownLabel: 'Frete provisório',
       rawPayload: null
     };

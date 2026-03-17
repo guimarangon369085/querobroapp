@@ -24,11 +24,30 @@ import {
 import type { DeliveryDispatchInput, DeliveryProvider, DeliveryQuoteInput } from './delivery-provider.js';
 import { LocalDeliveryProvider } from './local-delivery.provider.js';
 import { LoggiProvider } from './loggi.provider.js';
+import { UberDirectProvider } from './uber-direct.provider.js';
 
 type OrderWithDeliveryContext = Awaited<ReturnType<DeliveriesService['getOrderForDelivery']>>;
 type DeliveryQuoteDraft = typeof DeliveryQuoteDraftSchema._type;
-type DeliveryQuoteResponse = typeof DeliveryQuoteResponseSchema._type;
-type DeliveryJob = typeof DeliveryJobSchema._type;
+type DeliveryProviderCode = 'NONE' | 'LOCAL' | 'UBER_DIRECT' | 'LOGGI';
+type DeliveryQuoteSourceCode = 'NONE' | 'UBER_QUOTE' | 'LOGGI_QUOTE' | 'MANUAL_FALLBACK';
+type DeliveryQuoteStatusCode = 'NOT_REQUIRED' | 'PENDING' | 'QUOTED' | 'FALLBACK' | 'EXPIRED' | 'FAILED';
+type DeliveryJobStatusCode =
+  | 'NOT_REQUESTED'
+  | 'PENDING_REQUIREMENTS'
+  | 'REQUESTED'
+  | 'OUT_FOR_DELIVERY'
+  | 'DELIVERED'
+  | 'FAILED'
+  | 'CANCELED';
+type DeliveryQuoteResponse = Omit<typeof DeliveryQuoteResponseSchema._type, 'provider' | 'source' | 'status'> & {
+  provider: DeliveryProviderCode;
+  source: DeliveryQuoteSourceCode;
+  status: DeliveryQuoteStatusCode;
+};
+type DeliveryJob = Omit<typeof DeliveryJobSchema._type, 'provider' | 'status'> & {
+  provider: DeliveryProviderCode;
+  status: DeliveryJobStatusCode;
+};
 
 type DeliveryDraft = {
   orderId: number;
@@ -50,7 +69,7 @@ type DeliveryDraft = {
 };
 
 type DeliveryReadinessResult = {
-  provider: 'NONE' | 'LOCAL' | 'LOGGI';
+  provider: DeliveryProviderCode;
   mode: 'PROVIDER';
   ready: boolean;
   reason: string;
@@ -88,14 +107,11 @@ type QuoteRecordPayload = {
 const DELIVERY_TRACKING_SCOPE = 'DELIVERY_TRACKING';
 const DELIVERY_QUOTE_SCOPE = 'DELIVERY_QUOTE';
 const FIXED_PICKUP_ADDRESS = 'Alameda Jau, 731 - Sao Paulo - SP, Brasil';
-const FIXED_PICKUP_ADDRESS_LINE1 = 'Alameda Jau, 731';
-const FIXED_PICKUP_CITY = 'Sao Paulo';
-const FIXED_PICKUP_STATE = 'SP';
-const FIXED_PICKUP_COUNTRY = 'BR';
 
 @Injectable()
 export class DeliveriesService {
   private readonly localProvider = new LocalDeliveryProvider();
+  private readonly uberProvider = new UberDirectProvider();
   private readonly loggiProvider = new LoggiProvider();
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
@@ -493,6 +509,27 @@ export class DeliveriesService {
       );
     }
 
+    if (this.uberProvider.isConfigured()) {
+      try {
+        return await this.uberProvider.quote(input);
+      } catch (error) {
+        if (this.uberProvider.isCoverageLimitError(error) && this.loggiProvider.isConfigured()) {
+          try {
+            return await this.loggiProvider.quote(input);
+          } catch (fallbackError) {
+            if (options?.allowManualFallback !== false && fallbackError instanceof BadGatewayException) {
+              return this.localProvider.quote(input);
+            }
+            throw fallbackError;
+          }
+        }
+        if (options?.allowManualFallback !== false && error instanceof BadGatewayException) {
+          return this.localProvider.quote(input);
+        }
+        throw error;
+      }
+    }
+
     if (this.loggiProvider.isConfigured()) {
       try {
         return await this.loggiProvider.quote(input);
@@ -533,6 +570,7 @@ export class DeliveriesService {
   }
 
   private isAcceptableDeliveryQuote(quote: DeliveryQuoteResponse, allowManualFallback = true) {
+    if (quote.provider === 'UBER_DIRECT' && quote.source === 'UBER_QUOTE') return true;
     if (quote.provider === 'LOGGI' && quote.source === 'LOGGI_QUOTE') return true;
     if (!allowManualFallback) return false;
     return quote.provider === 'LOCAL' && quote.source === 'MANUAL_FALLBACK';
@@ -593,10 +631,12 @@ export class DeliveriesService {
     return {
       name:
         this.normalizeText(process.env.DELIVERY_PICKUP_NAME) ||
+        this.normalizeText(process.env.UBER_DIRECT_PICKUP_NAME) ||
         this.normalizeText(process.env.LOGGI_PICKUP_NAME) ||
         'Quero Broa',
       phone:
         this.normalizeText(process.env.DELIVERY_PICKUP_PHONE) ||
+        this.normalizeText(process.env.UBER_DIRECT_PICKUP_PHONE) ||
         this.normalizeText(process.env.LOGGI_PICKUP_PHONE) ||
         this.normalizeText(process.env.PIX_STATIC_KEY) ||
         '',
@@ -606,6 +646,9 @@ export class DeliveriesService {
 
   private selectDispatchProvider(provider: string | null | undefined): DeliveryProvider {
     const normalized = this.normalizeProvider(provider);
+    if (normalized === 'UBER_DIRECT' && this.uberProvider.isConfigured()) {
+      return this.uberProvider;
+    }
     if (normalized === 'LOGGI' && this.loggiProvider.isConfigured()) {
       return this.loggiProvider;
     }
@@ -900,8 +943,9 @@ export class DeliveriesService {
   }
 
   private normalizeProvider(provider: string | null | undefined): DeliveryTrackingRecord['provider'] {
-    if (provider === 'LOCAL' || provider === 'LOGGI' || provider === 'NONE') return provider;
-    if (provider === 'UBER_DIRECT') return 'LOGGI';
+    if (provider === 'LOCAL' || provider === 'UBER_DIRECT' || provider === 'LOGGI' || provider === 'NONE') {
+      return provider;
+    }
     return 'LOCAL';
   }
 
@@ -935,10 +979,9 @@ export class DeliveriesService {
   }
 
   private normalizeQuoteSource(source: string | null | undefined): DeliveryQuoteResponse['source'] {
-    if (source === 'NONE' || source === 'LOGGI_QUOTE' || source === 'MANUAL_FALLBACK') {
+    if (source === 'NONE' || source === 'UBER_QUOTE' || source === 'LOGGI_QUOTE' || source === 'MANUAL_FALLBACK') {
       return source;
     }
-    if (source === 'UBER_QUOTE') return 'LOGGI_QUOTE';
     return 'NONE';
   }
 

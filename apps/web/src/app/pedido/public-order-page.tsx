@@ -79,10 +79,10 @@ type PublicOrderResult = {
 };
 
 type DeliveryQuote = {
-  provider: 'NONE' | 'LOCAL' | 'LOGGI';
+  provider: 'NONE' | 'LOCAL' | 'UBER_DIRECT' | 'LOGGI';
   fee: number;
   currencyCode: string;
-  source: 'NONE' | 'LOGGI_QUOTE' | 'MANUAL_FALLBACK';
+  source: 'NONE' | 'UBER_QUOTE' | 'LOGGI_QUOTE' | 'MANUAL_FALLBACK';
   status: 'NOT_REQUIRED' | 'PENDING' | 'QUOTED' | 'FALLBACK' | 'EXPIRED' | 'FAILED';
   quoteToken: string | null;
   expiresAt: string | null;
@@ -855,14 +855,14 @@ export function PublicOrderPage() {
       },
       delivery:
         form.fulfillmentMode === 'DELIVERY' && deliveryQuote
-          ? {
+          ? ({
               quoteToken: deliveryQuote.quoteToken,
               fee: deliveryQuote.fee,
               provider: deliveryQuote.provider,
               source: deliveryQuote.source,
               status: deliveryQuote.status,
               expiresAt: deliveryQuote.expiresAt
-            }
+            } as ExternalOrderSubmission['delivery'])
           : undefined,
       flavors: computedUnits,
       notes: form.notes.trim() || null,

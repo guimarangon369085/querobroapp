@@ -11,15 +11,15 @@ Ultima atualizacao: 2026-03-17
 - CTAs contextuais por tela: `Pedidos` usa acao `Criar` no painel, `Clientes/Produtos` usam acao inline/sticky e `Estoque` usa botao flutuante `Nova movimentacao`.
 - `Calendario`, `Inicio`, `Jornada`, `Resumo` e `Builder` nao existem mais como superficies operacionais.
 - Marca lateral usa o mark vetorial interno e favicon/shortcut usam `broa-mark.svg`, com o nome QUEROBROAPP.
-- API cobre pedido, pagamento, estoque, BOM, D+1, producao e entrega local interna.
+- API cobre pedido, pagamento, estoque, BOM, D+1, producao, `Uber Direct`, `Loggi` e fallback local interno.
 - O processo de qualidade atual inclui `qa:trust`, `qa:browser-smoke`, `qa:critical-e2e`, drift check e testes raiz.
 - Gate operacional de religamento foi validado em 2026-03-11 com `stop-all -> dev-all`, health da API e execucao de smoke + E2E critico.
 - `Produtos` deixou de existir como superficie operacional; catalogo e ficha tecnica ficam dentro de `Estoque`.
 - Existe agora uma captura publica de pedido em `/pedido`, usando o mesmo intake externo que vai servir para `Google Forms`, pagina propria e futuro `WhatsApp Flow`.
 - Pedidos de `Entrega` agora podem receber cotacao de frete antes do submit final, com o valor incorporado ao total e ao PIX.
 - `/pedido`, `quick create` e a logica de caixas em `Pedidos` passaram a compartilhar o mesmo catalogo de caixas/sabores e as mesmas imagens originais da marca.
-- O provider principal de frete/entrega do app agora e `Loggi`, substituindo a integracao anterior com `Uber Direct`.
-- A cotacao Loggi agora protege o caso `origem = destino`, usa hash de quote mais fiel ao payload real e calcula pacote por caixa fechada em vez de inflar o peso por unidade interna do dashboard.
+- O frete agora opera em modo hibrido: `Uber Direct` como cotacao primaria dentro da cobertura da conta e `Loggi` como fallback automatico quando a Uber recusa por raio/cobertura.
+- A cotacao agora protege o caso `origem = destino`, usa hash de quote mais fiel ao payload real e calcula pacote Loggi por caixa fechada em vez de inflar o peso por unidade interna do dashboard.
 - `/pedido` e o modal de novo pedido em `/pedidos` agora usam o mesmo fluxo em duas etapas para entrega: `Calcular frete` antes de `Finalizar pedido/Criar pedido`.
 - As caixas mistas passaram a usar composicao visual unica no mesmo quadrante, padronizada entre a captura publica e a operacao interna.
 - As caixas mistas agora usam corte seco entre as duas imagens, sem a faixa branca intermediaria.
@@ -81,17 +81,17 @@ Ultima atualizacao: 2026-03-17
 
 ## Validacao operacional mais recente
 
-- Data: 2026-03-11
+- Data: 2026-03-17
 - Ciclo executado: `./scripts/stop-all.sh` -> `./scripts/dev-all.sh` -> `curl http://127.0.0.1:3001/health`
-- QA executado antes e apos religamento: `pnpm qa:browser-smoke` e `pnpm qa:critical-e2e`
-- Resultado: todos os gates passaram, incluindo jornada critica finalizando pedido como `ENTREGUE` e `PAGO`.
+- QA executado: `pnpm lint`, `pnpm test`, `pnpm qa:browser-smoke` e `pnpm qa:critical-e2e`
+- Resultado: todos os gates passaram; o E2E critico concluiu a jornada com o pedido `#1012` validado como `ENTREGUE` e `PAGO`.
 
 ## Gaps abertos
 
 1. `Google Forms` ja e viavel como canal temporario, mas ainda falta configuracao real do Apps Script e URL publica final.
 2. O dominio publico ja responde em `querobroa.com.br`, `www`, `ops` e `api`, mas o web ainda precisa publicar o bundle corrigido para `/pedidos` e `/pedido` nao cairem em fallback de `127.0.0.1` quando o client bundle estiver defasado.
 3. `WhatsApp Flow` segue sem numero dedicado; a migracao futura deve reutilizar o contrato externo atual.
-4. A integracao Loggi ja substituiu o provider anterior no codigo e no runtime, mas ainda vale validar o disparo real de shipment em producao sem criar entrega acidental e calibrar a cotacao final contra corridas manuais historicas.
+4. O runtime de frete agora esta em modo hibrido `Uber Direct -> Loggi`, mas ainda vale validar o disparo real de shipment em producao sem criar entrega acidental e calibrar a cotacao final contra corridas manuais historicas.
 5. Mobile segue atras do web no fluxo operacional novo.
 6. Ainda vale ampliar cobertura de testes alem dos gates atuais, principalmente em cenarios de edge case de dominio.
 7. O dashboard interno de analytics parte do zero sem historico legado; ele comeca a refletir navegacao nova a partir desta instrumentacao first-party.

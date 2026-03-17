@@ -1,5 +1,8 @@
 import type { Customer, Order, OrderItem, Payment } from '@querobroapp/shared';
 
+type DeliveryProviderCode = 'NONE' | 'LOCAL' | 'UBER_DIRECT' | 'LOGGI';
+type DeliveryFeeSourceCode = 'NONE' | 'UBER_QUOTE' | 'LOGGI_QUOTE' | 'MANUAL_FALLBACK';
+
 export const nextStatusByCurrent: Record<string, string | null> = {
   ABERTO: 'CONFIRMADO',
   CONFIRMADO: null,
@@ -9,7 +12,9 @@ export const nextStatusByCurrent: Record<string, string | null> = {
   CANCELADO: null
 };
 
-export type OrderView = Order & {
+export type OrderView = Omit<Order, 'deliveryProvider' | 'deliveryFeeSource'> & {
+  deliveryProvider?: DeliveryProviderCode;
+  deliveryFeeSource?: DeliveryFeeSourceCode;
   items?: OrderItem[];
   customer?: Customer | null;
   payments?: Payment[];
@@ -32,7 +37,7 @@ export type MassPrepEvent = {
 };
 
 export type DeliveryReadiness = {
-  provider: 'NONE' | 'LOCAL' | 'LOGGI';
+  provider: 'NONE' | 'LOCAL' | 'UBER_DIRECT' | 'LOGGI';
   mode: 'PROVIDER';
   ready: boolean;
   reason: string;
@@ -57,7 +62,7 @@ export type DeliveryReadiness = {
 
 export type DeliveryTracking = {
   orderId: number;
-  provider: 'NONE' | 'LOCAL' | 'LOGGI';
+  provider: 'NONE' | 'LOCAL' | 'UBER_DIRECT' | 'LOGGI';
   mode: 'PROVIDER';
   status:
     | 'NOT_REQUESTED'
@@ -82,10 +87,10 @@ export type DeliveryTracking = {
 };
 
 export type DeliveryQuote = {
-  provider: 'NONE' | 'LOCAL' | 'LOGGI';
+  provider: 'NONE' | 'LOCAL' | 'UBER_DIRECT' | 'LOGGI';
   fee: number;
   currencyCode: string;
-  source: 'NONE' | 'LOGGI_QUOTE' | 'MANUAL_FALLBACK';
+  source: 'NONE' | 'UBER_QUOTE' | 'LOGGI_QUOTE' | 'MANUAL_FALLBACK';
   status: 'NOT_REQUIRED' | 'PENDING' | 'QUOTED' | 'FALLBACK' | 'EXPIRED' | 'FAILED';
   quoteToken: string | null;
   expiresAt: string | null;

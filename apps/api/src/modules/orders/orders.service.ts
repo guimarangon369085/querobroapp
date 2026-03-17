@@ -1099,14 +1099,16 @@ export class OrdersService {
   }
 
   private normalizeDeliveryProvider(provider: string | null | undefined) {
-    if (provider === 'NONE' || provider === 'LOCAL' || provider === 'LOGGI') return provider;
-    if (provider === 'UBER_DIRECT') return 'LOGGI';
+    if (provider === 'NONE' || provider === 'LOCAL' || provider === 'UBER_DIRECT' || provider === 'LOGGI') {
+      return provider;
+    }
     return 'NONE';
   }
 
   private normalizeDeliveryFeeSource(source: string | null | undefined) {
-    if (source === 'NONE' || source === 'LOGGI_QUOTE' || source === 'MANUAL_FALLBACK') return source;
-    if (source === 'UBER_QUOTE') return 'LOGGI_QUOTE';
+    if (source === 'NONE' || source === 'UBER_QUOTE' || source === 'LOGGI_QUOTE' || source === 'MANUAL_FALLBACK') {
+      return source;
+    }
     return 'NONE';
   }
 

@@ -1,6 +1,6 @@
 # NEXT_STEP_PLAN
 
-Ultima atualizacao: 2026-03-13
+Ultima atualizacao: 2026-03-17
 
 ## Objetivo da fase atual
 
@@ -9,7 +9,7 @@ Consolidar o lancamento publico do app sobre o mesmo nucleo operacional:
 - landing publica em `/`
 - operacao interna em `Pedidos`
 - captura externa em `/pedido` e `Google Forms`
-- entrega com frete cotado antes do PIX
+- entrega com frete cotado antes do PIX, agora em modo hibrido `Uber Direct -> Loggi`
 
 ## Gate operacional (concluido em 2026-03-11)
 

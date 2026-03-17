@@ -751,15 +751,30 @@ function safeDateFromIso(iso?: string | null) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+function formatDeliveryProviderLabel(provider?: string | null) {
+  if (provider === 'UBER_DIRECT') return 'Uber Envios';
+  if (provider === 'LOGGI') return 'Loggi';
+  if (provider === 'LOCAL') return 'Fallback local';
+  return 'Frete';
+}
+
+function isLiveCarrierQuote(quote?: { provider?: string | null; source?: string | null } | null) {
+  return (
+    (quote?.provider === 'UBER_DIRECT' && quote?.source === 'UBER_QUOTE') ||
+    (quote?.provider === 'LOGGI' && quote?.source === 'LOGGI_QUOTE')
+  );
+}
+
 function formatDeliveryEstimateCaption(order?: OrderView | null) {
   if (!order || order.fulfillmentMode !== 'DELIVERY') return '';
 
   const quoteStatus = order.deliveryQuoteStatus ?? 'NOT_REQUIRED';
   const deliveryFee = toMoney(order.deliveryFee ?? 0);
   const quoteExpiry = formatOrderDateTimeLabel(safeDateFromIso(order.deliveryQuoteExpiresAt ?? null));
+  const providerLabel = formatDeliveryProviderLabel(order.deliveryProvider);
 
   if (quoteStatus === 'FAILED') {
-    return 'Cotacao da Loggi indisponivel. Revise os dados do cliente e atualize o frete.';
+    return 'Cotacao do frete indisponivel. Revise os dados do cliente e atualize o frete.';
   }
 
   if (quoteStatus === 'EXPIRED') {
@@ -769,15 +784,15 @@ function formatDeliveryEstimateCaption(order?: OrderView | null) {
   }
 
   if (quoteStatus === 'FALLBACK' || order.deliveryFeeSource === 'MANUAL_FALLBACK' || order.deliveryProvider === 'LOCAL') {
-    return 'Frete em fallback local. Atualize para buscar a estimativa real da Loggi.';
+    return 'Frete em fallback local. Atualize para buscar a estimativa real do provedor.';
   }
 
   if (deliveryFee <= 0) {
-    return 'Frete Loggi ainda nao cotado.';
+    return 'Frete ainda nao cotado.';
   }
 
-  if (order.deliveryProvider === 'LOGGI') {
-    return quoteExpiry ? `Estimativa Loggi valida ate ${quoteExpiry}.` : 'Estimativa Loggi registrada.';
+  if (order.deliveryProvider === 'UBER_DIRECT' || order.deliveryProvider === 'LOGGI') {
+    return quoteExpiry ? `Estimativa ${providerLabel} valida ate ${quoteExpiry}.` : `Estimativa ${providerLabel} registrada.`;
   }
 
   return quoteExpiry ? `Estimativa registrada ate ${quoteExpiry}.` : 'Estimativa de frete registrada.';
@@ -1590,18 +1605,15 @@ function OrdersPageContent() {
       return;
     }
     if (isQuotingNewOrderDelivery) {
-      setOrderError('Aguarde a cotacao da Loggi terminar.');
+      setOrderError('Aguarde a cotacao do frete terminar.');
       return;
     }
     if (!newOrderDeliveryQuote) {
       setOrderError(newOrderDeliveryQuoteError || 'A estimativa de frete e obrigatoria para criar.');
       return;
     }
-    if (
-      requiresLiveLoggiQuote &&
-      (newOrderDeliveryQuote.provider !== 'LOGGI' || newOrderDeliveryQuote.source !== 'LOGGI_QUOTE')
-    ) {
-      setOrderError(newOrderDeliveryQuoteError || 'A estimativa real da Loggi e obrigatoria para criar.');
+    if (requiresLiveCarrierQuote && !isLiveCarrierQuote(newOrderDeliveryQuote)) {
+      setOrderError(newOrderDeliveryQuoteError || 'A estimativa real do frete e obrigatoria para criar.');
       return;
     }
     setOrderError(null);
@@ -1620,8 +1632,8 @@ function OrdersPageContent() {
         delivery: {
           quoteToken: newOrderDeliveryQuote.quoteToken,
           fee: newOrderDeliveryQuote.fee,
-          provider: newOrderDeliveryQuote.provider,
-          source: newOrderDeliveryQuote.source,
+          provider: newOrderDeliveryQuote.provider as NonNullable<OrderIntake['delivery']>['provider'],
+          source: newOrderDeliveryQuote.source as NonNullable<OrderIntake['delivery']>['source'],
           status: newOrderDeliveryQuote.status,
           expiresAt: newOrderDeliveryQuote.expiresAt
         },
@@ -1683,7 +1695,7 @@ function OrdersPageContent() {
     try {
       await refreshOrderDeliveryQuote(selectedOrder.id);
       await loadAll();
-      notifySuccess('Frete Loggi atualizado.');
+      notifySuccess('Frete atualizado.');
     } catch (error) {
       notifyError(error instanceof Error ? error.message : 'Nao foi possivel recalcular o frete.');
     } finally {
@@ -2423,12 +2435,12 @@ function OrdersPageContent() {
       newOrderItems
         .filter((item) => Math.max(Math.floor(item.quantity || 0), 0) > 0)
         .map((item) => ({
-          name: compactOrderProductName(productMap.get(item.productId)?.name ?? `Produto ${item.productId}`),
+          name: productMap.get(item.productId)?.name ?? `Produto ${item.productId}`,
           quantity: Math.max(Math.floor(item.quantity || 0), 0)
         })),
     [newOrderItems, productMap]
   );
-  const requiresLiveLoggiQuote =
+  const requiresLiveCarrierQuote =
     typeof window === 'undefined' ? true : !isLoopbackBrowserHost(window.location.hostname);
   const canCreateOrder =
     Boolean(newOrderCustomerId) &&
@@ -2593,7 +2605,7 @@ function OrdersPageContent() {
 
       if (!newOrderCustomerAddress.trim()) {
         setNewOrderDeliveryQuote(null);
-        setNewOrderDeliveryQuoteError('Cliente sem endereco completo para cotacao da Loggi.');
+        setNewOrderDeliveryQuoteError('Cliente sem endereco completo para cotacao do frete.');
         setIsQuotingNewOrderDelivery(false);
         return null;
       }
@@ -2633,8 +2645,7 @@ function OrdersPageContent() {
         if (requestId !== newOrderQuoteRequestIdRef.current) {
           return null;
         }
-        const message =
-          error instanceof Error ? error.message : 'Nao foi possivel calcular o frete com a Loggi.';
+        const message = error instanceof Error ? error.message : 'Nao foi possivel calcular o frete agora.';
         setNewOrderDeliveryQuote(null);
         setNewOrderDeliveryQuoteError(message);
         return null;
@@ -2675,7 +2686,7 @@ function OrdersPageContent() {
     if (!newOrderCustomerAddress.trim()) {
       newOrderQuoteRequestIdRef.current += 1;
       setNewOrderDeliveryQuote(null);
-      setNewOrderDeliveryQuoteError('Cliente sem endereco completo para cotacao da Loggi.');
+      setNewOrderDeliveryQuoteError('Cliente sem endereco completo para cotacao do frete.');
       setIsQuotingNewOrderDelivery(false);
       return;
     }
@@ -3937,6 +3948,8 @@ function OrdersPageContent() {
                   <span className="w-fit rounded-full border border-white/80 bg-white/86 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
                     {selectedOrder.deliveryProvider === 'LOGGI'
                       ? 'Loggi'
+                      : selectedOrder.deliveryProvider === 'UBER_DIRECT'
+                        ? 'Uber Envios'
                       : selectedOrder.deliveryQuoteStatus === 'FALLBACK'
                         ? 'Fallback local'
                         : 'Estimativa'}
