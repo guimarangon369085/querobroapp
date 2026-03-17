@@ -7,6 +7,7 @@ import type {
   DeliveryQuoteInput,
   DeliveryQuoteOutput
 } from './delivery-provider.js';
+import { FIXED_PICKUP_ORIGIN } from './pickup-origin.js';
 
 function normalizePath(pathname: string) {
   if (!pathname) return '';
@@ -186,7 +187,7 @@ export class UberDirectProvider implements DeliveryProvider {
     }
 
     return {
-      pickup_address: input.pickupAddress,
+      pickup_address: FIXED_PICKUP_ORIGIN.fullAddress,
       pickup_name: input.pickupName,
       pickup_phone_number: pickupPhone,
       dropoff_address: input.dropoffAddress,

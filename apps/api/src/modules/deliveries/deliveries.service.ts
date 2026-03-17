@@ -24,6 +24,7 @@ import {
 import type { DeliveryDispatchInput, DeliveryProvider, DeliveryQuoteInput } from './delivery-provider.js';
 import { LocalDeliveryProvider } from './local-delivery.provider.js';
 import { LoggiProvider } from './loggi.provider.js';
+import { FIXED_PICKUP_ORIGIN } from './pickup-origin.js';
 import { UberDirectProvider } from './uber-direct.provider.js';
 
 type OrderWithDeliveryContext = Awaited<ReturnType<DeliveriesService['getOrderForDelivery']>>;
@@ -106,8 +107,6 @@ type QuoteRecordPayload = {
 
 const DELIVERY_TRACKING_SCOPE = 'DELIVERY_TRACKING';
 const DELIVERY_QUOTE_SCOPE = 'DELIVERY_QUOTE';
-const FIXED_PICKUP_ADDRESS = 'Alameda Jau, 731 - Sao Paulo - SP, Brasil';
-
 @Injectable()
 export class DeliveriesService {
   private readonly localProvider = new LocalDeliveryProvider();
@@ -640,7 +639,7 @@ export class DeliveriesService {
         this.normalizeText(process.env.LOGGI_PICKUP_PHONE) ||
         this.normalizeText(process.env.PIX_STATIC_KEY) ||
         '',
-      address: FIXED_PICKUP_ADDRESS
+      address: FIXED_PICKUP_ORIGIN.fullAddress
     };
   }
 

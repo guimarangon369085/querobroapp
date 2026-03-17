@@ -8,6 +8,7 @@ import type {
   DeliveryQuoteInput,
   DeliveryQuoteOutput
 } from './delivery-provider.js';
+import { FIXED_PICKUP_ORIGIN } from './pickup-origin.js';
 
 type LoggiMoney = {
   currencyCode?: string;
@@ -25,9 +26,6 @@ type ParsedLineAddress = {
 };
 
 const BRAZIL_COUNTRY_LABEL = 'Brasil';
-const FIXED_PICKUP_ADDRESS_LINE1 = 'Alameda Jau, 731';
-const FIXED_PICKUP_CITY = 'Sao Paulo';
-const FIXED_PICKUP_STATE = 'SP';
 const POSTAL_CODE_PATTERN = /\b\d{5}-?\d{3}\b/;
 const COGNITO_DEFAULT_REGION = 'us-east-1';
 const ORDER_BOX_UNITS = 7;
@@ -234,7 +232,7 @@ export class LoggiProvider implements DeliveryProvider {
   private buildQuotePayload(input: DeliveryQuoteInput) {
     const payload: Record<string, unknown> = {
       shipFrom: this.buildQuoteAddressPayload({
-        address: input.pickupAddress,
+        address: FIXED_PICKUP_ORIGIN.fullAddress,
         complement: this.pickupInstructions() || null
       }),
       shipTo: this.buildQuoteAddressPayload({
@@ -313,13 +311,12 @@ export class LoggiProvider implements DeliveryProvider {
   }
 
   private resolvePickupLineAddress(): ParsedLineAddress {
-    const addressLine1 =
-      String(process.env.LOGGI_PICKUP_ADDRESS_LINE1 || '').trim() || FIXED_PICKUP_ADDRESS_LINE1;
-    const addressLine2 = String(process.env.LOGGI_PICKUP_ADDRESS_LINE2 || '').trim();
-    const city = String(process.env.LOGGI_PICKUP_CITY || '').trim() || FIXED_PICKUP_CITY;
-    const state = String(process.env.LOGGI_PICKUP_STATE || '').trim().toUpperCase() || FIXED_PICKUP_STATE;
+    const addressLine1 = FIXED_PICKUP_ORIGIN.addressLine1;
+    const addressLine2 = FIXED_PICKUP_ORIGIN.addressLine2;
+    const city = FIXED_PICKUP_ORIGIN.city;
+    const state = FIXED_PICKUP_ORIGIN.state;
     const postalCode = String(process.env.LOGGI_PICKUP_POSTAL_CODE || '').trim();
-    const country = String(process.env.LOGGI_PICKUP_COUNTRY || '').trim() || BRAZIL_COUNTRY_LABEL;
+    const country = FIXED_PICKUP_ORIGIN.country || BRAZIL_COUNTRY_LABEL;
     if (!postalCode) {
       throw new BadRequestException('LOGGI_PICKUP_POSTAL_CODE ausente para criar o envio na Loggi.');
     }
