@@ -2,7 +2,6 @@
 
 import Image from 'next/image';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
 import {
   formatExternalOrderMinimumSchedule,
   resolveDisplayNumber,
@@ -23,7 +22,6 @@ import { OrderCardArtwork } from '@/features/orders/order-card-artwork';
 import {
   ORDER_BOX_CATALOG,
   ORDER_BOX_UNITS,
-  ORDER_BRAND_GALLERY_IMAGES,
   ORDER_FLAVOR_CODES,
   ORDER_SABORES_REFERENCE_IMAGE,
   type OrderBoxCode,
@@ -35,7 +33,6 @@ import {
 } from '@/features/orders/order-box-catalog';
 
 const boxCatalog = ORDER_BOX_CATALOG;
-const heroImages = ORDER_BRAND_GALLERY_IMAGES;
 const FLAVOR_CODES = ORDER_FLAVOR_CODES;
 const GOOGLE_MAPS_API_KEY = (process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '').trim();
 const PUBLIC_ORDER_TIME_STEP_SECONDS = 15 * 60;
@@ -336,66 +333,6 @@ function formatCustomBoxParts(counts: Record<FlavorCode, number>) {
     .filter((entry) => entry.quantity > 0)
     .map((entry) => `${entry.quantity} ${boxCatalog[entry.code].label}`)
     .join(' • ');
-}
-
-function BrandGallery({ children }: { children?: ReactNode }) {
-  const [tilt, setTilt] = useState({ rotateX: 0, rotateY: 0 });
-
-  const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = (event.clientX - rect.left) / rect.width;
-    const y = (event.clientY - rect.top) / rect.height;
-    setTilt({
-      rotateX: (0.5 - y) * 10,
-      rotateY: (x - 0.5) * 12
-    });
-  };
-
-  const onPointerLeave = () => {
-    setTilt({ rotateX: 0, rotateY: 0 });
-  };
-
-  return (
-    <div
-      className="relative isolate h-[250px] overflow-hidden rounded-[28px] border border-[rgba(126,79,45,0.08)] bg-[linear-gradient(160deg,rgba(255,253,249,0.96),rgba(244,231,217,0.92))] p-4 shadow-[0_20px_60px_rgba(70,44,26,0.12)] sm:h-[320px] sm:rounded-[30px] sm:p-5 lg:h-[420px] lg:rounded-[34px] lg:shadow-[0_28px_88px_rgba(70,44,26,0.12)]"
-      onPointerMove={onPointerMove}
-      onPointerLeave={onPointerLeave}
-      style={{ perspective: '1400px' }}
-    >
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_12%_18%,rgba(255,208,128,0.25),transparent_28%),radial-gradient(circle_at_84%_22%,rgba(247,176,195,0.2),transparent_26%),radial-gradient(circle_at_58%_82%,rgba(170,209,180,0.22),transparent_30%)]" />
-      <div
-        className="relative h-full transition-transform duration-300 ease-out"
-        style={{ transform: `rotateX(${tilt.rotateX}deg) rotateY(${tilt.rotateY}deg)` }}
-      >
-        {heroImages.map((image, index) => {
-          const style = {
-            transform: `${image.transform} translate3d(${tilt.rotateY * (index + 1) * 0.8}px, ${-tilt.rotateX * (index + 1) * 0.8}px, ${(index + 1) * 8}px)`
-          } satisfies CSSProperties;
-          return (
-            <div
-              key={image.src}
-              className={`absolute overflow-hidden rounded-[28px] border border-white/70 shadow-[0_26px_60px_rgba(76,48,31,0.18)] ${image.className}`}
-              style={style}
-            >
-              <Image
-                alt={image.alt}
-                className="h-full w-full object-cover"
-                fill
-                priority
-                sizes="(max-width: 1280px) 40vw, 320px"
-                src={image.src}
-              />
-            </div>
-          );
-        })}
-        {children ? (
-          <div className="absolute bottom-0 left-0 right-0 rounded-[22px] border border-white/70 bg-[rgba(255,251,246,0.82)] p-4 backdrop-blur-sm shadow-[0_18px_40px_rgba(76,48,31,0.08)] sm:rounded-[24px] sm:p-5 lg:rounded-[28px]">
-            {children}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
 }
 
 export function PublicOrderPage() {
@@ -1289,41 +1226,7 @@ export function PublicOrderPage() {
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(255,240,220,0.95),transparent_32%),radial-gradient(circle_at_top_right,rgba(219,234,222,0.9),transparent_28%),linear-gradient(180deg,#f8efe5_0%,#f4eadc_100%)]">
       <div className="mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:py-8" ref={pageTopRef}>
-        <div className="sticky top-[calc(env(safe-area-inset-top)+8px)] z-30 mb-4 xl:hidden">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.88)] px-4 py-3 shadow-[0_18px_34px_rgba(70,44,26,0.08)] backdrop-blur-md sm:px-5">
-            <div className="min-w-0">
-              <p className="brand-wordmark brand-wordmark--micro text-[0.78rem] text-[color:var(--ink-strong)]">
-                @QUEROBROA
-              </p>
-              <p className="mt-1 text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
-                {form.fulfillmentMode === 'DELIVERY' ? 'Entrega' : 'Retirada'} • Subtotal {formatCurrencyBRL(estimatedTotal)}
-              </p>
-            </div>
-            {lastSavedOrder ? (
-              <button
-                className="app-button app-button-ghost w-full sm:w-auto"
-                onClick={applyLastSavedOrder}
-                type="button"
-              >
-                Refazer ultimo pedido
-              </button>
-            ) : null}
-          </div>
-        </div>
-
-        <section className="grid gap-4 lg:gap-6 xl:hidden xl:grid-cols-[minmax(0,0.94fr)_minmax(420px,1.06fr)] xl:items-stretch">
-          <div className="overflow-hidden rounded-[30px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(145deg,rgba(255,252,247,0.92),rgba(246,235,221,0.9))] p-5 shadow-[0_20px_64px_rgba(70,44,26,0.12)] sm:rounded-[34px] sm:p-6 lg:p-7 lg:shadow-[0_24px_84px_rgba(70,44,26,0.12)]">
-            <p className="brand-wordmark brand-wordmark--display text-[1.7rem] text-[color:var(--ink-strong)] sm:text-[2.35rem]">
-              @QUEROBROA
-            </p>
-          </div>
-
-          <div className="hidden xl:block">
-            <BrandGallery />
-          </div>
-        </section>
-
-        <section className="mt-5 grid gap-4 lg:gap-6 xl:grid-cols-[minmax(0,1.08fr)_minmax(340px,0.92fr)]">
+        <section className="grid gap-4 lg:gap-6 xl:grid-cols-[minmax(0,1.08fr)_minmax(340px,0.92fr)]">
           <form
             autoComplete="on"
             className="grid gap-4 rounded-[26px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.88)] p-4 shadow-[0_22px_60px_rgba(70,44,26,0.12)] sm:gap-5 sm:rounded-[32px] sm:p-6 sm:shadow-[0_26px_90px_rgba(70,44,26,0.12)]"
@@ -1336,10 +1239,7 @@ export function PublicOrderPage() {
             >
               <div className="mb-4 flex items-center justify-between gap-4 sm:mb-5">
                 <div>
-                  <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-[color:var(--ink-muted)]">
-                    01. Dados
-                  </p>
-                  <h2 className="mt-1.5 text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:mt-2 sm:text-2xl">Seus dados</h2>
+                  <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Dados</h2>
                 </div>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
@@ -1372,10 +1272,7 @@ export function PublicOrderPage() {
 
             <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6">
               <div className="mb-4 sm:mb-5">
-                <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-[color:var(--ink-muted)]">
-                  02. Recebimento
-                </p>
-                <h2 className="mt-1.5 text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:mt-2 sm:text-2xl">Entrega ou retirada</h2>
+                <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Entrega ou retirada</h2>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
@@ -1497,10 +1394,7 @@ export function PublicOrderPage() {
             <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6">
               <div className="mb-4 flex flex-col gap-2 sm:mb-5 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
                 <div>
-                  <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-[color:var(--ink-muted)]">
-                    03. Caixas
-                  </p>
-                  <h2 className="mt-1.5 text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:mt-2 sm:text-2xl">Caixas</h2>
+                  <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Caixas</h2>
                 </div>
               </div>
 
@@ -1704,10 +1598,7 @@ export function PublicOrderPage() {
 
             <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6">
               <div className="mb-4">
-                <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-[color:var(--ink-muted)]">
-                  04. Observacoes
-                </p>
-                <h2 className="mt-1.5 text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:mt-2 sm:text-2xl">Observacoes</h2>
+                <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Observacoes</h2>
               </div>
               <FormField label="Observacoes do pedido">
                 <textarea
@@ -1752,10 +1643,7 @@ export function PublicOrderPage() {
             <section className="order-1 overflow-hidden rounded-[24px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(165deg,rgba(255,252,248,0.96),rgba(243,231,216,0.9))] p-4 shadow-[0_18px_40px_rgba(70,44,26,0.1)] sm:rounded-[30px] sm:p-5 sm:shadow-[0_26px_80px_rgba(70,44,26,0.12)]">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-[0.72rem] font-semibold uppercase tracking-[0.22em] text-[color:var(--ink-muted)]">
-                    Resumo
-                  </p>
-                  <h2 className="mt-1.5 text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:mt-2 sm:text-2xl">Pedido</h2>
+                  <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Pedido</h2>
                 </div>
                 <div className="rounded-full bg-white/80 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)] sm:text-xs">
                   {form.fulfillmentMode === 'DELIVERY' ? 'Entrega' : 'Retirada'}

@@ -57,6 +57,7 @@ Criterio de pronto:
 - Manter a home travada ao viewport visivel real, sem qualquer rolagem residual causada por `100vh` ou barras do navegador.
 - Manter a home sem bounce/scroll residual em iPhone, mesmo com barras dinamicas do navegador, e validar isso no dominio publico.
 - Manter o desktop de `/pedido` mais direto, sem blocos introdutorios redundantes acima do formulario.
+- Manter `/pedido` abrindo direto em `Dados`, sem header/resumo duplicado no topo e sem labels redundantes de seção.
 - Manter `/dashboard` acessivel no menu principal sem voltar a aplicar trava de host no web por engano.
 - Manter a navegacao padronizada com `PEDIDOS` como item principal e labels em caixa alta em todo o menu.
 - Seguir limpando redundancias em `Estoque` agora que `Produtos` saiu da navegação.
