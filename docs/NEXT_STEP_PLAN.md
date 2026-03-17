@@ -53,7 +53,7 @@ Criterio de pronto:
 - Manter o catalogo de caixas/sabores centralizado entre `/pedido`, `quick create` e `/pedidos`.
 - Manter a numeracao publica sequencial de clientes/pedidos como unico numero exposto na interface.
 - Validar em producao o atalho mobile da home, o prefill local de `/pedido` e o fluxo `Refazer ultimo pedido`.
-- Manter a home sem fluxo manual redundante para instalacao: exibir o atalho apenas quando o navegador permitir prompt nativo por clique.
+- Manter a home sem CTA de instalacao/atalho enquanto iPhone/iOS nao permitir um fluxo realmente coerente por clique direto.
 - Manter `/dashboard` acessivel no menu principal sem voltar a aplicar trava de host no web por engano.
 - Manter a navegacao padronizada com `PEDIDOS` como item principal e labels em caixa alta em todo o menu.
 - Seguir limpando redundancias em `Estoque` agora que `Produtos` saiu da navegação.

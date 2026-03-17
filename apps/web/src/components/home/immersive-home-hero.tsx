@@ -3,14 +3,6 @@
 import Image from 'next/image';
 import { startTransition, useEffect, useId, useState } from 'react';
 
-type DeferredInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{
-    outcome: 'accepted' | 'dismissed';
-    platform: string;
-  }>;
-};
-
 type HeroImage = {
   accent: string;
   alt: string;
@@ -70,9 +62,6 @@ function wrapIndex(index: number, total: number) {
 export function ImmersiveHomeHero() {
   const [activeIndex, setActiveIndex] = useState(INITIAL_INDEX);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
-  const [installPrompt, setInstallPrompt] = useState<DeferredInstallPromptEvent | null>(null);
-  const [isInstalling, setIsInstalling] = useState(false);
-  const [isStandalone, setIsStandalone] = useState(false);
   const instructionsId = useId();
 
   const activeImage = HOME_HERO_IMAGES[activeIndex];
@@ -103,36 +92,6 @@ export function ImmersiveHomeHero() {
       window.clearInterval(autoplay);
     };
   }, [prefersReducedMotion]);
-
-  useEffect(() => {
-    const standalone =
-      window.matchMedia('(display-mode: standalone)').matches ||
-      Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
-    setIsStandalone(standalone);
-
-    const handleBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setInstallPrompt(event as DeferredInstallPromptEvent);
-    };
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-  }, []);
-
-  const handleInstallShortcut = async () => {
-    if (!installPrompt) return;
-
-    try {
-      setIsInstalling(true);
-      await installPrompt.prompt();
-      await installPrompt.userChoice.catch(() => null);
-      setInstallPrompt(null);
-    } finally {
-      setIsInstalling(false);
-    }
-  };
-
-  const canInstallShortcut = Boolean(installPrompt) && !isStandalone;
 
   return (
     <main
@@ -229,34 +188,6 @@ export function ImmersiveHomeHero() {
           >
             Em breve
           </button>
-          {canInstallShortcut ? (
-            <button
-              aria-label="Criar atalho no celular"
-              className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/18 bg-[rgba(255,248,232,0.12)] text-[rgba(255,248,232,0.94)] backdrop-blur-md transition-[background,border-color,transform] duration-300 ease-out hover:border-white/32 hover:bg-[rgba(255,248,232,0.18)] hover:translate-y-[-1px] disabled:cursor-wait disabled:opacity-70"
-              disabled={isInstalling}
-              onClick={() => {
-                void handleInstallShortcut();
-              }}
-              data-home-cta
-              type="button"
-            >
-              <svg aria-hidden="true" className="h-5 w-5" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M12 3v10m0-10 3.5 3.5M12 3 8.5 6.5M6.5 10.5v6A1.5 1.5 0 0 0 8 18h8a1.5 1.5 0 0 0 1.5-1.5v-6"
-                  stroke="currentColor"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="1.8"
-                />
-                <path
-                  d="M9.25 21h5.5"
-                  stroke="currentColor"
-                  strokeLinecap="round"
-                  strokeWidth="1.8"
-                />
-              </svg>
-            </button>
-          ) : null}
         </div>
       </section>
     </main>
