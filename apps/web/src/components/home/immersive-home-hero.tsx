@@ -99,8 +99,14 @@ export function ImmersiveHomeHero() {
     const body = document.body;
     const previousRootOverflow = root.style.overflow;
     const previousRootHeight = root.style.height;
+    const previousRootOverscroll = root.style.overscrollBehavior;
     const previousBodyOverflow = body.style.overflow;
     const previousBodyHeight = body.style.height;
+    const previousBodyPosition = body.style.position;
+    const previousBodyInset = body.style.inset;
+    const previousBodyWidth = body.style.width;
+    const previousBodyOverscroll = body.style.overscrollBehavior;
+    const previousBodyTouchAction = body.style.touchAction;
 
     const syncViewport = () => {
       const nextHeight = Math.round(window.visualViewport?.height || window.innerHeight || 0);
@@ -108,8 +114,14 @@ export function ImmersiveHomeHero() {
       setViewportHeight(nextHeight);
       root.style.overflow = 'hidden';
       root.style.height = `${nextHeight}px`;
+      root.style.overscrollBehavior = 'none';
       body.style.overflow = 'hidden';
       body.style.height = `${nextHeight}px`;
+      body.style.position = 'fixed';
+      body.style.inset = '0';
+      body.style.width = '100%';
+      body.style.overscrollBehavior = 'none';
+      body.style.touchAction = 'manipulation';
     };
 
     syncViewport();
@@ -123,8 +135,14 @@ export function ImmersiveHomeHero() {
       window.visualViewport?.removeEventListener('scroll', syncViewport);
       root.style.overflow = previousRootOverflow;
       root.style.height = previousRootHeight;
+      root.style.overscrollBehavior = previousRootOverscroll;
       body.style.overflow = previousBodyOverflow;
       body.style.height = previousBodyHeight;
+      body.style.position = previousBodyPosition;
+      body.style.inset = previousBodyInset;
+      body.style.width = previousBodyWidth;
+      body.style.overscrollBehavior = previousBodyOverscroll;
+      body.style.touchAction = previousBodyTouchAction;
     };
   }, []);
 
@@ -133,7 +151,7 @@ export function ImmersiveHomeHero() {
       aria-label="Galeria da home da QUEROBROA"
       aria-describedby={instructionsId}
       aria-keyshortcuts="ArrowLeft ArrowRight Enter Space"
-      className="relative overflow-hidden bg-[#120c07] text-white"
+      className="fixed inset-0 overflow-hidden bg-[#120c07] text-white"
       style={{
         height: viewportHeight ? `${viewportHeight}px` : '100svh',
         minHeight: viewportHeight ? `${viewportHeight}px` : '100svh'

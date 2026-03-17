@@ -1289,7 +1289,7 @@ export function PublicOrderPage() {
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(255,240,220,0.95),transparent_32%),radial-gradient(circle_at_top_right,rgba(219,234,222,0.9),transparent_28%),linear-gradient(180deg,#f8efe5_0%,#f4eadc_100%)]">
       <div className="mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:py-8" ref={pageTopRef}>
-        <div className="sticky top-[calc(env(safe-area-inset-top)+8px)] z-30 mb-4">
+        <div className="sticky top-[calc(env(safe-area-inset-top)+8px)] z-30 mb-4 xl:hidden">
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.88)] px-4 py-3 shadow-[0_18px_34px_rgba(70,44,26,0.08)] backdrop-blur-md sm:px-5">
             <div className="min-w-0">
               <p className="brand-wordmark brand-wordmark--micro text-[0.78rem] text-[color:var(--ink-strong)]">
@@ -1311,7 +1311,7 @@ export function PublicOrderPage() {
           </div>
         </div>
 
-        <section className="grid gap-4 lg:gap-6 xl:grid-cols-[minmax(0,0.94fr)_minmax(420px,1.06fr)] xl:items-stretch">
+        <section className="grid gap-4 lg:gap-6 xl:hidden xl:grid-cols-[minmax(0,0.94fr)_minmax(420px,1.06fr)] xl:items-stretch">
           <div className="overflow-hidden rounded-[30px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(145deg,rgba(255,252,247,0.92),rgba(246,235,221,0.9))] p-5 shadow-[0_20px_64px_rgba(70,44,26,0.12)] sm:rounded-[34px] sm:p-6 lg:p-7 lg:shadow-[0_24px_84px_rgba(70,44,26,0.12)]">
             <p className="brand-wordmark brand-wordmark--display text-[1.7rem] text-[color:var(--ink-strong)] sm:text-[2.35rem]">
               @QUEROBROA
