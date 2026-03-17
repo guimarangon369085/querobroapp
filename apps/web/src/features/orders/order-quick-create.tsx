@@ -560,10 +560,10 @@ export function OrderQuickCreate({
       <div className="rounded-2xl border border-white/80 bg-white/85 px-4 py-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">Frete Uber</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">Frete Loggi</p>
             <p className="mt-1 text-base font-semibold text-neutral-900">
               {isQuotingDelivery
-                ? 'Cotando Uber Envios...'
+                ? 'Cotando Loggi...'
                 : deliveryQuote
                   ? `${formatCurrencyBR(deliveryQuote.fee)}`
                   : 'Aguardando cliente, horario e caixas'}
@@ -582,11 +582,11 @@ export function OrderQuickCreate({
           <p className="mt-2 text-xs text-rose-700">{deliveryQuoteError}</p>
         ) : deliveryQuote ? (
           <p className="mt-2 text-xs text-neutral-600">
-            {deliveryQuote.breakdownLabel || 'Uber Envios'} {deliveryQuote.expiresAt ? 'pronto para uso neste pedido.' : 'cotado para este pedido.'}
+            {deliveryQuote.breakdownLabel || 'Loggi'} {deliveryQuote.expiresAt ? 'pronto para uso neste pedido.' : 'cotado para este pedido.'}
           </p>
         ) : (
           <p className="mt-2 text-xs text-neutral-600">
-            A criacao fica liberada quando a estimativa real da Uber Envios estiver pronta.
+            A criacao fica liberada quando a estimativa real da Loggi estiver pronta.
           </p>
         )}
       </div>
@@ -889,9 +889,9 @@ export function OrderQuickCreate({
             : newOrderItems.length === 0
               ? 'Escolha ao menos uma caixa.'
               : isQuotingDelivery
-                ? 'Aguarde a cotacao da Uber Envios.'
+                ? 'Aguarde a cotacao da Loggi.'
                 : !deliveryQuote?.quoteToken
-                  ? 'A cotacao da Uber Envios e obrigatoria para criar.'
+                  ? 'A cotacao da Loggi e obrigatoria para criar.'
                   : 'Revise o pedido.'}
         </p>
       ) : null}

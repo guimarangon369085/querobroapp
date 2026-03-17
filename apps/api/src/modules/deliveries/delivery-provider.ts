@@ -21,10 +21,10 @@ export type DeliveryQuoteInput = {
 };
 
 export type DeliveryQuoteOutput = {
-  provider: 'LOCAL' | 'UBER_DIRECT';
+  provider: 'LOCAL' | 'LOGGI';
   fee: number;
   currencyCode: string;
-  source: 'UBER_QUOTE' | 'MANUAL_FALLBACK';
+  source: 'LOGGI_QUOTE' | 'MANUAL_FALLBACK';
   status: 'QUOTED' | 'FALLBACK' | 'FAILED';
   providerQuoteId: string | null;
   expiresAt: string | null;
@@ -38,7 +38,7 @@ export type DeliveryDispatchInput = DeliveryQuoteInput & {
 };
 
 export type DeliveryDispatchOutput = {
-  provider: 'LOCAL' | 'UBER_DIRECT';
+  provider: 'LOCAL' | 'LOGGI';
   status: 'REQUESTED' | 'FAILED';
   trackingId: string;
   providerDeliveryId: string | null;

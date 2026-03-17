@@ -759,7 +759,7 @@ function formatDeliveryEstimateCaption(order?: OrderView | null) {
   const quoteExpiry = formatOrderDateTimeLabel(safeDateFromIso(order.deliveryQuoteExpiresAt ?? null));
 
   if (quoteStatus === 'FAILED') {
-    return 'Cotacao da Uber Envios indisponivel. Revise os dados do cliente e atualize o frete.';
+    return 'Cotacao da Loggi indisponivel. Revise os dados do cliente e atualize o frete.';
   }
 
   if (quoteStatus === 'EXPIRED') {
@@ -769,15 +769,15 @@ function formatDeliveryEstimateCaption(order?: OrderView | null) {
   }
 
   if (quoteStatus === 'FALLBACK' || order.deliveryFeeSource === 'MANUAL_FALLBACK' || order.deliveryProvider === 'LOCAL') {
-    return 'Frete em fallback local. Atualize para buscar a estimativa real da Uber Envios.';
+    return 'Frete em fallback local. Atualize para buscar a estimativa real da Loggi.';
   }
 
   if (deliveryFee <= 0) {
-    return 'Frete Uber ainda nao cotado.';
+    return 'Frete Loggi ainda nao cotado.';
   }
 
-  if (order.deliveryProvider === 'UBER_DIRECT') {
-    return quoteExpiry ? `Estimativa Uber Envios valida ate ${quoteExpiry}.` : 'Estimativa Uber Envios registrada.';
+  if (order.deliveryProvider === 'LOGGI') {
+    return quoteExpiry ? `Estimativa Loggi valida ate ${quoteExpiry}.` : 'Estimativa Loggi registrada.';
   }
 
   return quoteExpiry ? `Estimativa registrada ate ${quoteExpiry}.` : 'Estimativa de frete registrada.';
@@ -1590,7 +1590,7 @@ function OrdersPageContent() {
       return;
     }
     if (isQuotingNewOrderDelivery) {
-      setOrderError('Aguarde a cotacao da Uber Envios terminar.');
+      setOrderError('Aguarde a cotacao da Loggi terminar.');
       return;
     }
     if (!newOrderDeliveryQuote) {
@@ -1598,10 +1598,10 @@ function OrdersPageContent() {
       return;
     }
     if (
-      requiresLiveUberQuote &&
-      (newOrderDeliveryQuote.provider !== 'UBER_DIRECT' || newOrderDeliveryQuote.source !== 'UBER_QUOTE')
+      requiresLiveLoggiQuote &&
+      (newOrderDeliveryQuote.provider !== 'LOGGI' || newOrderDeliveryQuote.source !== 'LOGGI_QUOTE')
     ) {
-      setOrderError(newOrderDeliveryQuoteError || 'A estimativa real da Uber Envios e obrigatoria para criar.');
+      setOrderError(newOrderDeliveryQuoteError || 'A estimativa real da Loggi e obrigatoria para criar.');
       return;
     }
     setOrderError(null);
@@ -1683,7 +1683,7 @@ function OrdersPageContent() {
     try {
       await refreshOrderDeliveryQuote(selectedOrder.id);
       await loadAll();
-      notifySuccess('Frete Uber atualizado.');
+      notifySuccess('Frete Loggi atualizado.');
     } catch (error) {
       notifyError(error instanceof Error ? error.message : 'Nao foi possivel recalcular o frete.');
     } finally {
@@ -2428,7 +2428,7 @@ function OrdersPageContent() {
         })),
     [newOrderItems, productMap]
   );
-  const requiresLiveUberQuote =
+  const requiresLiveLoggiQuote =
     typeof window === 'undefined' ? true : !isLoopbackBrowserHost(window.location.hostname);
   const canCreateOrder =
     Boolean(newOrderCustomerId) &&
@@ -2593,7 +2593,7 @@ function OrdersPageContent() {
 
       if (!newOrderCustomerAddress.trim()) {
         setNewOrderDeliveryQuote(null);
-        setNewOrderDeliveryQuoteError('Cliente sem endereco completo para cotacao da Uber Envios.');
+        setNewOrderDeliveryQuoteError('Cliente sem endereco completo para cotacao da Loggi.');
         setIsQuotingNewOrderDelivery(false);
         return null;
       }
@@ -2634,7 +2634,7 @@ function OrdersPageContent() {
           return null;
         }
         const message =
-          error instanceof Error ? error.message : 'Nao foi possivel calcular o frete com a Uber Envios.';
+          error instanceof Error ? error.message : 'Nao foi possivel calcular o frete com a Loggi.';
         setNewOrderDeliveryQuote(null);
         setNewOrderDeliveryQuoteError(message);
         return null;
@@ -2675,7 +2675,7 @@ function OrdersPageContent() {
     if (!newOrderCustomerAddress.trim()) {
       newOrderQuoteRequestIdRef.current += 1;
       setNewOrderDeliveryQuote(null);
-      setNewOrderDeliveryQuoteError('Cliente sem endereco completo para cotacao da Uber Envios.');
+      setNewOrderDeliveryQuoteError('Cliente sem endereco completo para cotacao da Loggi.');
       setIsQuotingNewOrderDelivery(false);
       return;
     }
@@ -3942,8 +3942,8 @@ function OrdersPageContent() {
               {selectedOrder.fulfillmentMode === 'DELIVERY' ? (
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="w-fit rounded-full border border-white/80 bg-white/86 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
-                    {selectedOrder.deliveryProvider === 'UBER_DIRECT'
-                      ? 'Uber Envios'
+                    {selectedOrder.deliveryProvider === 'LOGGI'
+                      ? 'Loggi'
                       : selectedOrder.deliveryQuoteStatus === 'FALLBACK'
                         ? 'Fallback local'
                         : 'Estimativa'}

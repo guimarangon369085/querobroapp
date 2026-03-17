@@ -23,7 +23,7 @@ import {
 } from '../../common/external-order-schedule.js';
 import type { DeliveryDispatchInput, DeliveryProvider, DeliveryQuoteInput } from './delivery-provider.js';
 import { LocalDeliveryProvider } from './local-delivery.provider.js';
-import { UberDirectProvider } from './uber-direct.provider.js';
+import { LoggiProvider } from './loggi.provider.js';
 
 type OrderWithDeliveryContext = Awaited<ReturnType<DeliveriesService['getOrderForDelivery']>>;
 type DeliveryQuoteDraft = typeof DeliveryQuoteDraftSchema._type;
@@ -49,7 +49,7 @@ type DeliveryDraft = {
 };
 
 type DeliveryReadinessResult = {
-  provider: 'NONE' | 'LOCAL' | 'UBER_DIRECT';
+  provider: 'NONE' | 'LOCAL' | 'LOGGI';
   mode: 'PROVIDER';
   ready: boolean;
   reason: string;
@@ -95,7 +95,7 @@ const FIXED_PICKUP_COUNTRY = 'BR';
 @Injectable()
 export class DeliveriesService {
   private readonly localProvider = new LocalDeliveryProvider();
-  private readonly uberProvider = new UberDirectProvider();
+  private readonly loggiProvider = new LoggiProvider();
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
@@ -299,6 +299,7 @@ export class DeliveriesService {
 
     const readiness = await this.getReadiness(orderId);
     const existing = await this.readTracking(orderId);
+    const providerQuoteId = await this.resolveStoredProviderQuoteId(order.deliveryQuoteRef);
     if (existing && !['FAILED', 'DELIVERED', 'CANCELED'].includes(existing.status)) {
       return {
         reusedExisting: true,
@@ -321,7 +322,7 @@ export class DeliveriesService {
         lastError: readiness.missingRequirements.join(' • '),
         mode: 'PROVIDER',
         draft: readiness.draft,
-        providerQuoteId: order.deliveryQuoteRef ?? null,
+        providerQuoteId,
         quoteFee: this.toMoney(order.deliveryFee ?? 0),
         quoteExpiresAt: order.deliveryQuoteExpiresAt?.toISOString() ?? null
       });
@@ -330,7 +331,7 @@ export class DeliveriesService {
     }
 
     const provider = this.selectDispatchProvider(order.deliveryProvider);
-    const input = this.buildProviderInput(readiness.draft, order.deliveryQuoteRef ?? null);
+    const input = this.buildProviderInput(readiness.draft, providerQuoteId);
 
     try {
       const dispatch = await provider.createDelivery(input);
@@ -348,7 +349,7 @@ export class DeliveriesService {
         lastError: dispatch.lastError,
         mode: 'PROVIDER',
         draft: readiness.draft,
-        providerQuoteId: order.deliveryQuoteRef ?? null,
+        providerQuoteId,
         quoteFee: this.toMoney(order.deliveryFee ?? 0),
         quoteExpiresAt: order.deliveryQuoteExpiresAt?.toISOString() ?? null
       });
@@ -371,7 +372,7 @@ export class DeliveriesService {
         lastError: error instanceof Error ? error.message : 'Falha ao solicitar envio.',
         mode: 'PROVIDER',
         draft: readiness.draft,
-        providerQuoteId: order.deliveryQuoteRef ?? null,
+        providerQuoteId,
         quoteFee: this.toMoney(order.deliveryFee ?? 0),
         quoteExpiresAt: order.deliveryQuoteExpiresAt?.toISOString() ?? null
       });
@@ -461,20 +462,21 @@ export class DeliveriesService {
     }
 
     const input = this.buildQuoteInput(draft);
-    const quote = await this.fetchProviderQuote(input, {
-      allowManualFallback: options?.allowManualFallback ?? true
-    });
-    const normalized = DeliveryQuoteResponseSchema.parse({
-      provider: quote.provider,
-      fee: this.toMoney(quote.fee),
-      currencyCode: quote.currencyCode || 'BRL',
-      source: quote.source,
-      status: quote.status,
-      quoteToken,
-      expiresAt: quote.expiresAt ?? null,
-      fallbackReason: quote.fallbackReason ?? null,
-      breakdownLabel: quote.breakdownLabel ?? null
-    });
+      const quote = await this.fetchProviderQuote(input, {
+        allowManualFallback: options?.allowManualFallback ?? true
+      });
+      const normalized = DeliveryQuoteResponseSchema.parse({
+        provider: quote.provider,
+        fee: this.toMoney(quote.fee),
+        currencyCode: quote.currencyCode || 'BRL',
+        source: quote.source,
+        status: quote.status,
+        quoteToken,
+        providerQuoteId: quote.providerQuoteId ?? null,
+        expiresAt: quote.expiresAt ?? null,
+        fallbackReason: quote.fallbackReason ?? null,
+        breakdownLabel: quote.breakdownLabel ?? null
+      });
 
     await this.saveQuoteRecord(quoteToken, requestHash, normalized);
     return normalized;
@@ -485,9 +487,9 @@ export class DeliveriesService {
       throw new BadRequestException('Endereco de entrega obrigatorio para cotar frete.');
     }
 
-    if (this.uberProvider.isConfigured()) {
+    if (this.loggiProvider.isConfigured()) {
       try {
-        return await this.uberProvider.quote(input);
+        return await this.loggiProvider.quote(input);
       } catch (error) {
         if (options?.allowManualFallback !== false && error instanceof BadGatewayException) {
           return this.localProvider.quote(input);
@@ -509,8 +511,8 @@ export class DeliveriesService {
   }
 
   private isAcceptableDeliveryQuote(quote: DeliveryQuoteResponse, allowManualFallback = true) {
-    if (quote.provider === 'UBER_DIRECT' && quote.source === 'UBER_QUOTE') return true;
-    if (!allowManualFallback && this.uberProvider.isConfigured()) return false;
+    if (quote.provider === 'LOGGI' && quote.source === 'LOGGI_QUOTE') return true;
+    if (!allowManualFallback) return false;
     return quote.provider === 'LOCAL' && quote.source === 'MANUAL_FALLBACK';
   }
 
@@ -555,22 +557,8 @@ export class DeliveriesService {
     };
   }
 
-  private buildUberStructuredPickupAddress() {
-    return [
-      this.normalizeText(process.env.UBER_DIRECT_PICKUP_ADDRESS_LINE1) || FIXED_PICKUP_ADDRESS_LINE1,
-      process.env.UBER_DIRECT_PICKUP_ADDRESS_LINE2,
-      this.normalizeText(process.env.UBER_DIRECT_PICKUP_CITY) || FIXED_PICKUP_CITY,
-      this.normalizeText(process.env.UBER_DIRECT_PICKUP_STATE) || FIXED_PICKUP_STATE,
-      process.env.UBER_DIRECT_PICKUP_POSTAL_CODE,
-      this.normalizeText(process.env.UBER_DIRECT_PICKUP_COUNTRY) || FIXED_PICKUP_COUNTRY
-    ]
-      .map((value) => this.normalizeText(value))
-      .filter(Boolean)
-      .join(', ');
-  }
-
   private pickupOriginKey() {
-    return this.pickupOrigin().address || this.normalizeText(process.env.UBER_DIRECT_STORE_ID);
+    return this.pickupOrigin().address;
   }
 
   private hasPickupOriginConfigured() {
@@ -581,11 +569,11 @@ export class DeliveriesService {
     return {
       name:
         this.normalizeText(process.env.DELIVERY_PICKUP_NAME) ||
-        this.normalizeText(process.env.UBER_DIRECT_PICKUP_NAME) ||
+        this.normalizeText(process.env.LOGGI_PICKUP_NAME) ||
         'Quero Broa',
       phone:
         this.normalizeText(process.env.DELIVERY_PICKUP_PHONE) ||
-        this.normalizeText(process.env.UBER_DIRECT_PICKUP_PHONE) ||
+        this.normalizeText(process.env.LOGGI_PICKUP_PHONE) ||
         this.normalizeText(process.env.PIX_STATIC_KEY) ||
         '',
       address: FIXED_PICKUP_ADDRESS
@@ -594,8 +582,8 @@ export class DeliveriesService {
 
   private selectDispatchProvider(provider: string | null | undefined): DeliveryProvider {
     const normalized = this.normalizeProvider(provider);
-    if (normalized === 'UBER_DIRECT' && this.uberProvider.isConfigured()) {
-      return this.uberProvider;
+    if (normalized === 'LOGGI' && this.loggiProvider.isConfigured()) {
+      return this.loggiProvider;
     }
     return this.localProvider;
   }
@@ -625,6 +613,13 @@ export class DeliveriesService {
     return `DQ_${requestHash}`;
   }
 
+  private async resolveStoredProviderQuoteId(quoteToken: string | null | undefined) {
+    const normalizedQuoteToken = this.normalizeText(quoteToken);
+    if (!normalizedQuoteToken) return null;
+    const stored = await this.readQuoteRecord(normalizedQuoteToken);
+    return stored?.quote.providerQuoteId ?? null;
+  }
+
   private async readQuoteRecord(quoteToken: string): Promise<QuoteRecordPayload | null> {
     const record = await this.prisma.idempotencyRecord.findUnique({
       where: {
@@ -640,7 +635,7 @@ export class DeliveriesService {
       const parsed = JSON.parse(record.responseJson) as QuoteRecordPayload;
       return {
         requestHash: this.normalizeText(parsed.requestHash),
-        quote: DeliveryQuoteResponseSchema.parse(parsed.quote)
+        quote: this.normalizeQuoteRecord(parsed.quote)
       };
     } catch {
       return null;
@@ -673,6 +668,24 @@ export class DeliveriesService {
 
   private defaultQuoteExpiry() {
     return new Date(Date.now() + 20 * 60_000);
+  }
+
+  private normalizeQuoteRecord(quote: unknown): DeliveryQuoteResponse {
+    const payload = quote && typeof quote === 'object' ? (quote as Record<string, unknown>) : {};
+    const provider = this.normalizeProvider(this.normalizeText(payload.provider as string));
+    const source = this.normalizeQuoteSource(payload.source as string | null | undefined);
+    return DeliveryQuoteResponseSchema.parse({
+      provider,
+      fee: this.toMoney(Number(payload.fee) || 0),
+      currencyCode: this.normalizeText(payload.currencyCode as string) || 'BRL',
+      source,
+      status: this.normalizeQuoteStatus(payload.status as string | null | undefined),
+      quoteToken: this.normalizeText(payload.quoteToken as string) || null,
+      providerQuoteId: this.normalizeText(payload.providerQuoteId as string) || null,
+      expiresAt: this.normalizeIsoTimestamp(payload.expiresAt as string | null | undefined),
+      fallbackReason: this.normalizeText(payload.fallbackReason as string) || null,
+      breakdownLabel: this.normalizeText(payload.breakdownLabel as string) || null
+    });
   }
 
   private isQuoteExpired(quote: DeliveryQuoteResponse) {
@@ -859,7 +872,8 @@ export class DeliveriesService {
   }
 
   private normalizeProvider(provider: string | null | undefined): DeliveryTrackingRecord['provider'] {
-    if (provider === 'LOCAL' || provider === 'UBER_DIRECT' || provider === 'NONE') return provider;
+    if (provider === 'LOCAL' || provider === 'LOGGI' || provider === 'NONE') return provider;
+    if (provider === 'UBER_DIRECT') return 'LOGGI';
     return 'LOCAL';
   }
 
@@ -890,6 +904,14 @@ export class DeliveriesService {
       return status;
     }
     return 'NOT_REQUIRED';
+  }
+
+  private normalizeQuoteSource(source: string | null | undefined): DeliveryQuoteResponse['source'] {
+    if (source === 'NONE' || source === 'LOGGI_QUOTE' || source === 'MANUAL_FALLBACK') {
+      return source;
+    }
+    if (source === 'UBER_QUOTE') return 'LOGGI_QUOTE';
+    return 'NONE';
   }
 
   private normalizeDraft(orderId: number, draft?: Partial<DeliveryDraft>): DeliveryDraft {

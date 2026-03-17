@@ -1089,10 +1089,39 @@ export class OrdersService {
     const paymentStatus = this.deriveOrderPaymentStatus(total, amountPaid);
     return {
       ...order,
+      deliveryProvider: this.normalizeDeliveryProvider(order.deliveryProvider),
+      deliveryFeeSource: this.normalizeDeliveryFeeSource(order.deliveryFeeSource),
+      deliveryQuoteStatus: this.normalizeDeliveryQuoteStatus(order.deliveryQuoteStatus),
       amountPaid,
       balanceDue,
       paymentStatus
     };
+  }
+
+  private normalizeDeliveryProvider(provider: string | null | undefined) {
+    if (provider === 'NONE' || provider === 'LOCAL' || provider === 'LOGGI') return provider;
+    if (provider === 'UBER_DIRECT') return 'LOGGI';
+    return 'NONE';
+  }
+
+  private normalizeDeliveryFeeSource(source: string | null | undefined) {
+    if (source === 'NONE' || source === 'LOGGI_QUOTE' || source === 'MANUAL_FALLBACK') return source;
+    if (source === 'UBER_QUOTE') return 'LOGGI_QUOTE';
+    return 'NONE';
+  }
+
+  private normalizeDeliveryQuoteStatus(status: string | null | undefined) {
+    if (
+      status === 'NOT_REQUIRED' ||
+      status === 'PENDING' ||
+      status === 'QUOTED' ||
+      status === 'FALLBACK' ||
+      status === 'EXPIRED' ||
+      status === 'FAILED'
+    ) {
+      return status;
+    }
+    return 'NOT_REQUIRED';
   }
 
   private async getRaw(id: number) {
@@ -1585,9 +1614,9 @@ export class OrdersService {
       paidAt: payment?.paidAt?.toISOString() ?? null,
       providerRef: payment?.providerRef ?? null,
       deliveryFee: this.toMoney(order.deliveryFee ?? 0),
-      deliveryProvider: order.deliveryProvider ?? 'NONE',
-      deliveryFeeSource: order.deliveryFeeSource ?? 'NONE',
-      deliveryQuoteStatus: order.deliveryQuoteStatus ?? 'NOT_REQUIRED',
+      deliveryProvider: this.normalizeDeliveryProvider(order.deliveryProvider),
+      deliveryFeeSource: this.normalizeDeliveryFeeSource(order.deliveryFeeSource),
+      deliveryQuoteStatus: this.normalizeDeliveryQuoteStatus(order.deliveryQuoteStatus),
       deliveryQuoteExpiresAt: order.deliveryQuoteExpiresAt?.toISOString() ?? null,
       pixCharge,
       orderId: order.id!,
@@ -1620,11 +1649,18 @@ export class OrdersService {
         include: { items: true, customer: true, payments: true }
       });
       if (!order) return null;
+      const intakePayload =
+        typeof parsed.intake === 'object' && parsed.intake ? (parsed.intake as Record<string, unknown>) : {};
       return {
         order: this.withFinancial(order),
         intake: OrderIntakeMetaSchema.parse({
           pixCharge: null,
-          ...(typeof parsed.intake === 'object' && parsed.intake ? parsed.intake : {})
+          ...intakePayload,
+          deliveryProvider: this.normalizeDeliveryProvider(intakePayload.deliveryProvider as string | null | undefined),
+          deliveryFeeSource: this.normalizeDeliveryFeeSource(intakePayload.deliveryFeeSource as string | null | undefined),
+          deliveryQuoteStatus: this.normalizeDeliveryQuoteStatus(
+            intakePayload.deliveryQuoteStatus as string | null | undefined
+          )
         })
       };
     } catch {
