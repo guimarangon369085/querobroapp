@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { startTransition, useEffect, useId, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useId, useRef, useState } from 'react';
 
 type HeroImage = {
   accent: string;
@@ -53,6 +53,7 @@ const HOME_HERO_IMAGES: HeroImage[] = Array.from({ length: HERO_IMAGE_COUNT }, (
 });
 
 const AUTOPLAY_MS = 6000;
+const DESKTOP_STAGGER_MS = 340;
 const INITIAL_INDEX = 4;
 const DESKTOP_COLUMN_OFFSETS = [0, 3, 6] as const;
 
@@ -61,25 +62,59 @@ function wrapIndex(index: number, total: number) {
 }
 
 export function ImmersiveHomeHero() {
-  const [activeIndex, setActiveIndex] = useState(INITIAL_INDEX);
+  const [mobileIndex, setMobileIndex] = useState(INITIAL_INDEX);
+  const [desktopIndices, setDesktopIndices] = useState(() =>
+    DESKTOP_COLUMN_OFFSETS.map((offset) => wrapIndex(INITIAL_INDEX + offset, HOME_HERO_IMAGES.length))
+  );
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const [viewportHeight, setViewportHeight] = useState<number | null>(null);
   const instructionsId = useId();
   const rootRef = useRef<HTMLElement | null>(null);
+  const desktopShiftTimersRef = useRef<number[]>([]);
 
-  const activeImage = HOME_HERO_IMAGES[activeIndex];
+  const activeImage = HOME_HERO_IMAGES[desktopIndices[1] ?? mobileIndex];
   const transitionDuration = prefersReducedMotion ? '100ms' : '1800ms';
   const transitionTimingFunction = 'cubic-bezier(.19,1,.22,1)';
-  const desktopColumnImages = DESKTOP_COLUMN_OFFSETS.map((offset) => ({
-    image: HOME_HERO_IMAGES[wrapIndex(activeIndex + offset, HOME_HERO_IMAGES.length)],
-    offset
+  const desktopColumnImages = desktopIndices.map((imageIndex, columnIndex) => ({
+    imageIndex,
+    image: HOME_HERO_IMAGES[imageIndex],
+    columnIndex
   }));
 
-  const step = (delta = 1) => {
-    startTransition(() => {
-      setActiveIndex((current) => wrapIndex(current + delta, HOME_HERO_IMAGES.length));
-    });
-  };
+  const clearDesktopShiftQueue = useCallback(() => {
+    for (const timeoutId of desktopShiftTimersRef.current) {
+      window.clearTimeout(timeoutId);
+    }
+    desktopShiftTimersRef.current = [];
+  }, []);
+
+  const queueDesktopShift = useCallback(
+    (delta = 1) => {
+      clearDesktopShiftQueue();
+      desktopShiftTimersRef.current = DESKTOP_COLUMN_OFFSETS.map((_, columnIndex) =>
+        window.setTimeout(() => {
+          startTransition(() => {
+            setDesktopIndices((current) =>
+              current.map((value, index) =>
+                index === columnIndex ? wrapIndex(value + delta, HOME_HERO_IMAGES.length) : value
+              )
+            );
+          });
+        }, prefersReducedMotion ? 0 : columnIndex * DESKTOP_STAGGER_MS)
+      );
+    },
+    [clearDesktopShiftQueue, prefersReducedMotion]
+  );
+
+  const step = useCallback(
+    (delta = 1) => {
+      startTransition(() => {
+        setMobileIndex((current) => wrapIndex(current + delta, HOME_HERO_IMAGES.length));
+      });
+      queueDesktopShift(delta);
+    },
+    [queueDesktopShift]
+  );
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -98,7 +133,13 @@ export function ImmersiveHomeHero() {
     return () => {
       window.clearInterval(autoplay);
     };
-  }, [prefersReducedMotion]);
+  }, [prefersReducedMotion, step]);
+
+  useEffect(() => {
+    return () => {
+      clearDesktopShiftQueue();
+    };
+  }, [clearDesktopShiftQueue]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -189,12 +230,12 @@ export function ImmersiveHomeHero() {
         Toque, clique ou use as setas do teclado para trocar a foto de fundo.
       </p>
       <p className="sr-only" aria-live="polite">
-        Foto {activeIndex + 1} de {HOME_HERO_IMAGES.length}
+        Foto {mobileIndex + 1} de {HOME_HERO_IMAGES.length}
       </p>
       <div className="absolute inset-0">
         <div className="absolute inset-0 lg:hidden">
           {HOME_HERO_IMAGES.map((image, index) => {
-            const active = index === activeIndex;
+            const active = index === mobileIndex;
 
             return (
               <div
@@ -225,40 +266,59 @@ export function ImmersiveHomeHero() {
         </div>
 
         <div className="absolute inset-0 hidden grid-cols-3 gap-[1.2vw] px-[1.2vw] py-[1.2vw] lg:grid">
-          {desktopColumnImages.map(({ image, offset }, columnIndex) => {
-            const translateY = prefersReducedMotion ? '0px' : `${(columnIndex - 1) * 18}px`;
-            const rotate = prefersReducedMotion ? '0deg' : `${(columnIndex - 1) * 1.35}deg`;
-            const scale = prefersReducedMotion ? '1' : columnIndex === 1 ? '1.015' : '1.03';
+          {desktopColumnImages.map(({ image, imageIndex, columnIndex }) => {
+            const translateY = prefersReducedMotion ? 0 : (columnIndex - 1) * 18;
+            const rotate = prefersReducedMotion ? 0 : (columnIndex - 1) * 1.35;
+            const activeScale = prefersReducedMotion ? 1 : columnIndex === 1 ? 1.015 : 1.03;
+            const inactiveScale = prefersReducedMotion ? 1 : activeScale + 0.045;
             const originX = columnIndex === 0 ? '18%' : columnIndex === 1 ? '50%' : '82%';
+            const columnTransitionDuration = prefersReducedMotion
+              ? '100ms'
+              : `${1500 + columnIndex * 180}ms`;
 
             return (
               <div
-                key={`${image.src}-${offset}`}
+                key={`desktop-column-${columnIndex}`}
                 className="relative overflow-hidden rounded-[2.4vw] border border-white/10 bg-[rgba(17,10,6,0.28)] shadow-[0_24px_70px_rgba(8,5,2,0.28)]"
               >
-                <div
-                  className="absolute inset-0 transition-[transform,filter]"
-                  style={{
-                    transform: `translate3d(0, ${translateY}, 0) rotate(${rotate}) scale(${scale})`,
-                    transformOrigin: `${originX} 52%`,
-                    transitionDuration,
-                    transitionTimingFunction
-                  }}
-                >
-                  <Image
-                    alt={image.alt}
-                    className="object-cover"
-                    fill
-                    priority={columnIndex === 1}
-                    quality={86}
-                    sizes="33vw"
-                    src={image.src}
-                  />
-                </div>
+                {HOME_HERO_IMAGES.map((columnImage, index) => {
+                  const active = index === imageIndex;
+                  const baseTransform = active
+                    ? `translate3d(0, ${translateY}px, 0) rotate(${rotate}deg) scale(${activeScale})`
+                    : `translate3d(0, ${translateY + (columnIndex === 1 ? 10 : 18)}px, 0) rotate(${rotate + (columnIndex === 1 ? 0 : columnIndex === 0 ? -0.4 : 0.4)}deg) scale(${inactiveScale})`;
+
+                  return (
+                    <div
+                      key={`${columnIndex}-${columnImage.src}`}
+                      aria-hidden={!active}
+                      className={`absolute inset-0 transition-[opacity,transform,filter] ${
+                        active
+                          ? 'opacity-100'
+                          : 'pointer-events-none opacity-0'
+                      }`}
+                      style={{
+                        transform: baseTransform,
+                        transformOrigin: `${originX} 52%`,
+                        transitionDuration: columnTransitionDuration,
+                        transitionTimingFunction
+                      }}
+                    >
+                      <Image
+                        alt={columnImage.alt}
+                        className="object-cover"
+                        fill
+                        priority={columnIndex === 1 && index === imageIndex}
+                        quality={86}
+                        sizes="33vw"
+                        src={columnImage.src}
+                      />
+                    </div>
+                  );
+                })}
                 <div
                   className="absolute inset-0 transition-[background,opacity]"
                   style={{
-                    transitionDuration,
+                    transitionDuration: columnTransitionDuration,
                     transitionTimingFunction,
                     background:
                       columnIndex === 1
