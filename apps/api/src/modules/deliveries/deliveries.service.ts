@@ -39,6 +39,7 @@ type DeliveryDraft = {
   dropoffLat: number | null;
   dropoffLng: number | null;
   orderTotal: number;
+  totalUnits: number;
   scheduledAt: string;
   manifestSummary: string;
   items: Array<{
@@ -486,6 +487,11 @@ export class DeliveriesService {
     if (!input.dropoffAddress.trim()) {
       throw new BadRequestException('Endereco de entrega obrigatorio para cotar frete.');
     }
+    if (this.isPickupAndDropoffSameAddress(input.pickupAddress, input.dropoffAddress)) {
+      throw new BadRequestException(
+        'O endereco de entrega coincide com o ponto de coleta da Alameda Jau 731. Selecione retirada ou informe outro destino.'
+      );
+    }
 
     if (this.loggiProvider.isConfigured()) {
       try {
@@ -499,6 +505,22 @@ export class DeliveriesService {
     }
 
     return this.localProvider.quote(input);
+  }
+
+  private isPickupAndDropoffSameAddress(pickupAddress: string, dropoffAddress: string) {
+    const pickupKey = this.normalizeAddressKey(pickupAddress);
+    const dropoffKey = this.normalizeAddressKey(dropoffAddress);
+    return Boolean(pickupKey && dropoffKey && pickupKey === dropoffKey);
+  }
+
+  private normalizeAddressKey(value: string | null | undefined) {
+    const normalized = this.normalizeText(value)
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+    return normalized.replace(/\s+/g, ' ');
   }
 
   private ensureExternalOrderQuoteScheduleAllowed(scheduledAt: string | null | undefined) {
@@ -531,6 +553,7 @@ export class DeliveriesService {
       dropoffLng: typeof draft.customer.lng === 'number' && Number.isFinite(draft.customer.lng) ? draft.customer.lng : null,
       scheduledAt: draft.scheduledAt,
       orderTotal: this.toMoney(draft.manifest.subtotal),
+      totalUnits: Math.max(Math.floor(draft.manifest.totalUnits || 0), 0),
       manifestSummary: this.buildManifestSummary(draft.manifest.items),
       items: draft.manifest.items.map((item) => ({ name: item.name, quantity: item.quantity }))
     };
@@ -551,6 +574,7 @@ export class DeliveriesService {
       dropoffLng: draft.dropoffLng,
       scheduledAt: draft.scheduledAt || null,
       orderTotal: this.toMoney(draft.orderTotal),
+      totalUnits: Math.max(Math.floor(draft.totalUnits || 0), 0),
       manifestSummary: draft.manifestSummary,
       items: draft.items.map((item) => ({ name: item.name, quantity: item.quantity })),
       providerQuoteId
@@ -603,7 +627,10 @@ export class DeliveriesService {
             typeof draft.customer.lng === 'number' && Number.isFinite(draft.customer.lng) ? draft.customer.lng : null,
           subtotal: this.toMoney(draft.manifest.subtotal),
           totalUnits: draft.manifest.totalUnits,
-          itemCount: draft.manifest.items.length
+          items: draft.manifest.items.map((item) => ({
+            name: this.normalizeText(item.name),
+            quantity: Math.max(Number(item.quantity) || 0, 0)
+          }))
         })
       )
       .digest('hex');
@@ -733,6 +760,7 @@ export class DeliveriesService {
       dropoffLng:
         typeof order.customer?.lng === 'number' && Number.isFinite(order.customer.lng) ? order.customer.lng : null,
       orderTotal: this.toMoney(order.total ?? 0),
+      totalUnits: items.reduce((sum, item) => sum + Math.max(Math.floor(item.quantity || 0), 0), 0),
       scheduledAt: order.scheduledAt?.toISOString() || '',
       manifestSummary: items.map((item) => `${item.name} x ${item.quantity}`).join(', '),
       items
@@ -926,6 +954,12 @@ export class DeliveriesService {
       dropoffLng:
         typeof draft?.dropoffLng === 'number' && Number.isFinite(draft.dropoffLng) ? draft.dropoffLng : null,
       orderTotal: this.toMoney(Number(draft?.orderTotal) || 0),
+      totalUnits: Math.max(
+        Math.floor(Number(draft?.totalUnits) || 0),
+        Array.isArray(draft?.items)
+          ? draft.items.reduce((sum, item) => sum + Math.max(Number(item?.quantity) || 0, 0), 0)
+          : 0
+      ),
       scheduledAt: this.normalizeText(draft?.scheduledAt) || '',
       manifestSummary: this.normalizeText(draft?.manifestSummary) || '',
       items: Array.isArray(draft?.items)

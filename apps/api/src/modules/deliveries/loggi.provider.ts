@@ -30,6 +30,7 @@ const FIXED_PICKUP_CITY = 'Sao Paulo';
 const FIXED_PICKUP_STATE = 'SP';
 const POSTAL_CODE_PATTERN = /\b\d{5}-?\d{3}\b/;
 const COGNITO_DEFAULT_REGION = 'us-east-1';
+const ORDER_BOX_UNITS = 7;
 
 export class LoggiProvider implements DeliveryProvider {
   private accessTokenCache: { idToken: string; expiresAt: number } | null = null;
@@ -97,6 +98,12 @@ export class LoggiProvider implements DeliveryProvider {
 
   private externalServiceId() {
     return String(process.env.LOGGI_EXTERNAL_SERVICE_ID || '').trim();
+  }
+
+  private shouldForceExternalServiceIdOnQuote() {
+    return String(process.env.LOGGI_FORCE_EXTERNAL_SERVICE_ID_ON_QUOTE || '')
+      .trim()
+      .toLowerCase() === 'true';
   }
 
   private pickupInstructions() {
@@ -206,12 +213,13 @@ export class LoggiProvider implements DeliveryProvider {
   }
 
   private buildQuotePackages(input: DeliveryQuoteInput) {
-    const totalUnits = Math.max(
-      input.items.reduce((sum, item) => sum + Math.max(Math.floor(item.quantity || 0), 0), 0),
-      1
+    const totalUnits = Math.max(Math.floor(input.totalUnits || 0), 0);
+    const boxCount = Math.max(Math.ceil(totalUnits / ORDER_BOX_UNITS), 1);
+    const weightG = Math.min(
+      this.packageBaseWeightG() + Math.max(boxCount - 1, 0) * this.packageWeightPerItemG(),
+      30_000
     );
-    const weightG = Math.min(this.packageBaseWeightG() + Math.max(totalUnits - 1, 0) * this.packageWeightPerItemG(), 30_000);
-    const heightCm = Math.min(this.packageHeightCm() + Math.max(totalUnits - 1, 0) * this.packageHeightStepCm(), 100);
+    const heightCm = Math.min(this.packageHeightCm() + Math.max(boxCount - 1, 0) * this.packageHeightStepCm(), 100);
     return [
       {
         weightG,
@@ -239,7 +247,7 @@ export class LoggiProvider implements DeliveryProvider {
     };
 
     const externalServiceId = this.externalServiceId();
-    if (externalServiceId) {
+    if (externalServiceId && this.shouldForceExternalServiceIdOnQuote()) {
       payload.externalServiceIds = [externalServiceId];
     } else {
       payload.pickupTypes = [this.pickupType()];

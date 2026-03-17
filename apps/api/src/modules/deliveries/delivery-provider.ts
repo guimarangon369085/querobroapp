@@ -16,6 +16,7 @@ export type DeliveryQuoteInput = {
   dropoffLng?: number | null;
   scheduledAt: string | null;
   orderTotal: number;
+  totalUnits: number;
   manifestSummary: string;
   items: DeliveryManifestItem[];
 };

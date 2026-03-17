@@ -1,6 +1,6 @@
 # PROJECT_SNAPSHOT
 
-Ultima atualizacao: 2026-03-16
+Ultima atualizacao: 2026-03-17
 
 ## Estado atual
 
@@ -19,8 +19,10 @@ Ultima atualizacao: 2026-03-16
 - Pedidos de `Entrega` agora podem receber cotacao de frete antes do submit final, com o valor incorporado ao total e ao PIX.
 - `/pedido`, `quick create` e a logica de caixas em `Pedidos` passaram a compartilhar o mesmo catalogo de caixas/sabores e as mesmas imagens originais da marca.
 - O provider principal de frete/entrega do app agora e `Loggi`, substituindo a integracao anterior com `Uber Direct`.
+- A cotacao Loggi agora protege o caso `origem = destino`, usa hash de quote mais fiel ao payload real e calcula pacote por caixa fechada em vez de inflar o peso por unidade interna do dashboard.
 - `/pedido` e o modal de novo pedido em `/pedidos` agora usam o mesmo fluxo em duas etapas para entrega: `Calcular frete` antes de `Finalizar pedido/Criar pedido`.
 - As caixas mistas passaram a usar composicao visual unica no mesmo quadrante, padronizada entre a captura publica e a operacao interna.
+- As caixas mistas agora usam corte seco entre as duas imagens, sem a faixa branca intermediaria.
 - `/dashboard` voltou a existir como rota oculta interna, agora com painel real de analytics first-party do site, vitals e performance financeira/operacional da broa.
 - O web passou a instrumentar navegacao, links, funil e web vitals por coleta propria, gravando esses eventos na API para leitura imediata no dashboard.
 
@@ -89,7 +91,7 @@ Ultima atualizacao: 2026-03-16
 1. `Google Forms` ja e viavel como canal temporario, mas ainda falta configuracao real do Apps Script e URL publica final.
 2. O dominio publico ja responde em `querobroa.com.br`, `www`, `ops` e `api`, mas o web ainda precisa publicar o bundle corrigido para `/pedidos` e `/pedido` nao cairem em fallback de `127.0.0.1` quando o client bundle estiver defasado.
 3. `WhatsApp Flow` segue sem numero dedicado; a migracao futura deve reutilizar o contrato externo atual.
-4. A integracao Loggi ja substituiu o provider anterior no codigo e no runtime, mas ainda vale validar o disparo real de shipment em producao sem criar entrega acidental.
+4. A integracao Loggi ja substituiu o provider anterior no codigo e no runtime, mas ainda vale validar o disparo real de shipment em producao sem criar entrega acidental e calibrar a cotacao final contra corridas manuais historicas.
 5. Mobile segue atras do web no fluxo operacional novo.
 6. Ainda vale ampliar cobertura de testes alem dos gates atuais, principalmente em cenarios de edge case de dominio.
 7. O dashboard interno de analytics parte do zero sem historico legado; ele comeca a refletir navegacao nova a partir desta instrumentacao first-party.

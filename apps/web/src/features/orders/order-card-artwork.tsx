@@ -64,7 +64,6 @@ export function OrderCardArtwork({
               style={{ objectPosition: art.rightObjectPosition || 'center center' }}
             />
           </div>
-          <div className="absolute inset-0 bg-[linear-gradient(118deg,transparent_46.5%,rgba(255,248,238,0.92)_49.1%,rgba(255,248,238,0.98)_50.2%,rgba(255,248,238,0.92)_51.3%,transparent_53.9%)]" />
         </>
       )}
       <div className={overlayClassName} />
