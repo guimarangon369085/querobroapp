@@ -71,9 +71,7 @@ export function ImmersiveHomeHero() {
   const [activeIndex, setActiveIndex] = useState(INITIAL_INDEX);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<DeferredInstallPromptEvent | null>(null);
-  const [isInstallSheetOpen, setIsInstallSheetOpen] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
-  const [isIosLike, setIsIosLike] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const instructionsId = useId();
 
@@ -107,15 +105,9 @@ export function ImmersiveHomeHero() {
   }, [prefersReducedMotion]);
 
   useEffect(() => {
-    const userAgent = window.navigator.userAgent || '';
-    const touchPoints = Number(window.navigator.maxTouchPoints || 0);
-    const iosLike =
-      /iPad|iPhone|iPod/i.test(userAgent) ||
-      (userAgent.includes('Mac') && touchPoints > 1);
     const standalone =
       window.matchMedia('(display-mode: standalone)').matches ||
       Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
-    setIsIosLike(iosLike);
     setIsStandalone(standalone);
 
     const handleBeforeInstallPrompt = (event: Event) => {
@@ -139,6 +131,8 @@ export function ImmersiveHomeHero() {
       setIsInstalling(false);
     }
   };
+
+  const canInstallShortcut = Boolean(installPrompt) && !isStandalone;
 
   return (
     <main
@@ -235,88 +229,36 @@ export function ImmersiveHomeHero() {
           >
             Em breve
           </button>
-          <button
-            className="inline-flex min-h-12 items-center justify-center rounded-full border border-white/18 bg-[rgba(255,248,232,0.12)] px-6 text-[0.78rem] font-semibold uppercase tracking-[0.16em] text-[rgba(255,248,232,0.94)] backdrop-blur-md transition-[background,border-color,transform] duration-300 ease-out hover:border-white/32 hover:bg-[rgba(255,248,232,0.18)] hover:translate-y-[-1px]"
-            onClick={() => {
-              if (isStandalone) {
-                window.location.href = '/pedido';
-                return;
-              }
-              setIsInstallSheetOpen(true);
-            }}
-            data-home-cta
-            type="button"
-          >
-            {isStandalone ? 'Abrir pedido rapido' : 'Atalho no celular'}
-          </button>
-          <p className="max-w-[22rem] text-[0.8rem] leading-5 text-[rgba(255,248,232,0.78)] sm:ml-2">
-            Salve um atalho para abrir `/pedido`, reaproveitar seus dados neste aparelho e refazer o ultimo pedido com 1 toque.
-          </p>
+          {canInstallShortcut ? (
+            <button
+              aria-label="Criar atalho no celular"
+              className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/18 bg-[rgba(255,248,232,0.12)] text-[rgba(255,248,232,0.94)] backdrop-blur-md transition-[background,border-color,transform] duration-300 ease-out hover:border-white/32 hover:bg-[rgba(255,248,232,0.18)] hover:translate-y-[-1px] disabled:cursor-wait disabled:opacity-70"
+              disabled={isInstalling}
+              onClick={() => {
+                void handleInstallShortcut();
+              }}
+              data-home-cta
+              type="button"
+            >
+              <svg aria-hidden="true" className="h-5 w-5" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M12 3v10m0-10 3.5 3.5M12 3 8.5 6.5M6.5 10.5v6A1.5 1.5 0 0 0 8 18h8a1.5 1.5 0 0 0 1.5-1.5v-6"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="1.8"
+                />
+                <path
+                  d="M9.25 21h5.5"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeWidth="1.8"
+                />
+              </svg>
+            </button>
+          ) : null}
         </div>
       </section>
-
-      {isInstallSheetOpen ? (
-        <div
-          className="fixed inset-0 z-40 bg-[rgba(10,6,3,0.62)] px-4 py-6 backdrop-blur-sm sm:px-6"
-          onClick={() => setIsInstallSheetOpen(false)}
-        >
-          <div className="mx-auto flex min-h-full max-w-md items-end sm:items-center">
-            <div
-              className="w-full rounded-[30px] border border-white/18 bg-[linear-gradient(180deg,rgba(28,17,10,0.96),rgba(19,11,6,0.98))] p-5 text-[rgba(255,248,232,0.96)] shadow-[0_24px_80px_rgba(0,0,0,0.36)] sm:p-6"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="brand-wordmark brand-wordmark--micro text-[0.8rem] text-[rgba(255,248,232,0.82)]">
-                    @querobroa
-                  </p>
-                  <h2 className="mt-2 text-[1.35rem] font-semibold sm:text-[1.55rem]">
-                    Pedido rapido no celular
-                  </h2>
-                </div>
-                <button
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/12 bg-white/8 text-lg text-[rgba(255,248,232,0.86)]"
-                  onClick={() => setIsInstallSheetOpen(false)}
-                  type="button"
-                >
-                  ×
-                </button>
-              </div>
-
-              <p className="mt-3 text-sm leading-6 text-[rgba(255,248,232,0.78)]">
-                O atalho abre direto em `/pedido`. Neste aparelho, o sistema guarda seus dados e oferece um botao para refazer o ultimo pedido.
-              </p>
-
-              <div className="mt-5 grid gap-3 rounded-[24px] border border-white/10 bg-white/6 p-4 text-sm leading-6 text-[rgba(255,248,232,0.84)]">
-                <p className="font-semibold text-[rgba(255,248,232,0.96)]">No iPhone</p>
-                <p>1. Abra o Safari.</p>
-                <p>2. Toque em Compartilhar.</p>
-                <p>3. Escolha Adicionar a Tela de Inicio.</p>
-              </div>
-
-              {installPrompt && !isIosLike ? (
-                <button
-                  className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-full border border-white/14 bg-[rgba(255,248,232,0.14)] px-6 text-sm font-semibold uppercase tracking-[0.16em] text-[rgba(255,248,232,0.96)] transition hover:bg-[rgba(255,248,232,0.2)]"
-                  disabled={isInstalling}
-                  onClick={() => {
-                    void handleInstallShortcut();
-                  }}
-                  type="button"
-                >
-                  {isInstalling ? 'Instalando...' : 'Instalar agora'}
-                </button>
-              ) : null}
-
-              <a
-                className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-full border border-white/12 bg-[rgba(91,54,28,0.42)] px-6 text-sm font-semibold uppercase tracking-[0.16em] text-[rgba(255,248,232,0.96)] transition hover:bg-[rgba(91,54,28,0.56)]"
-                href="/pedido"
-              >
-                Abrir pedido rapido
-              </a>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </main>
   );
 }
