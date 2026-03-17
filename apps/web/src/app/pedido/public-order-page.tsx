@@ -1180,180 +1180,197 @@ export function PublicOrderPage() {
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(255,240,220,0.95),transparent_32%),radial-gradient(circle_at_top_right,rgba(219,234,222,0.9),transparent_28%),linear-gradient(180deg,#f8efe5_0%,#f4eadc_100%)]">
-      <div className="mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:py-8" ref={pageTopRef}>
-        <section className="grid gap-4 lg:gap-6 xl:grid-cols-[minmax(0,1.08fr)_minmax(340px,0.92fr)]">
+      <div
+        className="mx-auto w-full max-w-[1720px] px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:py-8 xl:px-10 2xl:px-12"
+        ref={pageTopRef}
+      >
+        <section className="grid gap-4 lg:gap-6 xl:grid-cols-[minmax(0,1.32fr)_minmax(320px,0.68fr)] 2xl:grid-cols-[minmax(0,1.4fr)_minmax(340px,0.64fr)]">
           <form
             autoComplete="on"
-            className="grid gap-4 rounded-[26px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.88)] p-4 shadow-[0_22px_60px_rgba(70,44,26,0.12)] sm:gap-5 sm:rounded-[32px] sm:p-6 sm:shadow-[0_26px_90px_rgba(70,44,26,0.12)]"
+            className="grid gap-4 rounded-[26px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.88)] p-4 shadow-[0_22px_60px_rgba(70,44,26,0.12)] sm:gap-5 sm:rounded-[32px] sm:p-6 sm:shadow-[0_26px_90px_rgba(70,44,26,0.12)] xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:shadow-none"
             onSubmit={onSubmit}
             ref={orderFormRef}
           >
-            <section
-              className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6"
-              data-order-boxes-section
-            >
-              <div className="mb-4 flex items-center justify-between gap-4 sm:mb-5">
-                <div>
-                  <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Dados</h2>
+            <div className="grid gap-4 xl:grid-cols-[minmax(300px,0.74fr)_minmax(0,1.26fr)] 2xl:grid-cols-[minmax(320px,0.7fr)_minmax(0,1.3fr)]">
+              <section
+                className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6 xl:h-full xl:p-7"
+                data-order-boxes-section
+              >
+                <div className="mb-4 flex items-center justify-between gap-4 sm:mb-5">
+                  <div>
+                    <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Dados</h2>
+                  </div>
                 </div>
-              </div>
-              <div className="grid gap-4 md:grid-cols-2">
-                <FormField label="Nome completo">
-                  <input
-                    autoFocus
-                    className="app-input"
-                    name="name"
-                    value={form.name}
-                    onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-                    placeholder="Nome e sobrenome"
-                    autoCapitalize="words"
-                    autoComplete="name"
-                  />
-                </FormField>
-                <FormField label="Telefone com WhatsApp">
-                  <input
-                    className="app-input"
-                    type="tel"
-                    name="tel"
-                    value={form.phone}
-                    onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))}
-                    placeholder="(31) 99999-9999"
-                    autoComplete="tel"
-                    inputMode="tel"
-                  />
-                </FormField>
-              </div>
-            </section>
-
-            <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6">
-              <div className="mb-4 sm:mb-5">
-                <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Entrega ou retirada</h2>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                {[
-                  {
-                    value: 'DELIVERY' as const,
-                    title: 'Entrega',
-                    description: 'Receber no endereco.'
-                  },
-                  {
-                    value: 'PICKUP' as const,
-                    title: 'Retirada',
-                    description: 'Buscar no local combinado.'
-                  }
-                ].map((option) => {
-                  const active = form.fulfillmentMode === option.value;
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => handleFulfillmentModeChange(option.value)}
-                      className={`rounded-[24px] border px-4 py-4 text-left ${
-                        active
-                          ? 'border-[rgba(181,68,57,0.32)] bg-[linear-gradient(160deg,rgba(255,245,241,0.98),rgba(251,232,225,0.94))] shadow-[0_16px_34px_rgba(181,68,57,0.12)]'
-                          : 'border-[rgba(126,79,45,0.08)] bg-[rgba(250,245,239,0.86)] hover:border-[rgba(126,79,45,0.18)] hover:bg-white/88'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-base font-semibold text-[color:var(--ink-strong)]">{option.title}</p>
-                          <p className="mt-1 text-sm text-[color:var(--ink-muted)]">{option.description}</p>
-                        </div>
-                        <span
-                          className={`grid h-6 w-6 place-items-center rounded-full border text-xs ${
-                            active
-                              ? 'border-[rgba(181,68,57,0.3)] bg-[rgba(181,68,57,0.12)] text-[rgb(160,20,26)]'
-                              : 'border-[rgba(126,79,45,0.14)] bg-white/85 text-[color:var(--ink-muted)]'
-                          }`}
-                        >
-                          {active ? '✓' : ''}
-                        </span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_220px_180px]">
-                <div className="md:col-span-2 xl:col-span-1">
-                  <FormField label={form.fulfillmentMode === 'DELIVERY' ? 'Endereco para entrega' : 'Ponto de retirada'}>
+                <div className="grid gap-4 xl:grid-cols-1">
+                  <FormField label="Nome completo">
                     <input
-                      className="app-input"
-                      ref={addressInputRef}
-                      name="street-address"
-                      value={form.address}
-                      onChange={(event) =>
-                        setForm((current) => {
-                          if (current.fulfillmentMode !== 'DELIVERY') return current;
-                          rememberDeliveryLocation({
-                            address: event.target.value,
-                            placeId: '',
-                            lat: null,
-                            lng: null
-                          });
-                          return {
-                            ...current,
-                            address: event.target.value,
-                            placeId: '',
-                            lat: null,
-                            lng: null
-                          };
-                        })
-                      }
-                      placeholder={form.fulfillmentMode === 'DELIVERY' ? 'Rua, numero e bairro' : PUBLIC_ORDER_PICKUP_ADDRESS}
+                      autoFocus
+                      className="app-input xl:h-14 xl:text-[1.02rem]"
+                      name="name"
+                      value={form.name}
+                      onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                      placeholder="Nome e sobrenome"
                       autoCapitalize="words"
-                      autoComplete={form.fulfillmentMode === 'DELIVERY' ? 'street-address' : 'off'}
-                      readOnly={isPickupSelected}
-                      aria-readonly={isPickupSelected}
-                      spellCheck={false}
+                      autoComplete="name"
+                    />
+                  </FormField>
+                  <FormField label="Telefone com WhatsApp">
+                    <input
+                      className="app-input xl:h-14 xl:text-[1.02rem]"
+                      type="tel"
+                      name="tel"
+                      value={form.phone}
+                      onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))}
+                      placeholder="(31) 99999-9999"
+                      autoComplete="tel"
+                      inputMode="tel"
                     />
                   </FormField>
                 </div>
-                <FormField label="Data">
-                  <input
-                    className="app-input"
-                    type="date"
-                    min={minimumDateValue || undefined}
-                    value={form.date}
-                    onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))}
-                  />
-                </FormField>
-                <FormField label="Horario">
-                  <input
-                    className="app-input"
-                    type="time"
-                    min={form.date === minimumDateValue ? minimumTimeValue || undefined : undefined}
-                    step={PUBLIC_ORDER_TIME_STEP_SECONDS}
-                    value={form.time}
-                    onChange={(event) => setForm((current) => ({ ...current, time: event.target.value }))}
-                  />
-                </FormField>
-              </div>
+              </section>
 
-              <div className="mt-4">
-                <FormField label="Complemento">
-                  <input
-                    className="app-input"
-                    name="address-line2"
-                    value={form.deliveryNotes}
-                    onChange={(event) => setForm((current) => ({ ...current, deliveryNotes: event.target.value }))}
-                    placeholder="Portao azul, interfone, bloco"
-                    autoComplete={form.fulfillmentMode === 'DELIVERY' ? 'address-line2' : 'off'}
-                    autoCapitalize="sentences"
-                  />
-                </FormField>
-              </div>
-            </section>
+              <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
+                <div className="mb-4 sm:mb-5">
+                  <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">
+                    Entrega ou retirada
+                  </h2>
+                </div>
 
-            <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {[
+                    {
+                      value: 'DELIVERY' as const,
+                      title: 'Entrega',
+                      description: 'Receber no endereco.'
+                    },
+                    {
+                      value: 'PICKUP' as const,
+                      title: 'Retirada',
+                      description: 'Buscar no local combinado.'
+                    }
+                  ].map((option) => {
+                    const active = form.fulfillmentMode === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => handleFulfillmentModeChange(option.value)}
+                        className={`rounded-[24px] border px-4 py-4 text-left xl:min-h-[112px] xl:px-5 ${
+                          active
+                            ? 'border-[rgba(181,68,57,0.32)] bg-[linear-gradient(160deg,rgba(255,245,241,0.98),rgba(251,232,225,0.94))] shadow-[0_16px_34px_rgba(181,68,57,0.12)]'
+                            : 'border-[rgba(126,79,45,0.08)] bg-[rgba(250,245,239,0.86)] hover:border-[rgba(126,79,45,0.18)] hover:bg-white/88'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-base font-semibold text-[color:var(--ink-strong)] xl:text-[1.05rem]">
+                              {option.title}
+                            </p>
+                            <p className="mt-1 text-sm text-[color:var(--ink-muted)] xl:text-[0.95rem]">
+                              {option.description}
+                            </p>
+                          </div>
+                          <span
+                            className={`grid h-6 w-6 place-items-center rounded-full border text-xs ${
+                              active
+                                ? 'border-[rgba(181,68,57,0.3)] bg-[rgba(181,68,57,0.12)] text-[rgb(160,20,26)]'
+                                : 'border-[rgba(126,79,45,0.14)] bg-white/85 text-[color:var(--ink-muted)]'
+                            }`}
+                          >
+                            {active ? '✓' : ''}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_220px_180px]">
+                  <div className="md:col-span-2 xl:col-span-1">
+                    <FormField
+                      label={form.fulfillmentMode === 'DELIVERY' ? 'Endereco para entrega' : 'Ponto de retirada'}
+                    >
+                      <input
+                        className="app-input xl:h-14 xl:text-[1.02rem]"
+                        ref={addressInputRef}
+                        name="street-address"
+                        value={form.address}
+                        onChange={(event) =>
+                          setForm((current) => {
+                            if (current.fulfillmentMode !== 'DELIVERY') return current;
+                            rememberDeliveryLocation({
+                              address: event.target.value,
+                              placeId: '',
+                              lat: null,
+                              lng: null
+                            });
+                            return {
+                              ...current,
+                              address: event.target.value,
+                              placeId: '',
+                              lat: null,
+                              lng: null
+                            };
+                          })
+                        }
+                        placeholder={
+                          form.fulfillmentMode === 'DELIVERY'
+                            ? 'Rua, numero e bairro'
+                            : PUBLIC_ORDER_PICKUP_ADDRESS
+                        }
+                        autoCapitalize="words"
+                        autoComplete={form.fulfillmentMode === 'DELIVERY' ? 'street-address' : 'off'}
+                        readOnly={isPickupSelected}
+                        aria-readonly={isPickupSelected}
+                        spellCheck={false}
+                      />
+                    </FormField>
+                  </div>
+                  <FormField label="Data">
+                    <input
+                      className="app-input xl:h-14 xl:text-[1.02rem]"
+                      type="date"
+                      min={minimumDateValue || undefined}
+                      value={form.date}
+                      onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))}
+                    />
+                  </FormField>
+                  <FormField label="Horario">
+                    <input
+                      className="app-input xl:h-14 xl:text-[1.02rem]"
+                      type="time"
+                      min={form.date === minimumDateValue ? minimumTimeValue || undefined : undefined}
+                      step={PUBLIC_ORDER_TIME_STEP_SECONDS}
+                      value={form.time}
+                      onChange={(event) => setForm((current) => ({ ...current, time: event.target.value }))}
+                    />
+                  </FormField>
+                </div>
+
+                <div className="mt-4">
+                  <FormField label="Complemento">
+                    <input
+                      className="app-input xl:h-14 xl:text-[1.02rem]"
+                      name="address-line2"
+                      value={form.deliveryNotes}
+                      onChange={(event) => setForm((current) => ({ ...current, deliveryNotes: event.target.value }))}
+                      placeholder="Portao azul, interfone, bloco"
+                      autoComplete={form.fulfillmentMode === 'DELIVERY' ? 'address-line2' : 'off'}
+                      autoCapitalize="sentences"
+                    />
+                  </FormField>
+                </div>
+              </section>
+            </div>
+
+            <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
               <div className="mb-4 flex flex-col gap-2 sm:mb-5 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
                 <div>
                   <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Caixas</h2>
                 </div>
               </div>
 
-              <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
+              <div className="grid gap-3 sm:gap-4 xl:grid-cols-2 2xl:grid-cols-3">
                 {(Object.keys(boxCatalog) as BoxCode[]).map((code) => {
                   const meta = boxCatalog[code];
                   const quantity = parsedBoxCounts[code];
@@ -1361,57 +1378,59 @@ export function PublicOrderPage() {
                   return (
                     <article
                       key={code}
-                      className={`group grid gap-3 overflow-hidden rounded-[22px] border p-3 shadow-[0_14px_28px_rgba(74,47,31,0.08)] transition-transform duration-300 hover:-translate-y-1 sm:gap-4 sm:rounded-[26px] sm:p-4 sm:shadow-[0_16px_38px_rgba(74,47,31,0.08)] ${meta.accentClassName} ${
+                      className={`group grid gap-3 overflow-hidden rounded-[22px] border p-3 shadow-[0_14px_28px_rgba(74,47,31,0.08)] transition-transform duration-300 hover:-translate-y-1 sm:gap-4 sm:rounded-[26px] sm:p-4 sm:shadow-[0_16px_38px_rgba(74,47,31,0.08)] xl:grid-rows-[auto_minmax(0,1fr)_auto] xl:gap-4 xl:p-5 ${meta.accentClassName} ${
                         active ? 'ring-1 ring-[rgba(181,68,57,0.16)]' : ''
                       }`}
                     >
-                      <div className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-3 sm:gap-4 sm:grid-cols-[118px_minmax(0,1fr)]">
-                        <div className="relative h-[96px] w-[96px] shrink-0 sm:h-[118px] sm:w-[118px]">
-                          <div className="relative h-full w-full overflow-hidden rounded-[18px] border border-white/80 bg-white/70 shadow-[0_12px_24px_rgba(74,47,31,0.12)] transition-transform duration-300 group-hover:translate-y-[-2px] sm:rounded-[22px] sm:shadow-[0_14px_28px_rgba(74,47,31,0.12)]">
+                      <div className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-3 sm:gap-4 sm:grid-cols-[118px_minmax(0,1fr)] xl:grid-cols-1 xl:items-start">
+                        <div className="relative h-[96px] w-[96px] shrink-0 sm:h-[118px] sm:w-[118px] xl:h-[188px] xl:w-full">
+                          <div className="relative h-full w-full overflow-hidden rounded-[18px] border border-white/80 bg-white/70 shadow-[0_12px_24px_rgba(74,47,31,0.12)] transition-transform duration-300 group-hover:translate-y-[-2px] sm:rounded-[22px] sm:shadow-[0_14px_28px_rgba(74,47,31,0.12)] xl:rounded-[24px]">
                             <OrderCardArtwork
                               alt={meta.label}
                               art={meta.art}
-                              sizes="(max-width: 640px) 96px, 118px"
+                              sizes="(max-width: 640px) 96px, (max-width: 1279px) 118px, (max-width: 1535px) 42vw, 22vw"
                             />
                           </div>
                         </div>
-                        <div className="min-w-0">
-                          <h3 className="text-[0.96rem] font-semibold leading-tight tracking-[-0.02em] text-[color:var(--ink-strong)] sm:text-lg">
+                        <div className="min-w-0 xl:flex xl:min-h-[148px] xl:flex-col">
+                          <h3 className="text-[0.96rem] font-semibold leading-tight tracking-[-0.02em] text-[color:var(--ink-strong)] sm:text-lg xl:text-[1.08rem]">
                             {meta.label}
                           </h3>
-                          <p className="mt-2 text-[0.76rem] leading-[1.35] text-[color:var(--ink-muted)] sm:text-sm sm:leading-6">{meta.detail}</p>
-                          <p className="mt-1 text-sm font-semibold text-[color:var(--ink-strong)]">
+                          <p className="mt-2 text-[0.76rem] leading-[1.35] text-[color:var(--ink-muted)] sm:text-sm sm:leading-6 xl:text-[0.84rem] xl:leading-6">
+                            {meta.detail}
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-[color:var(--ink-strong)] xl:mt-auto xl:pt-3 xl:text-[1rem]">
                             {formatCurrencyBRL(meta.priceEstimate)}
                           </p>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-[52px_minmax(0,1fr)_52px] items-center gap-2 sm:grid-cols-[56px_minmax(0,1fr)_56px] sm:gap-3">
+                      <div className="grid grid-cols-[52px_minmax(0,1fr)_52px] items-center gap-2 sm:grid-cols-[56px_minmax(0,1fr)_56px] sm:gap-3 xl:grid-cols-[64px_minmax(0,1fr)_64px] xl:gap-3">
                         <button
                           type="button"
                           onClick={() => setBoxQuantity(code, Math.max(quantity - 1, 0))}
-                          className="h-12 rounded-[16px] border border-white/85 bg-white/86 text-2xl font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:h-14 sm:rounded-[18px]"
+                          className="h-12 rounded-[16px] border border-white/85 bg-white/86 text-2xl font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:h-14 sm:rounded-[18px] xl:h-16 xl:text-[2rem]"
                           aria-label={`Diminuir ${meta.label}`}
                         >
                           −
                         </button>
-                        <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
+                        <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center xl:grid-cols-[132px_minmax(0,1fr)]">
                           <input
-                            className="app-input h-12 text-center text-base font-semibold sm:h-14 sm:text-lg"
+                            className="app-input h-12 text-center text-base font-semibold sm:h-14 sm:text-lg xl:h-16 xl:text-xl"
                             inputMode="numeric"
                             value={form.boxes[code]}
                             onChange={(event) => setBoxQuantity(code, event.target.value)}
                             placeholder="0"
                             aria-label={meta.label}
                           />
-                          <div className="rounded-[16px] border border-white/80 bg-white/80 px-3 py-2.5 text-center text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-[color:var(--ink-muted)] sm:rounded-[18px] sm:py-3 sm:text-xs">
+                          <div className="rounded-[16px] border border-white/80 bg-white/80 px-3 py-2.5 text-center text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-[color:var(--ink-muted)] sm:rounded-[18px] sm:py-3 sm:text-xs xl:min-h-[64px] xl:content-center">
                             {quantity} {pluralize(quantity, 'caixa', 'caixas')}
                           </div>
                         </div>
                         <button
                           type="button"
                           onClick={() => setBoxQuantity(code, quantity + 1)}
-                          className="h-12 rounded-[16px] border border-white/85 bg-white/86 text-2xl font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:h-14 sm:rounded-[18px]"
+                          className="h-12 rounded-[16px] border border-white/85 bg-white/86 text-2xl font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:h-14 sm:rounded-[18px] xl:h-16 xl:text-[2rem]"
                           aria-label={`Aumentar ${meta.label}`}
                         >
                           +
@@ -1422,8 +1441,8 @@ export function PublicOrderPage() {
                 })}
               </div>
 
-              <div className="mt-4 rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-[rgba(247,239,230,0.62)] p-4 sm:mt-5 sm:rounded-[26px] sm:p-5">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="mt-4 rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-[rgba(247,239,230,0.62)] p-4 sm:mt-5 sm:rounded-[26px] sm:p-5 xl:p-6">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between xl:items-center">
                   <div>
                     <h3 className="text-[1.1rem] font-semibold text-[color:var(--ink-strong)] sm:text-[1.35rem]">
                       Caixa Sabores
@@ -1442,11 +1461,11 @@ export function PublicOrderPage() {
                 </div>
 
                 {customBoxSummaries.length > 0 ? (
-                  <div className="mt-4 grid gap-3">
+                  <div className="mt-4 grid gap-3 xl:grid-cols-2">
                     {customBoxSummaries.map((box) => (
                       <article
                         key={box.id}
-                        className={`rounded-[20px] border p-4 ${
+                        className={`rounded-[20px] border p-4 xl:p-5 ${
                           box.isComplete
                             ? 'border-emerald-200 bg-emerald-50/80'
                             : box.isActive
@@ -1488,7 +1507,7 @@ export function PublicOrderPage() {
                             return (
                               <div
                                 key={`${box.id}-${code}`}
-                                className="grid grid-cols-[minmax(0,1fr)_40px_50px_40px] items-center gap-1.5 rounded-[16px] border border-white/80 bg-white/82 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_44px_58px_44px] sm:gap-2"
+                                className="grid grid-cols-[minmax(0,1fr)_40px_50px_40px] items-center gap-1.5 rounded-[16px] border border-white/80 bg-white/82 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_44px_58px_44px] sm:gap-2 xl:grid-cols-[minmax(0,1fr)_44px_64px_44px]"
                               >
                                 <div className="min-w-0 flex items-center gap-2">
                                   <div className="relative h-10 w-10 shrink-0">
@@ -1536,7 +1555,7 @@ export function PublicOrderPage() {
                   </div>
                 ) : (
                   <div className="mt-4 rounded-[20px] border border-white/80 bg-white/80 p-3">
-                    <div className="relative aspect-[16/10] overflow-hidden rounded-[18px]">
+                    <div className="relative aspect-[16/10] overflow-hidden rounded-[18px] xl:aspect-[21/10]">
                       <Image
                         alt="Caixa Sabores com 7 broas variadas"
                         className="h-full w-full object-cover"
@@ -1551,7 +1570,7 @@ export function PublicOrderPage() {
               </div>
             </section>
 
-            <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6">
+            <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
               <div className="mb-4">
                 <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Observacoes</h2>
               </div>
@@ -1594,8 +1613,8 @@ export function PublicOrderPage() {
 
           </form>
 
-          <aside className="grid gap-4 self-start sm:gap-5 xl:sticky xl:top-8">
-            <section className="order-1 overflow-hidden rounded-[24px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(165deg,rgba(255,252,248,0.96),rgba(243,231,216,0.9))] p-4 shadow-[0_18px_40px_rgba(70,44,26,0.1)] sm:rounded-[30px] sm:p-5 sm:shadow-[0_26px_80px_rgba(70,44,26,0.12)]">
+          <aside className="grid gap-4 self-start sm:gap-5 xl:sticky xl:top-6">
+            <section className="order-1 overflow-hidden rounded-[24px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(165deg,rgba(255,252,248,0.96),rgba(243,231,216,0.9))] p-4 shadow-[0_18px_40px_rgba(70,44,26,0.1)] sm:rounded-[30px] sm:p-5 sm:shadow-[0_26px_80px_rgba(70,44,26,0.12)] xl:max-h-[calc(var(--app-vh,1vh)*100-3rem)] xl:overflow-y-auto xl:p-4 2xl:p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Pedido</h2>
@@ -1606,34 +1625,44 @@ export function PublicOrderPage() {
               </div>
 
               <div className="mt-4 grid gap-3 sm:mt-5">
-                <div className="grid gap-2 rounded-[20px] bg-white/78 p-4 sm:gap-3 sm:rounded-[24px]">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm text-[color:var(--ink-muted)]">Caixas escolhidas</span>
-                    <strong className="text-xl text-[color:var(--ink-strong)] sm:text-2xl">{totalBoxes}</strong>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm text-[color:var(--ink-muted)]">Broas calculadas</span>
-                    <strong className="text-base text-[color:var(--ink-strong)] sm:text-lg">{totalBroas}</strong>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm text-[color:var(--ink-muted)]">Produtos</span>
-                    <strong className="text-base text-[color:var(--ink-strong)] sm:text-lg">{formatCurrencyBRL(estimatedTotal)}</strong>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm text-[color:var(--ink-muted)]">
-                      {form.fulfillmentMode === 'DELIVERY' ? 'Frete estimado' : 'Frete'}
-                    </span>
-                    <strong className="text-base text-[color:var(--ink-strong)] sm:text-lg">
-                      {form.fulfillmentMode === 'DELIVERY'
-                        ? isQuotingDelivery
-                          ? 'Calculando...'
-                          : formatCurrencyBRL(deliveryFee)
-                        : formatCurrencyBRL(0)}
-                    </strong>
+                <div className="grid gap-3 rounded-[20px] bg-white/78 p-4 sm:rounded-[24px]">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white/88 px-3 py-3">
+                      <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
+                        Caixas
+                      </span>
+                      <strong className="mt-1 block text-[1.35rem] text-[color:var(--ink-strong)]">{totalBoxes}</strong>
+                    </div>
+                    <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white/88 px-3 py-3">
+                      <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
+                        Broas
+                      </span>
+                      <strong className="mt-1 block text-[1.35rem] text-[color:var(--ink-strong)]">{totalBroas}</strong>
+                    </div>
+                    <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white/88 px-3 py-3">
+                      <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
+                        Produtos
+                      </span>
+                      <strong className="mt-1 block text-base text-[color:var(--ink-strong)]">
+                        {formatCurrencyBRL(estimatedTotal)}
+                      </strong>
+                    </div>
+                    <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white/88 px-3 py-3">
+                      <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
+                        {form.fulfillmentMode === 'DELIVERY' ? 'Frete' : 'Sem frete'}
+                      </span>
+                      <strong className="mt-1 block text-base text-[color:var(--ink-strong)]">
+                        {form.fulfillmentMode === 'DELIVERY'
+                          ? isQuotingDelivery
+                            ? 'Calculando...'
+                            : formatCurrencyBRL(deliveryFee)
+                          : formatCurrencyBRL(0)}
+                      </strong>
+                    </div>
                   </div>
                   <div className="flex items-center justify-between gap-3 border-t border-[rgba(126,79,45,0.08)] pt-3">
                     <span className="text-sm font-semibold text-[color:var(--ink-strong)]">Total</span>
-                    <strong className="text-lg text-[color:var(--ink-strong)] sm:text-xl">{formatCurrencyBRL(displayTotal)}</strong>
+                    <strong className="text-[1.3rem] text-[color:var(--ink-strong)]">{formatCurrencyBRL(displayTotal)}</strong>
                   </div>
                 </div>
 
@@ -1671,7 +1700,7 @@ export function PublicOrderPage() {
                     Caixas escolhidas
                   </p>
                   {selectedBoxes.length ? (
-                    <ul className="mt-3 grid gap-2">
+                    <ul className="mt-3 grid max-h-[260px] gap-2 overflow-y-auto pr-1">
                       {selectedBoxes.map((entry) => (
                         <li
                           key={entry.key}
