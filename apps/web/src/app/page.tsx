@@ -5,7 +5,7 @@ import { ImmersiveHomeHero } from '@/components/home/immersive-home-hero';
 import { buildPublicAppUrl, isOpsHost } from '@/lib/public-site-config';
 
 const pageTitle = 'QUEROBROA';
-const pageDescription = 'Pedido publico em /pedido e operacao em /pedidos no mesmo app.';
+const pageDescription = 'Sua vida + broa';
 const homeSocialImagePath = '/querobroa-brand/home-immersive/scene-05.jpg';
 
 export function generateMetadata(): Metadata {

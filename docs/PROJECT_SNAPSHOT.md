@@ -98,6 +98,7 @@ Ultima atualizacao: 2026-03-17
 - O app agora produz analytics first-party sem GA4 previa, usando o proprio banco para sessao, page view, link click e web vitals.
 - O PWA/atalho mobile agora usa icones raster dedicados da marca (`apple-touch-icon` + `manifest` 192/512).
 - O web agora sincroniza `visualViewport` globalmente no layout e usa essa metrica real em modais, toasts, backdrops, FABs e barras sticky, reduzindo overflow causado por barras dinamicas do navegador fora da home.
+- Os previews sociais das rotas publicas (`/` e `/pedido`) agora usam a descricao curta `Sua vida + broa`, evitando copy tecnica no compartilhamento via WhatsApp.
 
 ## Validacao operacional mais recente
 
