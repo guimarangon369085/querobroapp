@@ -3,7 +3,7 @@ import { PublicOrderPage } from './public-order-page';
 import { buildPublicAppUrl } from '@/lib/public-site-config';
 
 const pageTitle = 'Fazer pedido | QUEROBROAPP';
-const pageDescription = 'Sua vida + broa';
+const pageDescription = 'Sua vida + broa :) 🙂';
 const socialImagePath = '/querobroa-brand/cardapio/sabores-caixa.jpg';
 
 export function generateMetadata(): Metadata {
