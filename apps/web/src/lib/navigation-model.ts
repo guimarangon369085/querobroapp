@@ -31,13 +31,19 @@ export const primaryNavItems: AppNavItem[] = [
     label: 'Estoque',
     title: 'Estoque',
     icon: 'estoque'
+  },
+  {
+    href: '/dashboard',
+    label: 'Dashboard',
+    title: 'Dashboard',
+    icon: 'pedidos'
   }
 ];
 
 const byHref = new Map(primaryNavItems.map((item) => [item.href, item]));
 const pathAliases = new Map<string, string>([
   ['/', '/pedidos'],
-  ['/dashboard', '/pedidos'],
+  ['/dashboard', '/dashboard'],
   ['/inicio', '/pedidos'],
   ['/jornada', '/pedidos'],
   ['/hoje', '/pedidos'],
@@ -61,7 +67,7 @@ export const navSections: AppNavSection[] = [
   {
     id: 'principal',
     label: 'Principal',
-    items: pickItems(['/pedidos', '/clientes', '/estoque'])
+    items: pickItems(['/pedidos', '/clientes', '/estoque', '/dashboard'])
   }
 ];
 

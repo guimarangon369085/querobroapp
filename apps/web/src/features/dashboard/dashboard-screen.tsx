@@ -349,7 +349,7 @@ export default function DashboardScreen() {
         <div className="flex flex-wrap items-center gap-3 text-sm text-neutral-500">
           <span>Última leitura: {summary ? new Date(summary.asOf).toLocaleString('pt-BR') : 'carregando...'}</span>
           <span>Coleta first-party ativa</span>
-          <span>Sem link no menu</span>
+          <span>Link direto no menu</span>
         </div>
       </section>
 

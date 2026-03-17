@@ -64,7 +64,7 @@ Ultima atualizacao: 2026-03-17
 - `/produtos`: redirect legado para `/estoque`.
 - `/calendario`: redirect permanente para `/pedidos`.
 - `/dashboard`: pagina oculta interna com trafego, navegacao, vitals, funil e financeiro completo.
-- `/dashboard`: exposta so em host operacional/loopback, via bridge interno do web.
+- `/dashboard`: agora acessivel pelo proprio app em host publico, com link direto no menu e leitura via bridge same-origin do web.
 - Rotas antigas (`/`, `/hoje`, `/jornada`, `/inicio`, `/resumo`, `/base`, `/producao`, `/saidas`, `/caixa`) convergem para `Pedidos`.
 - Alias legado de captura (`/whatsapp-flow/pedido/:sessionId`) ainda converte para `Pedidos` ate a troca do canal.
 - `/builder`: redirect para `/pedidos`; o runtime interno segue exposto por `GET /runtime-config`.

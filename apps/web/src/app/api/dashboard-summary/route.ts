@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { resolveServerBridgeApiBaseUrl } from '@/lib/server-bridge-api-base-url';
-import { isTrustedDashboardBridgeRequest } from '@/lib/server-bridge-access';
+import { isTrustedSameOriginBridgeRequest } from '@/lib/server-bridge-access';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,7 +9,7 @@ function buildErrorResponse(status: number, payload: unknown) {
 }
 
 export async function GET(request: Request) {
-  if (!isTrustedDashboardBridgeRequest(request)) {
+  if (!isTrustedSameOriginBridgeRequest(request)) {
     return buildErrorResponse(404, { message: 'Nao encontrado.' });
   }
 
