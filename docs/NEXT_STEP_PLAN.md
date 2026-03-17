@@ -54,6 +54,7 @@ Criterio de pronto:
 - Manter a numeracao publica sequencial de clientes/pedidos como unico numero exposto na interface.
 - Validar em producao o atalho mobile da home, o prefill local de `/pedido` e o fluxo `Refazer ultimo pedido`.
 - Manter a home sem CTA de instalacao/atalho enquanto iPhone/iOS nao permitir um fluxo realmente coerente por clique direto.
+- Manter a home travada ao viewport visivel real, sem qualquer rolagem residual causada por `100vh` ou barras do navegador.
 - Manter `/dashboard` acessivel no menu principal sem voltar a aplicar trava de host no web por engano.
 - Manter a navegacao padronizada com `PEDIDOS` como item principal e labels em caixa alta em todo o menu.
 - Seguir limpando redundancias em `Estoque` agora que `Produtos` saiu da navegação.

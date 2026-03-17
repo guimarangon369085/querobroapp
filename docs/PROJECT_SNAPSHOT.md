@@ -22,6 +22,7 @@ Ultima atualizacao: 2026-03-17
 - Em `/pedido`, quando `Retirada` e selecionada, o ponto de retirada agora e preenchido automaticamente como `Alameda Jau, 731` e fica bloqueado para edicao pelo cliente.
 - `/pedido` agora salva localmente os dados do cliente neste aparelho, oferece `Refazer ultimo pedido` e ganhou camadas fixas para topo/subtotal/CTA em mobile.
 - A home publica `/` nao exibe mais CTA de instalacao/atalho mobile; o fluxo publico foi simplificado para manter a home sem instrucoes extras nem affordance inconsistente entre plataformas.
+- A home publica `/` agora trava o viewport visivel real do navegador e bloqueia overflow de `html/body` enquanto a rota esta montada, mantendo `scrollWidth == innerWidth` e `scrollHeight == innerHeight` em desktop e mobile.
 - O frete agora opera em modo hibrido: `Uber Direct` como cotacao primaria dentro da cobertura da conta e `Loggi` como fallback automatico quando a Uber recusa por raio/cobertura.
 - A cotacao agora protege o caso `origem = destino`, usa hash de quote mais fiel ao payload real e calcula pacote Loggi por caixa fechada em vez de inflar o peso por unidade interna do dashboard.
 - `/pedido` e o modal de novo pedido em `/pedidos` agora usam o mesmo fluxo em duas etapas para entrega: `Calcular frete` antes de `Finalizar pedido/Criar pedido`.

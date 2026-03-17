@@ -62,6 +62,7 @@ function wrapIndex(index: number, total: number) {
 export function ImmersiveHomeHero() {
   const [activeIndex, setActiveIndex] = useState(INITIAL_INDEX);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+  const [viewportHeight, setViewportHeight] = useState<number | null>(null);
   const instructionsId = useId();
 
   const activeImage = HOME_HERO_IMAGES[activeIndex];
@@ -93,12 +94,50 @@ export function ImmersiveHomeHero() {
     };
   }, [prefersReducedMotion]);
 
+  useEffect(() => {
+    const root = document.documentElement;
+    const body = document.body;
+    const previousRootOverflow = root.style.overflow;
+    const previousRootHeight = root.style.height;
+    const previousBodyOverflow = body.style.overflow;
+    const previousBodyHeight = body.style.height;
+
+    const syncViewport = () => {
+      const nextHeight = Math.round(window.visualViewport?.height || window.innerHeight || 0);
+      if (!nextHeight) return;
+      setViewportHeight(nextHeight);
+      root.style.overflow = 'hidden';
+      root.style.height = `${nextHeight}px`;
+      body.style.overflow = 'hidden';
+      body.style.height = `${nextHeight}px`;
+    };
+
+    syncViewport();
+    window.addEventListener('resize', syncViewport);
+    window.visualViewport?.addEventListener('resize', syncViewport);
+    window.visualViewport?.addEventListener('scroll', syncViewport);
+
+    return () => {
+      window.removeEventListener('resize', syncViewport);
+      window.visualViewport?.removeEventListener('resize', syncViewport);
+      window.visualViewport?.removeEventListener('scroll', syncViewport);
+      root.style.overflow = previousRootOverflow;
+      root.style.height = previousRootHeight;
+      body.style.overflow = previousBodyOverflow;
+      body.style.height = previousBodyHeight;
+    };
+  }, []);
+
   return (
     <main
       aria-label="Galeria da home da QUEROBROA"
       aria-describedby={instructionsId}
       aria-keyshortcuts="ArrowLeft ArrowRight Enter Space"
-      className="relative min-h-screen overflow-hidden bg-[#120c07] text-white"
+      className="relative overflow-hidden bg-[#120c07] text-white"
+      style={{
+        height: viewportHeight ? `${viewportHeight}px` : '100svh',
+        minHeight: viewportHeight ? `${viewportHeight}px` : '100svh'
+      }}
       tabIndex={0}
       onClick={(event) => {
         if ((event.target as HTMLElement).closest('a, [data-home-cta]')) return;
@@ -168,7 +207,13 @@ export function ImmersiveHomeHero() {
         />
       </div>
 
-      <section className="relative z-10 flex min-h-screen flex-col justify-between px-5 py-5 sm:px-8 sm:py-7 lg:px-12 lg:py-10">
+      <section
+        className="relative z-10 flex flex-col justify-between px-5 py-5 sm:px-8 sm:py-7 lg:px-12 lg:py-10"
+        style={{
+          height: viewportHeight ? `${viewportHeight}px` : '100svh',
+          minHeight: viewportHeight ? `${viewportHeight}px` : '100svh'
+        }}
+      >
         <a
           className="brand-wordmark brand-wordmark--micro inline-flex w-fit items-center rounded-full border border-white/14 bg-[rgba(26,15,8,0.34)] px-4 py-2 text-[0.72rem] text-[rgba(255,248,232,0.92)] backdrop-blur-md transition-[background,border-color,transform] duration-500 ease-out hover:border-white/24 hover:bg-[rgba(26,15,8,0.48)] hover:translate-y-[-1px]"
           href="https://www.instagram.com/querobroa/"
