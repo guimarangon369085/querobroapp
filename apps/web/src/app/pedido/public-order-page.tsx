@@ -39,6 +39,7 @@ const FLAVOR_CODES = ORDER_FLAVOR_CODES;
 const GOOGLE_MAPS_API_KEY = (process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '').trim();
 const PUBLIC_ORDER_TIME_STEP_SECONDS = 15 * 60;
 const PUBLIC_ORDER_DRAFT_SESSION_STORAGE_KEY = 'querobroapp:public-order-draft-session-id';
+const PUBLIC_ORDER_PICKUP_ADDRESS = 'Alameda Jaú, 731';
 
 type BoxCode = OrderBoxCode;
 type FlavorCode = OrderFlavorCode;
@@ -320,15 +321,69 @@ export function PublicOrderPage() {
   const addressInputRef = useRef<HTMLInputElement | null>(null);
   const orderFormRef = useRef<HTMLFormElement | null>(null);
   const pageTopRef = useRef<HTMLDivElement | null>(null);
+  const deliveryAddressDraftRef = useRef<Pick<PublicOrderFormState, 'address' | 'placeId' | 'lat' | 'lng'>>({
+    address: '',
+    placeId: '',
+    lat: null,
+    lng: null
+  });
   const [minimumSchedule, setMinimumSchedule] = useState<Date | null>(null);
   const [draftSessionId, setDraftSessionId] = useState(() => resolvePublicOrderDraftSessionId());
   const minimumDateValue = minimumSchedule ? formatDateInputValue(minimumSchedule) : '';
   const minimumTimeValue = minimumSchedule ? formatTimeInputValue(minimumSchedule) : '';
+  const isPickupSelected = form.fulfillmentMode === 'PICKUP';
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     window.sessionStorage.setItem(PUBLIC_ORDER_DRAFT_SESSION_STORAGE_KEY, draftSessionId);
   }, [draftSessionId]);
+
+  const rememberDeliveryLocation = useCallback(
+    (patch: Partial<Pick<PublicOrderFormState, 'address' | 'placeId' | 'lat' | 'lng'>>) => {
+      deliveryAddressDraftRef.current = {
+        address: patch.address ?? deliveryAddressDraftRef.current.address,
+        placeId: patch.placeId ?? deliveryAddressDraftRef.current.placeId,
+        lat: Object.prototype.hasOwnProperty.call(patch, 'lat') ? patch.lat ?? null : deliveryAddressDraftRef.current.lat,
+        lng: Object.prototype.hasOwnProperty.call(patch, 'lng') ? patch.lng ?? null : deliveryAddressDraftRef.current.lng
+      };
+    },
+    []
+  );
+
+  const handleFulfillmentModeChange = useCallback((nextMode: 'DELIVERY' | 'PICKUP') => {
+    setForm((current) => {
+      if (current.fulfillmentMode === nextMode) return current;
+
+      if (nextMode === 'PICKUP') {
+        if (current.fulfillmentMode === 'DELIVERY') {
+          deliveryAddressDraftRef.current = {
+            address: current.address,
+            placeId: current.placeId,
+            lat: current.lat,
+            lng: current.lng
+          };
+        }
+
+        return {
+          ...current,
+          fulfillmentMode: 'PICKUP',
+          address: PUBLIC_ORDER_PICKUP_ADDRESS,
+          placeId: '',
+          lat: null,
+          lng: null
+        };
+      }
+
+      return {
+        ...current,
+        fulfillmentMode: 'DELIVERY',
+        address: deliveryAddressDraftRef.current.address,
+        placeId: deliveryAddressDraftRef.current.placeId,
+        lat: deliveryAddressDraftRef.current.lat,
+        lng: deliveryAddressDraftRef.current.lng
+      };
+    });
+  }, []);
 
   const parsedBoxCounts = useMemo(() => {
     return Object.fromEntries(
@@ -562,6 +617,12 @@ export function PublicOrderPage() {
           const patch = buildCustomerAddressAutofillFromGooglePlace(place as GooglePlaceResultLike);
           const nextAddress = `${patch.address || ''}`.trim();
           if (!nextAddress) return;
+          rememberDeliveryLocation({
+            address: nextAddress,
+            placeId: `${patch.placeId || ''}`,
+            lat: typeof patch.lat === 'number' ? patch.lat : null,
+            lng: typeof patch.lng === 'number' ? patch.lng : null
+          });
 
           setForm((current) => ({
             ...current,
@@ -580,7 +641,7 @@ export function PublicOrderPage() {
       disposed = true;
       if (listener?.remove) listener.remove();
     };
-  }, [form.fulfillmentMode]);
+  }, [form.fulfillmentMode, rememberDeliveryLocation]);
 
   useEffect(() => {
     if (form.fulfillmentMode !== 'DELIVERY') {
@@ -630,6 +691,29 @@ export function PublicOrderPage() {
     totalBroas,
     incompleteCustomBoxes.length
   ]);
+
+  useEffect(() => {
+    if (form.fulfillmentMode !== 'PICKUP') return;
+    if (
+      form.address === PUBLIC_ORDER_PICKUP_ADDRESS &&
+      !form.placeId &&
+      form.lat == null &&
+      form.lng == null
+    ) {
+      return;
+    }
+    setForm((current) =>
+      current.fulfillmentMode !== 'PICKUP'
+        ? current
+        : {
+            ...current,
+            address: PUBLIC_ORDER_PICKUP_ADDRESS,
+            placeId: '',
+            lat: null,
+            lng: null
+          }
+    );
+  }, [form.address, form.fulfillmentMode, form.lat, form.lng, form.placeId]);
 
   const requestDeliveryQuote = useCallback(async () => {
     if (form.fulfillmentMode !== 'DELIVERY') {
@@ -970,6 +1054,12 @@ export function PublicOrderPage() {
 
   const resetForm = () => {
     const nextMinimum = resolveExternalOrderMinimumSchedule();
+    deliveryAddressDraftRef.current = {
+      address: '',
+      placeId: '',
+      lat: null,
+      lng: null
+    };
     setDraftSessionId(createPublicOrderDraftSessionId());
     setMinimumSchedule(nextMinimum);
     setForm({
@@ -1096,7 +1186,7 @@ export function PublicOrderPage() {
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => setForm((current) => ({ ...current, fulfillmentMode: option.value }))}
+                      onClick={() => handleFulfillmentModeChange(option.value)}
                       className={`rounded-[24px] border px-4 py-4 text-left ${
                         active
                           ? 'border-[rgba(181,68,57,0.32)] bg-[linear-gradient(160deg,rgba(255,245,241,0.98),rgba(251,232,225,0.94))] shadow-[0_16px_34px_rgba(181,68,57,0.12)]'
@@ -1132,17 +1222,28 @@ export function PublicOrderPage() {
                       name="street-address"
                       value={form.address}
                       onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          address: event.target.value,
-                          placeId: '',
-                          lat: null,
-                          lng: null
-                        }))
+                        setForm((current) => {
+                          if (current.fulfillmentMode !== 'DELIVERY') return current;
+                          rememberDeliveryLocation({
+                            address: event.target.value,
+                            placeId: '',
+                            lat: null,
+                            lng: null
+                          });
+                          return {
+                            ...current,
+                            address: event.target.value,
+                            placeId: '',
+                            lat: null,
+                            lng: null
+                          };
+                        })
                       }
-                      placeholder={form.fulfillmentMode === 'DELIVERY' ? 'Rua, numero e bairro' : 'Local de retirada'}
+                      placeholder={form.fulfillmentMode === 'DELIVERY' ? 'Rua, numero e bairro' : PUBLIC_ORDER_PICKUP_ADDRESS}
                       autoCapitalize="words"
                       autoComplete={form.fulfillmentMode === 'DELIVERY' ? 'street-address' : 'off'}
+                      readOnly={isPickupSelected}
+                      aria-readonly={isPickupSelected}
                       spellCheck={false}
                     />
                   </FormField>
