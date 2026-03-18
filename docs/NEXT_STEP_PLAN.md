@@ -66,9 +66,12 @@ Criterio de pronto:
 - Manter `/pedido` abrindo direto em `Dados`, sem header/resumo duplicado no topo e sem labels redundantes de seção.
 - Manter `/pedido` sem colapsos em desktop/mobile intermediario, com grids elasticos para agendamento, caixas e `Caixa Sabores` em qualquer navegador.
 - Manter em `/pedido` a mensagem explicita de que pedido novo nao entra para hoje, sempre mostrando o primeiro horario liberado antes do erro final.
+- Manter `/pedido` sem subtotal/CTA flutuante no mobile e com a `Caixa Sabores` exibindo a composicao oficial dos 5 sabores.
 - Manter `/dashboard` acessivel no menu principal sem voltar a aplicar trava de host no web por engano.
 - Manter `/dashboard` no formato editorial didatico novo, sem regressao para cards genericos ou leitura mais tecnica do que humana.
 - Manter `Novo pedido` de `/pedidos` estavel em mobile, sem popup deformado nem quebra no bloco de quantidade.
+- Manter `/pedidos` mobile sem FAB flutuante para `Novo pedido`, usando acao inline no proprio painel.
+- Manter o intake externo/publico sem abortar transacao no Postgres ao reservar `publicNumber` para cliente/pedido.
 - Manter a navegacao padronizada com `PEDIDOS` como item principal e labels em caixa alta em todo o menu.
 - Seguir limpando redundancias em `Estoque` agora que `Produtos` saiu da navegação.
 - Validar estados vazios e mudanca de dia em desktop e mobile width.

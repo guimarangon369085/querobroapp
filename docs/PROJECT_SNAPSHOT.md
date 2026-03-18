@@ -20,7 +20,7 @@ Ultima atualizacao: 2026-03-18
 - Pedidos de `Entrega` agora podem receber cotacao de frete antes do submit final, com o valor incorporado ao total e ao PIX.
 - `/pedido`, `quick create` e a logica de caixas em `Pedidos` passaram a compartilhar o mesmo catalogo de caixas/sabores e as mesmas imagens originais da marca.
 - Em `/pedido`, quando `Retirada` e selecionada, o ponto de retirada agora e preenchido automaticamente como `Alameda Jau, 731` e fica bloqueado para edicao pelo cliente.
-- `/pedido` agora salva localmente os dados do cliente neste aparelho, oferece `Refazer ultimo pedido` e ganhou camadas fixas para topo/subtotal/CTA em mobile.
+- `/pedido` agora salva localmente os dados do cliente neste aparelho, oferece `Refazer ultimo pedido` e trocou o subtotal/CTA flutuante de mobile por um bloco inline no fluxo, evitando sobreposicao no scroll.
 - A home publica `/` nao exibe mais CTA de instalacao/atalho mobile; o fluxo publico foi simplificado para manter a home sem instrucoes extras nem affordance inconsistente entre plataformas.
 - A home publica `/` agora trava o viewport visivel real do navegador e bloqueia overflow de `html/body` enquanto a rota esta montada, mantendo `scrollWidth == innerWidth` e `scrollHeight == innerHeight` em desktop e mobile.
 - A home publica `/` agora fixa tambem o `body` em `position: fixed` enquanto esta montada, para bloquear bounce/rolagem residual em iPhone e navegadores com barras dinamicas.
@@ -35,6 +35,7 @@ Ultima atualizacao: 2026-03-18
 - As caixas mistas agora usam corte seco entre as duas imagens, sem a faixa branca intermediaria.
 - O desktop de `/pedido` agora usa grids mais elasticas em vez de tracks fixas, evitando colapso de endereco, caixas e `Caixa Sabores` em navegacoes diferentes, inclusive browsers mais sensiveis a `minmax` rigido.
 - `/pedido` agora deixa explicito antes do submit que pedido novo nao entra para hoje, mostrando o primeiro horario disponivel na propria area de agendamento e no resumo lateral.
+- A `Caixa Sabores` de `/pedido` agora mostra uma composicao com as 5 artes oficiais dos sabores no mesmo envelope visual da imagem anterior.
 - `/dashboard` voltou a existir como rota oculta interna, agora com painel real de analytics first-party do site, vitals e performance financeira/operacional da broa.
 - O web passou a instrumentar navegacao, links, funil e web vitals por coleta propria, gravando esses eventos na API para leitura imediata no dashboard.
 - `/dashboard` deixou de depender so de obscuridade: agora abre apenas em host operacional/loopback, usa bridge protegido no web e a API exige token de bridge.
@@ -42,6 +43,8 @@ Ultima atualizacao: 2026-03-18
 - Analytics first-party deixou de gravar URLs completas com query/hash e passou a aceitar ingest apenas por bridge same-origin autenticado.
 - `Repetir pedido` em `/clientes` e `Novo pedido` em `/pedidos` agora preservam `PICKUP` em vez de forcar `DELIVERY`.
 - O modal `Novo pedido` em `/pedidos` foi reequilibrado para mobile, com shell propria e controles compactos mais estaveis no grid de quantidade.
+- `/pedidos` agora expoe `Novo pedido` inline no topo em mobile e esconde o FAB flutuante abaixo de `xl`.
+- A alocacao de `publicNumber` na API deixou de depender de colisao proposital no contador; o intake externo voltou a criar pedidos sem abortar a transacao do Postgres.
 - A criacao de pedido agora dispara alerta operacional assincrono no backend, com `ntfy` como canal gratuito principal para iPhone/PWA e WhatsApp/webhook como canais opcionais.
 - A navegacao operacional foi normalizada: o item principal antes chamado `Agenda` agora se chama `PEDIDOS`, e o menu passou a usar labels em caixa alta de forma consistente.
 
@@ -61,7 +64,7 @@ Ultima atualizacao: 2026-03-18
 
 ## Telas web
 
-- `/pedido`: pagina publica do cliente com submit para o intake canonico, cotacao previa de frete e exibicao do PIX copia e cola.
+- `/pedido`: pagina publica do cliente com submit para o intake canonico, cotacao previa de frete, exibicao do PIX copia e cola e CTA mobile sem barra flutuante sobre o conteudo.
 - `/pedido`: CTA principal abaixo do bloco `Resumo`; em `Entrega` ele calcula o frete antes da finalizacao, e em `Retirada` o frete zera.
 - `/pedido`: desktop sem colapso nos blocos de agendamento e sabores; a copy de agendamento agora avisa claramente que pedido novo nao entra para hoje.
 - `/`: landing publica fullscreen da marca, preparada para `www.querobroa.com.br`.
@@ -69,6 +72,7 @@ Ultima atualizacao: 2026-03-18
 - `/pedidos`: agenda do dia, criacao de pedido, status, producao, entrega e pagamento.
 - `/pedidos`: modal `Novo pedido` alinhado visualmente com `/pedido`, sem miniatura redundante e com CTA de frete abaixo do resumo.
 - `/pedidos`: modal `Novo pedido` agora se comporta melhor em mobile, sem deformar popup ou quebrar o bloco de quantidade.
+- `/pedidos`: mobile sem CTA flutuante no canto; a acao principal fica inline no proprio painel da agenda.
 - `/clientes`: cadastro e edicao rapida.
 - `/clientes`: repetir pedido respeita o modo original de atendimento.
 - `/estoque`: saldo, D+1, compras e leitura operacional.
@@ -111,10 +115,10 @@ Ultima atualizacao: 2026-03-18
 
 ## Validacao operacional mais recente
 
-- Data: 2026-03-17
-- Ciclo executado: `./scripts/stop-all.sh` -> `./scripts/dev-all.sh` -> `curl http://127.0.0.1:3001/health`
-- QA executado: `pnpm lint`, `pnpm test`, `pnpm qa:browser-smoke` e `pnpm qa:critical-e2e`
-- Resultado: todos os gates passaram; o E2E critico concluiu a jornada com o pedido `#1014` validado como `ENTREGUE` e `PAGO`.
+- Data: 2026-03-18
+- Ciclo executado: `pnpm --filter @querobroapp/web lint`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/api lint`, `node --test tests/public-number-sequencing.test.mjs tests/order-intake-google-form.test.mjs tests/order-intake-whatsapp-flow.test.mjs tests/customer-dedupe-and-intake.test.mjs tests/external-order-schedule-guard.test.mjs`, `pnpm qa:critical-e2e`
+- Validacao adicional: browser real em mobile para `/pedido` e `/pedidos`, com pedido publico concluido localmente ate `PIX_PENDING` e cleanup automatico dos dados `[TESTE_E2E]`
+- Resultado: intake publico voltou a criar pedido com sucesso (`Pedido #454` local), o E2E critico concluiu a jornada com pedido `ENTREGUE/PAGO` e o mobile ficou sem elementos fixos intrusivos em `/pedido` e `/pedidos`.
 
 ## Gaps abertos
 

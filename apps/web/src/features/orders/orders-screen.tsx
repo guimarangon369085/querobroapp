@@ -3334,6 +3334,19 @@ function OrdersPageContent() {
         <OrdersBoard
           filters={null}
           helperText={null}
+          summary={
+            <div className="xl:hidden">
+              <div className="rounded-[20px] border border-[rgba(126,79,45,0.08)] bg-white/82 p-3 shadow-[0_14px_30px_rgba(70,44,26,0.06)]">
+                <button
+                  type="button"
+                  className="app-button app-button-primary w-full"
+                  onClick={openNewOrderModal}
+                >
+                  Novo pedido
+                </button>
+              </div>
+            </div>
+          }
           toolbar={
             <div className="orders-calendar-toolbar">
               <div className="orders-calendar-toolbar__controls">
@@ -4737,7 +4750,7 @@ function OrdersPageContent() {
       </section>
       <button
         type="button"
-        className="app-button app-button-primary orders-new-order-floating"
+        className="app-button app-button-primary orders-new-order-floating hidden xl:inline-flex"
         onClick={openNewOrderModal}
         aria-label="Novo pedido"
       >

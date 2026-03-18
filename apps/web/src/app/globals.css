@@ -4338,6 +4338,13 @@ input[type='radio'] {
   right: max(clamp(16px, 2vw, 28px), calc(12px + var(--app-safe-area-right)));
   bottom: max(clamp(18px, 2vw, 28px), calc(12px + var(--app-safe-area-bottom)));
   z-index: 100;
+  display: inline-flex;
+}
+
+@media (max-width: 1279px) {
+  .orders-new-order-floating {
+    display: none !important;
+  }
 }
 
 .app-fab {

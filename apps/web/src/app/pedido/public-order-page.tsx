@@ -23,7 +23,6 @@ import {
   ORDER_BOX_CATALOG,
   ORDER_BOX_UNITS,
   ORDER_FLAVOR_CODES,
-  ORDER_SABORES_REFERENCE_IMAGE,
   type OrderBoxCode,
   type OrderFlavorCode,
   calculateOrderSubtotalFromFlavorSummary,
@@ -314,6 +313,53 @@ function formatCustomBoxParts(counts: Record<FlavorCode, number>) {
     .filter((entry) => entry.quantity > 0)
     .map((entry) => `${entry.quantity} ${boxCatalog[entry.code].label}`)
     .join(' • ');
+}
+
+const PUBLIC_ORDER_SABORES_COLLAGE_LAYOUT: Array<{
+  code: FlavorCode;
+  className: string;
+}> = [
+  { code: 'T', className: 'left-[5%] top-[10%] h-[44%] w-[29%] -rotate-[10deg]' },
+  { code: 'G', className: 'left-[32%] top-[6%] h-[34%] w-[24%] rotate-[7deg]' },
+  { code: 'D', className: 'right-[5%] top-[10%] h-[43%] w-[29%] rotate-[9deg]' },
+  { code: 'Q', className: 'left-[18%] bottom-[9%] h-[36%] w-[26%] -rotate-[5deg]' },
+  { code: 'R', className: 'right-[16%] bottom-[8%] h-[37%] w-[27%] rotate-[6deg]' }
+] as const;
+
+function PublicOrderSaboresCollage() {
+  return (
+    <div className="relative aspect-[16/10] overflow-hidden rounded-[18px] bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.92),transparent_34%),linear-gradient(155deg,rgba(248,239,230,0.98),rgba(238,222,202,0.92))] xl:aspect-[21/10]">
+      <span className="sr-only">
+        Composicao com os cinco sabores oficiais da Caixa Sabores: Tradicional, Goiabada, Doce de Leite,
+        Queijo do Serro e Requeijao de Corte.
+      </span>
+      <div className="absolute inset-x-[9%] top-[48%] h-px bg-[rgba(126,79,45,0.12)] blur-[1px]" aria-hidden="true" />
+      {PUBLIC_ORDER_SABORES_COLLAGE_LAYOUT.map(({ code, className }) => {
+        const art = boxCatalog[code].art;
+        if (art.mode !== 'single') return null;
+        return (
+          <div
+            key={code}
+            className={`absolute overflow-hidden rounded-[16px] border border-white/85 bg-white/92 shadow-[0_18px_36px_rgba(70,44,26,0.16)] ${className}`}
+            aria-hidden="true"
+          >
+            <Image
+              alt=""
+              className="h-full w-full object-cover"
+              fill
+              sizes="(max-width: 768px) 26vw, 140px"
+              src={art.src}
+              style={{ objectPosition: art.objectPosition || 'center center' }}
+            />
+            <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_18%,rgba(46,29,20,0.14)_100%)]" />
+          </div>
+        );
+      })}
+      <div className="absolute bottom-3 left-3 rounded-full border border-white/75 bg-[rgba(255,252,248,0.88)] px-3 py-1.5 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-strong)] shadow-[0_10px_22px_rgba(70,44,26,0.1)] sm:bottom-4 sm:left-4 sm:text-[0.72rem]">
+        5 sabores oficiais
+      </div>
+    </div>
+  );
 }
 
 export function PublicOrderPage() {
@@ -1574,16 +1620,7 @@ export function PublicOrderPage() {
                   </div>
                 ) : (
                   <div className="mt-4 rounded-[20px] border border-white/80 bg-white/80 p-3">
-                    <div className="relative aspect-[16/10] overflow-hidden rounded-[18px] xl:aspect-[21/10]">
-                      <Image
-                        alt="Caixa Sabores com 7 broas variadas"
-                        className="h-full w-full object-cover"
-                        fill
-                        sizes="(max-width: 768px) 70vw, 420px"
-                        src={ORDER_SABORES_REFERENCE_IMAGE}
-                      />
-                      <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_24%,rgba(46,29,20,0.12)_100%)]" />
-                    </div>
+                    <PublicOrderSaboresCollage />
                   </div>
                 )}
               </div>
@@ -1610,7 +1647,7 @@ export function PublicOrderPage() {
             ) : null}
 
             {!result ? (
-              <div className="app-form-actions app-form-actions--mobile-sticky xl:hidden">
+              <div className="app-form-actions rounded-[20px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.94)] p-3 shadow-[0_18px_32px_rgba(70,44,26,0.08)] backdrop-blur-[10px] xl:hidden">
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <span className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
                     Total
