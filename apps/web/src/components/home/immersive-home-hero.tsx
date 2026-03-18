@@ -1,6 +1,7 @@
 'use client';
 
 import Image from 'next/image';
+import Link from 'next/link';
 import { startTransition, useCallback, useEffect, useId, useRef, useState } from 'react';
 
 type HeroImage = {
@@ -366,15 +367,13 @@ export function ImmersiveHomeHero() {
         </a>
 
         <div className="flex flex-col items-start gap-3 pb-4 sm:flex-row sm:flex-wrap sm:items-center sm:pb-6">
-          <button
-            aria-disabled="true"
-            className="inline-flex min-h-12 cursor-not-allowed items-center justify-center rounded-full border border-white/12 bg-[rgba(56,34,14,0.26)] px-7 text-sm font-semibold uppercase tracking-[0.18em] text-[rgba(255,248,232,0.76)] backdrop-blur-md"
+          <Link
+            className="inline-flex min-h-12 items-center justify-center rounded-full border border-white/14 bg-[rgba(56,34,14,0.42)] px-7 text-sm font-semibold uppercase tracking-[0.18em] text-[rgba(255,248,232,0.96)] backdrop-blur-md transition-[background,border-color,transform] duration-300 ease-out hover:border-white/24 hover:bg-[rgba(56,34,14,0.54)] hover:translate-y-[-1px]"
             data-home-cta
-            disabled
-            type="button"
+            href="/pedido"
           >
-            Em breve
-          </button>
+            Fazer pedido
+          </Link>
         </div>
       </section>
     </main>
