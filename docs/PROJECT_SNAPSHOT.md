@@ -37,6 +37,7 @@ Ultima atualizacao: 2026-03-18
 - `/pedido` agora deixa explicito antes do submit que pedido novo nao entra para hoje, mostrando o primeiro horario disponivel na propria area de agendamento e no resumo lateral.
 - A `Caixa Sabores` de `/pedido` agora mostra uma composicao com as 5 artes oficiais dos sabores no mesmo envelope visual da imagem anterior.
 - O autocomplete de endereco em `/pedido` e `/clientes` saiu do widget legado `google.maps.places.Autocomplete` e passou para a API nova programatica do Google Places, preservando os inputs atuais e eliminando o warning de deprecacao no console.
+- A linha de quantidade dos cards de caixas em `/pedido` saiu do grid aninhado fragil e passou a usar miolo flexivel com container query por card, evitando que o selo `0 caixas` seja esmagado entre input e botao `+` em Safari/desktop.
 - `/dashboard` voltou a existir como rota oculta interna, agora com painel real de analytics first-party do site, vitals e performance financeira/operacional da broa.
 - O web passou a instrumentar navegacao, links, funil e web vitals por coleta propria, gravando esses eventos na API para leitura imediata no dashboard.
 - `/dashboard` deixou de depender so de obscuridade: agora abre apenas em host operacional/loopback, usa bridge protegido no web e a API exige token de bridge.
@@ -69,6 +70,7 @@ Ultima atualizacao: 2026-03-18
 - `/pedido`: CTA principal abaixo do bloco `Resumo`; em `Entrega` ele calcula o frete antes da finalizacao, e em `Retirada` o frete zera.
 - `/pedido`: desktop sem colapso nos blocos de agendamento e sabores; a copy de agendamento agora avisa claramente que pedido novo nao entra para hoje.
 - `/pedido`: autocomplete de endereco segue no input atual, com sugestoes novas do Google Places e sem warning legado no console.
+- `/pedido`: cards de caixas no desktop mantem input e selo de quantidade legiveis lado a lado, sem o bloco `caixas` comprimir ou quebrar em colunas estreitas.
 - `/`: landing publica fullscreen da marca, preparada para `www.querobroa.com.br`.
 - `/`: landing publica fullscreen da marca com CTA de atalho mobile para instalar/acessar `Pedido rapido`.
 - `/pedidos`: agenda do dia, criacao de pedido, status, producao, entrega e pagamento.
@@ -121,7 +123,7 @@ Ultima atualizacao: 2026-03-18
 - Data: 2026-03-18
 - Ciclo executado: `pnpm --filter @querobroapp/web lint`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/api lint`, `node --test tests/public-number-sequencing.test.mjs tests/order-intake-google-form.test.mjs tests/order-intake-whatsapp-flow.test.mjs tests/customer-dedupe-and-intake.test.mjs tests/external-order-schedule-guard.test.mjs`, `pnpm qa:critical-e2e`
 - Validacao adicional: browser real em mobile para `/pedido` e `/pedidos`, com pedido publico concluido localmente ate `PIX_PENDING` e cleanup automatico dos dados `[TESTE_E2E]`; browser real adicional em desktop para `/pedido` e `/clientes`, confirmando sugestoes do Google Places, preenchimento do endereco e ausencia do warning legado no console.
-- Resultado: intake publico voltou a criar pedido com sucesso (`Pedido #454` local), o E2E critico concluiu a jornada com pedido `ENTREGUE/PAGO`, o mobile ficou sem elementos fixos intrusivos em `/pedido` e `/pedidos`, e o autocomplete novo de endereco passou a preencher `placeId`/coordenadas sem warning de deprecacao.
+- Resultado: intake publico voltou a criar pedido com sucesso (`Pedido #454` local), o E2E critico concluiu a jornada com pedido `ENTREGUE/PAGO`, o mobile ficou sem elementos fixos intrusivos em `/pedido` e `/pedidos`, o autocomplete novo de endereco passou a preencher `placeId`/coordenadas sem warning de deprecacao, e os cards de caixas ficaram estaveis em desktop (`1267x768` e `1024x768`) sem esmagar o selo `caixas`.
 
 ## Gaps abertos
 

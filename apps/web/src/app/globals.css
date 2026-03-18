@@ -4180,22 +4180,51 @@ input[type='radio'] {
 
 .public-order-box-card__controls {
   display: grid;
-  grid-template-columns: clamp(3rem, 8vw, 4rem) minmax(0, 1fr) clamp(3rem, 8vw, 4rem);
+  grid-template-columns: clamp(2.85rem, 7vw, 3.9rem) minmax(0, 1fr) clamp(2.85rem, 7vw, 3.9rem);
   align-items: center;
-  gap: clamp(0.5rem, 1vw, 0.75rem);
+  gap: clamp(0.45rem, 0.9vw, 0.7rem);
 }
 
 .public-order-box-card__summary {
-  display: grid;
-  gap: 0.5rem;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0.45rem;
 }
 
 .public-order-box-card__pill {
+  flex: 1 1 clamp(4.9rem, 28cqw, 6.1rem);
+  min-width: clamp(4.75rem, 24cqw, 5.65rem);
   min-height: clamp(3rem, 7vw, 4rem);
-  display: grid;
-  align-content: center;
-  font-size: clamp(0.68rem, 0.64rem + 0.1vw, 0.76rem);
-  line-height: 1.2;
+  padding: 0.45rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0.12rem;
+  line-height: 1.05;
+  text-align: center;
+}
+
+.public-order-box-card__summary .app-input {
+  flex: 1 1 clamp(6rem, 40cqw, 7.35rem);
+  min-width: clamp(5.5rem, 34cqw, 7rem);
+}
+
+.public-order-box-card__pill-count {
+  font-size: clamp(0.96rem, 0.9rem + 0.14vw, 1.08rem);
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--ink-strong);
+}
+
+.public-order-box-card__pill-label {
+  font-size: clamp(0.56rem, 0.53rem + 0.08vw, 0.68rem);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
 }
 
 .public-order-custom-grid {
@@ -4261,8 +4290,43 @@ input[type='radio'] {
 
 @media (min-width: 48rem) {
   .public-order-box-card__summary {
-    grid-template-columns: minmax(6.5rem, 8.25rem) minmax(0, 1fr);
-    align-items: center;
+    flex-wrap: nowrap;
+  }
+}
+
+@container (max-width: 22rem) {
+  .public-order-box-card__title {
+    font-size: clamp(0.9rem, 0.86rem + 0.14vw, 1rem);
+  }
+
+  .public-order-box-card__detail {
+    font-size: clamp(0.7rem, 0.67rem + 0.08vw, 0.78rem);
+  }
+
+  .public-order-box-card__controls {
+    grid-template-columns: 3rem minmax(0, 1fr) 3rem;
+    gap: 0.45rem;
+  }
+
+  .public-order-box-card__summary .app-input {
+    flex-basis: 5.85rem;
+    min-width: 5.25rem;
+  }
+
+  .public-order-box-card__pill {
+    flex-basis: 4.6rem;
+    min-width: 4.35rem;
+  }
+}
+
+@container (max-width: 18.5rem) {
+  .public-order-box-card__summary {
+    flex-direction: column;
+  }
+
+  .public-order-box-card__summary .app-input,
+  .public-order-box-card__pill {
+    min-width: 100%;
   }
 }
 

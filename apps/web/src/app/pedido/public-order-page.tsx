@@ -1437,8 +1437,11 @@ export function PublicOrderPage() {
                             placeholder="0"
                             aria-label={meta.label}
                           />
-                          <div className="public-order-box-card__pill rounded-[16px] border border-white/80 bg-white/80 px-3 py-2.5 text-center text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-[color:var(--ink-muted)] sm:rounded-[18px] sm:py-3 sm:text-xs xl:min-h-[64px] xl:content-center">
-                            {quantity} {pluralize(quantity, 'caixa', 'caixas')}
+                          <div className="public-order-box-card__pill rounded-[16px] border border-white/80 bg-white/80 sm:rounded-[18px]">
+                            <span className="public-order-box-card__pill-count">{quantity}</span>
+                            <span className="public-order-box-card__pill-label">
+                              {pluralize(quantity, 'caixa', 'caixas')}
+                            </span>
                           </div>
                         </div>
                         <button

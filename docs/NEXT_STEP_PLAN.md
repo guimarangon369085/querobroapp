@@ -68,6 +68,7 @@ Criterio de pronto:
 - Manter em `/pedido` a mensagem explicita de que pedido novo nao entra para hoje, sempre mostrando o primeiro horario liberado antes do erro final.
 - Manter `/pedido` sem subtotal/CTA flutuante no mobile e com a `Caixa Sabores` exibindo a composicao oficial dos 5 sabores.
 - Manter `/pedido` e `/clientes` no autocomplete novo do Google Places, sem regressao para o widget legado nem novos warnings de console ao selecionar sugestao.
+- Manter a linha de quantidade dos cards de `/pedido` no layout flexivel novo, sem voltar a comprimir o selo `caixas` em Safari/desktop ou em larguras intermediarias.
 - Manter `/dashboard` acessivel no menu principal sem voltar a aplicar trava de host no web por engano.
 - Manter `/dashboard` no formato editorial didatico novo, sem regressao para cards genericos ou leitura mais tecnica do que humana.
 - Manter `Novo pedido` de `/pedidos` estavel em mobile, sem popup deformado nem quebra no bloco de quantidade.
