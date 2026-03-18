@@ -19,6 +19,45 @@ type LoadGooglePlacesOptions = {
   region?: string;
 };
 
+export type GooglePlacesAutocompleteRequestLike = {
+  input: string;
+  includedRegionCodes?: string[];
+  inputOffset?: number;
+  language?: string;
+  region?: string;
+  sessionToken?: unknown;
+};
+
+export type GooglePlacesFormattableTextLike = {
+  text?: string;
+};
+
+export type GooglePlacesPlaceLike = {
+  fetchFields?: (options: { fields: string[] }) => Promise<unknown>;
+};
+
+export type GooglePlacesPlacePredictionLike = {
+  mainText?: GooglePlacesFormattableTextLike;
+  placeId?: string;
+  secondaryText?: GooglePlacesFormattableTextLike;
+  text?: GooglePlacesFormattableTextLike;
+  toPlace?: () => GooglePlacesPlaceLike;
+  types?: string[];
+};
+
+export type GooglePlacesAutocompleteSuggestionLike = {
+  placePrediction?: GooglePlacesPlacePredictionLike;
+};
+
+export type GooglePlacesAutocompleteDataLibraryLike = {
+  AutocompleteSessionToken?: new () => unknown;
+  AutocompleteSuggestion?: {
+    fetchAutocompleteSuggestions?: (
+      request: GooglePlacesAutocompleteRequestLike
+    ) => Promise<{ suggestions?: GooglePlacesAutocompleteSuggestionLike[] }>;
+  };
+};
+
 let googlePlacesLoaderPromise: Promise<GoogleMapsGlobal> | null = null;
 
 function buildGooglePlacesScriptUrl(options: LoadGooglePlacesOptions) {
@@ -127,4 +166,31 @@ export async function loadGooglePlacesLibrary(options: LoadGooglePlacesOptions) 
     });
 
   return googlePlacesLoaderPromise;
+}
+
+export async function loadGooglePlacesAutocompleteDataLibrary(options: LoadGooglePlacesOptions) {
+  const google = await loadGooglePlacesLibrary(options);
+  const start = Date.now();
+  const timeoutMs = 5000;
+
+  while (Date.now() - start < timeoutMs) {
+    const mapsApi = google.maps;
+    if (typeof mapsApi?.importLibrary !== 'function') {
+      await sleep(120);
+      continue;
+    }
+
+    try {
+      const library = (await mapsApi.importLibrary('places')) as GooglePlacesAutocompleteDataLibraryLike;
+      if (library.AutocompleteSuggestion?.fetchAutocompleteSuggestions) {
+        return library;
+      }
+    } catch {
+      // The Maps script may still be hydrating the Places data layer; retry until timeout below.
+    }
+
+    await sleep(120);
+  }
+
+  throw new Error('Autocomplete Data indisponivel no Google Places atual.');
 }

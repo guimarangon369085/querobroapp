@@ -25,6 +25,7 @@ import { useTutorialSpotlight } from '@/hooks/use-tutorial-spotlight';
 import { AppIcon } from '@/components/app-icons';
 import { useFeedback } from '@/components/feedback-provider';
 import { FormField } from '@/components/form/FormField';
+import { GoogleAddressAutocompleteInput } from '@/components/form/GoogleAddressAutocompleteInput';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
 import {
@@ -33,10 +34,8 @@ import {
   buildCustomerAddressSummary,
   buildCustomerNameAutofill,
   type CustomerAutofillPatch,
-  type GooglePlaceResultLike,
   lookupPostalCodeAutofill
 } from '@/lib/customer-autofill';
-import { loadGooglePlacesLibrary } from '@/lib/google-places';
 import { submitOrderIntake } from '@/features/orders/orders-api';
 
 type CustomerRecord = Customer & { email?: string | null };
@@ -271,97 +270,6 @@ function CustomersPageContent() {
   }, []);
 
   useEffect(() => {
-    if (!GOOGLE_MAPS_API_KEY) return;
-
-    const inputs = Array.from(
-      new Set([addressInputRef.current, modalAddressInputRef.current].filter(Boolean))
-    ) as HTMLInputElement[];
-    if (inputs.length === 0) return;
-
-    let disposed = false;
-    const listeners: Array<{ remove?: () => void }> = [];
-
-    const applyGooglePatch = (patch: ReturnType<typeof buildCustomerAddressAutofillFromGooglePlace>) => {
-      if (Object.keys(patch).length === 0) return;
-      setForm((prev) => {
-        const next: CustomerFormState = {
-          ...prev,
-          // Complemento permanece manual; nao e preenchido pelo endereco do Google.
-          address: `${patch.address || ''}`,
-          addressLine1: `${patch.addressLine1 || ''}`,
-          neighborhood: `${patch.neighborhood || ''}`,
-          city: `${patch.city || ''}`,
-          state: `${patch.state || ''}`,
-          postalCode: `${patch.postalCode || ''}`,
-          country: `${patch.country || 'Brasil'}`,
-          placeId: `${patch.placeId || ''}`,
-          ...(typeof patch.lat === 'number' ? { lat: patch.lat } : { lat: undefined }),
-          ...(typeof patch.lng === 'number' ? { lng: patch.lng } : { lng: undefined })
-        };
-
-        customerAutofillRef.current.address = `${next.address || ''}`;
-        customerAutofillRef.current.addressLine1 = `${next.addressLine1 || ''}`;
-        customerAutofillRef.current.city = `${next.city || ''}`;
-        customerAutofillRef.current.country = `${next.country || ''}`;
-        customerAutofillRef.current.neighborhood = `${next.neighborhood || ''}`;
-        customerAutofillRef.current.postalCode = `${next.postalCode || ''}`;
-        customerAutofillRef.current.state = `${next.state || ''}`;
-
-        return next;
-      });
-    };
-
-    void loadGooglePlacesLibrary({ apiKey: GOOGLE_MAPS_API_KEY })
-      .then((google) => {
-        if (disposed) return;
-        const mapsApi = (google as { maps?: { places?: { Autocomplete?: unknown } } }).maps;
-        const placesApi = mapsApi?.places as
-          | {
-              Autocomplete?: new (
-                input: HTMLInputElement,
-                options?: Record<string, unknown>
-              ) => {
-                addListener: (
-                  eventName: string,
-                  handler: () => void
-                ) => {
-                  remove?: () => void;
-                };
-                getPlace?: () => unknown;
-              };
-            }
-          | undefined;
-
-        if (!placesApi?.Autocomplete) return;
-
-        for (const input of inputs) {
-          const autocomplete = new placesApi.Autocomplete(input, {
-            fields: ['address_components', 'formatted_address', 'geometry', 'place_id'],
-            componentRestrictions: { country: 'br' },
-            types: ['address']
-          });
-
-          const listener = autocomplete.addListener('place_changed', () => {
-            const place = autocomplete.getPlace?.();
-            const patch = buildCustomerAddressAutofillFromGooglePlace(place as GooglePlaceResultLike);
-            applyGooglePatch(patch);
-          });
-          listeners.push(listener);
-        }
-      })
-      .catch((error) => {
-        console.warn(error instanceof Error ? error.message : 'Google Places indisponivel no momento.');
-      });
-
-    return () => {
-      disposed = true;
-      for (const listener of listeners) {
-        if (listener?.remove) listener.remove();
-      }
-    };
-  }, [isCustomerModalOpen, isCustomerInfoEditing]);
-
-  useEffect(() => {
     const focus = consumeFocusQueryParam(searchParams);
     if (!focus) return;
 
@@ -408,6 +316,36 @@ function CustomersPageContent() {
     }
 
     return nextForm;
+  };
+
+  const applyGooglePatch = (patch: ReturnType<typeof buildCustomerAddressAutofillFromGooglePlace>) => {
+    if (Object.keys(patch).length === 0) return;
+    setForm((prev) => {
+      const next: CustomerFormState = {
+        ...prev,
+        // Complemento permanece manual; nao e preenchido pelo endereco do Google.
+        address: `${patch.address || ''}`,
+        addressLine1: `${patch.addressLine1 || ''}`,
+        neighborhood: `${patch.neighborhood || ''}`,
+        city: `${patch.city || ''}`,
+        state: `${patch.state || ''}`,
+        postalCode: `${patch.postalCode || ''}`,
+        country: `${patch.country || 'Brasil'}`,
+        placeId: `${patch.placeId || ''}`,
+        ...(typeof patch.lat === 'number' ? { lat: patch.lat } : { lat: undefined }),
+        ...(typeof patch.lng === 'number' ? { lng: patch.lng } : { lng: undefined })
+      };
+
+      customerAutofillRef.current.address = `${next.address || ''}`;
+      customerAutofillRef.current.addressLine1 = `${next.addressLine1 || ''}`;
+      customerAutofillRef.current.city = `${next.city || ''}`;
+      customerAutofillRef.current.country = `${next.country || ''}`;
+      customerAutofillRef.current.neighborhood = `${next.neighborhood || ''}`;
+      customerAutofillRef.current.postalCode = `${next.postalCode || ''}`;
+      customerAutofillRef.current.state = `${next.state || ''}`;
+
+      return next;
+    });
   };
 
   const seedCustomerAutofill = (currentForm: CustomerFormState, patch: CustomerAutofillPatch) => {
@@ -968,23 +906,18 @@ function CustomersPageContent() {
             />
           </FormField>
           <FormField label="Endereço">
-            <input
+            <GoogleAddressAutocompleteInput
               className="app-input"
               placeholder="Rua, numero, bairro, cidade"
-              ref={addressInputRef}
-              list="customer-address-recommendations"
+              inputRef={addressInputRef}
               value={form.address || ''}
               autoComplete="street-address"
-              onChange={(e) => handleAddressChange(e.target.value)}
+              googleApiKey={GOOGLE_MAPS_API_KEY}
+              manualSuggestions={addressRecommendations}
+              onValueChange={handleAddressChange}
+              onGooglePlacePick={applyGooglePatch}
               onBlur={(e) => handleAddressChange(normalizeAddress(e.target.value) || '')}
             />
-            {addressRecommendations.length > 0 ? (
-              <datalist id="customer-address-recommendations">
-                {addressRecommendations.map((entry) => (
-                  <option key={entry} value={entry} />
-                ))}
-              </datalist>
-            ) : null}
           </FormField>
           <FormField label="Complemento">
             <input
@@ -1406,14 +1339,16 @@ function CustomersPageContent() {
                         />
                       </FormField>
                       <FormField label="Endereço">
-                        <input
+                        <GoogleAddressAutocompleteInput
                           className="app-input"
                           placeholder="Rua, numero, bairro, cidade"
-                          ref={modalAddressInputRef}
-                          list="customer-address-recommendations"
+                          inputRef={modalAddressInputRef}
                           value={form.address || ''}
                           autoComplete="street-address"
-                          onChange={(event) => handleAddressChange(event.target.value)}
+                          googleApiKey={GOOGLE_MAPS_API_KEY}
+                          manualSuggestions={addressRecommendations}
+                          onValueChange={handleAddressChange}
+                          onGooglePlacePick={applyGooglePatch}
                           onBlur={(event) => handleAddressChange(normalizeAddress(event.target.value) || '')}
                         />
                       </FormField>

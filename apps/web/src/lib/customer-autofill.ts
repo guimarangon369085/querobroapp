@@ -22,22 +22,30 @@ export type CustomerAutofillPatch = Partial<
 
 export type GooglePlaceAddressComponentLike = {
   long_name?: string;
+  longText?: string;
   short_name?: string;
+  shortText?: string;
   types?: string[];
 };
 
+export type GooglePlaceLocationLike = {
+  lat?: () => number;
+  lng?: () => number;
+};
+
 export type GooglePlaceGeometryLike = {
-  location?: {
-    lat?: () => number;
-    lng?: () => number;
-  };
+  location?: GooglePlaceLocationLike;
 };
 
 export type GooglePlaceResultLike = {
+  addressComponents?: GooglePlaceAddressComponentLike[];
   place_id?: string;
+  id?: string;
   formatted_address?: string;
+  formattedAddress?: string;
   address_components?: GooglePlaceAddressComponentLike[];
   geometry?: GooglePlaceGeometryLike;
+  location?: GooglePlaceLocationLike;
 };
 
 const POSTAL_CODE_PATTERN = /\b\d{5}-?\d{3}\b/;
@@ -170,7 +178,10 @@ function normalizeGoogleAddressComponent(
 ) {
   const component = getAddressComponent(components, types);
   if (!component) return '';
-  const rawValue = mode === 'short' ? component.short_name : component.long_name;
+  const rawValue =
+    mode === 'short'
+      ? component.short_name || component.shortText
+      : component.long_name || component.longText;
   return normalizeSegment(rawValue);
 }
 
@@ -179,7 +190,7 @@ export function buildCustomerAddressAutofillFromGooglePlace(
 ): CustomerAutofillPatch {
   if (!place) return {};
 
-  const components = place.address_components || [];
+  const components = place.address_components || place.addressComponents || [];
   const street = normalizeGoogleAddressComponent(components, ['route']);
   const streetNumber = normalizeGoogleAddressComponent(components, ['street_number'], 'short');
   const neighborhood = normalizeGoogleAddressComponent(components, ['sublocality_level_1', 'neighborhood']);
@@ -191,8 +202,9 @@ export function buildCustomerAddressAutofillFromGooglePlace(
   const country = normalizeGoogleAddressComponent(components, ['country']);
 
   const addressLine1 = [street, streetNumber].filter(Boolean).join(', ');
-  const lat = place.geometry?.location?.lat?.();
-  const lng = place.geometry?.location?.lng?.();
+  const coordinates = place.geometry?.location || place.location;
+  const lat = coordinates?.lat?.();
+  const lng = coordinates?.lng?.();
 
   const patch: CustomerAutofillPatch = {
     addressLine1,
@@ -201,13 +213,14 @@ export function buildCustomerAddressAutofillFromGooglePlace(
     state,
     postalCode,
     country,
-    placeId: place.place_id || '',
+    placeId: place.place_id || place.id || '',
     ...(Number.isFinite(lat) ? { lat } : {}),
     ...(Number.isFinite(lng) ? { lng } : {})
   };
 
   const addressFromSummary = buildCustomerAddressSummary(patch);
-  patch.address = compactWhitespace(place.formatted_address || '') || addressFromSummary || '';
+  patch.address =
+    compactWhitespace(place.formatted_address || place.formattedAddress || '') || addressFromSummary || '';
   return patch;
 }
 

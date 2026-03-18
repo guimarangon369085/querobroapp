@@ -10,14 +10,10 @@ import {
   type OrderIntakeMeta,
   type PixCharge
 } from '@querobroapp/shared';
+import { GoogleAddressAutocompleteInput } from '@/components/form/GoogleAddressAutocompleteInput';
 import { FormField } from '@/components/form/FormField';
 import { useFeedback } from '@/components/feedback-provider';
 import { resolveAnalyticsSessionId, trackAnalyticsEvent } from '@/lib/analytics';
-import {
-  buildCustomerAddressAutofillFromGooglePlace,
-  type GooglePlaceResultLike
-} from '@/lib/customer-autofill';
-import { loadGooglePlacesLibrary } from '@/lib/google-places';
 import { OrderCardArtwork } from '@/features/orders/order-card-artwork';
 import {
   ORDER_BOX_CATALOG,
@@ -690,76 +686,6 @@ export function PublicOrderPage() {
   };
 
   useEffect(() => {
-    if (!GOOGLE_MAPS_API_KEY || form.fulfillmentMode !== 'DELIVERY') return;
-
-    const input = addressInputRef.current;
-    if (!input) return;
-
-    let disposed = false;
-    let listener: { remove?: () => void } | null = null;
-
-    void loadGooglePlacesLibrary({ apiKey: GOOGLE_MAPS_API_KEY })
-      .then((google) => {
-        if (disposed) return;
-
-        const mapsApi = (google as { maps?: { places?: { Autocomplete?: unknown } } }).maps;
-        const placesApi = mapsApi?.places as
-          | {
-              Autocomplete?: new (
-                input: HTMLInputElement,
-                options?: Record<string, unknown>
-              ) => {
-                addListener: (
-                  eventName: string,
-                  handler: () => void
-                ) => {
-                  remove?: () => void;
-                };
-                getPlace?: () => unknown;
-              };
-            }
-          | undefined;
-
-        if (!placesApi?.Autocomplete) return;
-
-        const autocomplete = new placesApi.Autocomplete(input, {
-          fields: ['address_components', 'formatted_address', 'geometry', 'place_id'],
-          componentRestrictions: { country: 'br' },
-          types: ['address']
-        });
-
-        listener = autocomplete.addListener('place_changed', () => {
-          const place = autocomplete.getPlace?.();
-          const patch = buildCustomerAddressAutofillFromGooglePlace(place as GooglePlaceResultLike);
-          const nextAddress = `${patch.address || ''}`.trim();
-          if (!nextAddress) return;
-          rememberDeliveryLocation({
-            address: nextAddress,
-            placeId: `${patch.placeId || ''}`,
-            lat: typeof patch.lat === 'number' ? patch.lat : null,
-            lng: typeof patch.lng === 'number' ? patch.lng : null
-          });
-
-          setForm((current) => ({
-            ...current,
-            address: nextAddress,
-            placeId: `${patch.placeId || ''}`,
-            lat: typeof patch.lat === 'number' ? patch.lat : null,
-            lng: typeof patch.lng === 'number' ? patch.lng : null
-          }));
-        });
-      })
-      .catch((error) => {
-        console.warn(error instanceof Error ? error.message : 'Google Places indisponivel no momento.');
-      });
-
-    return () => {
-      disposed = true;
-      if (listener?.remove) listener.remove();
-    };
-  }, [form.fulfillmentMode, rememberDeliveryLocation]);
-
-  useEffect(() => {
     if (form.fulfillmentMode !== 'DELIVERY') {
       setDeliveryQuote({
         provider: 'NONE',
@@ -1346,29 +1272,50 @@ export function PublicOrderPage() {
                     <FormField
                       label={form.fulfillmentMode === 'DELIVERY' ? 'Endereco para entrega' : 'Ponto de retirada'}
                     >
-                      <input
+                      <GoogleAddressAutocompleteInput
                         className="app-input xl:h-14 xl:text-[1.02rem]"
-                        ref={addressInputRef}
+                        inputRef={addressInputRef}
                         name="street-address"
                         value={form.address}
-                        onChange={(event) =>
+                        onValueChange={(nextValue) =>
                           setForm((current) => {
                             if (current.fulfillmentMode !== 'DELIVERY') return current;
                             rememberDeliveryLocation({
-                              address: event.target.value,
+                              address: nextValue,
                               placeId: '',
                               lat: null,
                               lng: null
                             });
                             return {
                               ...current,
-                              address: event.target.value,
+                              address: nextValue,
                               placeId: '',
                               lat: null,
                               lng: null
                             };
                           })
                         }
+                        onGooglePlacePick={(patch) => {
+                          const nextAddress = `${patch.address || ''}`.trim();
+                          if (!nextAddress) return;
+                          rememberDeliveryLocation({
+                            address: nextAddress,
+                            placeId: `${patch.placeId || ''}`,
+                            lat: typeof patch.lat === 'number' ? patch.lat : null,
+                            lng: typeof patch.lng === 'number' ? patch.lng : null
+                          });
+
+                          setForm((current) => {
+                            if (current.fulfillmentMode !== 'DELIVERY') return current;
+                            return {
+                              ...current,
+                              address: nextAddress,
+                              placeId: `${patch.placeId || ''}`,
+                              lat: typeof patch.lat === 'number' ? patch.lat : null,
+                              lng: typeof patch.lng === 'number' ? patch.lng : null
+                            };
+                          });
+                        }}
                         placeholder={
                           form.fulfillmentMode === 'DELIVERY'
                             ? 'Rua, numero e bairro'
@@ -1376,6 +1323,8 @@ export function PublicOrderPage() {
                         }
                         autoCapitalize="words"
                         autoComplete={form.fulfillmentMode === 'DELIVERY' ? 'street-address' : 'off'}
+                        googleApiKey={GOOGLE_MAPS_API_KEY}
+                        googleEnabled={form.fulfillmentMode === 'DELIVERY' && !isPickupSelected}
                         readOnly={isPickupSelected}
                         aria-readonly={isPickupSelected}
                         spellCheck={false}
