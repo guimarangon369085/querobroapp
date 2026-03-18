@@ -3847,7 +3847,7 @@ function OrdersPageContent() {
       {isNewOrderModalOpen ? (
         <div className="order-detail-modal" role="presentation" onClick={closeNewOrderModal}>
           <div
-            className="order-detail-modal__dialog"
+            className="order-detail-modal__dialog order-detail-modal__dialog--quick-create"
             ref={newOrderDialogRef}
             role="dialog"
             aria-modal="true"
@@ -3862,48 +3862,50 @@ function OrdersPageContent() {
               <AppIcon name="close" className="h-4 w-4" />
               Fechar
             </button>
-            <OrderQuickCreate
-              tutorialMode={tutorialMode}
-              customerOptions={customerOptions}
-              productsForCards={orderableProducts}
-              fulfillmentMode={newOrderFulfillmentMode}
-              customerSearch={customerSearch}
-              selectedCustomerId={newOrderCustomerId}
-              restoredFromLastOrder={restoredLastOrderDraft}
-              newOrderScheduledAt={newOrderScheduledAt}
-              newOrderDiscount={newOrderDiscount}
-              newOrderNotes={newOrderNotes}
-              newOrderItems={newOrderItems}
-              draftTotalUnits={draftTotalUnits}
-              virtualBoxRemainingUnits={draftVirtualBoxRemainingUnits}
-              canCreateOrder={canCreateOrder}
-              isCreatingOrder={isCreatingOrder}
-              isQuotingDelivery={isQuotingNewOrderDelivery}
-              orderError={orderError}
-              draftTotal={draftTotal}
-              deliveryQuote={newOrderDeliveryQuote}
-              deliveryQuoteError={newOrderDeliveryQuoteError}
-              productMap={productMap}
-              onFulfillmentModeChange={setNewOrderFulfillmentMode}
-              onCustomerSearchChange={setCustomerSearch}
-              onCustomerOptionPick={(option) => {
-                setCustomerSearch(option.label);
-                syncNewOrderCustomerSelection(option.label, customerOptions);
-              }}
-              onScheduledAtChange={setNewOrderScheduledAt}
-              onDiscountChange={setNewOrderDiscount}
-              onDiscountBlur={() =>
-                setNewOrderDiscount(formatMoneyInputBR(newOrderDiscount || '0') || '0,00')
-              }
-              onNotesChange={setNewOrderNotes}
-              onCreateOrder={createOrder}
-              onRefreshDeliveryQuote={() => {
-                void refreshNewOrderDeliveryQuote();
-              }}
-              onClearDraft={clearDraft}
-              onDecrementProduct={decrementDraftItem}
-              onAddProductUnits={addDraftItemUnits}
-            />
+            <div className="order-detail-modal__panel order-detail-modal__panel--quick-create">
+              <OrderQuickCreate
+                tutorialMode={tutorialMode}
+                customerOptions={customerOptions}
+                productsForCards={orderableProducts}
+                fulfillmentMode={newOrderFulfillmentMode}
+                customerSearch={customerSearch}
+                selectedCustomerId={newOrderCustomerId}
+                restoredFromLastOrder={restoredLastOrderDraft}
+                newOrderScheduledAt={newOrderScheduledAt}
+                newOrderDiscount={newOrderDiscount}
+                newOrderNotes={newOrderNotes}
+                newOrderItems={newOrderItems}
+                draftTotalUnits={draftTotalUnits}
+                virtualBoxRemainingUnits={draftVirtualBoxRemainingUnits}
+                canCreateOrder={canCreateOrder}
+                isCreatingOrder={isCreatingOrder}
+                isQuotingDelivery={isQuotingNewOrderDelivery}
+                orderError={orderError}
+                draftTotal={draftTotal}
+                deliveryQuote={newOrderDeliveryQuote}
+                deliveryQuoteError={newOrderDeliveryQuoteError}
+                productMap={productMap}
+                onFulfillmentModeChange={setNewOrderFulfillmentMode}
+                onCustomerSearchChange={setCustomerSearch}
+                onCustomerOptionPick={(option) => {
+                  setCustomerSearch(option.label);
+                  syncNewOrderCustomerSelection(option.label, customerOptions);
+                }}
+                onScheduledAtChange={setNewOrderScheduledAt}
+                onDiscountChange={setNewOrderDiscount}
+                onDiscountBlur={() =>
+                  setNewOrderDiscount(formatMoneyInputBR(newOrderDiscount || '0') || '0,00')
+                }
+                onNotesChange={setNewOrderNotes}
+                onCreateOrder={createOrder}
+                onRefreshDeliveryQuote={() => {
+                  void refreshNewOrderDeliveryQuote();
+                }}
+                onClearDraft={clearDraft}
+                onDecrementProduct={decrementDraftItem}
+                onAddProductUnits={addDraftItemUnits}
+              />
+            </div>
           </div>
         </div>
       ) : null}

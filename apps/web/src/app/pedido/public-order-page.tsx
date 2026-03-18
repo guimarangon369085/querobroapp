@@ -208,7 +208,7 @@ function parseLocalDateTime(date: string, time: string) {
 }
 
 function buildPublicOrderScheduleErrorMessage(minimum: Date) {
-  return `Novos pedidos so podem ser agendados a partir de ${formatExternalOrderMinimumSchedule(minimum)}.`;
+  return `Pedidos novos nao entram para hoje. O primeiro horario disponivel agora e ${formatExternalOrderMinimumSchedule(minimum)}.`;
 }
 
 function extractErrorMessage(body: unknown) {
@@ -554,6 +554,10 @@ export function PublicOrderPage() {
   const deliveryFee = deliveryQuote?.fee ?? 0;
   const displayTotal = estimatedTotal + deliveryFee;
   const parsedScheduledAt = useMemo(() => parseLocalDateTime(form.date, form.time), [form.date, form.time]);
+  const minimumScheduleLabel = useMemo(
+    () => (minimumSchedule ? formatExternalOrderMinimumSchedule(minimumSchedule) : null),
+    [minimumSchedule]
+  );
   const isScheduleBelowMinimum = useMemo(() => {
     if (!minimumSchedule || !parsedScheduledAt) return false;
     return parsedScheduledAt.getTime() < minimumSchedule.getTime();
@@ -1184,14 +1188,14 @@ export function PublicOrderPage() {
         className="mx-auto w-full max-w-[1720px] px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:py-8 xl:px-10 2xl:px-12"
         ref={pageTopRef}
       >
-        <section className="grid gap-4 lg:gap-6 xl:grid-cols-[minmax(0,1.32fr)_minmax(320px,0.68fr)] 2xl:grid-cols-[minmax(0,1.4fr)_minmax(340px,0.64fr)]">
+        <section className="public-order-layout">
           <form
             autoComplete="on"
             className="grid gap-4 rounded-[26px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.88)] p-4 shadow-[0_22px_60px_rgba(70,44,26,0.12)] sm:gap-5 sm:rounded-[32px] sm:p-6 sm:shadow-[0_26px_90px_rgba(70,44,26,0.12)] xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:shadow-none"
             onSubmit={onSubmit}
             ref={orderFormRef}
           >
-            <div className="grid gap-4 xl:grid-cols-[minmax(300px,0.74fr)_minmax(0,1.26fr)] 2xl:grid-cols-[minmax(320px,0.7fr)_minmax(0,1.3fr)]">
+            <div className="public-order-intake-grid">
               <section
                 className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6 xl:h-full xl:p-7"
                 data-order-boxes-section
@@ -1234,9 +1238,15 @@ export function PublicOrderPage() {
                   <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">
                     Entrega ou retirada
                   </h2>
+                  {minimumScheduleLabel ? (
+                    <p className="mt-2 max-w-[44rem] text-sm leading-6 text-[color:var(--ink-muted)]">
+                      Pedidos novos nao entram para hoje. O formulario ja abre no primeiro horario disponivel:
+                      <strong className="ml-1 text-[color:var(--ink-strong)]">{minimumScheduleLabel}</strong>.
+                    </p>
+                  ) : null}
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="public-order-mode-grid">
                   {[
                     {
                       value: 'DELIVERY' as const,
@@ -1255,7 +1265,7 @@ export function PublicOrderPage() {
                         key={option.value}
                         type="button"
                         onClick={() => handleFulfillmentModeChange(option.value)}
-                        className={`rounded-[24px] border px-4 py-4 text-left xl:min-h-[112px] xl:px-5 ${
+                        className={`public-order-mode-card rounded-[24px] border px-4 py-4 text-left xl:min-h-[112px] xl:px-5 ${
                           active
                             ? 'border-[rgba(181,68,57,0.32)] bg-[linear-gradient(160deg,rgba(255,245,241,0.98),rgba(251,232,225,0.94))] shadow-[0_16px_34px_rgba(181,68,57,0.12)]'
                             : 'border-[rgba(126,79,45,0.08)] bg-[rgba(250,245,239,0.86)] hover:border-[rgba(126,79,45,0.18)] hover:bg-white/88'
@@ -1263,10 +1273,10 @@ export function PublicOrderPage() {
                       >
                         <div className="flex items-center justify-between gap-3">
                           <div>
-                            <p className="text-base font-semibold text-[color:var(--ink-strong)] xl:text-[1.05rem]">
+                            <p className="public-order-mode-card__title text-base font-semibold text-[color:var(--ink-strong)] xl:text-[1.05rem]">
                               {option.title}
                             </p>
-                            <p className="mt-1 text-sm text-[color:var(--ink-muted)] xl:text-[0.95rem]">
+                            <p className="public-order-mode-card__description mt-1 text-sm text-[color:var(--ink-muted)] xl:text-[0.95rem]">
                               {option.description}
                             </p>
                           </div>
@@ -1285,8 +1295,8 @@ export function PublicOrderPage() {
                   })}
                 </div>
 
-                <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_220px_180px]">
-                  <div className="md:col-span-2 xl:col-span-1">
+                <div className="public-order-schedule-grid mt-5">
+                  <div className="public-order-schedule-grid__address">
                     <FormField
                       label={form.fulfillmentMode === 'DELIVERY' ? 'Endereco para entrega' : 'Ponto de retirada'}
                     >
@@ -1347,6 +1357,15 @@ export function PublicOrderPage() {
                   </FormField>
                 </div>
 
+                {minimumScheduleLabel ? (
+                  <div className="mt-3 rounded-[18px] border border-[rgba(181,68,57,0.16)] bg-[rgba(255,244,240,0.82)] px-4 py-3 text-sm leading-6 text-[color:var(--ink-muted)]">
+                    <strong className="block text-[color:var(--ink-strong)]">Janela minima para pedido novo</strong>
+                    <span className="block mt-1">
+                      Hoje fica indisponivel para novos pedidos. Escolha a partir de <strong>{minimumScheduleLabel}</strong>.
+                    </span>
+                  </div>
+                ) : null}
+
                 <div className="mt-4">
                   <FormField label="Complemento">
                     <input
@@ -1370,20 +1389,20 @@ export function PublicOrderPage() {
                 </div>
               </div>
 
-              <div className="grid gap-3 sm:gap-4 xl:grid-cols-2 2xl:grid-cols-3">
+              <div className="public-order-box-grid">
                 {(Object.keys(boxCatalog) as BoxCode[]).map((code) => {
                   const meta = boxCatalog[code];
                   const quantity = parsedBoxCounts[code];
                   const active = quantity > 0;
                   return (
-                    <article
-                      key={code}
-                      className={`group grid gap-3 overflow-hidden rounded-[22px] border p-3 shadow-[0_14px_28px_rgba(74,47,31,0.08)] transition-transform duration-300 hover:-translate-y-1 sm:gap-4 sm:rounded-[26px] sm:p-4 sm:shadow-[0_16px_38px_rgba(74,47,31,0.08)] xl:grid-rows-[auto_minmax(0,1fr)_auto] xl:gap-4 xl:p-5 ${meta.accentClassName} ${
-                        active ? 'ring-1 ring-[rgba(181,68,57,0.16)]' : ''
-                      }`}
-                    >
-                      <div className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-3 sm:gap-4 sm:grid-cols-[118px_minmax(0,1fr)] xl:grid-cols-1 xl:items-start">
-                        <div className="relative h-[96px] w-[96px] shrink-0 sm:h-[118px] sm:w-[118px] xl:h-[188px] xl:w-full">
+                      <article
+                        key={code}
+                        className={`public-order-box-card group grid gap-3 overflow-hidden rounded-[22px] border p-3 shadow-[0_14px_28px_rgba(74,47,31,0.08)] transition-transform duration-300 hover:-translate-y-1 sm:gap-4 sm:rounded-[26px] sm:p-4 sm:shadow-[0_16px_38px_rgba(74,47,31,0.08)] xl:gap-4 xl:p-5 ${meta.accentClassName} ${
+                          active ? 'ring-1 ring-[rgba(181,68,57,0.16)]' : ''
+                        }`}
+                      >
+                      <div className="public-order-box-card__hero">
+                        <div className="public-order-box-card__media relative shrink-0">
                           <div className="relative h-full w-full overflow-hidden rounded-[18px] border border-white/80 bg-white/70 shadow-[0_12px_24px_rgba(74,47,31,0.12)] transition-transform duration-300 group-hover:translate-y-[-2px] sm:rounded-[22px] sm:shadow-[0_14px_28px_rgba(74,47,31,0.12)] xl:rounded-[24px]">
                             <OrderCardArtwork
                               alt={meta.label}
@@ -1392,20 +1411,20 @@ export function PublicOrderPage() {
                             />
                           </div>
                         </div>
-                        <div className="min-w-0 xl:flex xl:min-h-[148px] xl:flex-col">
-                          <h3 className="text-[0.96rem] font-semibold leading-tight tracking-[-0.02em] text-[color:var(--ink-strong)] sm:text-lg xl:text-[1.08rem]">
+                        <div className="public-order-box-card__body">
+                          <h3 className="public-order-box-card__title text-[0.96rem] font-semibold leading-tight tracking-[-0.02em] text-[color:var(--ink-strong)] sm:text-lg xl:text-[1.08rem]">
                             {meta.label}
                           </h3>
-                          <p className="mt-2 text-[0.76rem] leading-[1.35] text-[color:var(--ink-muted)] sm:text-sm sm:leading-6 xl:text-[0.84rem] xl:leading-6">
+                          <p className="public-order-box-card__detail mt-2 text-[0.76rem] leading-[1.35] text-[color:var(--ink-muted)] sm:text-sm sm:leading-6 xl:text-[0.84rem] xl:leading-6">
                             {meta.detail}
                           </p>
-                          <p className="mt-1 text-sm font-semibold text-[color:var(--ink-strong)] xl:mt-auto xl:pt-3 xl:text-[1rem]">
+                          <p className="public-order-box-card__price mt-1 text-sm font-semibold text-[color:var(--ink-strong)] xl:pt-3 xl:text-[1rem]">
                             {formatCurrencyBRL(meta.priceEstimate)}
                           </p>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-[52px_minmax(0,1fr)_52px] items-center gap-2 sm:grid-cols-[56px_minmax(0,1fr)_56px] sm:gap-3 xl:grid-cols-[64px_minmax(0,1fr)_64px] xl:gap-3">
+                      <div className="public-order-box-card__controls">
                         <button
                           type="button"
                           onClick={() => setBoxQuantity(code, Math.max(quantity - 1, 0))}
@@ -1414,7 +1433,7 @@ export function PublicOrderPage() {
                         >
                           −
                         </button>
-                        <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center xl:grid-cols-[132px_minmax(0,1fr)]">
+                        <div className="public-order-box-card__summary">
                           <input
                             className="app-input h-12 text-center text-base font-semibold sm:h-14 sm:text-lg xl:h-16 xl:text-xl"
                             inputMode="numeric"
@@ -1423,7 +1442,7 @@ export function PublicOrderPage() {
                             placeholder="0"
                             aria-label={meta.label}
                           />
-                          <div className="rounded-[16px] border border-white/80 bg-white/80 px-3 py-2.5 text-center text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-[color:var(--ink-muted)] sm:rounded-[18px] sm:py-3 sm:text-xs xl:min-h-[64px] xl:content-center">
+                          <div className="public-order-box-card__pill rounded-[16px] border border-white/80 bg-white/80 px-3 py-2.5 text-center text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-[color:var(--ink-muted)] sm:rounded-[18px] sm:py-3 sm:text-xs xl:min-h-[64px] xl:content-center">
                             {quantity} {pluralize(quantity, 'caixa', 'caixas')}
                           </div>
                         </div>
@@ -1461,11 +1480,11 @@ export function PublicOrderPage() {
                 </div>
 
                 {customBoxSummaries.length > 0 ? (
-                  <div className="mt-4 grid gap-3 xl:grid-cols-2">
+                  <div className="public-order-custom-grid mt-4">
                     {customBoxSummaries.map((box) => (
                       <article
                         key={box.id}
-                        className={`rounded-[20px] border p-4 xl:p-5 ${
+                        className={`public-order-custom-card rounded-[20px] border p-4 xl:p-5 ${
                           box.isComplete
                             ? 'border-emerald-200 bg-emerald-50/80'
                             : box.isActive
@@ -1473,7 +1492,7 @@ export function PublicOrderPage() {
                               : 'border-white/80 bg-white/80'
                         }`}
                       >
-                        <div className="flex items-start justify-between gap-3">
+                        <div className="public-order-custom-card__header">
                           <div>
                             <p className="text-sm font-semibold text-[color:var(--ink-strong)]">
                               Caixa Sabores #{box.index + 1}
@@ -1486,7 +1505,7 @@ export function PublicOrderPage() {
                                   : `Faltam ${box.remainingUnits}.`}
                             </p>
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="public-order-custom-card__meta">
                             <span className="rounded-full border border-white/80 bg-white/86 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)] sm:text-xs">
                               {box.totalUnits}/7
                             </span>
@@ -1507,33 +1526,33 @@ export function PublicOrderPage() {
                             return (
                               <div
                                 key={`${box.id}-${code}`}
-                                className="grid grid-cols-[minmax(0,1fr)_40px_50px_40px] items-center gap-1.5 rounded-[16px] border border-white/80 bg-white/82 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_44px_58px_44px] sm:gap-2 xl:grid-cols-[minmax(0,1fr)_44px_64px_44px]"
+                                className="public-order-custom-row rounded-[16px] border border-white/80 bg-white/82 px-3 py-2.5"
                               >
-                                <div className="min-w-0 flex items-center gap-2">
+                                <div className="public-order-custom-row__info">
                                   <div className="relative h-10 w-10 shrink-0">
                                     <div className="relative h-full w-full overflow-hidden rounded-xl border border-white/80 bg-white shadow-[0_8px_18px_rgba(70,44,26,0.08)]">
                                       <OrderCardArtwork alt={meta.label} art={meta.art} sizes="40px" />
                                     </div>
                                   </div>
-                                  <p className="truncate text-[0.82rem] font-semibold text-[color:var(--ink-strong)] sm:text-sm">
+                                  <p className="public-order-custom-row__label text-[0.82rem] font-semibold text-[color:var(--ink-strong)] sm:text-sm">
                                     {meta.label}
                                   </p>
                                 </div>
                                 <button
                                   type="button"
-                                  className="h-10 rounded-[14px] border border-white/85 bg-white text-[1.15rem] font-semibold text-[color:var(--ink-strong)] transition hover:bg-white sm:text-xl"
+                                  className="public-order-custom-row__button h-10 rounded-[14px] border border-white/85 bg-white text-[1.15rem] font-semibold text-[color:var(--ink-strong)] transition hover:bg-white sm:text-xl"
                                   onClick={() => adjustCustomBoxFlavor(box.id, code, -1)}
                                   disabled={quantity <= 0}
                                   aria-label={`Diminuir ${meta.label} na Caixa Sabores #${box.index + 1}`}
                                 >
                                   −
                                 </button>
-                                <div className="text-center text-[0.82rem] font-semibold text-[color:var(--ink-strong)] sm:text-sm">
+                                <div className="public-order-custom-row__qty text-center text-[0.82rem] font-semibold text-[color:var(--ink-strong)] sm:text-sm">
                                   {quantity}
                                 </div>
                                 <button
                                   type="button"
-                                  className="h-10 rounded-[14px] border border-white/85 bg-white text-[1.15rem] font-semibold text-[color:var(--ink-strong)] transition hover:bg-white sm:text-xl"
+                                  className="public-order-custom-row__button h-10 rounded-[14px] border border-white/85 bg-white text-[1.15rem] font-semibold text-[color:var(--ink-strong)] transition hover:bg-white sm:text-xl"
                                   onClick={() => adjustCustomBoxFlavor(box.id, code, 1)}
                                   disabled={box.totalUnits >= ORDER_BOX_UNITS}
                                   aria-label={`Aumentar ${meta.label} na Caixa Sabores #${box.index + 1}`}
@@ -1693,6 +1712,11 @@ export function PublicOrderPage() {
                   <p className="mt-2 text-base font-semibold text-[color:var(--ink-strong)] sm:text-lg">
                     {form.date && form.time ? `${form.date} às ${form.time}` : 'Escolha data e hora'}
                   </p>
+                  {minimumScheduleLabel ? (
+                    <p className="mt-2 text-sm leading-6 text-[color:var(--ink-muted)]">
+                      Pedido novo liberado a partir de <strong className="text-[color:var(--ink-strong)]">{minimumScheduleLabel}</strong>.
+                    </p>
+                  ) : null}
                 </div>
 
                 <div className="rounded-[20px] bg-white/78 p-4 sm:rounded-[24px]">

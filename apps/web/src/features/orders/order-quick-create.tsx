@@ -479,7 +479,7 @@ export function OrderQuickCreate({
   };
 
   return (
-    <div className="order-quick-create app-panel grid gap-5">
+    <div className="order-quick-create grid gap-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-xl font-semibold text-neutral-900">Pedido</h3>

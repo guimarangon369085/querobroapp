@@ -1,6 +1,6 @@
 # PROJECT_SNAPSHOT
 
-Ultima atualizacao: 2026-03-17
+Ultima atualizacao: 2026-03-18
 
 ## Estado atual
 
@@ -33,11 +33,15 @@ Ultima atualizacao: 2026-03-17
 - A cotacao publica de `/pedido` agora usa a assinatura canonica dos sabores para casar com o intake final e evitar refresh indevido do frete na primeira finalizacao.
 - As caixas mistas passaram a usar composicao visual unica no mesmo quadrante, padronizada entre a captura publica e a operacao interna.
 - As caixas mistas agora usam corte seco entre as duas imagens, sem a faixa branca intermediaria.
+- O desktop de `/pedido` agora usa grids mais elasticas em vez de tracks fixas, evitando colapso de endereco, caixas e `Caixa Sabores` em navegacoes diferentes, inclusive browsers mais sensiveis a `minmax` rigido.
+- `/pedido` agora deixa explicito antes do submit que pedido novo nao entra para hoje, mostrando o primeiro horario disponivel na propria area de agendamento e no resumo lateral.
 - `/dashboard` voltou a existir como rota oculta interna, agora com painel real de analytics first-party do site, vitals e performance financeira/operacional da broa.
 - O web passou a instrumentar navegacao, links, funil e web vitals por coleta propria, gravando esses eventos na API para leitura imediata no dashboard.
 - `/dashboard` deixou de depender so de obscuridade: agora abre apenas em host operacional/loopback, usa bridge protegido no web e a API exige token de bridge.
+- `/dashboard` ganhou uma narrativa editorial mais didatica, reorganizando trafego, funil, performance, financeiro, mix e recebiveis em linguagem mais humana sem alterar a base de dados lida pelo painel.
 - Analytics first-party deixou de gravar URLs completas com query/hash e passou a aceitar ingest apenas por bridge same-origin autenticado.
 - `Repetir pedido` em `/clientes` e `Novo pedido` em `/pedidos` agora preservam `PICKUP` em vez de forcar `DELIVERY`.
+- O modal `Novo pedido` em `/pedidos` foi reequilibrado para mobile, com shell propria e controles compactos mais estaveis no grid de quantidade.
 - A criacao de pedido agora dispara alerta operacional assincrono no backend, com `ntfy` como canal gratuito principal para iPhone/PWA e WhatsApp/webhook como canais opcionais.
 - A navegacao operacional foi normalizada: o item principal antes chamado `Agenda` agora se chama `PEDIDOS`, e o menu passou a usar labels em caixa alta de forma consistente.
 
@@ -59,16 +63,18 @@ Ultima atualizacao: 2026-03-17
 
 - `/pedido`: pagina publica do cliente com submit para o intake canonico, cotacao previa de frete e exibicao do PIX copia e cola.
 - `/pedido`: CTA principal abaixo do bloco `Resumo`; em `Entrega` ele calcula o frete antes da finalizacao, e em `Retirada` o frete zera.
+- `/pedido`: desktop sem colapso nos blocos de agendamento e sabores; a copy de agendamento agora avisa claramente que pedido novo nao entra para hoje.
 - `/`: landing publica fullscreen da marca, preparada para `www.querobroa.com.br`.
 - `/`: landing publica fullscreen da marca com CTA de atalho mobile para instalar/acessar `Pedido rapido`.
 - `/pedidos`: agenda do dia, criacao de pedido, status, producao, entrega e pagamento.
 - `/pedidos`: modal `Novo pedido` alinhado visualmente com `/pedido`, sem miniatura redundante e com CTA de frete abaixo do resumo.
+- `/pedidos`: modal `Novo pedido` agora se comporta melhor em mobile, sem deformar popup ou quebrar o bloco de quantidade.
 - `/clientes`: cadastro e edicao rapida.
 - `/clientes`: repetir pedido respeita o modo original de atendimento.
 - `/estoque`: saldo, D+1, compras e leitura operacional.
 - `/produtos`: redirect legado para `/estoque`.
 - `/calendario`: redirect permanente para `/pedidos`.
-- `/dashboard`: pagina oculta interna com trafego, navegacao, vitals, funil e financeiro completo.
+- `/dashboard`: pagina oculta interna com trafego, navegacao, vitals, funil e financeiro completo, agora em linguagem editorial mais guiada.
 - `/dashboard`: agora acessivel pelo proprio app em host publico, com link direto no menu e leitura via bridge same-origin do web.
 - Rotas antigas (`/`, `/hoje`, `/jornada`, `/inicio`, `/resumo`, `/base`, `/producao`, `/saidas`, `/caixa`) convergem para `Pedidos`.
 - Alias legado de captura (`/whatsapp-flow/pedido/:sessionId`) ainda converte para `Pedidos` ate a troca do canal.

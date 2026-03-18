@@ -1,6 +1,6 @@
 # NEXT_STEP_PLAN
 
-Ultima atualizacao: 2026-03-17
+Ultima atualizacao: 2026-03-18
 
 ## Objetivo da fase atual
 
@@ -64,7 +64,11 @@ Criterio de pronto:
 - Manter na home o contraste mais leve sobre as fotos e a navegacao desktop com botoes maiores, sem voltar a achatar o impacto visual.
 - Manter o desktop de `/pedido` mais direto, sem blocos introdutorios redundantes acima do formulario.
 - Manter `/pedido` abrindo direto em `Dados`, sem header/resumo duplicado no topo e sem labels redundantes de seção.
+- Manter `/pedido` sem colapsos em desktop/mobile intermediario, com grids elasticos para agendamento, caixas e `Caixa Sabores` em qualquer navegador.
+- Manter em `/pedido` a mensagem explicita de que pedido novo nao entra para hoje, sempre mostrando o primeiro horario liberado antes do erro final.
 - Manter `/dashboard` acessivel no menu principal sem voltar a aplicar trava de host no web por engano.
+- Manter `/dashboard` no formato editorial didatico novo, sem regressao para cards genericos ou leitura mais tecnica do que humana.
+- Manter `Novo pedido` de `/pedidos` estavel em mobile, sem popup deformado nem quebra no bloco de quantidade.
 - Manter a navegacao padronizada com `PEDIDOS` como item principal e labels em caixa alta em todo o menu.
 - Seguir limpando redundancias em `Estoque` agora que `Produtos` saiu da navegação.
 - Validar estados vazios e mudanca de dia em desktop e mobile width.

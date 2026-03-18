@@ -2757,6 +2757,15 @@ input[type='radio'] {
   scrollbar-gutter: stable both-edges;
 }
 
+.order-detail-modal__dialog--quick-create {
+  border-radius: 28px;
+  border: 1px solid color-mix(in srgb, var(--line-soft), white 22%);
+  background:
+    linear-gradient(180deg, rgba(255, 251, 246, 0.99), rgba(250, 239, 226, 0.97));
+  box-shadow: 0 22px 50px rgba(40, 24, 14, 0.18);
+  padding: 12px;
+}
+
 .order-detail-modal__close {
   position: sticky;
   top: 0;
@@ -2781,6 +2790,11 @@ input[type='radio'] {
   background: rgba(255, 251, 246, 0.98);
   min-width: 0;
   overflow-x: clip;
+}
+
+.order-detail-modal__panel--quick-create {
+  background: transparent;
+  overflow: visible;
 }
 
 .order-detail-modal__panel > * {
@@ -4068,6 +4082,206 @@ input[type='radio'] {
   color: var(--ink-muted);
 }
 
+.public-order-layout {
+  display: grid;
+  gap: clamp(16px, 2vw, 24px);
+  align-items: start;
+}
+
+.public-order-intake-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr));
+}
+
+.public-order-mode-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+}
+
+.public-order-mode-card {
+  min-width: 0;
+}
+
+.public-order-mode-card__title,
+.public-order-mode-card__description {
+  overflow-wrap: anywhere;
+}
+
+.public-order-mode-card__title {
+  font-size: clamp(1rem, 0.94rem + 0.18vw, 1.05rem);
+  line-height: 1.2;
+}
+
+.public-order-mode-card__description {
+  font-size: clamp(0.88rem, 0.84rem + 0.14vw, 0.95rem);
+  line-height: 1.45;
+}
+
+.public-order-schedule-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11.5rem), 1fr));
+}
+
+.public-order-schedule-grid__address {
+  grid-column: 1 / -1;
+}
+
+.public-order-box-grid {
+  display: grid;
+  gap: clamp(12px, 1.6vw, 18px);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17.75rem), 1fr));
+}
+
+.public-order-box-card {
+  container-type: inline-size;
+}
+
+.public-order-box-card__hero {
+  display: grid;
+  grid-template-columns: clamp(5.75rem, 24%, 7.4rem) minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(0.75rem, 1.5vw, 1rem);
+}
+
+.public-order-box-card__media {
+  height: clamp(5.75rem, 8vw, 7.4rem);
+  width: clamp(5.75rem, 24%, 7.4rem);
+}
+
+.public-order-box-card__body {
+  min-width: 0;
+  display: grid;
+  gap: 0.35rem;
+  align-content: start;
+}
+
+.public-order-box-card__title,
+.public-order-box-card__detail {
+  overflow-wrap: anywhere;
+}
+
+.public-order-box-card__title {
+  font-size: clamp(0.95rem, 0.9rem + 0.2vw, 1.08rem);
+  line-height: 1.15;
+}
+
+.public-order-box-card__detail {
+  font-size: clamp(0.74rem, 0.7rem + 0.12vw, 0.84rem);
+  line-height: 1.45;
+}
+
+.public-order-box-card__price {
+  font-size: clamp(0.92rem, 0.88rem + 0.1vw, 1rem);
+  line-height: 1.2;
+}
+
+.public-order-box-card__controls {
+  display: grid;
+  grid-template-columns: clamp(3rem, 8vw, 4rem) minmax(0, 1fr) clamp(3rem, 8vw, 4rem);
+  align-items: center;
+  gap: clamp(0.5rem, 1vw, 0.75rem);
+}
+
+.public-order-box-card__summary {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.public-order-box-card__pill {
+  min-height: clamp(3rem, 7vw, 4rem);
+  display: grid;
+  align-content: center;
+  font-size: clamp(0.68rem, 0.64rem + 0.1vw, 0.76rem);
+  line-height: 1.2;
+}
+
+.public-order-custom-grid {
+  display: grid;
+  gap: clamp(12px, 1.2vw, 16px);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 21rem), 1fr));
+}
+
+.public-order-custom-card {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.public-order-custom-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.public-order-custom-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.public-order-custom-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.public-order-custom-row__info {
+  min-width: 0;
+  flex: 1 1 12rem;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.public-order-custom-row__label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: clamp(0.78rem, 0.74rem + 0.08vw, 0.9rem);
+  line-height: 1.2;
+}
+
+.public-order-custom-row__button {
+  flex: 0 0 clamp(2.5rem, 5vw, 2.75rem);
+  height: clamp(2.5rem, 5vw, 2.75rem);
+}
+
+.public-order-custom-row__qty {
+  flex: 0 0 clamp(2.5rem, 6vw, 3.5rem);
+  text-align: center;
+  font-size: clamp(0.82rem, 0.78rem + 0.08vw, 0.95rem);
+  line-height: 1.1;
+}
+
+@media (min-width: 48rem) {
+  .public-order-box-card__summary {
+    grid-template-columns: minmax(6.5rem, 8.25rem) minmax(0, 1fr);
+    align-items: center;
+  }
+}
+
+@media (min-width: 84rem) {
+  .public-order-layout {
+    grid-template-columns: minmax(0, 1.24fr) minmax(clamp(19rem, 29vw, 27rem), 0.76fr);
+  }
+}
+
+@media (min-width: 96rem) {
+  .public-order-schedule-grid {
+    grid-template-columns: minmax(0, 1.5fr) minmax(11.5rem, 0.75fr) minmax(10.5rem, 0.65fr);
+  }
+
+  .public-order-schedule-grid__address {
+    grid-column: auto;
+  }
+}
+
 .order-quick-create {
   gap: 1.25rem;
 }
@@ -4470,9 +4684,19 @@ html.app-render-stability .app-topbar {
     max-height: calc(var(--app-viewport-height) - max(24px, calc(2 * var(--app-overlay-gap))));
   }
 
+  .order-detail-modal__dialog--quick-create {
+    border-radius: 24px;
+    padding: 10px;
+    scrollbar-gutter: auto;
+  }
+
   .order-detail-modal__close {
     top: 2px;
     padding: 7px 11px;
+  }
+
+  .order-detail-modal__dialog--quick-create .order-detail-modal__close {
+    margin-bottom: 6px;
   }
 
   .app-content {
@@ -4664,7 +4888,8 @@ html.app-render-stability .app-topbar {
   }
 
   .order-quick-create__product-primary {
-    grid-template-columns: 46px minmax(0, 1fr) 46px;
+    grid-template-columns: 42px minmax(0, 1fr) 42px;
+    gap: 8px;
   }
 
   .order-quick-create__product-secondary {
@@ -4672,15 +4897,15 @@ html.app-render-stability .app-topbar {
   }
 
   .order-quick-create__qty-button {
-    min-height: 34px;
-    min-width: 36px;
+    min-height: 36px;
+    min-width: 0;
     padding-inline: 8px;
     width: 100%;
   }
 
   .order-quick-create__qty-value {
-    grid-column: 1 / -1;
     min-width: 0;
+    padding-inline: 10px;
   }
 
 
