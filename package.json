@@ -31,6 +31,8 @@
     "qa:critical-e2e": "node scripts/qa-critical-e2e.mjs",
     "qa:trust": "node scripts/qa-trust.mjs",
     "qa:smoke": "node scripts/qa-smoke.mjs",
+    "validate:public-deploy": "node scripts/validate-public-deploy.mjs",
+    "validate:delivery-quote": "node scripts/validate-delivery-quote.mjs",
     "test": "node --test --test-concurrency=1 tests/*.test.mjs && pnpm -r --if-present test"
   },
   "devDependencies": {

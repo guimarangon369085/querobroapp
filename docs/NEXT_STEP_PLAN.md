@@ -38,8 +38,10 @@ Criterio de pronto:
 - Configurar `ORDER_FORM_BRIDGE_TOKEN` onde houver auth ligada.
 - Montar o `Google Form` real com os labels definidos em `docs/GOOGLE_FORMS_BRIDGE.md`.
 - Colar o `scripts/google-form-bridge.gs` no Apps Script do formulario.
+- Publicar no deploy final o bundle que expoe `POST /api/google-form/preview` e `POST /api/customer-form/preview`.
 - Validar uma submissao real ponta a ponta caindo no app com `PIX_PENDING`.
 - Validar no mesmo teste um pedido `Entrega` com frete somado antes do PIX.
+- Rodar `pnpm validate:public-deploy` apos o deploy e manter `pnpm validate:delivery-quote` como checagem rapida de frete real.
 
 Criterio de pronto:
 - cliente consegue abrir o link, enviar o pedido e receber o PIX com o total final correto sem intervencao manual de cadastro.

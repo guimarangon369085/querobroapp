@@ -67,6 +67,17 @@ export class OrdersController {
   }
 
   @Public()
+  @Post('intake/customer-form/preview')
+  previewCustomerForm(
+    @Body() body: unknown,
+    @Headers('authorization') authorization?: string,
+    @Headers('x-order-form-token') formToken?: string
+  ) {
+    this.assertExternalFormAccess(authorization, formToken);
+    return this.service.previewCustomerForm(body);
+  }
+
+  @Public()
   @Post('intake/customer-form')
   intakeCustomerForm(
     @Body() body: unknown,
@@ -75,6 +86,17 @@ export class OrdersController {
   ) {
     this.assertExternalFormAccess(authorization, formToken);
     return this.service.intakeCustomerForm(body);
+  }
+
+  @Public()
+  @Post('intake/google-form/preview')
+  previewGoogleForm(
+    @Body() body: unknown,
+    @Headers('authorization') authorization?: string,
+    @Headers('x-order-form-token') formToken?: string
+  ) {
+    this.assertExternalFormAccess(authorization, formToken);
+    return this.service.previewGoogleForm(body);
   }
 
   @Public()

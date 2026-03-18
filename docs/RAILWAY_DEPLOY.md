@@ -124,3 +124,12 @@ Checklist rapido de status:
 5. `https://ops.querobroa.com.br/` deve abrir em `Pedidos`
 6. `https://api.querobroa.com.br/health` deve responder `{\"status\":\"ok\"}`
 7. O submit de `/pedido` deve cair na mesma base operacional vista em `/pedidos`
+
+Validadores automatizados:
+
+- `pnpm validate:public-deploy`
+  - valida `/`, `/pedido`, `/pedidos`, redirect de `ops`, health da API e `POST /api/google-form/preview`
+- `pnpm validate:delivery-quote`
+  - valida uma cotacao real em `POST /api/delivery-quote` sem criar entrega
+- `QBAPP_GOOGLE_FORM_MODE=preview node scripts/test-google-form-bridge.mjs`
+  - valida o contrato do Google Forms sem criar pedido

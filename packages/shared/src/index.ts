@@ -342,6 +342,53 @@ export const DeliveryQuoteResponseSchema = z.object({
   breakdownLabel: z.string().trim().min(1).max(160).optional().nullable()
 });
 
+export const ExternalOrderSubmissionPreviewItemSchema = z.object({
+  productId: z.number().int().positive(),
+  name: z.string().min(1),
+  quantity: z.number().int().positive(),
+  unitPrice: z.number().nonnegative(),
+  total: z.number().nonnegative()
+});
+
+export const ExternalOrderSubmissionPreviewSchema = z.object({
+  version: z.literal(1),
+  channel: OrderIntakeChannelEnum,
+  expectedStage: OrderIntakeStageEnum,
+  fulfillmentMode: OrderFulfillmentModeEnum,
+  scheduledAt: z.string().datetime(),
+  customer: z.object({
+    name: z.string().min(1),
+    phone: z.string().nullable(),
+    address: z.string().nullable(),
+    placeId: z.string().nullable(),
+    lat: z.number().nullable(),
+    lng: z.number().nullable(),
+    deliveryNotes: z.string().nullable()
+  }),
+  order: z.object({
+    items: z.array(ExternalOrderSubmissionPreviewItemSchema).min(1),
+    totalUnits: z.number().int().nonnegative(),
+    subtotal: z.number().nonnegative(),
+    discount: z.number().nonnegative(),
+    deliveryFee: z.number().nonnegative(),
+    total: z.number().nonnegative(),
+    notes: z.string().nullable()
+  }),
+  delivery: DeliveryQuoteResponseSchema,
+  payment: z.object({
+    method: z.literal('pix'),
+    status: PixChargeStatusEnum,
+    payable: z.boolean(),
+    dueAt: z.string().datetime().nullable()
+  }),
+  source: z.object({
+    channel: ExternalOrderSubmissionChannelEnum,
+    externalId: z.string().nullable(),
+    idempotencyKey: z.string().nullable(),
+    originLabel: z.string().nullable()
+  })
+});
+
 export const DeliveryQuoteViewSchema = DeliveryQuoteResponseSchema.extend({
   id: z.number().int().positive().optional(),
   orderId: z.number().int().positive().optional().nullable(),

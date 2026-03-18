@@ -114,4 +114,4 @@ export function getApiBaseUrl() {
   return configuredBaseUrl || devDefaultBaseUrl;
 }
 
-export { devDefaultBaseUrl };
+export { devDefaultBaseUrl, productionApiHostname, resolveProductionApiBaseUrlFromHostname };

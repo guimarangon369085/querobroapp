@@ -4,7 +4,9 @@ Canal temporario para capturar pedidos sem depender ainda de um numero dedicado 
 
 ## Rotas
 
+- `POST /api/google-form/preview` no `web` (preview seguro, sem criar pedido)
 - `POST /api/google-form` no `web` (proxy recomendado quando so o web estiver publico)
+- `POST /orders/intake/google-form/preview`
 - `POST /orders/intake/google-form`
 - Alias generico futuro: `POST /orders/intake/customer-form`
 
@@ -120,15 +122,33 @@ Regra operacional:
 
 Ou seja: muda o canal, nao muda o contrato.
 
+## Preview seguro
+
+Para validar o bridge ponta a ponta sem criar pedido nem PIX real:
+
+- `QBAPP_GOOGLE_FORM_MODE=preview node scripts/test-google-form-bridge.mjs`
+- `pnpm validate:public-deploy`
+
+O preview usa o mesmo proxy do web e a mesma validacao do backend, mas responde apenas com:
+
+- itens resolvidos
+- subtotal, frete e total
+- provider/source do frete
+- stage esperado (`PIX_PENDING`)
+
 ## Apps Script
 
 Arquivo de apoio:
 
 - [google-form-bridge.gs](/Users/gui/querobroapp/scripts/google-form-bridge.gs)
 
-Configure os 2 valores no topo do script:
+Configure o valor no topo do script:
 
 - `APP_BASE_URL`
+
+Valor atual do script versionado:
+
+- `APP_BASE_URL=https://querobroa.com.br`
 
 Regras:
 

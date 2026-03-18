@@ -17,6 +17,7 @@ Ultima atualizacao: 2026-03-18
 - Gate operacional de religamento foi validado em 2026-03-11 com `stop-all -> dev-all`, health da API e execucao de smoke + E2E critico.
 - `Produtos` deixou de existir como superficie operacional; catalogo e ficha tecnica ficam dentro de `Estoque`.
 - Existe agora uma captura publica de pedido em `/pedido`, usando o mesmo intake externo que vai servir para `Google Forms`, pagina propria e futuro `WhatsApp Flow`.
+- O intake externo agora expoe preview seguro para `Google Forms` e `customer-form`, validando payload, frete e total sem criar pedido nem PIX.
 - Pedidos de `Entrega` agora podem receber cotacao de frete antes do submit final, com o valor incorporado ao total e ao PIX.
 - `/pedido`, `quick create` e a logica de caixas em `Pedidos` passaram a compartilhar o mesmo catalogo de caixas/sabores e as mesmas imagens originais da marca.
 - Em `/pedido`, quando `Retirada` e selecionada, o ponto de retirada agora e preenchido automaticamente como `Alameda Jau, 731` e fica bloqueado para edicao pelo cliente.
@@ -97,6 +98,7 @@ Ultima atualizacao: 2026-03-18
 - Intake externo: `orders/intake`, `orders/intake/customer-form`, `orders/intake/google-form`, `orders/intake/whatsapp-flow`
 - Cotacao de frete: `deliveries/quotes` + proxy interno do web em `/api/delivery-quote`
 - Proxy de `Google Forms`: web exposto em `/api/google-form` para receber o Apps Script sem abrir a API inteira publicamente
+- Preview do intake externo: `/api/google-form/preview`, `/api/customer-form/preview`, `orders/intake/google-form/preview` e `orders/intake/customer-form/preview`
 - Analytics first-party: `analytics/events` na API + proxy interno do web em `/api/analytics/track`
 - Dashboard: `dashboard/summary` para trafego, vitals, financeiro, mix de produtos e recebiveis
 - Suporte interno: `runtime-config` (read-only) e redirects legados controlados no web
@@ -107,6 +109,8 @@ Ultima atualizacao: 2026-03-18
 - `pnpm qa:browser-smoke`: smoke de navegador real nas 4 telas principais.
 - `pnpm qa:critical-e2e`: jornada critica de produto -> cliente -> pedido -> status.
 - `pnpm check:prisma-drift`: guard de drift dev/prod.
+- `pnpm validate:public-deploy`: valida dominio publico, redirect de `ops`, health da API, preview do Google Forms e quote de frete sem criar pedido.
+- `pnpm validate:delivery-quote`: valida cotacao real em producao sem criar entrega.
 - Os flows de QA que sobem um web temporario agora usam dist dirs dedicados do Next, para nao disputar o `.next` do `next dev`.
 - O workflow principal de CI no GitHub agora roda `check:prisma-drift` e `qa:trust` com lint habilitado.
 - O browser smoke garante o redirect legado de `/produtos` e cobre as telas operacionais principais.
@@ -121,14 +125,14 @@ Ultima atualizacao: 2026-03-18
 ## Validacao operacional mais recente
 
 - Data: 2026-03-18
-- Ciclo executado: `pnpm --filter @querobroapp/web lint`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/api lint`, `node --test tests/public-number-sequencing.test.mjs tests/order-intake-google-form.test.mjs tests/order-intake-whatsapp-flow.test.mjs tests/customer-dedupe-and-intake.test.mjs tests/external-order-schedule-guard.test.mjs`, `pnpm qa:critical-e2e`
+- Ciclo executado: `pnpm --filter @querobroapp/web lint`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/api lint`, `node --test tests/public-number-sequencing.test.mjs tests/order-intake-google-form.test.mjs tests/order-intake-whatsapp-flow.test.mjs tests/customer-dedupe-and-intake.test.mjs tests/external-order-schedule-guard.test.mjs`, `pnpm qa:critical-e2e`, `node --test tests/order-intake-preview.test.mjs tests/order-intake-google-form.test.mjs tests/delivery-provider-hybrid-fallback.test.mjs tests/google-form-bridge-payload.test.mjs`, `pnpm validate:delivery-quote`
 - Validacao adicional: browser real em mobile para `/pedido` e `/pedidos`, com pedido publico concluido localmente ate `PIX_PENDING` e cleanup automatico dos dados `[TESTE_E2E]`; browser real adicional em desktop para `/pedido` e `/clientes`, confirmando sugestoes do Google Places, preenchimento do endereco e ausencia do warning legado no console.
-- Resultado: intake publico voltou a criar pedido com sucesso (`Pedido #454` local), o E2E critico concluiu a jornada com pedido `ENTREGUE/PAGO`, o mobile ficou sem elementos fixos intrusivos em `/pedido` e `/pedidos`, o autocomplete novo de endereco passou a preencher `placeId`/coordenadas sem warning de deprecacao, e os cards de caixas ficaram estaveis em desktop (`1267x768` e `1024x768`) sem esmagar o selo `caixas`.
+- Resultado: intake publico voltou a criar pedido com sucesso (`Pedido #454` local), o E2E critico concluiu a jornada com pedido `ENTREGUE/PAGO`, o mobile ficou sem elementos fixos intrusivos em `/pedido` e `/pedidos`, o autocomplete novo de endereco passou a preencher `placeId`/coordenadas sem warning de deprecacao, os cards de caixas ficaram estaveis em desktop (`1267x768` e `1024x768`) sem esmagar o selo `caixas`, o preview do intake externo passou sem criar pedido e a cotacao publica de producao respondeu `UBER_DIRECT/UBER_QUOTE` com taxa real.
 
 ## Gaps abertos
 
 1. `Google Forms` ja e viavel como canal temporario, mas ainda falta configuracao real do Apps Script e URL publica final.
-2. O dominio publico ja responde em `querobroa.com.br`, `www`, `ops` e `api`, mas o web ainda precisa publicar o bundle corrigido para `/pedidos` e `/pedido` nao cairem em fallback de `127.0.0.1` quando o client bundle estiver defasado.
+2. O dominio publico ja responde em `querobroa.com.br`, `www`, `ops` e `api`, mas o web ainda precisa publicar o bundle mais novo para expor os endpoints de preview (`/api/google-form/preview` e `/api/customer-form/preview`) e fechar a validacao publica automatizada.
 3. `WhatsApp Flow` segue sem numero dedicado; a migracao futura deve reutilizar o contrato externo atual.
 4. O runtime de frete agora esta em modo hibrido `Uber Direct -> Loggi`, mas ainda vale validar o disparo real de shipment em producao sem criar entrega acidental e calibrar a cotacao final contra corridas manuais historicas.
 5. Mobile segue atras do web no fluxo operacional novo.

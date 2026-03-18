@@ -1,4 +1,8 @@
-import { devDefaultBaseUrl, getApiBaseUrl } from '@/lib/api-base-url';
+import {
+  devDefaultBaseUrl,
+  getApiBaseUrl,
+  resolveProductionApiBaseUrlFromHostname
+} from '@/lib/api-base-url';
 
 function normalizeHost(rawHost: string | null | undefined) {
   return String(rawHost || '')
@@ -11,6 +15,22 @@ function normalizeHost(rawHost: string | null | undefined) {
 function isLoopbackHost(rawHost: string | null | undefined) {
   const host = normalizeHost(rawHost);
   return host === '127.0.0.1' || host === 'localhost' || host === '::1';
+}
+
+function resolveRequestProtocol(request: Request) {
+  const forwardedProto = String(request.headers.get('x-forwarded-proto') || '')
+    .trim()
+    .toLowerCase();
+  if (forwardedProto === 'http' || forwardedProto === 'https') {
+    return `${forwardedProto}:`;
+  }
+
+  try {
+    const requestUrl = new URL(request.url);
+    return requestUrl.protocol || 'https:';
+  } catch {
+    return 'https:';
+  }
 }
 
 export function resolveServerBridgeApiBaseUrl(request: Request, explicitBaseUrl?: string | null) {
@@ -26,8 +46,17 @@ export function resolveServerBridgeApiBaseUrl(request: Request, explicitBaseUrl?
     return devDefaultBaseUrl;
   }
 
-  if ((process.env.NODE_ENV || 'development') !== 'production') {
+  const isProduction = (process.env.NODE_ENV || 'development') === 'production';
+  if (!isProduction) {
     return devDefaultBaseUrl;
+  }
+
+  const inferredFromRequestHost = resolveProductionApiBaseUrlFromHostname(
+    normalizeHost(requestHost),
+    resolveRequestProtocol(request)
+  );
+  if (inferredFromRequestHost) {
+    return inferredFromRequestHost.replace(/\/+$/, '');
   }
 
   return getApiBaseUrl().replace(/\/+$/, '');

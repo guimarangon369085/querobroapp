@@ -4,6 +4,7 @@ import type { Customer as PrismaCustomer, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
 import {
   compareMoney,
+  ExternalOrderSubmissionPreviewSchema,
   ExternalOrderSubmissionSchema,
   moneyFromMinorUnits,
   moneyToMinorUnits,
@@ -130,6 +131,7 @@ type OrderIntakePayload = z.infer<typeof OrderIntakeSchema>;
 type OrderIntakeMeta = z.infer<typeof OrderIntakeMetaSchema>;
 type PixCharge = z.infer<typeof PixChargeSchema>;
 type ExternalOrderSubmissionPayload = z.infer<typeof ExternalOrderSubmissionSchema>;
+type ExternalOrderSubmissionPreview = z.infer<typeof ExternalOrderSubmissionPreviewSchema>;
 
 type MassPrepEvent = z.infer<typeof massPrepEventSchema>;
 type OrderFlavorCode = 'T' | 'G' | 'D' | 'Q' | 'R';
@@ -1254,6 +1256,86 @@ export class OrdersService {
     });
   }
 
+  private async previewExternalSubmission(
+    data: ExternalOrderSubmissionPayload,
+    params: {
+      intakeChannel: 'CUSTOMER_LINK' | 'WHATSAPP_FLOW';
+    }
+  ): Promise<ExternalOrderSubmissionPreview> {
+    this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt));
+
+    const productIdByCode = await this.resolveActiveFlavorProductIdByCode();
+    const items = this.buildOrderItemsFromFlavorCounts(data.flavors, productIdByCode);
+    const pricedOrder = await this.priceOrderItems(this.prisma, items);
+    const scheduledAt = this.parseOptionalDateTime(data.fulfillment.scheduledAt);
+    const deliveryQuote = await this.deliveriesService.resolveDeliverySelection(
+      data.delivery,
+      this.buildDeliveryQuoteDraft({
+        fulfillmentMode: data.fulfillment.mode,
+        scheduledAt: scheduledAt?.toISOString() ?? data.fulfillment.scheduledAt ?? null,
+        customerName: data.customer.name,
+        customerPhone: data.customer.phone ?? null,
+        customerAddress: data.customer.address ?? null,
+        customerPlaceId: data.customer.placeId ?? null,
+        customerLat: data.customer.lat ?? null,
+        customerLng: data.customer.lng ?? null,
+        customerDeliveryNotes: data.customer.deliveryNotes ?? null,
+        items: pricedOrder.manifestItems,
+        subtotal: pricedOrder.subtotal
+      }),
+      {
+        enforceExternalSchedule: true,
+        allowManualFallback: false
+      }
+    );
+
+    const deliveryFee = this.toMoney(deliveryQuote.fee ?? 0);
+    const discount = 0;
+    const total = this.computeOrderTotal(pricedOrder.subtotal, discount, deliveryFee);
+
+    return ExternalOrderSubmissionPreviewSchema.parse({
+      version: 1,
+      channel: params.intakeChannel,
+      expectedStage: 'PIX_PENDING',
+      fulfillmentMode: data.fulfillment.mode,
+      scheduledAt: data.fulfillment.scheduledAt,
+      customer: {
+        name: data.customer.name,
+        phone: data.customer.phone ?? null,
+        address: data.customer.address ?? null,
+        placeId: data.customer.placeId ?? null,
+        lat: data.customer.lat ?? null,
+        lng: data.customer.lng ?? null,
+        deliveryNotes: data.customer.deliveryNotes ?? null
+      },
+      order: {
+        items: pricedOrder.itemsData.map((item) => ({
+          ...item,
+          name: pricedOrder.manifestItems.find((entry) => entry.productId === item.productId)?.name || 'Produto'
+        })),
+        totalUnits: pricedOrder.parsedItems.reduce((sum, item) => sum + Math.max(item.quantity || 0, 0), 0),
+        subtotal: pricedOrder.subtotal,
+        discount,
+        deliveryFee,
+        total,
+        notes: data.notes ?? null
+      },
+      delivery: deliveryQuote,
+      payment: {
+        method: 'pix',
+        status: 'PENDENTE',
+        payable: false,
+        dueAt: data.fulfillment.scheduledAt
+      },
+      source: {
+        channel: data.source.channel,
+        externalId: data.source.externalId ?? null,
+        idempotencyKey: data.source.idempotencyKey ?? data.source.externalId ?? null,
+        originLabel: data.source.originLabel ?? null
+      }
+    });
+  }
+
   private buildDeliveryQuoteDraft(input: {
     fulfillmentMode: 'DELIVERY' | 'PICKUP';
     scheduledAt?: string | null;
@@ -1917,12 +1999,32 @@ export class OrdersService {
     });
   }
 
+  async previewCustomerForm(payload: unknown) {
+    const data = this.parseExternalOrderSubmission(payload, {
+      defaultChannel: 'PUBLIC_FORM',
+      defaultOriginLabel: 'customer-form'
+    });
+    return this.previewExternalSubmission(data, {
+      intakeChannel: data.source.channel === 'WHATSAPP_FLOW' ? 'WHATSAPP_FLOW' : 'CUSTOMER_LINK'
+    });
+  }
+
   async intakeGoogleForm(payload: unknown) {
     const data = this.parseExternalOrderSubmission(payload, {
       defaultChannel: 'GOOGLE_FORM',
       defaultOriginLabel: 'google-form'
     });
     return this.intakeExternalSubmission(data, {
+      intakeChannel: 'CUSTOMER_LINK'
+    });
+  }
+
+  async previewGoogleForm(payload: unknown) {
+    const data = this.parseExternalOrderSubmission(payload, {
+      defaultChannel: 'GOOGLE_FORM',
+      defaultOriginLabel: 'google-form'
+    });
+    return this.previewExternalSubmission(data, {
       intakeChannel: 'CUSTOMER_LINK'
     });
   }

@@ -1,4 +1,4 @@
-const APP_BASE_URL = 'https://web-publico.seu-endereco.com';
+const APP_BASE_URL = 'https://querobroa.com.br';
 
 const FORM_FIELDS = {
   timestamp: 'Carimbo de data/hora',
