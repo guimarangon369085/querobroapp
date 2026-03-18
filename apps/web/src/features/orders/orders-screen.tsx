@@ -546,6 +546,93 @@ function roundInventoryQty(value: number) {
   return Math.round((value + Number.EPSILON) * 10000) / 10000;
 }
 
+type OrderWorkflowIllustrationName =
+  | 'phone-check'
+  | 'mixer'
+  | 'oven'
+  | 'bag-check'
+  | 'scooter';
+
+function OrderWorkflowIllustration({
+  name,
+  className
+}: {
+  name: OrderWorkflowIllustrationName;
+  className?: string;
+}) {
+  const sharedProps = {
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    strokeWidth: 1.8
+  };
+
+  if (name === 'phone-check') {
+    return (
+      <svg aria-hidden="true" className={className} viewBox="0 0 48 48">
+        <rect {...sharedProps} x="10" y="5" width="18" height="38" rx="4.5" />
+        <path {...sharedProps} d="M16.5 25.5 21 30l8-9" />
+      </svg>
+    );
+  }
+
+  if (name === 'mixer') {
+    return (
+      <svg aria-hidden="true" className={className} viewBox="0 0 48 48">
+        <path {...sharedProps} d="M10 34h8l2 6h13" />
+        <path {...sharedProps} d="M19 16c0-4.5 4-7 9.5-7 7 0 12.5 3.5 12.5 8.5 0 3-1.6 5.4-4.1 6.8" />
+        <path {...sharedProps} d="M20 17h15.5" />
+        <path {...sharedProps} d="M19 18v16" />
+        <path {...sharedProps} d="M31 20.5v13" />
+        <path {...sharedProps} d="M24 28.5c2.2-2.1 7.4-2.1 9.8 0v3.5c0 4-2.8 7-7 7s-7-3-7-7v-3.5Z" />
+        <circle {...sharedProps} cx="14" cy="8.5" r="2.5" />
+      </svg>
+    );
+  }
+
+  if (name === 'oven') {
+    return (
+      <svg aria-hidden="true" className={className} viewBox="0 0 48 48">
+        <rect {...sharedProps} x="7" y="8" width="34" height="31" rx="3.5" />
+        <path {...sharedProps} d="M7 17h34" />
+        <circle {...sharedProps} cx="15" cy="12.5" r="1.5" />
+        <circle {...sharedProps} cx="23.5" cy="12.5" r="1.5" />
+        <circle {...sharedProps} cx="32" cy="12.5" r="1.5" />
+        <path {...sharedProps} d="M17 31c0-2.1 2.1-2.8 2.1-5 0-2.4-2.1-3-2.1-5" />
+        <path {...sharedProps} d="M24 31c0-2.1 2.1-2.8 2.1-5 0-2.4-2.1-3-2.1-5" />
+        <path {...sharedProps} d="M31 31c0-2.1 2.1-2.8 2.1-5 0-2.4-2.1-3-2.1-5" />
+      </svg>
+    );
+  }
+
+  if (name === 'bag-check') {
+    return (
+      <svg aria-hidden="true" className={className} viewBox="0 0 48 48">
+        <path {...sharedProps} d="M14 18h20l-2 20H16l-2-20Z" />
+        <path {...sharedProps} d="M18 18v-3.5c0-3.3 2.7-6 6-6s6 2.7 6 6V18" />
+        <path {...sharedProps} d="M31.5 11.5 36 16l8-8" />
+        <path {...sharedProps} d="M20 29.5c1.5-1 5.7-1 8 0" />
+        <text x="18.3" y="27.4" fontSize="6.2" fontWeight="700" fill="currentColor">
+          @QB
+        </text>
+      </svg>
+    );
+  }
+
+  return (
+    <svg aria-hidden="true" className={className} viewBox="0 0 48 48">
+      <circle {...sharedProps} cx="14" cy="35" r="4" />
+      <circle {...sharedProps} cx="33" cy="35" r="4" />
+      <path {...sharedProps} d="M18 35h11.5c3.2 0 5.5-2.3 5.5-5.2v-6.3h-8.5" />
+      <path {...sharedProps} d="M8 31h8l4-13h7l3.2 9.5" />
+      <path {...sharedProps} d="M34.5 15.5h3l2 7" />
+      <path {...sharedProps} d="M38.5 11.5c2.2 0 4 1.8 4 4v1.5" />
+      <path {...sharedProps} d="M24 18v-3.5c0-1.7 1.4-3 3-3h4" />
+    </svg>
+  );
+}
+
 type OrderWorkflowStatus = 'ABERTO' | 'CONFIRMADO' | 'EM_PREPARACAO' | 'PRONTO' | 'ENTREGUE';
 
 const ORDER_WORKFLOW_STATUSES: OrderWorkflowStatus[] = [
@@ -560,43 +647,43 @@ const orderWorkflowStatusMeta: Record<
   OrderWorkflowStatus,
   {
     label: string;
-    icon: AppIconName;
+    illustration: OrderWorkflowIllustrationName;
     activeClassName: string;
     passedDotClassName: string;
     activeLineClassName: string;
   }
 > = {
   ABERTO: {
-    label: 'Aberto',
-    icon: 'pedidos',
+    label: 'Pedido',
+    illustration: 'phone-check',
     activeClassName: 'border-stone-300 bg-stone-100 text-stone-700',
     passedDotClassName: 'bg-stone-500',
     activeLineClassName: 'bg-stone-400'
   },
   CONFIRMADO: {
-    label: 'Confirmado',
-    icon: 'spark',
+    label: 'Massa',
+    illustration: 'mixer',
     activeClassName: 'border-amber-300 bg-amber-100 text-amber-800',
     passedDotClassName: 'bg-amber-500',
     activeLineClassName: 'bg-amber-400'
   },
   EM_PREPARACAO: {
-    label: 'Preparo',
-    icon: 'tools',
+    label: 'Forno',
+    illustration: 'oven',
     activeClassName: 'border-orange-300 bg-orange-100 text-orange-800',
     passedDotClassName: 'bg-orange-500',
     activeLineClassName: 'bg-orange-400'
   },
   PRONTO: {
     label: 'Pronto',
-    icon: 'plus',
+    illustration: 'bag-check',
     activeClassName: 'border-sky-300 bg-sky-100 text-sky-800',
     passedDotClassName: 'bg-sky-500',
     activeLineClassName: 'bg-sky-400'
   },
   ENTREGUE: {
     label: 'Entregue',
-    icon: 'external',
+    illustration: 'scooter',
     activeClassName: 'border-emerald-300 bg-emerald-100 text-emerald-800',
     passedDotClassName: 'bg-emerald-500',
     activeLineClassName: 'bg-emerald-400'
@@ -3853,26 +3940,21 @@ function OrdersPageContent() {
                       <li key={status} className="order-workflow-strip__item">
                         <div className="order-workflow-strip__step">
                           <span
-                            className={`flex h-9 w-9 items-center justify-center rounded-full border ${
+                            className={`flex h-12 w-12 items-center justify-center rounded-[18px] border ${
                               isCurrent
                                 ? stageMeta.activeClassName
                                 : isPassed
-                                  ? 'border-neutral-300 bg-neutral-100 text-neutral-700'
-                                  : 'border-neutral-200 bg-white text-neutral-400'
+                                  ? 'border-neutral-300 bg-white/94 text-neutral-700'
+                                  : 'border-neutral-200 bg-white text-neutral-300'
                             }`}
                           >
-                            {isCurrent ? (
-                              <AppIcon name={stageMeta.icon} className="h-4 w-4" />
-                            ) : (
-                              <span
-                                className={`h-2.5 w-2.5 rounded-full ${
-                                  isPassed ? stageMeta.passedDotClassName : 'bg-neutral-300'
-                                }`}
-                              />
-                            )}
+                            <OrderWorkflowIllustration
+                              name={stageMeta.illustration}
+                              className="h-7 w-7"
+                            />
                           </span>
                           <span
-                            className={`mt-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${
+                            className={`mt-2 text-[10px] font-semibold uppercase tracking-[0.14em] ${
                               isCurrent
                                 ? 'text-neutral-800'
                                 : isPassed
@@ -3885,7 +3967,7 @@ function OrdersPageContent() {
                         </div>
                         {index < ORDER_WORKFLOW_STATUSES.length - 1 ? (
                           <span
-                            className={`order-workflow-strip__connector mx-2 mt-4 h-[2px] w-10 shrink-0 rounded-full ${
+                            className={`order-workflow-strip__connector mx-2 mt-6 h-[2px] w-10 shrink-0 rounded-full ${
                               isConnectorActive ? stageMeta.activeLineClassName : 'bg-neutral-200'
                             }`}
                           />
