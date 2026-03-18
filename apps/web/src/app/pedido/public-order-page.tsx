@@ -3,6 +3,8 @@
 import Image from 'next/image';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  OFFICIAL_BUSINESS_PUBLIC_PROFILE,
+  buildOfficialBusinessWhatsAppUrl,
   formatExternalOrderMinimumSchedule,
   resolveDisplayNumber,
   resolveExternalOrderMinimumSchedule,
@@ -23,18 +25,22 @@ import {
   type OrderFlavorCode,
   calculateOrderSubtotalFromFlavorSummary,
   deriveFlavorUnitsFromBoxCounts,
+  parseMetaCheckoutProductsParam,
   formatOrderFlavorComposition,
+  resolveOrderBoxCodeFromCatalogContentId,
   sumOrderFlavorCounts
 } from '@/features/orders/order-box-catalog';
 
 const boxCatalog = ORDER_BOX_CATALOG;
 const FLAVOR_CODES = ORDER_FLAVOR_CODES;
 const GOOGLE_MAPS_API_KEY = (process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '').trim();
-const PUBLIC_ORDER_TIME_STEP_SECONDS = 15 * 60;
+const PUBLIC_ORDER_HOUR_OPTIONS = Array.from({ length: 24 }, (_, index) => `${index}`.padStart(2, '0'));
+const PUBLIC_ORDER_MINUTE_OPTIONS = ['00', '15', '30', '45'] as const;
 const PUBLIC_ORDER_DRAFT_SESSION_STORAGE_KEY = 'querobroapp:public-order-draft-session-id';
 const PUBLIC_ORDER_PROFILE_STORAGE_KEY = 'querobroapp:public-order-profile';
 const PUBLIC_ORDER_LAST_ORDER_STORAGE_KEY = 'querobroapp:public-order-last-order';
 const PUBLIC_ORDER_PICKUP_ADDRESS = 'Alameda Jaú, 731';
+const PUBLIC_ORDER_META_COUPON_NOTE_PREFIX = 'Cupom Meta:';
 
 type BoxCode = OrderBoxCode;
 type FlavorCode = OrderFlavorCode;
@@ -107,6 +113,8 @@ type DeliveryQuote = {
   breakdownLabel?: string | null;
 };
 
+type PublicOrderMinuteOption = (typeof PUBLIC_ORDER_MINUTE_OPTIONS)[number];
+
 const initialFormState: PublicOrderFormState = {
   name: '',
   phone: '',
@@ -140,6 +148,46 @@ function sanitizeStoredBoxCounts(value: unknown) {
     next[code] = quantity > 0 ? String(quantity) : '';
   }
   return next;
+}
+
+function buildPrefilledBoxCountsFromSearchParams(source: { get(name: string): string | null }) {
+  const next = { ...initialFormState.boxes };
+  let hasPrefill = false;
+
+  const catalogCode = resolveOrderBoxCodeFromCatalogContentId(source.get('catalog'));
+  if (catalogCode) {
+    next[catalogCode] = '1';
+    hasPrefill = true;
+  }
+
+  const metaCheckoutBoxCounts = parseMetaCheckoutProductsParam(source.get('products'));
+  for (const code of Object.keys(metaCheckoutBoxCounts) as BoxCode[]) {
+    const quantity = Math.max(Math.floor(metaCheckoutBoxCounts[code] || 0), 0);
+    if (quantity <= 0) continue;
+    next[code] = String(quantity);
+    hasPrefill = true;
+  }
+
+  const couponCode = String(source.get('coupon') || '').trim();
+  if (!hasPrefill && !couponCode) return null;
+
+  return {
+    boxes: next,
+    couponCode: couponCode || null
+  };
+}
+
+function mergeMetaCouponIntoNotes(currentNotes: string, couponCode: string | null) {
+  const preservedLines = String(currentNotes || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !line.startsWith(PUBLIC_ORDER_META_COUPON_NOTE_PREFIX));
+
+  if (!couponCode) return preservedLines.join('\n');
+
+  preservedLines.push(`${PUBLIC_ORDER_META_COUPON_NOTE_PREFIX} ${couponCode}`);
+  return preservedLines.join('\n');
 }
 
 function sanitizeStoredCustomBox(value: unknown) {
@@ -193,6 +241,17 @@ function formatTimeInputValue(date: Date) {
   return `${hours}:${minutes}`;
 }
 
+function parseTimeValueParts(value?: string | null) {
+  const [hour = '', minute = ''] = String(value || '').split(':');
+  if (!/^\d{2}$/.test(hour) || !/^\d{2}$/.test(minute)) return null;
+  return { hour, minute };
+}
+
+function buildTimeValue(hour: string, minute: string) {
+  if (!/^\d{2}$/.test(hour) || !/^\d{2}$/.test(minute)) return '';
+  return `${hour}:${minute}`;
+}
+
 function parseLocalDateTime(date: string, time: string) {
   if (!date || !time) return null;
   const [year, month, day] = date.split('-').map((entry) => Number(entry));
@@ -203,7 +262,7 @@ function parseLocalDateTime(date: string, time: string) {
 }
 
 function buildPublicOrderScheduleErrorMessage(minimum: Date) {
-  return `Pedidos novos nao entram para hoje. O primeiro horario disponivel agora e ${formatExternalOrderMinimumSchedule(minimum)}.`;
+  return `Próximo horário: ${formatExternalOrderMinimumSchedule(minimum)}.`;
 }
 
 function extractErrorMessage(body: unknown) {
@@ -311,16 +370,7 @@ function formatCustomBoxParts(counts: Record<FlavorCode, number>) {
     .join(' • ');
 }
 
-const PUBLIC_ORDER_SABORES_COLLAGE_LAYOUT: Array<{
-  code: FlavorCode;
-  className: string;
-}> = [
-  { code: 'T', className: 'left-[5%] top-[10%] h-[44%] w-[29%] -rotate-[10deg]' },
-  { code: 'G', className: 'left-[32%] top-[6%] h-[34%] w-[24%] rotate-[7deg]' },
-  { code: 'D', className: 'right-[5%] top-[10%] h-[43%] w-[29%] rotate-[9deg]' },
-  { code: 'Q', className: 'left-[18%] bottom-[9%] h-[36%] w-[26%] -rotate-[5deg]' },
-  { code: 'R', className: 'right-[16%] bottom-[8%] h-[37%] w-[27%] rotate-[6deg]' }
-] as const;
+const PUBLIC_ORDER_SABORES_COLLAGE_CODES: readonly FlavorCode[] = ['T', 'G', 'D', 'Q', 'R'] as const;
 
 function PublicOrderSaboresCollage() {
   return (
@@ -329,31 +379,51 @@ function PublicOrderSaboresCollage() {
         Composicao com os cinco sabores oficiais da Caixa Sabores: Tradicional, Goiabada, Doce de Leite,
         Queijo do Serro e Requeijao de Corte.
       </span>
-      <div className="absolute inset-x-[9%] top-[48%] h-px bg-[rgba(126,79,45,0.12)] blur-[1px]" aria-hidden="true" />
-      {PUBLIC_ORDER_SABORES_COLLAGE_LAYOUT.map(({ code, className }) => {
-        const art = boxCatalog[code].art;
-        if (art.mode !== 'single') return null;
-        return (
-          <div
-            key={code}
-            className={`absolute overflow-hidden rounded-[16px] border border-white/85 bg-white/92 shadow-[0_18px_36px_rgba(70,44,26,0.16)] ${className}`}
-            aria-hidden="true"
-          >
-            <Image
-              alt=""
-              className="h-full w-full object-cover"
-              fill
-              sizes="(max-width: 768px) 26vw, 140px"
-              src={art.src}
-              style={{ objectPosition: art.objectPosition || 'center center' }}
-            />
-            <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_18%,rgba(46,29,20,0.14)_100%)]" />
-          </div>
-        );
-      })}
-      <div className="absolute bottom-3 left-3 rounded-full border border-white/75 bg-[rgba(255,252,248,0.88)] px-3 py-1.5 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-strong)] shadow-[0_10px_22px_rgba(70,44,26,0.1)] sm:bottom-4 sm:left-4 sm:text-[0.72rem]">
-        5 sabores oficiais
+      <div
+        className="absolute inset-[10px] grid grid-cols-5 gap-[6px] sm:inset-4 sm:gap-3"
+        aria-hidden="true"
+      >
+        {PUBLIC_ORDER_SABORES_COLLAGE_CODES.map((code) => {
+          const art = boxCatalog[code].art;
+          if (art.mode !== 'single') return null;
+          return (
+            <div
+              key={code}
+              className="relative min-w-0 overflow-hidden rounded-[14px] border border-white/85 bg-white/92 shadow-[0_18px_36px_rgba(70,44,26,0.16)]"
+            >
+              <Image
+                alt=""
+                className="h-full w-full object-cover"
+                fill
+                sizes="(max-width: 768px) 15vw, 120px"
+                src={art.src}
+                style={{ objectPosition: art.objectPosition || 'center center' }}
+              />
+              <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_18%,rgba(46,29,20,0.14)_100%)]" />
+            </div>
+          );
+        })}
       </div>
+      <div
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.16),transparent_40%),linear-gradient(180deg,rgba(65,40,24,0.04)_0%,rgba(65,40,24,0.14)_100%)]"
+        aria-hidden="true"
+      />
+      <div
+        className="pointer-events-none absolute inset-y-0 left-[20%] hidden w-px -translate-x-1/2 bg-white/20 sm:block"
+        aria-hidden="true"
+      />
+      <div
+        className="pointer-events-none absolute inset-y-0 left-[40%] hidden w-px -translate-x-1/2 bg-white/20 sm:block"
+        aria-hidden="true"
+      />
+      <div
+        className="pointer-events-none absolute inset-y-0 left-[60%] hidden w-px -translate-x-1/2 bg-white/20 sm:block"
+        aria-hidden="true"
+      />
+      <div
+        className="pointer-events-none absolute inset-y-0 left-[80%] hidden w-px -translate-x-1/2 bg-white/20 sm:block"
+        aria-hidden="true"
+      />
     </div>
   );
 }
@@ -372,6 +442,7 @@ export function PublicOrderPage() {
   const addressInputRef = useRef<HTMLInputElement | null>(null);
   const orderFormRef = useRef<HTMLFormElement | null>(null);
   const pageTopRef = useRef<HTMLDivElement | null>(null);
+  const urlPrefillSignatureRef = useRef<string | null>(null);
   const deliveryAddressDraftRef = useRef<Pick<PublicOrderFormState, 'address' | 'placeId' | 'lat' | 'lng'>>({
     address: '',
     placeId: '',
@@ -383,6 +454,70 @@ export function PublicOrderPage() {
   const minimumDateValue = minimumSchedule ? formatDateInputValue(minimumSchedule) : '';
   const minimumTimeValue = minimumSchedule ? formatTimeInputValue(minimumSchedule) : '';
   const isPickupSelected = form.fulfillmentMode === 'PICKUP';
+  const selectedTimeParts = useMemo(() => parseTimeValueParts(form.time), [form.time]);
+  const minimumTimeParts = useMemo(() => parseTimeValueParts(minimumTimeValue), [minimumTimeValue]);
+  const selectedHourValue = selectedTimeParts?.hour ?? '';
+  const selectedMinuteValue = selectedTimeParts?.minute ?? '';
+  const availableMinuteOptions = useMemo(() => {
+    if (
+      form.date === minimumDateValue &&
+      minimumTimeParts &&
+      selectedHourValue === minimumTimeParts.hour
+    ) {
+      return PUBLIC_ORDER_MINUTE_OPTIONS.filter((option) => option >= minimumTimeParts.minute);
+    }
+    return PUBLIC_ORDER_MINUTE_OPTIONS;
+  }, [form.date, minimumDateValue, minimumTimeParts, selectedHourValue]);
+
+  const handleHourChange = useCallback(
+    (nextHour: string) => {
+      setForm((current) => {
+        if (!nextHour) {
+          return { ...current, time: '' };
+        }
+
+        const currentParts = parseTimeValueParts(current.time);
+        const currentMinimumParts =
+          current.date === minimumDateValue ? parseTimeValueParts(minimumTimeValue) : null;
+        const allowedMinuteOptions =
+          currentMinimumParts && nextHour === currentMinimumParts.hour
+            ? PUBLIC_ORDER_MINUTE_OPTIONS.filter((option) => option >= currentMinimumParts.minute)
+            : PUBLIC_ORDER_MINUTE_OPTIONS;
+        const nextMinute =
+          currentParts && allowedMinuteOptions.includes(currentParts.minute as PublicOrderMinuteOption)
+            ? currentParts.minute
+            : (allowedMinuteOptions[0] ?? PUBLIC_ORDER_MINUTE_OPTIONS[0]);
+
+        return {
+          ...current,
+          time: buildTimeValue(nextHour, nextMinute)
+        };
+      });
+    },
+    [minimumDateValue, minimumTimeValue]
+  );
+
+  const handleMinuteChange = useCallback((nextMinute: string) => {
+    setForm((current) => {
+      const currentParts = parseTimeValueParts(current.time);
+      const nextHour = currentParts?.hour ?? '';
+      if (!nextHour || !nextMinute) return current;
+      return {
+        ...current,
+        time: buildTimeValue(nextHour, nextMinute)
+      };
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!selectedHourValue || !selectedMinuteValue) return;
+    if (availableMinuteOptions.includes(selectedMinuteValue as PublicOrderMinuteOption)) return;
+    const nextMinute = availableMinuteOptions[0] ?? PUBLIC_ORDER_MINUTE_OPTIONS[0];
+    setForm((current) => ({
+      ...current,
+      time: buildTimeValue(selectedHourValue, nextMinute)
+    }));
+  }, [availableMinuteOptions, selectedHourValue, selectedMinuteValue]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -410,6 +545,28 @@ export function PublicOrderPage() {
         deliveryNotes: storedProfile.deliveryNotes || current.deliveryNotes
       }));
     }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const prefill = buildPrefilledBoxCountsFromSearchParams(searchParams);
+    const signature = searchParams.toString();
+    if (!prefill || urlPrefillSignatureRef.current === signature) return;
+
+    urlPrefillSignatureRef.current = signature;
+    setDraftSessionId(createPublicOrderDraftSessionId());
+    setCustomBoxes([]);
+    setResult(null);
+    setError(null);
+    setDeliveryQuote(null);
+    setDeliveryQuoteError(null);
+    setForm((current) => ({
+      ...current,
+      boxes: prefill.boxes,
+      notes: mergeMetaCouponIntoNotes(current.notes, prefill.couponCode)
+    }));
   }, []);
 
   useEffect(() => {
@@ -1212,7 +1369,7 @@ export function PublicOrderPage() {
                   </h2>
                   {minimumScheduleLabel ? (
                     <p className="mt-2 max-w-[44rem] text-sm leading-6 text-[color:var(--ink-muted)]">
-                      Pedidos novos nao entram para hoje. O formulario ja abre no primeiro horario disponivel:
+                      Próximo horário:
                       <strong className="ml-1 text-[color:var(--ink-strong)]">{minimumScheduleLabel}</strong>.
                     </p>
                   ) : null}
@@ -1341,22 +1498,47 @@ export function PublicOrderPage() {
                     />
                   </FormField>
                   <FormField label="Horario">
-                    <input
-                      className="app-input xl:h-14 xl:text-[1.02rem]"
-                      type="time"
-                      min={form.date === minimumDateValue ? minimumTimeValue || undefined : undefined}
-                      step={PUBLIC_ORDER_TIME_STEP_SECONDS}
-                      value={form.time}
-                      onChange={(event) => setForm((current) => ({ ...current, time: event.target.value }))}
-                    />
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+                      <select
+                        className="app-select xl:h-14 xl:text-[1.02rem]"
+                        value={selectedHourValue}
+                        onChange={(event) => handleHourChange(event.target.value)}
+                      >
+                        <option value="">Hora</option>
+                        {PUBLIC_ORDER_HOUR_OPTIONS.map((hour) => {
+                          const isDisabled =
+                            form.date === minimumDateValue &&
+                            Boolean(minimumTimeParts) &&
+                            hour < (minimumTimeParts?.hour || '');
+                          return (
+                            <option key={hour} value={hour} disabled={isDisabled}>
+                              {hour}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      <span className="text-base font-semibold text-[color:var(--ink-muted)]">:</span>
+                      <select
+                        className="app-select xl:h-14 xl:text-[1.02rem]"
+                        value={selectedMinuteValue}
+                        onChange={(event) => handleMinuteChange(event.target.value)}
+                        disabled={!selectedHourValue}
+                      >
+                        <option value="">Min</option>
+                        {availableMinuteOptions.map((minute) => (
+                          <option key={minute} value={minute}>
+                            {minute}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </FormField>
                 </div>
 
                 {minimumScheduleLabel ? (
                   <div className="mt-3 rounded-[18px] border border-[rgba(181,68,57,0.16)] bg-[rgba(255,244,240,0.82)] px-4 py-3 text-sm leading-6 text-[color:var(--ink-muted)]">
-                    <strong className="block text-[color:var(--ink-strong)]">Janela minima para pedido novo</strong>
-                    <span className="block mt-1">
-                      Hoje fica indisponivel para novos pedidos. Escolha a partir de <strong>{minimumScheduleLabel}</strong>.
+                    <span className="block">
+                      Próximo horário: <strong>{minimumScheduleLabel}</strong>.
                     </span>
                   </div>
                 ) : null}
@@ -1703,7 +1885,7 @@ export function PublicOrderPage() {
                   </p>
                   {minimumScheduleLabel ? (
                     <p className="mt-2 text-sm leading-6 text-[color:var(--ink-muted)]">
-                      Pedido novo liberado a partir de <strong className="text-[color:var(--ink-strong)]">{minimumScheduleLabel}</strong>.
+                      Próximo horário: <strong className="text-[color:var(--ink-strong)]">{minimumScheduleLabel}</strong>.
                     </p>
                   ) : null}
                 </div>
@@ -1824,6 +2006,26 @@ export function PublicOrderPage() {
                       <button className="app-button app-button-ghost" onClick={startAnotherOrder} type="button">
                         Fazer outro pedido
                       </button>
+                    </div>
+                    <div className="rounded-[24px] border border-emerald-200 bg-white/82 px-4 py-4 text-sm leading-6 text-[color:var(--ink-muted)]">
+                      <p className="font-semibold text-[color:var(--ink-strong)]">Confirme os dados oficiais antes de pagar</p>
+                      <p className="mt-2">
+                        PIX oficial: <strong className="text-[color:var(--ink-strong)]">{OFFICIAL_BUSINESS_PUBLIC_PROFILE.pixKey}</strong>
+                      </p>
+                      <p>
+                        WhatsApp oficial:{' '}
+                        <a
+                          className="font-semibold text-[color:var(--brand-primary)] underline underline-offset-4"
+                          href={buildOfficialBusinessWhatsAppUrl(
+                            `Oi! Acabei de montar o pedido #${resolveDisplayNumber(result.order) ?? result.order.id}.`
+                          )}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          {OFFICIAL_BUSINESS_PUBLIC_PROFILE.officialPhoneDisplay}
+                        </a>
+                      </p>
+                      <p>CNPJ: {OFFICIAL_BUSINESS_PUBLIC_PROFILE.cnpjDisplay}</p>
                     </div>
                   </div>
                 ) : (

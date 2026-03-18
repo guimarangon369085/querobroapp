@@ -36,6 +36,7 @@ export const ORDER_FLAVOR_CODES = ['T', 'G', 'D', 'Q', 'R'] as const;
 
 export type OrderMistaShortcutCode = (typeof ORDER_MISTA_SHORTCUT_CODES)[number];
 export type OrderFlavorCode = (typeof ORDER_FLAVOR_CODES)[number];
+export const ORDER_BOX_CATALOG_CONTENT_ID_PREFIX = 'QUEROBROA-' as const;
 
 export const ORDER_FLAVOR_OFFICIAL_BOX_NAME_BY_CODE: Record<OrderFlavorCode, string> = {
   T: 'Caixa Tradicional (T)',
@@ -221,6 +222,43 @@ export const ORDER_BOX_CATALOG = {
 } as const;
 
 export type OrderBoxCode = keyof typeof ORDER_BOX_CATALOG;
+
+export function buildOrderBoxCatalogContentId(code: OrderBoxCode) {
+  return `${ORDER_BOX_CATALOG_CONTENT_ID_PREFIX}${code}`;
+}
+
+export function resolveOrderBoxCodeFromCatalogContentId(value?: string | null): OrderBoxCode | null {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (!normalized) return null;
+
+  const candidate = normalized.startsWith(ORDER_BOX_CATALOG_CONTENT_ID_PREFIX)
+    ? normalized.slice(ORDER_BOX_CATALOG_CONTENT_ID_PREFIX.length)
+    : normalized;
+
+  return Object.prototype.hasOwnProperty.call(ORDER_BOX_CATALOG, candidate)
+    ? (candidate as OrderBoxCode)
+    : null;
+}
+
+export function parseMetaCheckoutProductsParam(value?: string | null) {
+  const counts = Object.keys(ORDER_BOX_CATALOG).reduce(
+    (accumulator, code) => {
+      accumulator[code as OrderBoxCode] = 0;
+      return accumulator;
+    },
+    {} as Record<OrderBoxCode, number>
+  );
+
+  for (const entry of String(value || '').split(',')) {
+    const [rawProductId = '', rawQuantity = ''] = entry.split(':');
+    const code = resolveOrderBoxCodeFromCatalogContentId(rawProductId);
+    const quantity = Math.max(Math.floor(Number(rawQuantity) || 0), 0);
+    if (!code || quantity <= 0) continue;
+    counts[code] += quantity;
+  }
+
+  return counts;
+}
 
 export const ORDER_BRAND_GALLERY_IMAGES = [
   {
