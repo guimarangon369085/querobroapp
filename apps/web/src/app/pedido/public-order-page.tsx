@@ -93,6 +93,18 @@ type DeliveryQuote = {
   breakdownLabel?: string | null;
 };
 
+type PublicOrderScheduleAvailability = {
+  minimumAllowedAt: string;
+  nextAvailableAt: string;
+  requestedAt: string | null;
+  requestedAvailable: boolean;
+  reason: 'AVAILABLE' | 'BEFORE_MINIMUM' | 'SLOT_TAKEN' | 'DAY_FULL';
+  dailyLimit: number;
+  slotMinutes: number;
+  dayOrderCount: number;
+  slotTaken: boolean;
+};
+
 type PublicOrderMinuteOption = (typeof PUBLIC_ORDER_MINUTE_OPTIONS)[number];
 
 const initialFormState: PublicOrderFormState = {
@@ -243,6 +255,18 @@ function extractErrorMessage(body: unknown) {
   if (typeof record.message === 'string') return record.message;
   if (Array.isArray(record.message)) return record.message.map((entry) => String(entry)).join('; ');
   return 'Nao foi possivel enviar o pedido.';
+}
+
+function isPublicOrderScheduleAvailability(value: unknown): value is PublicOrderScheduleAvailability {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.minimumAllowedAt === 'string' &&
+    typeof record.nextAvailableAt === 'string' &&
+    (record.requestedAt == null || typeof record.requestedAt === 'string') &&
+    typeof record.requestedAvailable === 'boolean' &&
+    typeof record.reason === 'string'
+  );
 }
 
 function parseCountValue(value: string) {
@@ -701,30 +725,59 @@ export function PublicOrderPage() {
     return parsedScheduledAt.getTime() < minimumSchedule.getTime();
   }, [minimumSchedule, parsedScheduledAt]);
 
-  const syncMinimumSchedule = useCallback(() => {
-    const nextMinimum = resolveExternalOrderMinimumSchedule();
-    setMinimumSchedule(nextMinimum);
+  const applyScheduleToForm = useCallback((nextSchedule: Date) => {
+    setMinimumSchedule(nextSchedule);
     setForm((current) => {
       const currentScheduledAt = parseLocalDateTime(current.date, current.time);
-      if (currentScheduledAt && currentScheduledAt.getTime() >= nextMinimum.getTime()) {
+      if (currentScheduledAt && currentScheduledAt.getTime() >= nextSchedule.getTime()) {
         return current;
       }
       return {
         ...current,
-        date: formatDateInputValue(nextMinimum),
-        time: formatTimeInputValue(nextMinimum)
+        date: formatDateInputValue(nextSchedule),
+        time: formatTimeInputValue(nextSchedule)
       };
     });
   }, []);
 
+  const fetchPublicScheduleAvailability = useCallback(async (requestedAt?: string | null) => {
+    const query = requestedAt ? `?scheduledAt=${encodeURIComponent(requestedAt)}` : '';
+    const response = await fetch(`/api/order-schedule${query}`, {
+      method: 'GET',
+      cache: 'no-store'
+    });
+    const raw = await response.text();
+    const data = raw ? JSON.parse(raw) : null;
+    if (!response.ok) {
+      throw new Error(extractErrorMessage(data));
+    }
+    if (!isPublicOrderScheduleAvailability(data)) {
+      throw new Error('Resposta invalida da agenda publica.');
+    }
+    return data;
+  }, []);
+
+  const syncMinimumSchedule = useCallback(async () => {
+    try {
+      const availability = await fetchPublicScheduleAvailability();
+      const nextMinimum = new Date(availability.nextAvailableAt);
+      if (Number.isNaN(nextMinimum.getTime())) {
+        throw new Error('Horario publico invalido.');
+      }
+      applyScheduleToForm(nextMinimum);
+    } catch {
+      applyScheduleToForm(resolveExternalOrderMinimumSchedule());
+    }
+  }, [applyScheduleToForm, fetchPublicScheduleAvailability]);
+
   useEffect(() => {
-    syncMinimumSchedule();
+    void syncMinimumSchedule();
     const timer = window.setInterval(() => {
-      syncMinimumSchedule();
+      void syncMinimumSchedule();
     }, 60_000);
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        syncMinimumSchedule();
+        void syncMinimumSchedule();
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -1016,7 +1069,7 @@ export function PublicOrderPage() {
     event.preventDefault();
 
     const scheduledAt = scheduledAtIso;
-    const currentMinimumSchedule = resolveExternalOrderMinimumSchedule();
+    const currentMinimumSchedule = minimumSchedule ?? resolveExternalOrderMinimumSchedule();
     if (!form.name.trim()) {
       setError('Informe o nome completo.');
       return;
@@ -1134,6 +1187,12 @@ export function PublicOrderPage() {
           setDeliveryQuote(record.delivery as DeliveryQuote);
           setDeliveryQuoteError('O frete foi atualizado. Confira o novo total e envie novamente.');
         }
+        if (typeof record?.nextAvailableAt === 'string') {
+          const suggestedSchedule = new Date(record.nextAvailableAt);
+          if (!Number.isNaN(suggestedSchedule.getTime())) {
+            applyScheduleToForm(suggestedSchedule);
+          }
+        }
         throw new Error(extractErrorMessage(data));
       }
       const storedOrderSnapshot: StoredPublicOrderSnapshot = {
@@ -1192,7 +1251,7 @@ export function PublicOrderPage() {
   };
 
   const resetForm = () => {
-    const nextMinimum = resolveExternalOrderMinimumSchedule();
+    const nextMinimum = minimumSchedule ?? resolveExternalOrderMinimumSchedule();
     deliveryAddressDraftRef.current = {
       address: '',
       placeId: '',
@@ -1210,6 +1269,7 @@ export function PublicOrderPage() {
     setError(null);
     setDeliveryQuote(null);
     setDeliveryQuoteError(null);
+    void syncMinimumSchedule();
   };
 
   return (

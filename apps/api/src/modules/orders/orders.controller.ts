@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Put,
   UnauthorizedException
 } from '@nestjs/common';
@@ -113,6 +114,12 @@ export class OrdersController {
   @Post('intake/whatsapp-flow')
   intakeWhatsAppFlow(@Body() body: unknown) {
     return this.service.intakeWhatsAppFlow(body);
+  }
+
+  @Public()
+  @Get('public-schedule')
+  getPublicScheduleAvailability(@Query('scheduledAt') scheduledAt?: string) {
+    return this.service.getPublicScheduleAvailability(scheduledAt ?? null);
   }
 
   @Get(':id/pix-charge')

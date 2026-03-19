@@ -264,6 +264,25 @@ export const OrderIntakeMetaSchema = z.object({
   customerId: z.number().int().positive()
 });
 
+export const ExternalOrderScheduleAvailabilityReasonEnum = z.enum([
+  'AVAILABLE',
+  'BEFORE_MINIMUM',
+  'SLOT_TAKEN',
+  'DAY_FULL'
+]);
+
+export const ExternalOrderScheduleAvailabilitySchema = z.object({
+  minimumAllowedAt: z.string().datetime(),
+  nextAvailableAt: z.string().datetime(),
+  requestedAt: z.string().datetime().nullable(),
+  requestedAvailable: z.boolean(),
+  reason: ExternalOrderScheduleAvailabilityReasonEnum,
+  dailyLimit: z.number().int().positive(),
+  slotMinutes: z.number().int().positive(),
+  dayOrderCount: z.number().int().nonnegative(),
+  slotTaken: z.boolean()
+});
+
 export const ExternalOrderSubmissionChannelEnum = z.enum(['GOOGLE_FORM', 'PUBLIC_FORM', 'WHATSAPP_FLOW']);
 
 export const ExternalOrderFlavorCountsSchema = z

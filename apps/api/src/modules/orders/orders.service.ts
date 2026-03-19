@@ -4,6 +4,7 @@ import type { Customer as PrismaCustomer, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
 import {
   compareMoney,
+  ExternalOrderScheduleAvailabilitySchema,
   ExternalOrderSubmissionPreviewSchema,
   ExternalOrderSubmissionSchema,
   moneyFromMinorUnits,
@@ -37,8 +38,10 @@ import {
 } from '../inventory/inventory-formulas.js';
 import { normalizePhone, normalizeText, normalizeTitle } from '../../common/normalize.js';
 import {
+  externalOrderScheduleAvailabilityErrorMessage,
   externalOrderScheduleErrorMessage,
-  isExternalOrderScheduleAllowed
+  isExternalOrderScheduleAllowed,
+  resolveExternalOrderScheduleAvailability
 } from '../../common/external-order-schedule.js';
 import { allocateNextPublicNumber } from '../../common/public-sequence.js';
 import { PaymentsService } from '../payments/payments.service.js';
@@ -127,6 +130,7 @@ type OrderWithRelations = Prisma.OrderGetPayload<{
   include: { items: true; customer: true; payments: true };
 }>;
 type TransactionClient = Prisma.TransactionClient;
+type OrderScheduleQueryClient = Pick<PrismaService | TransactionClient, 'order'>;
 type OrderIntakePayload = z.infer<typeof OrderIntakeSchema>;
 type OrderIntakeMeta = z.infer<typeof OrderIntakeMetaSchema>;
 type PixCharge = z.infer<typeof PixChargeSchema>;
@@ -1079,12 +1083,88 @@ export class OrdersService {
     return parsed;
   }
 
-  private ensurePublicOrderScheduleAllowed(scheduledAt: Date | null) {
+  private async buildExternalOrderScheduleAvailability(
+    client: OrderScheduleQueryClient,
+    options: {
+      requestedAt?: Date | null;
+      excludeOrderId?: number | null;
+      reference?: Date;
+    }
+  ) {
+    const scheduledOrders = await client.order.findMany({
+      where: {
+        scheduledAt: { not: null },
+        status: { not: 'CANCELADO' },
+        ...(options.excludeOrderId ? { id: { not: options.excludeOrderId } } : {})
+      },
+      select: { scheduledAt: true }
+    });
+
+    const availability = resolveExternalOrderScheduleAvailability({
+      scheduledOrders: scheduledOrders.map((entry) => entry.scheduledAt),
+      requestedAt: options.requestedAt ?? null,
+      reference: options.reference
+    });
+
+    return ExternalOrderScheduleAvailabilitySchema.parse({
+      minimumAllowedAt: availability.minimumAllowedAt.toISOString(),
+      nextAvailableAt: availability.nextAvailableAt.toISOString(),
+      requestedAt: availability.requestedAt ? availability.requestedAt.toISOString() : null,
+      requestedAvailable: availability.requestedAvailable,
+      reason: availability.reason,
+      dailyLimit: availability.dailyLimit,
+      slotMinutes: availability.slotMinutes,
+      dayOrderCount: availability.dayOrderCount,
+      slotTaken: availability.slotTaken
+    });
+  }
+
+  private async ensureOrderScheduleCapacityAllowed(
+    client: OrderScheduleQueryClient,
+    scheduledAt: Date | null,
+    options: {
+      excludeOrderId?: number | null;
+      reference?: Date;
+    } = {}
+  ) {
     if (!scheduledAt) {
       throw new BadRequestException('Data/hora do pedido invalida.');
     }
-    if (isExternalOrderScheduleAllowed(scheduledAt)) return;
-    throw new BadRequestException(externalOrderScheduleErrorMessage());
+    const availability = await this.buildExternalOrderScheduleAvailability(client, {
+      requestedAt: scheduledAt,
+      excludeOrderId: options.excludeOrderId,
+      reference: options.reference
+    });
+    if (availability.requestedAvailable) return availability;
+    throw new BadRequestException({
+      message: externalOrderScheduleAvailabilityErrorMessage(availability),
+      nextAvailableAt: availability.nextAvailableAt,
+      reason: availability.reason,
+      dailyLimit: availability.dailyLimit
+    });
+  }
+
+  private async ensurePublicOrderScheduleAllowed(
+    scheduledAt: Date | null,
+    options: {
+      excludeOrderId?: number | null;
+      reference?: Date;
+    } = {}
+  ) {
+    if (!scheduledAt) {
+      throw new BadRequestException('Data/hora do pedido invalida.');
+    }
+    if (!isExternalOrderScheduleAllowed(scheduledAt, options.reference)) {
+      throw new BadRequestException(externalOrderScheduleErrorMessage(options.reference));
+    }
+    return this.ensureOrderScheduleCapacityAllowed(this.prisma, scheduledAt, options);
+  }
+
+  async getPublicScheduleAvailability(requestedAt?: string | null) {
+    const parsedRequestedAt = this.parseOptionalDateTime(requestedAt ?? null);
+    return this.buildExternalOrderScheduleAvailability(this.prisma, {
+      requestedAt: parsedRequestedAt
+    });
   }
 
   private withFinancial(order: OrderWithRelations) {
@@ -1217,7 +1297,7 @@ export class OrdersService {
       intakeChannel: 'CUSTOMER_LINK' | 'WHATSAPP_FLOW';
     }
   ) {
-    this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt));
+    await this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt));
     const productIdByCode = await this.resolveActiveFlavorProductIdByCode();
     const items = this.buildOrderItemsFromFlavorCounts(data.flavors, productIdByCode);
 
@@ -1262,7 +1342,7 @@ export class OrdersService {
       intakeChannel: 'CUSTOMER_LINK' | 'WHATSAPP_FLOW';
     }
   ): Promise<ExternalOrderSubmissionPreview> {
-    this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt));
+    await this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt));
 
     const productIdByCode = await this.resolveActiveFlavorProductIdByCode();
     const items = this.buildOrderItemsFromFlavorCounts(data.flavors, productIdByCode);
@@ -1866,6 +1946,10 @@ export class OrdersService {
       const deliveryFee = this.toMoney(deliveryQuote.fee ?? 0);
       const total = this.computeOrderTotal(subtotal, discount, deliveryFee);
 
+      await this.ensureOrderScheduleCapacityAllowed(tx, scheduledAt, {
+        reference: data.source.channel === 'CUSTOMER_LINK' || data.source.channel === 'WHATSAPP_FLOW' ? new Date() : undefined
+      });
+
       const createdOrder = await tx.order.create({
         data: {
           publicNumber: await allocateNextPublicNumber(tx, 'ORDER'),
@@ -1972,7 +2056,7 @@ export class OrdersService {
 
   async intakeWhatsAppFlow(payload: unknown) {
     const data = whatsappFlowIntakeSchema.parse(payload);
-    this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt));
+    await this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt));
     return this.intake({
       ...data,
       payment: data.payment ?? {
@@ -2293,6 +2377,12 @@ export class OrdersService {
       const total = this.computeOrderTotal(subtotal, discount, this.toMoney(existing.deliveryFee ?? 0));
       const amountPaid = this.getPaidAmount(existing.payments || []);
       this.ensureOrderTotalCoversPaid(total, amountPaid);
+
+      if (nextScheduledAt !== undefined) {
+        await this.ensureOrderScheduleCapacityAllowed(tx, nextScheduledAt, {
+          excludeOrderId: id
+        });
+      }
 
       const updated = await tx.order.update({
         where: { id },

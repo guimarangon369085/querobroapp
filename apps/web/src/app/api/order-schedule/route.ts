@@ -1,0 +1,50 @@
+import { NextResponse } from 'next/server';
+import { resolveServerBridgeApiBaseUrl } from '@/lib/server-bridge-api-base-url';
+
+export const dynamic = 'force-dynamic';
+
+function buildErrorResponse(status: number, payload: unknown) {
+  return NextResponse.json(payload, { status });
+}
+
+export async function GET(request: Request) {
+  const requestUrl = new URL(request.url);
+  const scheduledAt = requestUrl.searchParams.get('scheduledAt');
+  const upstreamUrl = new URL(
+    `${resolveServerBridgeApiBaseUrl(request, process.env.ORDER_FORM_API_URL)}/orders/public-schedule`
+  );
+
+  if (scheduledAt) {
+    upstreamUrl.searchParams.set('scheduledAt', scheduledAt);
+  }
+
+  try {
+    const response = await fetch(upstreamUrl, {
+      method: 'GET',
+      cache: 'no-store'
+    });
+
+    const raw = await response.text();
+    const contentType = response.headers.get('content-type') || 'application/json';
+    let payload: unknown = null;
+    try {
+      payload = raw ? JSON.parse(raw) : null;
+    } catch {
+      payload = raw ? { message: raw } : null;
+    }
+
+    return new NextResponse(JSON.stringify(payload), {
+      status: response.status,
+      headers: {
+        'Content-Type': contentType
+      }
+    });
+  } catch (error) {
+    return buildErrorResponse(502, {
+      message:
+        error instanceof Error
+          ? `Falha ao consultar agenda publica na API: ${error.message}`
+          : 'Falha ao consultar agenda publica na API.'
+    });
+  }
+}
