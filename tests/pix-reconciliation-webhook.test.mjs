@@ -112,6 +112,7 @@ test('pix reconciliation webhook baixa pedido pendente por nome + valor', async 
     body: {
       payerName: 'Guilherme Marangon',
       amount: intake.order.total,
+      paidAt: '2026-03-18T13:50:00-03:00',
       source: 'test-suite',
       sourceTransactionId: `txn-${suffix}`
     }

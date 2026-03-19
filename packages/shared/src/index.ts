@@ -159,7 +159,7 @@ export const PixSettlementWebhookSchema = z
     txid: z.string().trim().min(1).max(80).optional().nullable(),
     providerRef: z.string().trim().min(1).max(160).optional().nullable(),
     amount: z.number().positive().optional().nullable(),
-    paidAt: z.string().datetime().optional().nullable(),
+    paidAt: z.string().datetime({ offset: true }).optional().nullable(),
     source: z.string().trim().min(1).max(80).default('webhook'),
     metadata: z.record(z.unknown()).optional()
   })
@@ -171,7 +171,7 @@ export const PixReconciliationWebhookSchema = z.object({
   version: z.literal(1).default(1),
   payerName: z.string().trim().min(1).max(160),
   amount: z.number().positive(),
-  paidAt: z.string().datetime().optional().nullable(),
+  paidAt: z.string().datetime({ offset: true }).optional().nullable(),
   source: z.string().trim().min(1).max(80).default('bank-bridge'),
   sourceTransactionId: z.string().trim().min(1).max(160).optional().nullable(),
   metadata: z.record(z.unknown()).optional()

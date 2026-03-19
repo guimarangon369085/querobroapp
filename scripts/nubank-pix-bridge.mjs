@@ -183,7 +183,9 @@ function resolveObservedPaidAt(timeLabel) {
   const match = String(timeLabel || '').match(/(\d{2}):(\d{2})/);
   if (!match) return null;
   const parts = nowInSaoPauloParts();
-  return `${parts.year}-${parts.month}-${parts.day}T${match[1]}:${match[2]}:00-03:00`;
+  return new Date(
+    Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(match[1]) + 3, Number(match[2]), 0, 0)
+  ).toISOString();
 }
 
 function fingerprintTransaction(transaction) {
