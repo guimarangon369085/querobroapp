@@ -4,5 +4,7 @@ export const FIXED_PICKUP_ORIGIN = {
   addressLine2: '',
   city: 'Sao Paulo',
   state: 'SP',
-  country: 'Brasil'
+  country: 'Brasil',
+  lat: -23.5650452,
+  lng: -46.6562471
 } as const;

@@ -252,6 +252,67 @@ export class UberDirectProvider implements DeliveryProvider {
     return this.getStringField((value as Record<string, unknown>)[outer], inner);
   }
 
+  private getNestedNumberField(value: unknown, outer: string, inner: string) {
+    if (!value || typeof value !== 'object') return null;
+    return this.getNumberField((value as Record<string, unknown>)[outer], inner);
+  }
+
+  private milesToKm(value: number) {
+    return this.toMoney(value * 1.60934);
+  }
+
+  private metersToKm(value: number) {
+    return this.toMoney(value / 1000);
+  }
+
+  private resolveDistanceKm(value: unknown): number | null {
+    const scalarKm =
+      this.getNumberField(value, 'distance_km') ??
+      this.getNumberField(value, 'distanceKm') ??
+      this.getNumberField(value, 'distance_in_km');
+    if (Number.isFinite(scalarKm ?? Number.NaN) && Number(scalarKm) > 0) {
+      return this.toMoney(Number(scalarKm));
+    }
+
+    const scalarMeters =
+      this.getNumberField(value, 'distance_meters') ??
+      this.getNumberField(value, 'distanceMeters') ??
+      this.getNestedNumberField(value, 'distance', 'meters');
+    if (Number.isFinite(scalarMeters ?? Number.NaN) && Number(scalarMeters) > 0) {
+      return this.metersToKm(Number(scalarMeters));
+    }
+
+    const scalarMiles =
+      this.getNumberField(value, 'distance_miles') ??
+      this.getNumberField(value, 'distanceMiles') ??
+      this.getNestedNumberField(value, 'distance', 'miles');
+    if (Number.isFinite(scalarMiles ?? Number.NaN) && Number(scalarMiles) > 0) {
+      return this.milesToKm(Number(scalarMiles));
+    }
+
+    const scalarDistance = this.getNumberField(value, 'distance');
+    if (Number.isFinite(scalarDistance ?? Number.NaN) && Number(scalarDistance) > 0) {
+      const unit = [
+        this.getStringField(value, 'distance_unit'),
+        this.getStringField(value, 'distanceUnit'),
+        this.getStringField(value, 'unit')
+      ]
+        .join(' ')
+        .toLowerCase();
+      if (unit.includes('mile')) {
+        return this.milesToKm(Number(scalarDistance));
+      }
+      if (unit.includes('meter')) {
+        return this.metersToKm(Number(scalarDistance));
+      }
+      if (unit.includes('km') || unit.includes('kilometer') || unit.includes('kilometre')) {
+        return this.toMoney(Number(scalarDistance));
+      }
+    }
+
+    return null;
+  }
+
   private resolveAmount(value: unknown, options?: { treatScalarAsMinorUnits?: boolean }) {
     if (typeof value === 'number') {
       return this.toMoney(options?.treatScalarAsMinorUnits ? value / 100 : value);
@@ -447,6 +508,11 @@ export class UberDirectProvider implements DeliveryProvider {
           Boolean(this.getStringField(parsed, 'currency_code')) ||
           Boolean(this.getStringField(parsed, 'currency_type')))
     });
+    const distanceKm = usingCurrentApi
+      ? this.resolveDistanceKm(currentPrimaryEstimate) ??
+        this.resolveDistanceKm(parsed?.route) ??
+        this.resolveDistanceKm(parsed)
+      : this.resolveDistanceKm(parsed);
     const currencyCode =
       (usingCurrentApi
         ? this.resolveCurrency(feeSource) ||
@@ -470,6 +536,7 @@ export class UberDirectProvider implements DeliveryProvider {
       expiresAt,
       fallbackReason: null,
       breakdownLabel: 'Uber Envios',
+      distanceKm,
       rawPayload: parsed
     };
   }

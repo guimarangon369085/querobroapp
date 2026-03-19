@@ -24,6 +24,7 @@ export class LocalDeliveryProvider implements DeliveryProvider {
       expiresAt: null,
       fallbackReason: 'Cotacao dos provedores indisponivel. Frete provisório aplicado.',
       breakdownLabel: 'Frete provisório',
+      distanceKm: null,
       rawPayload: null
     };
   }

@@ -28,9 +28,8 @@ async function loadModules() {
       runCommand('pnpm', ['--filter', '@querobroapp/shared', 'build']);
       runCommand('pnpm', ['--filter', '@querobroapp/api', 'build']);
 
-      const [uberModule, loggiModule, deliveriesModule, pickupOriginModule] = await Promise.all([
+      const [uberModule, deliveriesModule, pickupOriginModule] = await Promise.all([
         import(pathToFileURL(path.join(API_DIST_DIR, 'uber-direct.provider.js')).href),
-        import(pathToFileURL(path.join(API_DIST_DIR, 'loggi.provider.js')).href),
         import(pathToFileURL(path.join(API_DIST_DIR, 'deliveries.service.js')).href),
         import(pathToFileURL(path.join(API_DIST_DIR, 'pickup-origin.js')).href)
       ]);
@@ -38,7 +37,6 @@ async function loadModules() {
       return {
         DeliveriesService: deliveriesModule.DeliveriesService,
         UberDirectProvider: uberModule.UberDirectProvider,
-        LoggiProvider: loggiModule.LoggiProvider,
         FIXED_PICKUP_ORIGIN: pickupOriginModule.FIXED_PICKUP_ORIGIN
       };
     })();
@@ -79,29 +77,7 @@ test('Uber quote payload always uses Alameda Jau 731 as pickup origin and custom
   assert.equal(payload.dropoff_address, 'Alameda Rio Negro, 500 - Barueri - SP, Brasil');
 });
 
-test('Loggi quote and shipment payloads always use Alameda Jau 731 as pickup origin', async () => {
-  const { LoggiProvider, FIXED_PICKUP_ORIGIN } = await loadModules();
-  process.env.LOGGI_PICKUP_POSTAL_CODE = '01420-004';
-  process.env.LOGGI_PICKUP_ADDRESS_LINE1 = 'Rua Errada, 123';
-  process.env.LOGGI_PICKUP_CITY = 'Campinas';
-  process.env.LOGGI_PICKUP_STATE = 'RJ';
-  process.env.LOGGI_PICKUP_COUNTRY = 'Argentina';
-
-  const provider = new LoggiProvider();
-  const input = createInput();
-  const quotePayload = provider.buildQuotePayload(input);
-  const lineAddress = provider.resolvePickupLineAddress();
-
-  assert.equal(quotePayload.shipFrom.widget.address, FIXED_PICKUP_ORIGIN.fullAddress);
-  assert.equal(quotePayload.shipTo.widget.address, input.dropoffAddress);
-  assert.equal(lineAddress.addressLine1, FIXED_PICKUP_ORIGIN.addressLine1);
-  assert.equal(lineAddress.city, FIXED_PICKUP_ORIGIN.city);
-  assert.equal(lineAddress.state, FIXED_PICKUP_ORIGIN.state);
-  assert.equal(lineAddress.country, FIXED_PICKUP_ORIGIN.country);
-  assert.equal(lineAddress.postalCode, '01420004');
-});
-
-test('pickup origin phone never falls back to PIX key', async () => {
+test('pickup origin ignores legacy Loggi env and never falls back to PIX key', async () => {
   const { DeliveriesService } = await loadModules();
   const previousEnv = {
     DELIVERY_PICKUP_PHONE: process.env.DELIVERY_PICKUP_PHONE,
@@ -112,7 +88,7 @@ test('pickup origin phone never falls back to PIX key', async () => {
 
   process.env.DELIVERY_PICKUP_PHONE = '';
   process.env.UBER_DIRECT_PICKUP_PHONE = '';
-  process.env.LOGGI_PICKUP_PHONE = '';
+  process.env.LOGGI_PICKUP_PHONE = '11988887777';
   process.env.PIX_STATIC_KEY = 'pix-chave@querobroa.com.br';
 
   try {

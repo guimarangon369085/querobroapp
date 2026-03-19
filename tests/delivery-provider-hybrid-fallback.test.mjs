@@ -68,53 +68,85 @@ function createPrismaStub() {
   };
 }
 
-test('delivery quotes fall back to Loggi when Uber blocks by coverage radius', async () => {
-  const { DeliveriesService, BadRequestException } = await loadApiModules();
+test('delivery quotes charge R$ 12 when Uber stays within the base tier', async () => {
+  const { DeliveriesService } = await loadApiModules();
   const service = new DeliveriesService(createPrismaStub());
-  const uberError = new BadRequestException({
-    code: 'address_undeliverable',
-    message: 'outside coverage',
-    metadata: {
-      details: 'Max Radius: 3.11 miles, Calculated Distance: 7.29 miles'
-    }
-  });
+  service.uberProvider = {
+    isConfigured: () => true,
+    isCoverageLimitError: () => false,
+    quote: async () => ({
+      provider: 'UBER_DIRECT',
+      fee: 9.9,
+      currencyCode: 'BRL',
+      source: 'UBER_QUOTE',
+      status: 'QUOTED',
+      providerQuoteId: 'uber-123',
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      fallbackReason: null,
+      breakdownLabel: 'Uber Envios',
+      distanceKm: 6.4
+    })
+  };
+
+  const quote = await service.quoteDelivery(quotePayload(), { allowManualFallback: false });
+
+  assert.equal(quote.provider, 'UBER_DIRECT');
+  assert.equal(quote.source, 'UBER_QUOTE');
+  assert.equal(quote.fee, 12);
+  assert.equal(quote.breakdownLabel, 'Uber Envios');
+  assert.match(String(quote.quoteToken || ''), /^DQ_/);
+});
+
+test('delivery quotes charge R$ 18 when the Uber quote exceeds R$ 12', async () => {
+  const { DeliveriesService } = await loadApiModules();
+  const service = new DeliveriesService(createPrismaStub());
 
   service.uberProvider = {
     isConfigured: () => true,
-    isCoverageLimitError: (error) => error === uberError,
-    quote: async () => {
-      throw uberError;
-    }
-  };
-  service.loggiProvider = {
-    isConfigured: () => true,
+    isCoverageLimitError: () => false,
     quote: async () => ({
-      provider: 'LOGGI',
-      fee: 24.76,
+      provider: 'UBER_DIRECT',
+      fee: 14.2,
       currencyCode: 'BRL',
-      source: 'LOGGI_QUOTE',
+      source: 'UBER_QUOTE',
       status: 'QUOTED',
-      providerQuoteId: 'loggi-123',
+      providerQuoteId: 'uber-124',
       expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
       fallbackReason: null,
-      breakdownLabel: 'Loggi'
+      breakdownLabel: 'Uber Envios',
+      distanceKm: 5.2
     })
   };
-  service.localProvider = {
-    quote: async () => {
-      throw new Error('local fallback should not be used when Loggi can quote');
-    }
+
+  const quote = await service.quoteDelivery(quotePayload(), { allowManualFallback: false });
+
+  assert.equal(quote.fee, 18);
+});
+
+test('delivery quotes charge R$ 18 above 10 km even when the Uber quote is below R$ 12', async () => {
+  const { DeliveriesService } = await loadApiModules();
+  const service = new DeliveriesService(createPrismaStub());
+
+  service.uberProvider = {
+    isConfigured: () => true,
+    isCoverageLimitError: () => false,
+    quote: async () => ({
+      provider: 'UBER_DIRECT',
+      fee: 11.4,
+      currencyCode: 'BRL',
+      source: 'UBER_QUOTE',
+      status: 'QUOTED',
+      providerQuoteId: 'uber-125',
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      fallbackReason: null,
+      breakdownLabel: 'Uber Envios',
+      distanceKm: 12.8
+    })
   };
 
-  const quote = await service.quoteDelivery(quotePayload(), {
-    allowManualFallback: false
-  });
+  const quote = await service.quoteDelivery(quotePayload(), { allowManualFallback: false });
 
-  assert.equal(quote.provider, 'LOGGI');
-  assert.equal(quote.source, 'LOGGI_QUOTE');
-  assert.equal(quote.fee, 24.76);
-  assert.equal(quote.breakdownLabel, 'Loggi');
-  assert.match(String(quote.quoteToken || ''), /^DQ_/);
+  assert.equal(quote.fee, 18);
 });
 
 test('delivery quotes keep Uber validation errors when the failure is not a coverage limit', async () => {
@@ -132,12 +164,6 @@ test('delivery quotes keep Uber validation errors when the failure is not a cove
       throw uberError;
     }
   };
-  service.loggiProvider = {
-    isConfigured: () => true,
-    quote: async () => {
-      throw new Error('Loggi should not be called when Uber fails for another validation reason');
-    }
-  };
   service.localProvider = {
     quote: async () => {
       throw new Error('local fallback should not be used for explicit validation errors');
@@ -151,4 +177,44 @@ test('delivery quotes keep Uber validation errors when the failure is not a cove
       }),
     /Telefone invalido/
   );
+});
+
+test('delivery quotes fall back to local pricing when Uber blocks by coverage radius and manual fallback is enabled', async () => {
+  const { DeliveriesService, BadRequestException } = await loadApiModules();
+  const service = new DeliveriesService(createPrismaStub());
+  const uberError = new BadRequestException({
+    code: 'address_undeliverable',
+    message: 'outside coverage',
+    metadata: {
+      details: 'Max Radius: 3.11 miles, Calculated Distance: 7.29 miles'
+    }
+  });
+
+  service.uberProvider = {
+    isConfigured: () => true,
+    isCoverageLimitError: (error) => error === uberError,
+    quote: async () => {
+      throw uberError;
+    }
+  };
+  service.localProvider = {
+    quote: async () => ({
+      provider: 'LOCAL',
+      fee: 12,
+      currencyCode: 'BRL',
+      source: 'MANUAL_FALLBACK',
+      status: 'FALLBACK',
+      providerQuoteId: null,
+      expiresAt: null,
+      fallbackReason: 'Cobertura Uber indisponivel.',
+      breakdownLabel: 'Frete provisório',
+      distanceKm: null
+    })
+  };
+
+  const quote = await service.quoteDelivery(quotePayload(), { allowManualFallback: true });
+
+  assert.equal(quote.provider, 'LOCAL');
+  assert.equal(quote.source, 'MANUAL_FALLBACK');
+  assert.equal(quote.fee, 18);
 });

@@ -31,6 +31,7 @@ export type DeliveryQuoteOutput = {
   expiresAt: string | null;
   fallbackReason: string | null;
   breakdownLabel: string | null;
+  distanceKm?: number | null;
   rawPayload?: unknown;
 };
 
