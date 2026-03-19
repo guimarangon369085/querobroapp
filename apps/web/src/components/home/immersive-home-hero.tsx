@@ -53,7 +53,8 @@ const HOME_HERO_IMAGES: HeroImage[] = Array.from({ length: HERO_IMAGE_COUNT }, (
   };
 });
 
-const AUTOPLAY_MS = 6000;
+const MOBILE_AUTOPLAY_MS = 1000;
+const DESKTOP_AUTOPLAY_MS = 6000;
 const DESKTOP_STAGGER_MS = 340;
 const INITIAL_INDEX = 4;
 const DESKTOP_COLUMN_OFFSETS = [0, 3, 6] as const;
@@ -67,6 +68,7 @@ export function ImmersiveHomeHero() {
   const [desktopIndices, setDesktopIndices] = useState(() =>
     DESKTOP_COLUMN_OFFSETS.map((offset) => wrapIndex(INITIAL_INDEX + offset, HOME_HERO_IMAGES.length))
   );
+  const [isDesktopViewport, setIsDesktopViewport] = useState(false);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const [viewportHeight, setViewportHeight] = useState<number | null>(null);
   const instructionsId = useId();
@@ -74,7 +76,7 @@ export function ImmersiveHomeHero() {
   const desktopShiftTimersRef = useRef<number[]>([]);
 
   const activeImage = HOME_HERO_IMAGES[desktopIndices[1] ?? mobileIndex];
-  const transitionDuration = prefersReducedMotion ? '100ms' : '1800ms';
+  const transitionDuration = prefersReducedMotion ? '100ms' : isDesktopViewport ? '1800ms' : '720ms';
   const transitionTimingFunction = 'cubic-bezier(.19,1,.22,1)';
   const desktopColumnImages = desktopIndices.map((imageIndex, columnIndex) => ({
     imageIndex,
@@ -126,15 +128,24 @@ export function ImmersiveHomeHero() {
   }, []);
 
   useEffect(() => {
+    const mediaQuery = window.matchMedia('(min-width: 1024px)');
+    const sync = () => setIsDesktopViewport(mediaQuery.matches);
+    sync();
+    mediaQuery.addEventListener('change', sync);
+    return () => mediaQuery.removeEventListener('change', sync);
+  }, []);
+
+  useEffect(() => {
     if (prefersReducedMotion) return;
+    const autoplayMs = isDesktopViewport ? DESKTOP_AUTOPLAY_MS : MOBILE_AUTOPLAY_MS;
     const autoplay = window.setInterval(() => {
       step(1);
-    }, AUTOPLAY_MS);
+    }, autoplayMs);
 
     return () => {
       window.clearInterval(autoplay);
     };
-  }, [prefersReducedMotion, step]);
+  }, [isDesktopViewport, prefersReducedMotion, step]);
 
   useEffect(() => {
     return () => {
