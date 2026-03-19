@@ -102,24 +102,32 @@ export const ORDER_FLAVOR_CARD_ART_BY_CODE: Record<OrderFlavorCode, OrderCardArt
 
 const ORDER_MISTA_CARD_ART_BY_CODE: Record<OrderMistaShortcutCode, OrderCardArt> = {
   G: {
-    mode: 'single',
-    src: ORDER_CARDAPIO_IMAGE_PATHS.mistaGoiabada,
-    objectPosition: 'center center'
+    mode: 'split',
+    leftSrc: ORDER_CARDAPIO_IMAGE_PATHS.traditional,
+    rightSrc: ORDER_CARDAPIO_IMAGE_PATHS.goiabada,
+    leftObjectPosition: 'center center',
+    rightObjectPosition: 'center center'
   },
   D: {
-    mode: 'single',
-    src: ORDER_CARDAPIO_IMAGE_PATHS.mistaDoceDeLeite,
-    objectPosition: 'center center'
+    mode: 'split',
+    leftSrc: ORDER_CARDAPIO_IMAGE_PATHS.traditional,
+    rightSrc: ORDER_CARDAPIO_IMAGE_PATHS.doceDeLeite,
+    leftObjectPosition: 'center center',
+    rightObjectPosition: 'center center'
   },
   Q: {
-    mode: 'single',
-    src: ORDER_CARDAPIO_IMAGE_PATHS.mistaQueijoDoSerro,
-    objectPosition: 'center center'
+    mode: 'split',
+    leftSrc: ORDER_CARDAPIO_IMAGE_PATHS.traditional,
+    rightSrc: ORDER_CARDAPIO_IMAGE_PATHS.queijoDoSerro,
+    leftObjectPosition: 'center center',
+    rightObjectPosition: 'center center'
   },
   R: {
-    mode: 'single',
-    src: ORDER_CARDAPIO_IMAGE_PATHS.mistaRequeijaoDeCorte,
-    objectPosition: 'center center'
+    mode: 'split',
+    leftSrc: ORDER_CARDAPIO_IMAGE_PATHS.traditional,
+    rightSrc: ORDER_CARDAPIO_IMAGE_PATHS.requeijaoDeCorte,
+    leftObjectPosition: 'center center',
+    rightObjectPosition: 'center center'
   }
 };
 
