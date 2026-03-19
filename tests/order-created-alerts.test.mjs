@@ -417,6 +417,8 @@ test('order created alert: envia confirmacao automatica para o cliente via Whats
   assert.equal(graphHits[0].body.messaging_product, 'whatsapp');
   assert.equal(graphHits[0].body.to, '5511940009584');
   assert.equal(graphHits[0].body.type, 'text');
-  assert.match(graphHits[0].body.text.body, /Recebemos seu pedido #/);
-  assert.match(graphHits[0].body.text.body, /comprovante/);
+  assert.equal(
+    graphHits[0].body.text.body,
+    'Seu pedido foi confirmado ❤️\nVc vai receber um aviso quando suas broinhas sairem para entrega :)'
+  );
 });

@@ -196,15 +196,11 @@ function resolveOrderNumber(order) {
 }
 
 function buildPendingConfirmationBody(order) {
-  const customerLabel = firstName(order?.customer?.name);
-  const orderLabel = resolveOrderNumber(order);
-  return `Oi, ${customerLabel}! Recebemos seu pedido #${orderLabel}! Em breve, sua vida estara broa. Assim que confirmar o PIX enviando o comprovante para este numero, a gente confirma o seu pedido! :)`;
+  return 'Seu pedido foi confirmado ❤️\nVc vai receber um aviso quando suas broinhas sairem para entrega :)';
 }
 
 function buildPaidConfirmationBody(order) {
-  const customerLabel = firstName(order?.customer?.name);
-  const orderLabel = resolveOrderNumber(order);
-  return `Oi, ${customerLabel}! Recebemos seu pedido #${orderLabel}! Pagamento identificado. Em breve, sua vida estara broa :)`;
+  return 'Seu pedido foi confirmado ❤️\nVc vai receber um aviso quando suas broinhas sairem para entrega :)';
 }
 
 async function fetchOrders(apiUrl, apiToken) {

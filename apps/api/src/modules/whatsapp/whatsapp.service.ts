@@ -290,11 +290,7 @@ export class WhatsAppService {
     paymentPending: boolean;
   }) {
     const to = this.normalizeRecipientPhone(input.phone);
-    const customerLabel = String(input.customerName || '').trim().split(/\s+/)[0] || 'cliente';
-    const orderLabel = String(input.orderNumber).trim();
-    const body = input.paymentPending
-      ? `Oi, ${customerLabel}! Recebemos seu pedido #${orderLabel}! Em breve, sua vida estara broa. Assim que confirmar o PIX enviando o comprovante para este numero, a gente confirma o seu pedido! :)`
-      : `Oi, ${customerLabel}! Recebemos seu pedido #${orderLabel}! Pagamento identificado. Em breve, sua vida estara broa :)`;
+    const body = 'Seu pedido foi confirmado ❤️\nVc vai receber um aviso quando suas broinhas sairem para entrega :)';
 
     const message = await this.postTextMessage({
       to,
