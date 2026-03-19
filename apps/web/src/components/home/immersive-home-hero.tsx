@@ -53,7 +53,7 @@ const HOME_HERO_IMAGES: HeroImage[] = Array.from({ length: HERO_IMAGE_COUNT }, (
   };
 });
 
-const MOBILE_AUTOPLAY_MS = 1000;
+const MOBILE_AUTOPLAY_MS = 2000;
 const DESKTOP_AUTOPLAY_MS = 6000;
 const DESKTOP_STAGGER_MS = 340;
 const INITIAL_INDEX = 4;
