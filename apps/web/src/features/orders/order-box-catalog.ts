@@ -54,12 +54,15 @@ export const ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE: Record<OrderMistaShortcutCod
 };
 
 const ORDER_CARDAPIO_IMAGE_PATHS = {
-  traditionalSplit: '/querobroa-brand/half-broa.jpg',
   traditional: '/querobroa-brand/cardapio/tradicional.jpg',
   goiabada: '/querobroa-brand/cardapio/goiabada.jpg',
   doceDeLeite: '/querobroa-brand/cardapio/doce-de-leite.jpg',
   queijoDoSerro: '/querobroa-brand/cardapio/queijo-do-serro-camadas.jpg',
   requeijaoDeCorte: '/querobroa-brand/cardapio/requeijao-de-corte.jpg',
+  mistaGoiabada: '/querobroa-brand/cardapio/mista-goiabada.jpg',
+  mistaDoceDeLeite: '/querobroa-brand/cardapio/mista-doce-de-leite.jpg',
+  mistaQueijoDoSerro: '/querobroa-brand/cardapio/mista-queijo-do-serro.jpg',
+  mistaRequeijaoDeCorte: '/querobroa-brand/cardapio/mista-requeijao-de-corte.jpg',
   sabores: '/querobroa-brand/cardapio/sabores-caixa.jpg'
 } as const;
 
@@ -99,32 +102,24 @@ export const ORDER_FLAVOR_CARD_ART_BY_CODE: Record<OrderFlavorCode, OrderCardArt
 
 const ORDER_MISTA_CARD_ART_BY_CODE: Record<OrderMistaShortcutCode, OrderCardArt> = {
   G: {
-    mode: 'split',
-    leftSrc: ORDER_CARDAPIO_IMAGE_PATHS.traditionalSplit,
-    rightSrc: ORDER_CARDAPIO_IMAGE_PATHS.goiabada,
-    leftObjectPosition: '44% center',
-    rightObjectPosition: 'center center'
+    mode: 'single',
+    src: ORDER_CARDAPIO_IMAGE_PATHS.mistaGoiabada,
+    objectPosition: 'center center'
   },
   D: {
-    mode: 'split',
-    leftSrc: ORDER_CARDAPIO_IMAGE_PATHS.traditionalSplit,
-    rightSrc: ORDER_CARDAPIO_IMAGE_PATHS.doceDeLeite,
-    leftObjectPosition: '44% center',
-    rightObjectPosition: 'center center'
+    mode: 'single',
+    src: ORDER_CARDAPIO_IMAGE_PATHS.mistaDoceDeLeite,
+    objectPosition: 'center center'
   },
   Q: {
-    mode: 'split',
-    leftSrc: ORDER_CARDAPIO_IMAGE_PATHS.traditionalSplit,
-    rightSrc: ORDER_CARDAPIO_IMAGE_PATHS.queijoDoSerro,
-    leftObjectPosition: '44% center',
-    rightObjectPosition: 'center center'
+    mode: 'single',
+    src: ORDER_CARDAPIO_IMAGE_PATHS.mistaQueijoDoSerro,
+    objectPosition: 'center center'
   },
   R: {
-    mode: 'split',
-    leftSrc: ORDER_CARDAPIO_IMAGE_PATHS.traditionalSplit,
-    rightSrc: ORDER_CARDAPIO_IMAGE_PATHS.requeijaoDeCorte,
-    leftObjectPosition: '44% center',
-    rightObjectPosition: 'center center'
+    mode: 'single',
+    src: ORDER_CARDAPIO_IMAGE_PATHS.mistaRequeijaoDeCorte,
+    objectPosition: 'center center'
   }
 };
 
