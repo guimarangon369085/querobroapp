@@ -166,8 +166,7 @@ section {
 }
 
 .app-sidebar {
-  position: sticky;
-  top: calc(12px + var(--app-safe-area-top));
+  position: static;
   align-self: start;
   display: flex;
   flex-direction: column;
@@ -4557,9 +4556,7 @@ html.app-render-stability .app-topbar {
   }
 
   .app-sidebar {
-    position: sticky;
-    top: 10px;
-    z-index: 55;
+    position: static;
     gap: 12px;
     padding: 14px;
     background: linear-gradient(170deg, rgba(255, 251, 247, 0.93), rgba(250, 236, 221, 0.88));
@@ -4730,8 +4727,6 @@ html.app-render-stability .app-topbar {
   .app-sidebar {
     padding: 12px;
     gap: 10px;
-    top: calc(8px + var(--app-safe-area-top));
-    z-index: 60;
     background: linear-gradient(170deg, rgba(255, 251, 247, 0.9), rgba(250, 236, 221, 0.84));
     box-shadow: 0 14px 24px rgba(73, 43, 22, 0.16);
     backdrop-filter: blur(12px) saturate(1.02);
