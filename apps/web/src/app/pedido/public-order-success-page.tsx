@@ -107,7 +107,11 @@ export function PublicOrderSuccessPage() {
             <div className="flex items-center justify-between gap-3 rounded-[24px] bg-white/78 px-4 py-3">
               <span>Status</span>
               <strong className="text-[color:var(--ink-strong)]">
-                {intake.stage === 'PIX_PENDING' ? 'PIX pendente' : intake.stage}
+                {intake.stage === 'PIX_PENDING'
+                  ? 'PIX pendente'
+                  : intake.stage === 'PAID' || intake.stage === 'SCHEDULED'
+                    ? 'PIX recebido'
+                    : intake.stage}
               </strong>
             </div>
           </div>

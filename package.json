@@ -33,6 +33,8 @@
     "qa:smoke": "node scripts/qa-smoke.mjs",
     "validate:public-deploy": "node scripts/validate-public-deploy.mjs",
     "validate:delivery-quote": "node scripts/validate-delivery-quote.mjs",
+    "bank:pix:bridge": "node scripts/nubank-pix-bridge.mjs",
+    "bank:pix:bridge:once": "node scripts/nubank-pix-bridge.mjs --once",
     "test": "node --test --test-concurrency=1 tests/*.test.mjs && pnpm -r --if-present test"
   },
   "devDependencies": {

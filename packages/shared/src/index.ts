@@ -167,6 +167,16 @@ export const PixSettlementWebhookSchema = z
     message: 'Informe paymentId, providerRef ou txid.'
   });
 
+export const PixReconciliationWebhookSchema = z.object({
+  version: z.literal(1).default(1),
+  payerName: z.string().trim().min(1).max(160),
+  amount: z.number().positive(),
+  paidAt: z.string().datetime().optional().nullable(),
+  source: z.string().trim().min(1).max(80).default('bank-bridge'),
+  sourceTransactionId: z.string().trim().min(1).max(160).optional().nullable(),
+  metadata: z.record(z.unknown()).optional()
+});
+
 export const OrderIntakeChannelEnum = z.enum([
   'INTERNAL_DASHBOARD',
   'ADMIN_REPEAT',

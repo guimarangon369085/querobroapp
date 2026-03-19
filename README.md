@@ -137,8 +137,9 @@ Nota importante:
 ## Integracoes externas
 
 - O backend atual ja sustenta intake externo canonico (`/orders/intake/customer-form`, `google-form` e `whatsapp-flow`), envio opcional pela WhatsApp Cloud API e alerta operacional por webhook/ntfy.
-- Agora tambem existe `POST /whatsapp/webhook` para inbound da Meta e `POST /payments/pix-settlements/webhook` como bridge canonica para baixa PIX em tempo real.
+- Agora tambem existe `POST /whatsapp/webhook`, `POST /payments/pix-settlements/webhook` para baixa PIX por identificador interno e `POST /payments/pix-reconciliations/webhook` para conciliacao segura por nome + valor vinda de bridge externa.
 - O trilho bancario foi preparado de forma provider-neutral: a conta oficial hoje e Nubank, mas a integracao de liquidacao entra pelo webhook do ERP para permitir automacao futura via Nubank/Open Finance/bridge externo sem trocar o contrato interno.
+- O repo agora inclui `scripts/nubank-pix-bridge.mjs`, que usa a aba autenticada do Nubank PJ no Chrome para ler PIX de entrada visiveis e delegar o matching seguro ao backend.
 
 ## Scripts principais
 
@@ -152,6 +153,8 @@ pnpm test
 pnpm qa:trust
 pnpm qa:browser-smoke
 pnpm qa:critical-e2e
+pnpm bank:pix:bridge:once
+pnpm bank:pix:bridge
 ```
 
 ## Fontes de verdade

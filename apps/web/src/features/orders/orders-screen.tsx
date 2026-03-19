@@ -3844,10 +3844,12 @@ function OrdersPageContent() {
                                 <span>Pagamento</span>
                                 <span className="font-semibold text-neutral-900">
                                   {paymentStatus === 'PAGO'
-                                    ? 'Pago'
+                                    ? 'PIX recebido'
                                     : balanceDue > 0
                                       ? `Saldo ${formatCurrencyBR(balanceDue)}`
-                                      : paymentStatus}
+                                      : paymentStatus === 'PENDENTE'
+                                        ? 'PIX pendente'
+                                        : paymentStatus}
                                 </span>
                               </div>
                             </div>
@@ -4137,7 +4139,7 @@ function OrdersPageContent() {
                 </p>
                 <p className="text-sm font-semibold text-neutral-900">
                   {selectedOrderPaymentStatus === 'PAGO'
-                    ? 'Pedido pago.'
+                    ? 'PIX recebido.'
                     : selectedOrderPixCharge?.payable
                     ? `Saldo ${formatCurrencyBR(selectedOrderBalanceDue)} pronto para enviar no WhatsApp`
                     : `Saldo ${formatCurrencyBR(selectedOrderBalanceDue)} em modo de desenvolvimento`}

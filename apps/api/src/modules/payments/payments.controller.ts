@@ -58,6 +58,17 @@ export class PaymentsController {
     return this.service.settlePixWebhook(body);
   }
 
+  @Public()
+  @Post('pix-reconciliations/webhook')
+  reconcilePixWebhook(
+    @Body() body: unknown,
+    @Headers('authorization') authorization?: string,
+    @Headers('x-bank-sync-token') bankSyncToken?: string
+  ) {
+    this.assertPixSettlementWebhookAccess(authorization, bankSyncToken);
+    return this.service.reconcilePixWebhook(body);
+  }
+
   @Delete(':id')
   async remove(@Param('id') id: string) {
     await this.service.remove(parseWithSchema(idSchema, id));

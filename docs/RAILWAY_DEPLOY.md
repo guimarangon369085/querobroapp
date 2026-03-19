@@ -98,6 +98,8 @@ Variaveis obrigatorias:
 - `BUSINESS_BANK_ACCOUNT=770733822-0`
 - `WHATSAPP_WEBHOOK_VERIFY_TOKEN=<token forte para handshake com a Meta>`
 - `BANK_SYNC_WEBHOOK_TOKEN=<token forte para a bridge de baixa PIX>`
+- `PIX_RECONCILIATION_LOOKBACK_DAYS=45`
+- `PIX_RECONCILIATION_ALLOW_UNIQUE_AMOUNT_FALLBACK=false`
 - `DELIVERY_MANUAL_FALLBACK_FEE=12`
 
 Custom domain:

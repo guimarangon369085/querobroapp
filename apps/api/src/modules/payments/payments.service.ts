@@ -5,6 +5,7 @@ import {
   moneyToMinorUnits,
   PaymentSchema,
   PaymentStatusEnum,
+  PixReconciliationWebhookSchema,
   PixSettlementWebhookSchema,
   PixChargeSchema,
   roundMoney
@@ -22,6 +23,22 @@ type PaymentRecord = {
   dueDate: Date | null;
   providerRef: string | null;
 };
+type PendingPixPaymentCandidate = PaymentRecord & {
+  order: {
+    id: number;
+    publicNumber: number | null;
+    status: string;
+    total: number;
+    createdAt: Date;
+    customer: {
+      id: number;
+      name: string;
+      phone: string | null;
+    } | null;
+  };
+};
+
+const PIX_RECONCILIATION_NAME_STOPWORDS = new Set(['DA', 'DAS', 'DE', 'DI', 'DO', 'DOS', 'DU', 'E']);
 
 @Injectable()
 export class PaymentsService {
@@ -155,6 +172,108 @@ export class PaymentsService {
     }
 
     return raw;
+  }
+
+  private getPixReconciliationLookbackDays() {
+    const raw = Number(process.env.PIX_RECONCILIATION_LOOKBACK_DAYS || '');
+    if (!Number.isFinite(raw) || raw <= 0) return 45;
+    return Math.min(Math.floor(raw), 180);
+  }
+
+  private allowUniqueAmountFallbackForPixReconciliation() {
+    return String(process.env.PIX_RECONCILIATION_ALLOW_UNIQUE_AMOUNT_FALLBACK || '')
+      .trim()
+      .toLowerCase() === 'true';
+  }
+
+  private normalizeHumanName(value?: string | null) {
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9 ]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private tokenizeHumanName(value?: string | null) {
+    return this.normalizeHumanName(value)
+      .split(' ')
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 2 && !PIX_RECONCILIATION_NAME_STOPWORDS.has(token));
+  }
+
+  private compareHumanNames(left?: string | null, right?: string | null) {
+    const normalizedLeft = this.normalizeHumanName(left);
+    const normalizedRight = this.normalizeHumanName(right);
+    if (!normalizedLeft || !normalizedRight) return 0;
+    if (normalizedLeft === normalizedRight) return 1;
+    if (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft)) return 0.92;
+
+    const leftTokens = this.tokenizeHumanName(left);
+    const rightTokens = this.tokenizeHumanName(right);
+    if (!leftTokens.length || !rightTokens.length) return 0;
+
+    const rightSet = new Set(rightTokens);
+    const intersection = leftTokens.filter((token) => rightSet.has(token)).length;
+    const overlap = intersection / Math.max(leftTokens.length, rightTokens.length);
+    const firstMatches = leftTokens[0] === rightTokens[0];
+    const lastMatches = leftTokens[leftTokens.length - 1] === rightTokens[rightTokens.length - 1];
+
+    let score = overlap;
+    if (firstMatches) score += 0.15;
+    if (lastMatches) score += 0.15;
+    return Math.min(score, 0.99);
+  }
+
+  private summarizePixReconciliationCandidate(candidate: PendingPixPaymentCandidate, score: number) {
+    return {
+      paymentId: candidate.id,
+      orderId: candidate.order.id,
+      publicNumber: candidate.order.publicNumber ?? candidate.order.id,
+      customerName: candidate.order.customer?.name ?? 'Cliente sem nome',
+      amount: this.toMoney(candidate.amount),
+      createdAt: candidate.order.createdAt.toISOString(),
+      dueAt: candidate.dueDate?.toISOString() ?? null,
+      nameScore: Number(score.toFixed(3))
+    };
+  }
+
+  private async findPendingPixReconciliationCandidates(amount: number) {
+    const lookbackStart = new Date();
+    lookbackStart.setDate(lookbackStart.getDate() - this.getPixReconciliationLookbackDays());
+
+    return (await this.prisma.payment.findMany({
+      where: {
+        method: 'pix',
+        amount: this.toMoney(amount),
+        paidAt: null,
+        status: { not: PaymentStatusEnum.enum.PAGO },
+        order: {
+          status: { not: 'CANCELADO' },
+          createdAt: { gte: lookbackStart }
+        }
+      },
+      include: {
+        order: {
+          select: {
+            id: true,
+            publicNumber: true,
+            status: true,
+            total: true,
+            createdAt: true,
+            customer: {
+              select: {
+                id: true,
+                name: true,
+                phone: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: [{ id: 'desc' }]
+    })) as PendingPixPaymentCandidate[];
   }
 
   buildPixCharge(payment: PaymentRecord) {
@@ -338,6 +457,66 @@ export class PaymentsService {
     }
 
     return null;
+  }
+
+  async reconcilePixWebhook(payload: unknown) {
+    const data = PixReconciliationWebhookSchema.parse(payload);
+    const candidates = await this.findPendingPixReconciliationCandidates(data.amount);
+    const scoredCandidates = candidates.map((candidate) => ({
+      candidate,
+      score: this.compareHumanNames(candidate.order.customer?.name, data.payerName)
+    }));
+    const strongMatches = scoredCandidates.filter((entry) => entry.score >= 0.74);
+
+    const exactCandidate =
+      strongMatches.length === 1
+        ? strongMatches[0]
+        : strongMatches.length === 0 &&
+            scoredCandidates.length === 1 &&
+            this.allowUniqueAmountFallbackForPixReconciliation()
+          ? scoredCandidates[0]
+          : null;
+
+    if (!exactCandidate) {
+      return {
+        ok: true,
+        matched: false,
+        reason: strongMatches.length > 1 || scoredCandidates.length > 1 ? 'AMBIGUOUS' : 'NO_MATCH',
+        payerName: data.payerName,
+        amount: this.toMoney(data.amount),
+        candidateCount: scoredCandidates.length,
+        candidates: scoredCandidates.map((entry) =>
+          this.summarizePixReconciliationCandidate(entry.candidate, entry.score)
+        )
+      };
+    }
+
+    const settlement = await this.settlePixWebhook({
+      paymentId: exactCandidate.candidate.id,
+      amount: data.amount,
+      paidAt: data.paidAt ?? null,
+      source: data.source,
+      metadata: {
+        payerName: data.payerName,
+        sourceTransactionId: data.sourceTransactionId ?? null,
+        ...(data.metadata || {})
+      }
+    });
+
+    return {
+      ...settlement,
+      matched: true,
+      matchReason: strongMatches.length === 1 ? 'NAME_AND_AMOUNT' : 'UNIQUE_AMOUNT',
+      matchConfidence: Number(exactCandidate.score.toFixed(3)),
+      payerName: data.payerName,
+      sourceTransactionId: data.sourceTransactionId ?? null,
+      order: {
+        id: exactCandidate.candidate.order.id,
+        publicNumber: exactCandidate.candidate.order.publicNumber ?? exactCandidate.candidate.order.id,
+        customerName: exactCandidate.candidate.order.customer?.name ?? 'Cliente sem nome',
+        total: this.toMoney(exactCandidate.candidate.order.total)
+      }
+    };
   }
 
   async settlePixWebhook(payload: unknown) {
