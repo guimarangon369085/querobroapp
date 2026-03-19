@@ -663,13 +663,11 @@ export const BuilderLayoutsSchema = z.object({
     { id: 'header', label: 'Cabecalho da pagina', kind: 'slot', visible: true, order: 0 },
     { id: 'kpis', label: 'Resumo do dia', kind: 'slot', visible: true, order: 1 },
     { id: 'movement', label: 'Ajuste rapido de saldos', kind: 'slot', visible: true, order: 2 },
-    { id: 'd1', label: 'Alertas e compras', kind: 'slot', visible: true, order: 3 },
-    { id: 'capacity', label: 'Capacidade de producao', kind: 'slot', visible: true, order: 4 },
-    { id: 'movements', label: 'Auditoria', kind: 'slot', visible: true, order: 5 },
-    { id: 'bom', label: 'Catalogo tecnico', kind: 'slot', visible: true, order: 6 },
-    { id: 'packaging', label: 'Itens e insumos', kind: 'slot', visible: true, order: 7 },
-    { id: 'balance', label: 'Saldos detalhados', kind: 'slot', visible: true, order: 8 },
-    { id: 'ops', label: 'Atalhos operacionais', kind: 'slot', visible: false, order: 9 }
+    { id: 'movements', label: 'Auditoria', kind: 'slot', visible: true, order: 3 },
+    { id: 'bom', label: 'Catalogo tecnico', kind: 'slot', visible: true, order: 4 },
+    { id: 'packaging', label: 'Itens e insumos', kind: 'slot', visible: true, order: 5 },
+    { id: 'balance', label: 'Saldos detalhados', kind: 'slot', visible: true, order: 6 },
+    { id: 'ops', label: 'Atalhos operacionais', kind: 'slot', visible: false, order: 7 }
   ])
 });
 

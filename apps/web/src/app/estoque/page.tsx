@@ -29,7 +29,6 @@ import { useSurfaceMode } from '@/hooks/use-surface-mode';
 import { useTutorialSpotlight } from '@/hooks/use-tutorial-spotlight';
 import { useFeedback } from '@/components/feedback-provider';
 import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
-import { StockCapacitySection, type StockCapacityEntry } from './stock-capacity-section';
 
 const movementTypeOptions: Array<{ value: 'IN' | 'OUT' | 'ADJUST'; label: string }> = [
   { value: 'IN', label: 'Entrada' },
@@ -79,10 +78,6 @@ type BomCatalogRecord = Omit<Bom, 'id'> & {
   id: number;
   product?: Product | null;
   items?: BomCatalogItem[];
-};
-
-type BomCapacityItem = BomCatalogItem & {
-  perSaleQty: number;
 };
 
 type PurchaseCostRefreshItemResult = {
@@ -164,36 +159,6 @@ function normalizeLookupText(value?: string | null) {
     .toUpperCase();
 }
 
-function hasPerSaleQty(item: BomCapacityItem | null): item is BomCapacityItem {
-  return Boolean(item);
-}
-
-function parseSaleUnitCount(label?: string | null) {
-  if (!label) return 1;
-  const match = label.match(/(\d+)/);
-  return match ? Number(match[1]) : 1;
-}
-
-function resolveBomItemQtyPerSale(
-  bom: { saleUnitLabel?: string | null; yieldUnits?: number | null },
-  item: {
-    qtyPerSaleUnit?: number | null;
-    qtyPerUnit?: number | null;
-    qtyPerRecipe?: number | null;
-  }
-) {
-  if (item.qtyPerSaleUnit != null && item.qtyPerSaleUnit > 0) return item.qtyPerSaleUnit;
-
-  const unitsPerSale = parseSaleUnitCount(bom.saleUnitLabel);
-  if (item.qtyPerUnit != null && item.qtyPerUnit > 0) {
-    return item.qtyPerUnit * unitsPerSale;
-  }
-  if (item.qtyPerRecipe != null && item.qtyPerRecipe > 0 && bom.yieldUnits && bom.yieldUnits > 0) {
-    return item.qtyPerRecipe / bom.yieldUnits;
-  }
-  return null;
-}
-
 const EMPTY_MASS_SUMMARY: InventoryMassSummary = {
   itemId: null,
   name: 'MASSA PRONTA',
@@ -256,12 +221,9 @@ function StockPageContent() {
   const [bomSaleUnitLabel, setBomSaleUnitLabel] = useState<string>('Caixa com 7 broas');
   const [bomYieldUnits, setBomYieldUnits] = useState<string>('21');
   const [bomItems, setBomItems] = useState<BomItemInput[]>([]);
-  const [d1Date, setD1Date] = useState<string>(defaultTomorrowDate());
+  const [d1Date] = useState<string>(defaultTomorrowDate());
   const [d1Rows, setD1Rows] = useState<ProductionRequirementRow[]>([]);
   const [d1Warnings, setD1Warnings] = useState<ProductionRequirementWarning[]>([]);
-  const [d1Basis, setD1Basis] = useState<'deliveryDate' | 'createdAtPlus1'>('createdAtPlus1');
-  const [d1Loading, setD1Loading] = useState(false);
-  const [d1Error, setD1Error] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [hasLoadedTechnicalCatalog, setHasLoadedTechnicalCatalog] = useState(false);
   const [showInactiveTechnicalEntries, setShowInactiveTechnicalEntries] = useState(false);
@@ -335,8 +297,6 @@ function StockPageContent() {
     const allowed = new Set([
       'kpis',
       'ops',
-      'capacity',
-      'd1',
       'movement',
       'bom',
       'packaging',
@@ -372,21 +332,15 @@ function StockPageContent() {
   }, [searchParams]);
 
   const loadD1 = useCallback(async (targetDate: string) => {
-    setD1Loading(true);
-    setD1Error(null);
     try {
       const data = await apiFetch<ProductionRequirementsResponse>(
         `/production/requirements?date=${encodeURIComponent(targetDate)}`
       );
       setD1Rows(data.rows || []);
       setD1Warnings(data.warnings || []);
-      setD1Basis(data.basis || 'createdAtPlus1');
-    } catch (err) {
-      setD1Error(err instanceof Error ? err.message : 'Nao foi possivel calcular o quadro D+1.');
+    } catch {
       setD1Rows([]);
       setD1Warnings([]);
-    } finally {
-      setD1Loading(false);
     }
   }, []);
 
@@ -883,17 +837,6 @@ function StockPageContent() {
 
   const canSaveBom = Boolean(bomProductId) && bomName.trim().length > 0;
 
-  const effectiveBalanceByItemId = useMemo(() => {
-    const map = new Map<number, number>();
-    for (const item of items) {
-      map.set(item.id!, roundInventoryQty(item.balance || 0));
-      for (const rawItemId of item.rawItemIds || []) {
-        map.set(rawItemId, roundInventoryQty(item.balance || 0));
-      }
-    }
-    return map;
-  }, [items]);
-
   const saveStockCardBalance = useCallback(
     async (item: InventoryOverviewItem) => {
       if (!item.id) return;
@@ -1035,90 +978,7 @@ function StockPageContent() {
     : activeProducts;
   const visibleBoms = showInactiveTechnicalEntries ? boms : activeBoms;
 
-  const bomCosts = useMemo(() => {
-    return visibleBoms.map((bom) => {
-      let cost = 0;
-      for (const item of bom.items || []) {
-        const perSale = resolveBomItemQtyPerSale(bom, item);
-        if (perSale === null) continue;
-        cost += perSale * (unitCostMap.get(item.itemId) || 0);
-      }
-      return { bomId: bom.id, cost };
-    });
-  }, [unitCostMap, visibleBoms]);
-
-  const bomCostByBomId = useMemo(
-    () => new Map(bomCosts.map((entry) => [entry.bomId, entry.cost])),
-    [bomCosts]
-  );
-
-  const capacity = useMemo<StockCapacityEntry[]>(() => {
-    return visibleBoms.map((bom) => {
-      const perSaleItems = (bom.items || [])
-        .map((item) => {
-          const perSaleQty = resolveBomItemQtyPerSale(bom, item);
-          return perSaleQty && perSaleQty > 0 ? { ...item, perSaleQty } : null;
-        })
-        .filter(hasPerSaleQty);
-
-      let maxUnits = Infinity;
-      let limitingItemName = '';
-      let hasNegativeInput = false;
-
-      for (const item of perSaleItems) {
-        const balance = effectiveBalanceByItemId.get(item.itemId) || 0;
-        if (balance < 0) hasNegativeInput = true;
-        const currentCapacity = balance / item.perSaleQty;
-        if (currentCapacity < maxUnits) {
-          maxUnits = currentCapacity;
-          limitingItemName = item.item?.name || `Item ${item.itemId}`;
-        }
-      }
-      if (!Number.isFinite(maxUnits)) maxUnits = 0;
-
-      return {
-        bom,
-        maxUnits: Math.max(0, Math.floor(maxUnits)),
-        hasNegativeInput,
-        missingQtyDefinitions: perSaleItems.length === 0,
-        limitingItemName
-      };
-    });
-  }, [effectiveBalanceByItemId, visibleBoms]);
-
   const d1Shortages = useMemo(() => d1Rows.filter((row) => row.shortageQty > 0), [d1Rows]);
-
-  const d1ShortagesByCategory = useMemo(() => {
-    const categoryOrder = new Map<string, number>([
-      ['INGREDIENTE', 0],
-      ['EMBALAGEM_INTERNA', 1],
-      ['EMBALAGEM_EXTERNA', 2]
-    ]);
-
-    return d1Shortages
-      .map((row) => ({
-        ...row,
-        category: itemMap.get(row.ingredientId)?.category || 'INGREDIENTE'
-      }))
-      .sort((a, b) => {
-        const categoryA = categoryOrder.get(a.category) ?? 99;
-        const categoryB = categoryOrder.get(b.category) ?? 99;
-        if (categoryA !== categoryB) return categoryA - categoryB;
-        if (b.shortageQty !== a.shortageQty) return b.shortageQty - a.shortageQty;
-        return a.name.localeCompare(b.name, 'pt-BR');
-      });
-  }, [d1Shortages, itemMap]);
-
-  const d1ShortageSummary = useMemo(() => {
-    const ingredients = d1ShortagesByCategory.filter((row) => row.category === 'INGREDIENTE').length;
-    const internalPackaging = d1ShortagesByCategory.filter(
-      (row) => row.category === 'EMBALAGEM_INTERNA'
-    ).length;
-    const externalPackaging = d1ShortagesByCategory.filter(
-      (row) => row.category === 'EMBALAGEM_EXTERNA'
-    ).length;
-    return { ingredients, internalPackaging, externalPackaging };
-  }, [d1ShortagesByCategory]);
 
   const stockBoardCards = useMemo(() => {
     return items
@@ -1138,25 +998,12 @@ function StockPageContent() {
     [d1Warnings]
   );
 
-  const hasD1Attention = d1Shortages.length > 0 || d1Warnings.length > 0;
-
   useEffect(() => {
     setStockCardBalanceByItemId(
       Object.fromEntries(stockBoardCards.map((card) => [card.item.id!, formatQty(card.balance)]))
     );
     setStockCardErrorByItemId({});
   }, [stockBoardCards]);
-
-  const d1BreakdownSummary = (row: ProductionRequirementRow) => {
-    const grouped = new Map<string, number>();
-    for (const entry of row.breakdown || []) {
-      const current = grouped.get(entry.productName) || 0;
-      grouped.set(entry.productName, current + entry.quantity);
-    }
-    return Array.from(grouped.entries())
-      .map(([product, qty]) => `${product}: ${formatQty(qty)}`)
-      .join(' | ');
-  };
 
   return (
     <>
@@ -1176,8 +1023,8 @@ function StockPageContent() {
                     Operacao do estoque sem ruido tecnico
                   </h2>
                   <p className="text-sm text-neutral-700">
-                    Entradas, faltas e capacidade ficam na frente. Catalogo, fichas e custos
-                    avancados ficam no final.
+                    Entradas e faltas ficam na frente. Catalogo, fichas e custos avancados
+                    ficam no final.
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -1192,30 +1039,6 @@ function StockPageContent() {
                     }
                   >
                     Ajustar saldos
-                  </button>
-                  <button
-                    type="button"
-                    className="app-button app-button-ghost"
-                    onClick={() =>
-                      scrollToLayoutSlot('d1', {
-                        focus: true,
-                        focusSelector: 'input, button, summary'
-                      })
-                    }
-                  >
-                    Ver faltas
-                  </button>
-                  <button
-                    type="button"
-                    className="app-button app-button-ghost"
-                    onClick={() =>
-                      scrollToLayoutSlot('capacity', {
-                        focus: true,
-                        focusSelector: 'summary, button'
-                      })
-                    }
-                  >
-                    Ver capacidade
                   </button>
                   <button
                     type="button"
@@ -1299,223 +1122,59 @@ function StockPageContent() {
           </BuilderLayoutItemSlot>
 
           <BuilderLayoutItemSlot id="movement">
-            <div className="app-panel grid gap-4">
-              <div className="grid gap-1">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
-                  2. Ajuste rapido de saldos
-                </p>
-                <p className="text-sm text-neutral-600">
-                  Edite o saldo direto no card. O sistema confirma e registra automaticamente so a diferenca.
-                </p>
-              </div>
+            <div className="app-panel">
+              <div className="mass-prep-stock-grid">
+                {stockBoardCards.map((card) => {
+                  const stockItemId = card.item.id!;
+                  const editValue = stockCardBalanceByItemId[stockItemId] ?? formatQty(card.balance);
+                  const itemError = stockCardErrorByItemId[stockItemId];
+                  const isSavingItem = stockCardSavingItemId === stockItemId;
 
-              <div className="grid gap-3">
-                <div className="rounded-2xl border border-white/70 bg-white/60 px-4 py-3 text-sm text-neutral-600">
-                  Se o saldo mudar de 500 para 750, por exemplo, o sistema pede confirmacao e cria
-                  uma entrada automatica de 250. O mesmo vale para reducoes.
-                </div>
-                <div className="mass-prep-stock-grid">
-                  {stockBoardCards.map((card) => {
-                    const stockItemId = card.item.id!;
-                    const editValue = stockCardBalanceByItemId[stockItemId] ?? formatQty(card.balance);
-                    const itemError = stockCardErrorByItemId[stockItemId];
-                    const isSavingItem = stockCardSavingItemId === stockItemId;
-
-                    return (
-                      <article key={`stock-card-${stockItemId}`} className="mass-prep-stock-card">
-                        <p className="mass-prep-stock-card__category">
-                          {inventoryCategoryLabel(card.item.category)}
-                        </p>
-                        <h4 className="mass-prep-stock-card__name">{card.item.name}</h4>
-                        <p className="mass-prep-stock-card__balance">
-                          Saldo atual: {formatQty(card.balance)} {card.item.unit}
-                        </p>
-                        <label className="mass-prep-stock-card__edit-label">
-                          Ajustar saldo ({card.item.unit})
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            className="app-input mass-prep-stock-card__input"
-                            value={editValue}
-                            onChange={(event) => {
-                              const nextValue = event.target.value;
-                              setStockCardBalanceByItemId((current) => ({
-                                ...current,
-                                [stockItemId]: nextValue
-                              }));
-                              setStockCardErrorByItemId((current) => ({
-                                ...current,
-                                [stockItemId]: ''
-                              }));
-                            }}
-                            onBlur={() => {
-                              void saveStockCardBalance(card.item);
-                            }}
-                            onKeyDown={(event) => {
-                              if (event.key !== 'Enter') return;
-                              event.preventDefault();
-                              void saveStockCardBalance(card.item);
-                            }}
-                            placeholder="0"
-                            disabled={isSavingItem}
-                          />
-                        </label>
-                        {itemError ? <p className="mass-prep-stock-card__error">{itemError}</p> : null}
-                      </article>
-                    );
-                  })}
-                </div>
+                  return (
+                    <article key={`stock-card-${stockItemId}`} className="mass-prep-stock-card">
+                      <p className="mass-prep-stock-card__category">
+                        {inventoryCategoryLabel(card.item.category)}
+                      </p>
+                      <h4 className="mass-prep-stock-card__name">{card.item.name}</h4>
+                      <p className="mass-prep-stock-card__balance">
+                        Saldo atual: {formatQty(card.balance)} {card.item.unit}
+                      </p>
+                      <label className="mass-prep-stock-card__edit-label">
+                        Ajustar saldo ({card.item.unit})
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          className="app-input mass-prep-stock-card__input"
+                          value={editValue}
+                          onChange={(event) => {
+                            const nextValue = event.target.value;
+                            setStockCardBalanceByItemId((current) => ({
+                              ...current,
+                              [stockItemId]: nextValue
+                            }));
+                            setStockCardErrorByItemId((current) => ({
+                              ...current,
+                              [stockItemId]: ''
+                            }));
+                          }}
+                          onBlur={() => {
+                            void saveStockCardBalance(card.item);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key !== 'Enter') return;
+                            event.preventDefault();
+                            void saveStockCardBalance(card.item);
+                          }}
+                          placeholder="0"
+                          disabled={isSavingItem}
+                        />
+                      </label>
+                      {itemError ? <p className="mass-prep-stock-card__error">{itemError}</p> : null}
+                    </article>
+                  );
+                })}
               </div>
             </div>
-          </BuilderLayoutItemSlot>
-
-          <BuilderLayoutItemSlot id="d1">
-            <div className="app-panel grid gap-4">
-              <div className="grid gap-1">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
-                  3. Alertas e compras
-                </p>
-                <p className="text-sm text-neutral-600">
-                  Veja o que falta para atender a demanda prevista antes de comprar ou produzir.
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <span className="text-sm font-semibold text-neutral-700">
-                  D+1 ({d1Basis === 'deliveryDate' ? 'data de entrega' : 'pedido + 1 dia'})
-                </span>
-                <div className="flex flex-wrap items-end gap-2">
-                  <label className="text-sm text-neutral-600">
-                    Data
-                    <input
-                      className="app-input mt-1"
-                      type="date"
-                      value={d1Date}
-                      onChange={(e) => setD1Date(e.target.value)}
-                    />
-                  </label>
-                  <button className="app-button app-button-ghost" onClick={() => loadD1(d1Date)}>
-                    Atualizar
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-2xl border border-white/70 bg-white/75 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
-                    Itens em falta
-                  </p>
-                  <p className="mt-2 text-lg font-semibold text-neutral-900">{d1Shortages.length}</p>
-                  <p className="text-sm text-neutral-600">Total de itens com falta no D+1</p>
-                </div>
-                <div className="rounded-2xl border border-white/70 bg-white/75 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
-                    Ingredientes vs embalagem
-                  </p>
-                  <p className="mt-2 text-lg font-semibold text-neutral-900">
-                    {d1ShortageSummary.ingredients} / {d1ShortageSummary.internalPackaging + d1ShortageSummary.externalPackaging}
-                  </p>
-                  <p className="text-sm text-neutral-600">Ingredientes / embalagens em falta</p>
-                </div>
-                <div className="rounded-2xl border border-white/70 bg-white/75 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
-                    Pedidos impactados
-                  </p>
-                  <p className="mt-2 text-lg font-semibold text-neutral-900">{impactedOrdersCount}</p>
-                  <p className="text-sm text-neutral-600">Pedidos com alerta de ficha tecnica</p>
-                </div>
-              </div>
-
-              {d1Error ? <p className="text-sm text-red-700">{d1Error}</p> : null}
-              {d1Loading ? <p className="text-sm text-neutral-500">Calculando D+1...</p> : null}
-
-              {!d1Loading && !d1Error ? (
-                hasD1Attention ? (
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                    Ha faltas previstas ou alertas de ficha tecnica. Use o detalhamento abaixo para
-                    decidir compra e producao.
-                  </div>
-                ) : (
-                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-                    Sem faltas previstas para a data selecionada.
-                  </div>
-                )
-              ) : null}
-
-              <details className="app-details" open={!isOperationMode || hasD1Attention}>
-                <summary>Ver detalhamento D+1</summary>
-                <div className="mt-3 grid gap-4">
-                  <div className="overflow-x-auto rounded-lg border border-white/60 bg-white/70">
-                    <table className="min-w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-white/70 text-left text-xs uppercase tracking-[0.18em] text-neutral-500">
-                          <th className="px-3 py-2">Insumo</th>
-                          <th className="px-3 py-2">Unidade</th>
-                          <th className="px-3 py-2">Necessario</th>
-                          <th className="px-3 py-2">Disponivel</th>
-                          <th className="px-3 py-2">Falta</th>
-                          <th className="px-3 py-2">Por produto</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {d1Rows.map((row) => (
-                          <tr key={row.ingredientId} className="border-b border-white/50 align-top">
-                            <td className="px-3 py-2 font-medium text-neutral-800">{row.name}</td>
-                            <td className="px-3 py-2 text-neutral-600">{row.unit}</td>
-                            <td className="px-3 py-2 text-neutral-700">{formatQty(row.requiredQty)}</td>
-                            <td className="px-3 py-2 text-neutral-700">{formatQty(row.availableQty)}</td>
-                            <td
-                              className={`px-3 py-2 font-semibold ${
-                                row.shortageQty > 0 ? 'text-red-700' : 'text-emerald-700'
-                              }`}
-                            >
-                              {formatQty(row.shortageQty)}
-                            </td>
-                            <td className="px-3 py-2 text-xs text-neutral-600">
-                              {row.breakdown?.length ? d1BreakdownSummary(row) : '-'}
-                            </td>
-                          </tr>
-                        ))}
-                        {!d1Loading && d1Rows.length === 0 ? (
-                          <tr>
-                            <td className="px-3 py-3 text-sm text-neutral-500" colSpan={6}>
-                              Sem necessidades calculadas para a data selecionada.
-                            </td>
-                          </tr>
-                        ) : null}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {d1Warnings.length > 0 ? (
-                    <div className="grid gap-2">
-                      {d1Warnings.map((warning, index) => (
-                        <div
-                          key={`${warning.orderId}-${warning.productId}-${index}`}
-                          className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
-                        >
-                          Pedido #{warning.orderPublicNumber ?? warning.orderId} • {warning.productName}: {warning.message}
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              </details>
-            </div>
-          </BuilderLayoutItemSlot>
-
-          <BuilderLayoutItemSlot id="capacity">
-            <StockCapacitySection
-              capacity={capacity}
-              bomCostByBomId={bomCostByBomId}
-              selectedBomId={editingBomId}
-              onSelectBom={(selectedBom) => {
-                const matchingBom = visibleBoms.find((candidate) => candidate.id === selectedBom.id);
-                if (matchingBom) {
-                  startEditBom(matchingBom);
-                }
-              }}
-            />
           </BuilderLayoutItemSlot>
 
           <BuilderLayoutItemSlot id="movements">
