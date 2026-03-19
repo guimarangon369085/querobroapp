@@ -3,7 +3,9 @@ import path from 'node:path';
 
 const repoRoot = new URL('..', import.meta.url);
 const outputDir = new URL('../output/whatsapp-catalog/', import.meta.url);
+const publicCatalogDir = new URL('../apps/web/public/querobroa-brand/commerce/', import.meta.url);
 const publicBaseUrl = String(process.env.WHATSAPP_CATALOG_PUBLIC_BASE_URL || 'https://querobroa.com.br').trim().replace(/\/+$/, '');
+const assetVersion = String(process.env.WHATSAPP_CATALOG_ASSET_VERSION || '').trim();
 const orderUrl = `${publicBaseUrl}/pedido`;
 
 const items = [
@@ -95,7 +97,7 @@ const rows = items.map((item) => ({
   condition: 'new',
   price: item.price,
   link: `${orderUrl}?catalog=${encodeURIComponent(item.code)}`,
-  image_link: `${publicBaseUrl}${item.imagePath}`,
+  image_link: `${publicBaseUrl}${item.imagePath}${assetVersion ? `?v=${encodeURIComponent(assetVersion)}` : ''}`,
   brand: 'QUEROBROA'
 }));
 
@@ -103,8 +105,11 @@ const header = ['id', 'title', 'description', 'availability', 'condition', 'pric
 const csv = [header.join(','), ...rows.map((row) => header.map((field) => csvEscape(row[field])).join(','))].join('\n');
 
 await fs.mkdir(outputDir, { recursive: true });
+await fs.mkdir(publicCatalogDir, { recursive: true });
 await fs.writeFile(new URL('meta-catalog.csv', outputDir), `${csv}\n`, 'utf8');
 await fs.writeFile(new URL('meta-catalog.json', outputDir), `${JSON.stringify(rows, null, 2)}\n`, 'utf8');
+await fs.writeFile(new URL('meta-catalog.csv', publicCatalogDir), `${csv}\n`, 'utf8');
+await fs.writeFile(new URL('meta-catalog.json', publicCatalogDir), `${JSON.stringify(rows, null, 2)}\n`, 'utf8');
 await fs.writeFile(
   new URL('README.txt', outputDir),
   [
@@ -112,10 +117,23 @@ await fs.writeFile(
     '',
     `Base publica usada: ${publicBaseUrl}`,
     `Link de pedido: ${orderUrl}`,
+    `Asset version: ${assetVersion || 'none'}`,
     '',
     'Arquivos:',
     '- meta-catalog.csv',
     '- meta-catalog.json'
+  ].join('\n'),
+  'utf8'
+);
+await fs.writeFile(
+  new URL('README.txt', publicCatalogDir),
+  [
+    'Feed publico do catalogo da QUEROBROA para Commerce Manager / WhatsApp Business.',
+    '',
+    `Base publica usada: ${publicBaseUrl}`,
+    `Link de pedido: ${orderUrl}`,
+    `Asset version: ${assetVersion || 'none'}`,
+    ''
   ].join('\n'),
   'utf8'
 );
