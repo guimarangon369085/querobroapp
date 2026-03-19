@@ -34,6 +34,7 @@ type OrderAlertConfig = {
   ntfyPriority: string;
   ntfyTags: string;
   whatsappRecipients: string[];
+  customerConfirmationEnabled: boolean;
   webhookUrls: string[];
   webhookBearerToken: string;
   webhookTimeoutMs: number;
@@ -57,6 +58,16 @@ export class OrderNotificationsService {
     minute: '2-digit'
   });
 
+  private parseBooleanEnv(value: string | undefined, fallback: boolean) {
+    const normalized = String(value || '')
+      .trim()
+      .toLowerCase();
+    if (!normalized) return fallback;
+    if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
+    return fallback;
+  }
+
   private getConfig(): OrderAlertConfig {
     const parseList = (value: string | undefined) =>
       String(value || '')
@@ -72,6 +83,7 @@ export class OrderNotificationsService {
       ntfyPriority: String(process.env.ORDER_ALERT_NTFY_PRIORITY || '5').trim() || '5',
       ntfyTags: String(process.env.ORDER_ALERT_NTFY_TAGS || 'bread,shopping_cart').trim() || 'bread,shopping_cart',
       whatsappRecipients: Array.from(new Set(parseList(process.env.ORDER_ALERT_WHATSAPP_TO))),
+      customerConfirmationEnabled: this.parseBooleanEnv(process.env.WHATSAPP_ORDER_CONFIRMATION_ENABLED, true),
       webhookUrls: Array.from(new Set(parseList(process.env.ORDER_ALERT_WEBHOOK_URL))),
       webhookBearerToken: String(process.env.ORDER_ALERT_WEBHOOK_BEARER_TOKEN || '').trim(),
       webhookTimeoutMs:
@@ -192,7 +204,17 @@ export class OrderNotificationsService {
     };
   }
 
-  private logFailure(channel: 'NTFY' | 'WHATSAPP' | 'WEBHOOK', error: unknown, context: Record<string, unknown>) {
+  private shouldSendCustomerConfirmation(input: OrderAlertInput, config: OrderAlertConfig) {
+    if (!config.customerConfirmationEnabled) return false;
+    if (!String(input.order.customer.phone || '').trim()) return false;
+    return input.intake.channel === 'CUSTOMER_LINK' || input.intake.channel === 'WHATSAPP_FLOW';
+  }
+
+  private logFailure(
+    channel: 'NTFY' | 'WHATSAPP' | 'WEBHOOK' | 'CUSTOMER_WHATSAPP',
+    error: unknown,
+    context: Record<string, unknown>
+  ) {
     const detail =
       error instanceof Error
         ? {
@@ -268,7 +290,15 @@ export class OrderNotificationsService {
 
   async notifyNewOrder(input: OrderAlertInput) {
     const config = this.getConfig();
-    if (!config.ntfyTopicUrl && config.whatsappRecipients.length === 0 && config.webhookUrls.length === 0) return;
+    const sendCustomerConfirmation = this.shouldSendCustomerConfirmation(input, config);
+    if (
+      !config.ntfyTopicUrl &&
+      config.whatsappRecipients.length === 0 &&
+      config.webhookUrls.length === 0 &&
+      !sendCustomerConfirmation
+    ) {
+      return;
+    }
 
     const message = this.buildWhatsAppBody(input, config.operationsUrl);
     const webhookPayload = this.buildWebhookPayload(input, config.operationsUrl, message);
@@ -288,6 +318,25 @@ export class OrderNotificationsService {
         this.whatsappService.sendOrderAlert({ phone: recipient, body: message }).catch((error) => {
           this.logFailure('WHATSAPP', error, { orderId: input.order.id, recipient });
         })
+      );
+    }
+
+    if (sendCustomerConfirmation) {
+      const orderNumber = resolveDisplayNumber(input.order) ?? input.order.id;
+      tasks.push(
+        this.whatsappService
+          .sendOrderConfirmation({
+            customerName: input.order.customer.name,
+            phone: String(input.order.customer.phone || ''),
+            orderNumber,
+            paymentPending: input.intake.pixStatus !== 'PAGO'
+          })
+          .catch((error) => {
+            this.logFailure('CUSTOMER_WHATSAPP', error, {
+              orderId: input.order.id,
+              customerPhone: input.order.customer.phone
+            });
+          })
       );
     }
 

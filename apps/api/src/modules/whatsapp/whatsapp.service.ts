@@ -7,7 +7,7 @@ import {
 import { WhatsAppPixDispatchSchema, normalizePhoneNumber, type WhatsAppPixDispatch } from '@querobroapp/shared';
 import { readBusinessRuntimeProfile } from '../../common/business-profile.js';
 
-type WhatsAppCloudMessageKind = 'SUMMARY' | 'PIX_CODE' | 'ORDER_ALERT';
+type WhatsAppCloudMessageKind = 'SUMMARY' | 'PIX_CODE' | 'ORDER_ALERT' | 'ORDER_CONFIRMATION';
 
 type WhatsAppCloudApiResponse = {
   messages?: Array<{ id?: string }>;
@@ -273,6 +273,33 @@ export class WhatsAppService {
       to,
       kind: 'ORDER_ALERT',
       body: input.body.trim()
+    });
+
+    return {
+      provider: 'WHATSAPP_CLOUD_API' as const,
+      to,
+      sentAt: new Date().toISOString(),
+      message
+    };
+  }
+
+  async sendOrderConfirmation(input: {
+    customerName: string;
+    phone: string;
+    orderNumber: number | string;
+    paymentPending: boolean;
+  }) {
+    const to = this.normalizeRecipientPhone(input.phone);
+    const customerLabel = String(input.customerName || '').trim().split(/\s+/)[0] || 'cliente';
+    const orderLabel = String(input.orderNumber).trim();
+    const body = input.paymentPending
+      ? `Oi, ${customerLabel}! Recebemos seu pedido #${orderLabel}! Em breve, sua vida estara broa. Assim que confirmar o PIX enviando o comprovante para este numero, a gente confirma o seu pedido! :)`
+      : `Oi, ${customerLabel}! Recebemos seu pedido #${orderLabel}! Pagamento identificado. Em breve, sua vida estara broa :)`;
+
+    const message = await this.postTextMessage({
+      to,
+      kind: 'ORDER_CONFIRMATION',
+      body
     });
 
     return {
