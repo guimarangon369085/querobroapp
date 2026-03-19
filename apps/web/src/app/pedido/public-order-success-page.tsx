@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { resolveDisplayNumber, type PixCharge } from '@querobroapp/shared';
+import { type PixCharge } from '@querobroapp/shared';
 import { useFeedback } from '@/components/feedback-provider';
 import {
   clearStoredOrderFinalized,
@@ -82,7 +82,7 @@ export function PublicOrderSuccessPage() {
           <div>
             <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-emerald-700">Pedido recebido</p>
             <h1 className="mt-1.5 text-[1.55rem] font-semibold text-[color:var(--ink-strong)] sm:mt-2 sm:text-3xl">
-              Pedido #{resolveDisplayNumber(order) ?? order.id}
+              Obrigado pelo pedido! Em breve voce recebera uma confirmacao do pedido por WhatsApp e sua vida sera broa :)
             </h1>
             <p className="mt-2 text-[0.88rem] leading-6 text-[color:var(--ink-muted)] sm:text-sm">
               Programado para {formatScheduledAt(order.scheduledAt)}.
