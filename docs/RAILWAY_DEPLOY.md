@@ -85,10 +85,19 @@ Variaveis obrigatorias:
 - `ORDER_FORM_BRIDGE_TOKEN=<mesmo valor do web>`
 - `APP_CORS_ORIGINS=https://querobroa.com.br,https://www.querobroa.com.br,https://ops.querobroa.com.br`
 - `BUILDER_STORAGE_DIR=/data/builder`
-- `PIX_PROVIDER=LOCAL_DEV` no inicio, ate trocar por provedor real
-- `PIX_STATIC_KEY=<chave PIX real ou temporaria>`
-- `PIX_RECEIVER_NAME=QUERO BROA`
-- `PIX_RECEIVER_CITY=BELO HORIZONTE`
+- `PIX_PROVIDER=LOCAL_DEV` no inicio, ate ligar o PIX oficial no runtime
+- `PIX_STATIC_KEY=+5511994009584`
+- `PIX_RECEIVER_NAME=QUEROBROA`
+- `PIX_RECEIVER_CITY=SAO PAULO`
+- `BUSINESS_LEGAL_NAME=65.756.685 GUILHERME MARANGON`
+- `BUSINESS_CNPJ=65756685000146`
+- `BUSINESS_OFFICIAL_PHONE=+55 11 99400-9584`
+- `BUSINESS_BANK_NAME=Nu Pagamentos S.A. - Instituicao de Pagamento`
+- `BUSINESS_BANK_CODE=260`
+- `BUSINESS_BANK_BRANCH=0001`
+- `BUSINESS_BANK_ACCOUNT=770733822-0`
+- `WHATSAPP_WEBHOOK_VERIFY_TOKEN=<token forte para handshake com a Meta>`
+- `BANK_SYNC_WEBHOOK_TOKEN=<token forte para a bridge de baixa PIX>`
 - `DELIVERY_MANUAL_FALLBACK_FEE=12`
 
 Custom domain:

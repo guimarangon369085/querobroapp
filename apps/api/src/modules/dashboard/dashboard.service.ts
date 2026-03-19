@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { resolveDisplayNumber, roundMoney } from '@querobroapp/shared';
 import { PrismaService } from '../../prisma.service.js';
+import { readBusinessRuntimeProfile } from '../../common/business-profile.js';
 
 type LoadedOrder = Awaited<ReturnType<DashboardService['loadOrders']>>[number];
 type LoadedAnalyticsEvent = Awaited<ReturnType<DashboardService['loadAnalyticsEvents']>>[number];
@@ -172,9 +173,99 @@ function formatSourceLabel(event: LoadedAnalyticsEvent) {
   return 'Direto';
 }
 
+type IntegrationStatus = 'READY' | 'PENDING';
+
+type IntegrationRail = {
+  id: string;
+  label: string;
+  status: IntegrationStatus;
+  detail: string;
+  nextStep: string;
+};
+
 @Injectable()
 export class DashboardService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  private hasEnv(name: string) {
+    return Boolean(String(process.env[name] || '').trim());
+  }
+
+  private buildIdentitySummary() {
+    const profile = readBusinessRuntimeProfile();
+    return {
+      brandName: profile.brandName,
+      legalName: profile.legalName,
+      cnpj: profile.cnpj,
+      cnpjDisplay: profile.cnpjDisplay,
+      officialPhoneDisplay: profile.officialPhoneDisplay,
+      pixKey: profile.pixKey,
+      pickupAddressDisplay: profile.pickupAddressDisplay,
+      bank: profile.bank
+    };
+  }
+
+  private buildIntegrationRails() {
+    const autoReplyEnabled = String(process.env.WHATSAPP_AUTO_REPLY_ENABLED || 'false').trim().toLowerCase() === 'true';
+    const rails: IntegrationRail[] = [
+      {
+        id: 'whatsapp_cloud',
+        label: 'WhatsApp Cloud',
+        status: this.hasEnv('WHATSAPP_CLOUD_API_TOKEN') && this.hasEnv('WHATSAPP_CLOUD_PHONE_NUMBER_ID') ? 'READY' : 'PENDING',
+        detail:
+          this.hasEnv('WHATSAPP_CLOUD_API_TOKEN') && this.hasEnv('WHATSAPP_CLOUD_PHONE_NUMBER_ID')
+            ? 'Envio de mensagens pela Cloud API liberado.'
+            : 'Faltam token e/ou phone number ID para disparo real.',
+        nextStep: 'Preencher WHATSAPP_CLOUD_API_TOKEN e WHATSAPP_CLOUD_PHONE_NUMBER_ID.'
+      },
+      {
+        id: 'whatsapp_webhook',
+        label: 'Webhook inbound',
+        status: this.hasEnv('WHATSAPP_WEBHOOK_VERIFY_TOKEN') ? 'READY' : 'PENDING',
+        detail: this.hasEnv('WHATSAPP_WEBHOOK_VERIFY_TOKEN')
+          ? autoReplyEnabled
+            ? 'Handshake do webhook pronto e resposta automatica habilitada.'
+            : 'Handshake do webhook pronto; auto reply ainda desligado.'
+          : 'Endpoint pronto no app, mas ainda sem verify token para conectar na Meta.',
+        nextStep: autoReplyEnabled
+          ? 'Apontar a URL publica /whatsapp/webhook no app da Meta.'
+          : 'Definir WHATSAPP_WEBHOOK_VERIFY_TOKEN e WHATSAPP_AUTO_REPLY_ENABLED=true.'
+      },
+      {
+        id: 'whatsapp_flow',
+        label: 'Flow de pedidos',
+        status: this.hasEnv('WHATSAPP_FLOW_ORDER_INTAKE_ID') ? 'READY' : 'PENDING',
+        detail: this.hasEnv('WHATSAPP_FLOW_ORDER_INTAKE_ID')
+          ? 'Flow oficial configurado para rollout sem trocar o contrato do pedido.'
+          : 'Fallback atual responde com link oficial do /pedido.',
+        nextStep: 'Publicar o Flow e preencher WHATSAPP_FLOW_ORDER_INTAKE_ID.'
+      },
+      {
+        id: 'pix_settlement_bridge',
+        label: 'Baixa PIX em tempo real',
+        status: this.hasEnv('BANK_SYNC_WEBHOOK_TOKEN') ? 'READY' : 'PENDING',
+        detail: this.hasEnv('BANK_SYNC_WEBHOOK_TOKEN')
+          ? 'Webhook canônico de liquidacao PIX armado no backend.'
+          : 'Bridge pronta no codigo, aguardando token para aceitar eventos bancarios.',
+        nextStep: 'Definir BANK_SYNC_WEBHOOK_TOKEN e ligar a fonte de eventos.'
+      },
+      {
+        id: 'nubank_rail',
+        label: 'Trilho Nubank',
+        status: this.hasEnv('BANK_SYNC_WEBHOOK_TOKEN') ? 'READY' : 'PENDING',
+        detail: this.hasEnv('BANK_SYNC_WEBHOOK_TOKEN')
+          ? 'Conta oficial mapeada; o ERP ja consegue receber eventos de liquidacao via bridge.'
+          : 'Conta oficial mapeada, mas ainda sem emissor conectado para realtime.',
+        nextStep: 'Conectar uma automacao Nubank/Open Finance ao endpoint /payments/pix-settlements/webhook.'
+      }
+    ];
+
+    return {
+      readyCount: rails.filter((item) => item.status === 'READY').length,
+      pendingCount: rails.filter((item) => item.status === 'PENDING').length,
+      items: rails
+    };
+  }
 
   private loadAnalyticsEvents(rangeStart: Date) {
     return this.prisma.siteAnalyticsEvent.findMany({
@@ -235,6 +326,8 @@ export class DashboardService {
     return {
       asOf: new Date().toISOString(),
       rangeDays: days,
+      identity: this.buildIdentitySummary(),
+      integrations: this.buildIntegrationRails(),
       traffic,
       business
     };

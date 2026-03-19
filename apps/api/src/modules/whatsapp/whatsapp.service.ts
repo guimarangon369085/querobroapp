@@ -1,9 +1,11 @@
-import { BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import {
-  WhatsAppPixDispatchSchema,
-  normalizePhoneNumber,
-  type WhatsAppPixDispatch
-} from '@querobroapp/shared';
+  BadRequestException,
+  Injectable,
+  ServiceUnavailableException,
+  UnauthorizedException
+} from '@nestjs/common';
+import { WhatsAppPixDispatchSchema, normalizePhoneNumber, type WhatsAppPixDispatch } from '@querobroapp/shared';
+import { readBusinessRuntimeProfile } from '../../common/business-profile.js';
 
 type WhatsAppCloudMessageKind = 'SUMMARY' | 'PIX_CODE' | 'ORDER_ALERT';
 
@@ -37,6 +39,17 @@ export class WhatsAppService {
     return config;
   }
 
+  private getWebhookConfig() {
+    return {
+      verifyToken: String(process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || '').trim(),
+      defaultOrderEntryUrl:
+        String(process.env.WHATSAPP_DEFAULT_ORDER_ENTRY_URL || 'https://querobroa.com.br/pedido').trim() ||
+        'https://querobroa.com.br/pedido',
+      autoReplyEnabled: String(process.env.WHATSAPP_AUTO_REPLY_ENABLED || 'false').trim().toLowerCase() === 'true',
+      flowId: String(process.env.WHATSAPP_FLOW_ORDER_INTAKE_ID || '').trim()
+    };
+  }
+
   private normalizeRecipientPhone(value?: string | null) {
     const normalized = normalizePhoneNumber(value);
     if (!normalized) {
@@ -50,6 +63,125 @@ export class WhatsAppService {
   private messageUrl() {
     const config = this.assertConfigured();
     return `${config.baseUrl}/${config.version}/${config.phoneNumberId}/messages`;
+  }
+
+  private buildInboundOrderReply(messageBody?: string | null) {
+    const config = this.getWebhookConfig();
+    const businessProfile = readBusinessRuntimeProfile();
+    const normalizedMessage = String(messageBody || '').trim().toLowerCase();
+    const customerAskedAboutPix = normalizedMessage.includes('pix') || normalizedMessage.includes('pag');
+    const lines = [
+      'Oi! Aqui e a QUEROBROA.',
+      `Para montar seu pedido, use o link oficial: ${config.defaultOrderEntryUrl}`,
+      customerAskedAboutPix
+        ? `O PIX oficial da QUEROBROA e ${businessProfile.pixKey}.`
+        : `WhatsApp oficial: ${businessProfile.officialPhoneDisplay}.`,
+      config.flowId
+        ? 'O canal ja esta pronto para evoluir para Flow oficial sem trocar a base do pedido.'
+        : 'Se ja tiver um pedido em andamento, envie aqui o numero do pedido para atendimento manual.'
+    ];
+
+    return lines.filter(Boolean).join('\n');
+  }
+
+  private extractInboundTextMessages(payload: unknown) {
+    if (!payload || typeof payload !== 'object') return [];
+    const record = payload as {
+      entry?: Array<{
+        changes?: Array<{
+          value?: {
+            messages?: Array<{
+              from?: string;
+              id?: string;
+              timestamp?: string;
+              type?: string;
+              text?: { body?: string };
+            }>;
+          };
+        }>;
+      }>;
+    };
+
+    const messages: Array<{ from: string; messageId: string | null; body: string; timestamp: string | null }> = [];
+    for (const entry of record.entry || []) {
+      for (const change of entry.changes || []) {
+        for (const message of change.value?.messages || []) {
+          if (message.type !== 'text') continue;
+          let from = '';
+          try {
+            from = this.normalizeRecipientPhone(message.from);
+          } catch {
+            from = '';
+          }
+          const body = String(message.text?.body || '').trim();
+          if (!from || !body) continue;
+          messages.push({
+            from,
+            messageId: String(message.id || '').trim() || null,
+            body,
+            timestamp: String(message.timestamp || '').trim() || null
+          });
+        }
+      }
+    }
+    return messages;
+  }
+
+  async verifyWebhookSubscription(mode?: string | null, token?: string | null, challenge?: string | null) {
+    const config = this.getWebhookConfig();
+    if (!config.verifyToken) {
+      throw new ServiceUnavailableException(
+        'Webhook do WhatsApp nao configurado. Defina WHATSAPP_WEBHOOK_VERIFY_TOKEN.'
+      );
+    }
+    if (String(mode || '').trim() !== 'subscribe' || String(token || '').trim() !== config.verifyToken) {
+      throw new UnauthorizedException('Handshake do webhook do WhatsApp invalido.');
+    }
+    return String(challenge || '').trim();
+  }
+
+  async handleWebhookEvent(payload: unknown) {
+    const config = this.getWebhookConfig();
+    const cloudConfig = this.getConfig();
+    const businessProfile = readBusinessRuntimeProfile();
+    const inboundMessages = this.extractInboundTextMessages(payload);
+    const deliveries = [];
+    const canSendReplies = config.autoReplyEnabled && Boolean(cloudConfig.token && cloudConfig.phoneNumberId);
+
+    if (canSendReplies && inboundMessages.length > 0) {
+      for (const message of inboundMessages) {
+        deliveries.push(
+          this.postTextMessage({
+            to: message.from,
+            kind: 'ORDER_ALERT',
+            body: this.buildInboundOrderReply(message.body)
+          }).then((delivery) => ({
+            from: message.from,
+            messageId: message.messageId,
+            replyMessageId: delivery.messageId
+          }))
+        );
+      }
+    }
+
+    const settledReplies = await Promise.allSettled(deliveries);
+    return {
+      ok: true,
+      autoReplyEnabled: config.autoReplyEnabled,
+      canSendReplies,
+      flowReady: Boolean(config.flowId),
+      defaultOrderEntryUrl: config.defaultOrderEntryUrl,
+      businessPhone: businessProfile.officialPhoneDisplay,
+      receivedMessages: inboundMessages.length,
+      replies: settledReplies.map((entry) =>
+        entry.status === 'fulfilled'
+          ? { ok: true, ...entry.value }
+          : {
+              ok: false,
+              error: entry.reason instanceof Error ? entry.reason.message : String(entry.reason || 'reply_failed')
+            }
+      )
+    };
   }
 
   private async postTextMessage(input: {

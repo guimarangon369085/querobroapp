@@ -43,6 +43,23 @@ function resolveTopOverlayOffset() {
   }, 12);
 }
 
+function replaceCurrentUrlSearchParams(keys: string[]) {
+  if (typeof window === 'undefined' || keys.length === 0) return;
+
+  const url = new URL(window.location.href);
+  let changed = false;
+  for (const key of keys) {
+    if (!key) continue;
+    if (!url.searchParams.has(key)) continue;
+    url.searchParams.delete(key);
+    changed = true;
+  }
+  if (!changed) return;
+
+  const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+  window.history.replaceState(window.history.state, '', nextUrl);
+}
+
 export function scrollToLayoutSlot(slotId: string, options: ScrollToSlotOptions = {}) {
   if (typeof window === 'undefined') return;
 
@@ -98,10 +115,11 @@ export function consumeFocusQueryParam(searchParams: SearchParamsLike, key = 'fo
   const value = (searchParams.get(key) || '').trim();
   if (!value || typeof window === 'undefined') return '';
 
-  const url = new URL(window.location.href);
-  url.searchParams.delete(key);
-  const nextUrl = `${url.pathname}${url.search}${url.hash}`;
-  window.history.replaceState(window.history.state, '', nextUrl);
+  replaceCurrentUrlSearchParams([key]);
 
   return value;
+}
+
+export function clearQueryParams(keys: string[]) {
+  replaceCurrentUrlSearchParams(keys);
 }

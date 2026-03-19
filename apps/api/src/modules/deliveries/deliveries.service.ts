@@ -637,7 +637,6 @@ export class DeliveriesService {
         this.normalizeText(process.env.DELIVERY_PICKUP_PHONE) ||
         this.normalizeText(process.env.UBER_DIRECT_PICKUP_PHONE) ||
         this.normalizeText(process.env.LOGGI_PICKUP_PHONE) ||
-        this.normalizeText(process.env.PIX_STATIC_KEY) ||
         '',
       address: FIXED_PICKUP_ORIGIN.fullAddress
     };

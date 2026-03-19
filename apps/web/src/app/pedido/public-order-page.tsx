@@ -1,16 +1,12 @@
 'use client';
 
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  OFFICIAL_BUSINESS_PUBLIC_PROFILE,
-  buildOfficialBusinessWhatsAppUrl,
   formatExternalOrderMinimumSchedule,
-  resolveDisplayNumber,
   resolveExternalOrderMinimumSchedule,
-  type ExternalOrderSubmission,
-  type OrderIntakeMeta,
-  type PixCharge
+  type ExternalOrderSubmission
 } from '@querobroapp/shared';
 import { GoogleAddressAutocompleteInput } from '@/components/form/GoogleAddressAutocompleteInput';
 import { FormField } from '@/components/form/FormField';
@@ -30,16 +26,22 @@ import {
   resolveOrderBoxCodeFromCatalogContentId,
   sumOrderFlavorCounts
 } from '@/features/orders/order-box-catalog';
+import {
+  PUBLIC_ORDER_DRAFT_SESSION_STORAGE_KEY,
+  PUBLIC_ORDER_LAST_ORDER_STORAGE_KEY,
+  PUBLIC_ORDER_PICKUP_ADDRESS,
+  PUBLIC_ORDER_PROFILE_STORAGE_KEY,
+  readStoredPublicOrderProfile,
+  type PublicOrderResult,
+  type StoredPublicOrderProfile
+} from './public-order-storage';
+import { writeStoredOrderFinalized } from '@/lib/order-finalized-storage';
 
 const boxCatalog = ORDER_BOX_CATALOG;
 const FLAVOR_CODES = ORDER_FLAVOR_CODES;
 const GOOGLE_MAPS_API_KEY = (process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '').trim();
 const PUBLIC_ORDER_HOUR_OPTIONS = Array.from({ length: 24 }, (_, index) => `${index}`.padStart(2, '0'));
 const PUBLIC_ORDER_MINUTE_OPTIONS = ['00', '15', '30', '45'] as const;
-const PUBLIC_ORDER_DRAFT_SESSION_STORAGE_KEY = 'querobroapp:public-order-draft-session-id';
-const PUBLIC_ORDER_PROFILE_STORAGE_KEY = 'querobroapp:public-order-profile';
-const PUBLIC_ORDER_LAST_ORDER_STORAGE_KEY = 'querobroapp:public-order-last-order';
-const PUBLIC_ORDER_PICKUP_ADDRESS = 'Alameda Jaú, 731';
 const PUBLIC_ORDER_META_COUPON_NOTE_PREFIX = 'Cupom Meta:';
 
 type BoxCode = OrderBoxCode;
@@ -69,28 +71,6 @@ type PublicOrderFormState = {
   time: string;
   notes: string;
   boxes: Record<BoxCode, string>;
-};
-
-type PublicOrderResult = {
-  order: {
-    id: number;
-    publicNumber?: number | null;
-    total?: number;
-    scheduledAt?: string | null;
-  };
-  intake: OrderIntakeMeta;
-};
-
-type StoredPublicOrderProfile = {
-  version: 1;
-  name: string;
-  phone: string;
-  fulfillmentMode: 'DELIVERY' | 'PICKUP';
-  address: string;
-  placeId: string;
-  lat: number | null;
-  lng: number | null;
-  deliveryNotes: string;
 };
 
 type StoredPublicOrderSnapshot = {
@@ -201,33 +181,6 @@ function sanitizeStoredCustomBox(value: unknown) {
   );
 }
 
-function readStoredPublicOrderProfile(): StoredPublicOrderProfile | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(PUBLIC_ORDER_PROFILE_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<StoredPublicOrderProfile> | null;
-    if (!parsed || parsed.version !== 1) return null;
-    const fulfillmentMode = parsed.fulfillmentMode === 'PICKUP' ? 'PICKUP' : 'DELIVERY';
-    return {
-      version: 1 as const,
-      name: String(parsed.name || '').trim(),
-      phone: String(parsed.phone || '').trim(),
-      fulfillmentMode,
-      address:
-        fulfillmentMode === 'PICKUP'
-          ? PUBLIC_ORDER_PICKUP_ADDRESS
-          : String(parsed.address || '').trim(),
-      placeId: fulfillmentMode === 'DELIVERY' ? String(parsed.placeId || '').trim() : '',
-      lat: typeof parsed.lat === 'number' && Number.isFinite(parsed.lat) ? parsed.lat : null,
-      lng: typeof parsed.lng === 'number' && Number.isFinite(parsed.lng) ? parsed.lng : null,
-      deliveryNotes: String(parsed.deliveryNotes || '').trim()
-    };
-  } catch {
-    return null;
-  }
-}
-
 function formatDateInputValue(date: Date) {
   const year = date.getFullYear();
   const month = `${date.getMonth() + 1}`.padStart(2, '0');
@@ -308,16 +261,6 @@ function formatCurrencyBRL(value?: number | null) {
     style: 'currency',
     currency: 'BRL'
   }).format(value);
-}
-
-function formatScheduledAt(value?: string | null) {
-  if (!value) return 'Data a confirmar';
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return 'Data a confirmar';
-  return new Intl.DateTimeFormat('pt-BR', {
-    dateStyle: 'short',
-    timeStyle: 'short'
-  }).format(parsed);
 }
 
 function createCustomBoxId() {
@@ -429,19 +372,17 @@ function PublicOrderSaboresCollage() {
 }
 
 export function PublicOrderPage() {
-  const { notifyError, notifyInfo, presentSuccess } = useFeedback();
+  const router = useRouter();
+  const { notifyError } = useFeedback();
   const [form, setForm] = useState<PublicOrderFormState>(initialFormState);
   const [customBoxes, setCustomBoxes] = useState<CustomBoxDraft[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [result, setResult] = useState<PublicOrderResult | null>(null);
-  const [isCopyingPix, setIsCopyingPix] = useState(false);
   const [deliveryQuote, setDeliveryQuote] = useState<DeliveryQuote | null>(null);
   const [deliveryQuoteError, setDeliveryQuoteError] = useState<string | null>(null);
   const [isQuotingDelivery, setIsQuotingDelivery] = useState(false);
   const addressInputRef = useRef<HTMLInputElement | null>(null);
   const orderFormRef = useRef<HTMLFormElement | null>(null);
-  const pageTopRef = useRef<HTMLDivElement | null>(null);
   const urlPrefillSignatureRef = useRef<string | null>(null);
   const deliveryAddressDraftRef = useRef<Pick<PublicOrderFormState, 'address' | 'placeId' | 'lat' | 'lng'>>({
     address: '',
@@ -558,7 +499,6 @@ export function PublicOrderPage() {
     urlPrefillSignatureRef.current = signature;
     setDraftSessionId(createPublicOrderDraftSessionId());
     setCustomBoxes([]);
-    setResult(null);
     setError(null);
     setDeliveryQuote(null);
     setDeliveryQuoteError(null);
@@ -749,7 +689,6 @@ export function PublicOrderPage() {
       })).filter((entry) => entry.quantity > 0),
     [computedUnits]
   );
-  const pixCharge: PixCharge | null = result?.intake.pixCharge ?? null;
   const deliveryFee = deliveryQuote?.fee ?? 0;
   const displayTotal = estimatedTotal + deliveryFee;
   const parsedScheduledAt = useMemo(() => parseLocalDateTime(form.date, form.time), [form.date, form.time]);
@@ -1073,14 +1012,6 @@ export function PublicOrderPage() {
     orderFormRef.current?.requestSubmit();
   };
 
-  const scrollToTop = useCallback(() => {
-    if (pageTopRef.current) {
-      pageTopRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      return;
-    }
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
-
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -1213,23 +1144,34 @@ export function PublicOrderPage() {
         notes: form.notes.trim()
       };
       window.localStorage.setItem(PUBLIC_ORDER_LAST_ORDER_STORAGE_KEY, JSON.stringify(storedOrderSnapshot));
-      setResult(data as PublicOrderResult);
+      const result = data as PublicOrderResult;
+      writeStoredOrderFinalized({
+        version: 1,
+        origin: 'PUBLIC_FORM',
+        savedAt: new Date().toISOString(),
+        returnPath: '/pedido',
+        returnLabel: 'Fazer novo pedido',
+        productSubtotal: estimatedTotal,
+        order: result.order,
+        intake: {
+          stage: result.intake.stage,
+          deliveryFee: result.intake.deliveryFee,
+          pixCharge: result.intake.pixCharge
+        }
+      });
       trackAnalyticsEvent({
         sessionId: resolveAnalyticsSessionId(),
         eventType: 'FUNNEL',
         path: '/pedido',
         label: 'public_order_submitted',
         meta: {
-          orderId: (data as PublicOrderResult).order.id,
-          total: (data as PublicOrderResult).order.total ?? estimatedTotal,
+          orderId: result.order.id,
+          total: result.order.total ?? estimatedTotal,
           fulfillmentMode: form.fulfillmentMode,
           orderDraftSessionId: draftSessionId
         }
       });
-      presentSuccess(
-        'Seu pedido foi recebido. Confira o resumo e o PIX para concluir.',
-        `Pedido #${resolveDisplayNumber((data as PublicOrderResult).order) ?? (data as PublicOrderResult).order.id}`
-      );
+      router.push('/pedidofinalizado');
     } catch (submitError) {
       const message = submitError instanceof Error ? submitError.message : 'Nao foi possivel enviar o pedido.';
       setError(message);
@@ -1246,19 +1188,6 @@ export function PublicOrderPage() {
       notifyError(message);
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const copyPixCode = async () => {
-    if (!pixCharge?.copyPasteCode) return;
-    try {
-      setIsCopyingPix(true);
-      await navigator.clipboard.writeText(pixCharge.copyPasteCode);
-      notifyInfo('Codigo PIX copiado.');
-    } catch {
-      notifyError('Nao foi possivel copiar o codigo PIX.');
-    } finally {
-      setIsCopyingPix(false);
     }
   };
 
@@ -1279,44 +1208,13 @@ export function PublicOrderPage() {
     });
     setCustomBoxes([]);
     setError(null);
-    setResult(null);
     setDeliveryQuote(null);
     setDeliveryQuoteError(null);
-  };
-
-  const startAnotherOrder = () => {
-    const nextMinimum = resolveExternalOrderMinimumSchedule();
-    const preservedScheduledAt = parseLocalDateTime(form.date, form.time);
-    const nextScheduledAt =
-      preservedScheduledAt && preservedScheduledAt.getTime() >= nextMinimum.getTime()
-        ? preservedScheduledAt
-        : nextMinimum;
-
-    setDraftSessionId(createPublicOrderDraftSessionId());
-    setMinimumSchedule(nextMinimum);
-    setForm((current) => ({
-      ...current,
-      date: formatDateInputValue(nextScheduledAt),
-      time: formatTimeInputValue(nextScheduledAt),
-      notes: '',
-      boxes: {
-        ...initialFormState.boxes
-      }
-    }));
-    setCustomBoxes([]);
-    setError(null);
-    setResult(null);
-    setDeliveryQuote(null);
-    setDeliveryQuoteError(null);
-    scrollToTop();
   };
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(255,240,220,0.95),transparent_32%),radial-gradient(circle_at_top_right,rgba(219,234,222,0.9),transparent_28%),linear-gradient(180deg,#f8efe5_0%,#f4eadc_100%)]">
-      <div
-        className="mx-auto w-full max-w-[1720px] px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:py-8 xl:px-10 2xl:px-12"
-        ref={pageTopRef}
-      >
+      <div className="mx-auto w-full max-w-[1720px] px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:py-8 xl:px-10 2xl:px-12">
         <section className="public-order-layout">
           <form
             autoComplete="on"
@@ -1780,26 +1678,24 @@ export function PublicOrderPage() {
               </div>
             ) : null}
 
-            {!result ? (
-              <div className="app-form-actions rounded-[20px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.94)] p-3 shadow-[0_18px_32px_rgba(70,44,26,0.08)] backdrop-blur-[10px] xl:hidden">
-                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
-                    Total
-                  </span>
-                  <strong className="text-base text-[color:var(--ink-strong)]">{formatCurrencyBRL(displayTotal)}</strong>
-                </div>
-                <button
-                  className="app-button app-button-primary"
-                  disabled={isSubmitting || isQuotingDelivery}
-                  onClick={() => {
-                    void handlePrimaryAction();
-                  }}
-                  type="button"
-                >
-                  {primaryActionLabel}
-                </button>
+            <div className="app-form-actions rounded-[20px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.94)] p-3 shadow-[0_18px_32px_rgba(70,44,26,0.08)] backdrop-blur-[10px] xl:hidden">
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
+                  Total
+                </span>
+                <strong className="text-base text-[color:var(--ink-strong)]">{formatCurrencyBRL(displayTotal)}</strong>
               </div>
-            ) : null}
+              <button
+                className="app-button app-button-primary"
+                disabled={isSubmitting || isQuotingDelivery}
+                onClick={() => {
+                  void handlePrimaryAction();
+                }}
+                type="button"
+              >
+                {primaryActionLabel}
+              </button>
+            </div>
 
           </form>
 
@@ -1927,114 +1823,23 @@ export function PublicOrderPage() {
                   </p>
                 </div>
 
-                {!result ? (
-                  <div className="grid gap-2 rounded-[20px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(160deg,rgba(255,248,241,0.94),rgba(244,231,216,0.88))] p-4 shadow-[0_18px_34px_rgba(70,44,26,0.08)] sm:rounded-[24px]">
-                    <button
-                      className="app-button app-button-primary w-full"
-                      disabled={isSubmitting || isQuotingDelivery}
-                      onClick={() => {
-                        void handlePrimaryAction();
-                      }}
-                      type="button"
-                    >
-                      {primaryActionLabel}
-                    </button>
-                    <button className="app-button app-button-ghost w-full" onClick={resetForm} type="button">
-                      Limpar
-                    </button>
-                  </div>
-                ) : null}
+                <div className="grid gap-2 rounded-[20px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(160deg,rgba(255,248,241,0.94),rgba(244,231,216,0.88))] p-4 shadow-[0_18px_34px_rgba(70,44,26,0.08)] sm:rounded-[24px]">
+                  <button
+                    className="app-button app-button-primary w-full"
+                    disabled={isSubmitting || isQuotingDelivery}
+                    onClick={() => {
+                      void handlePrimaryAction();
+                    }}
+                    type="button"
+                  >
+                    {primaryActionLabel}
+                  </button>
+                  <button className="app-button app-button-ghost w-full" onClick={resetForm} type="button">
+                    Limpar
+                  </button>
+                </div>
               </div>
             </section>
-
-            {result ? (
-              <section className="order-2 overflow-hidden rounded-[24px] border border-emerald-200 bg-[linear-gradient(165deg,rgba(239,250,244,0.98),rgba(228,244,233,0.92))] p-4 shadow-[0_18px_40px_rgba(43,92,61,0.12)] sm:rounded-[30px] sm:p-6 sm:shadow-[0_26px_80px_rgba(43,92,61,0.12)]">
-                <div>
-                  <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-emerald-700">
-                    Pedido recebido
-                  </p>
-                  <h2 className="mt-1.5 text-[1.55rem] font-semibold text-[color:var(--ink-strong)] sm:mt-2 sm:text-3xl">
-                    Pedido #{resolveDisplayNumber(result.order) ?? result.order.id}
-                  </h2>
-                  <p className="mt-2 text-[0.88rem] leading-6 text-[color:var(--ink-muted)] sm:text-sm">
-                    Programado para {formatScheduledAt(result.order.scheduledAt)}.
-                  </p>
-                </div>
-
-                <div className="mt-5 grid gap-3 text-sm text-[color:var(--ink-muted)]">
-                  <div className="flex items-center justify-between gap-3 rounded-[24px] bg-white/78 px-4 py-3">
-                    <span>Produtos</span>
-                    <strong className="text-lg text-[color:var(--ink-strong)]">{formatCurrencyBRL(estimatedTotal)}</strong>
-                  </div>
-                  <div className="flex items-center justify-between gap-3 rounded-[24px] bg-white/78 px-4 py-3">
-                    <span>Frete</span>
-                    <strong className="text-lg text-[color:var(--ink-strong)]">
-                      {formatCurrencyBRL(result.intake.deliveryFee)}
-                    </strong>
-                  </div>
-                  <div className="flex items-center justify-between gap-3 rounded-[24px] bg-white/78 px-4 py-3">
-                    <span>Total</span>
-                    <strong className="text-lg text-[color:var(--ink-strong)]">{formatCurrencyBRL(result.order.total)}</strong>
-                  </div>
-                  <div className="flex items-center justify-between gap-3 rounded-[24px] bg-white/78 px-4 py-3">
-                    <span>Status</span>
-                    <strong className="text-[color:var(--ink-strong)]">
-                      {result.intake.stage === 'PIX_PENDING' ? 'PIX pendente' : result.intake.stage}
-                    </strong>
-                  </div>
-                </div>
-
-                {pixCharge?.copyPasteCode ? (
-                  <div className="mt-5 grid gap-4">
-                    <div>
-                      <p className="text-sm font-semibold text-[color:var(--ink-strong)]">PIX copia e cola</p>
-                    </div>
-                    <textarea
-                      className="app-textarea min-h-[170px] border-emerald-200 bg-white/84 font-mono text-[11px] leading-5 sm:text-xs"
-                      readOnly
-                      value={pixCharge.copyPasteCode}
-                    />
-                    <div className="app-form-actions">
-                      <button
-                        className="app-button app-button-primary"
-                        disabled={isCopyingPix}
-                        onClick={copyPixCode}
-                        type="button"
-                      >
-                        {isCopyingPix ? 'Copiando...' : 'Copiar codigo PIX'}
-                      </button>
-                      <button className="app-button app-button-ghost" onClick={startAnotherOrder} type="button">
-                        Fazer outro pedido
-                      </button>
-                    </div>
-                    <div className="rounded-[24px] border border-emerald-200 bg-white/82 px-4 py-4 text-sm leading-6 text-[color:var(--ink-muted)]">
-                      <p className="font-semibold text-[color:var(--ink-strong)]">Confirme os dados oficiais antes de pagar</p>
-                      <p className="mt-2">
-                        PIX oficial: <strong className="text-[color:var(--ink-strong)]">{OFFICIAL_BUSINESS_PUBLIC_PROFILE.pixKey}</strong>
-                      </p>
-                      <p>
-                        WhatsApp oficial:{' '}
-                        <a
-                          className="font-semibold text-[color:var(--brand-primary)] underline underline-offset-4"
-                          href={buildOfficialBusinessWhatsAppUrl(
-                            `Oi! Acabei de montar o pedido #${resolveDisplayNumber(result.order) ?? result.order.id}.`
-                          )}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          {OFFICIAL_BUSINESS_PUBLIC_PROFILE.officialPhoneDisplay}
-                        </a>
-                      </p>
-                      <p>CNPJ: {OFFICIAL_BUSINESS_PUBLIC_PROFILE.cnpjDisplay}</p>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="mt-5 rounded-[24px] bg-white/78 px-4 py-3 text-sm text-[color:var(--ink-muted)]">
-                    Pedido enviado. O PIX sera confirmado no atendimento.
-                  </p>
-                )}
-              </section>
-            ) : null}
           </aside>
         </section>
       </div>

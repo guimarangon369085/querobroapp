@@ -5,9 +5,11 @@ import {
   moneyToMinorUnits,
   PaymentSchema,
   PaymentStatusEnum,
+  PixSettlementWebhookSchema,
   PixChargeSchema,
   roundMoney
 } from '@querobroapp/shared';
+import { readBusinessRuntimeProfile } from '../../common/business-profile.js';
 
 type TransactionClient = Prisma.TransactionClient;
 type PaymentRecord = {
@@ -101,9 +103,16 @@ export class PaymentsService {
   }
 
   private buildStaticPixCopyPaste(input: { txid: string; amount: number }) {
-    const pixKey = this.normalizeStaticPixKey(process.env.PIX_STATIC_KEY || '');
-    const receiverName = this.sanitizePixText(process.env.PIX_RECEIVER_NAME || 'QUERO BROA', 25);
-    const receiverCity = this.sanitizePixText(process.env.PIX_RECEIVER_CITY || 'BELO HORIZONTE', 15);
+    const businessProfile = readBusinessRuntimeProfile();
+    const pixKey = this.normalizeStaticPixKey(businessProfile.pixKey || process.env.PIX_STATIC_KEY || '');
+    const receiverName = this.sanitizePixText(
+      businessProfile.brandName || process.env.PIX_RECEIVER_NAME || 'QUEROBROA',
+      25
+    );
+    const receiverCity = this.sanitizePixText(
+      businessProfile.city || process.env.PIX_RECEIVER_CITY || 'SAO PAULO',
+      15
+    );
     const descriptionPrefix = this.sanitizePixText(process.env.PIX_DESCRIPTION_PREFIX || 'PEDIDO', 20);
     const amount = this.toMoney(input.amount);
     const description = `${descriptionPrefix} ${input.txid}`.slice(0, 60).trim();
@@ -286,6 +295,111 @@ export class PaymentsService {
     return this.prisma.payment
       .findMany({ orderBy: { id: 'desc' } })
       .then((payments) => payments.map((payment) => this.normalizePayment(payment as PaymentRecord)));
+  }
+
+  private async findPaymentForSettlement(
+    tx: TransactionClient,
+    input: {
+      paymentId?: number | null;
+      orderId?: number | null;
+      txid?: string | null;
+      providerRef?: string | null;
+    }
+  ) {
+    if (input.paymentId) {
+      const payment = await tx.payment.findUnique({ where: { id: input.paymentId } });
+      return payment as PaymentRecord | null;
+    }
+
+    if (input.providerRef) {
+      const payment = await tx.payment.findFirst({
+        where: {
+          method: 'pix',
+          providerRef: input.providerRef,
+          ...(input.orderId ? { orderId: input.orderId } : {})
+        },
+        orderBy: [{ id: 'desc' }]
+      });
+      return payment as PaymentRecord | null;
+    }
+
+    if (input.txid) {
+      const payment = await tx.payment.findFirst({
+        where: {
+          method: 'pix',
+          providerRef: {
+            endsWith: `:${input.txid}`
+          },
+          ...(input.orderId ? { orderId: input.orderId } : {})
+        },
+        orderBy: [{ id: 'desc' }]
+      });
+      return payment as PaymentRecord | null;
+    }
+
+    return null;
+  }
+
+  async settlePixWebhook(payload: unknown) {
+    const data = PixSettlementWebhookSchema.parse(payload);
+
+    return this.prisma.$transaction(async (tx) => {
+      const payment = await this.findPaymentForSettlement(tx, data);
+      if (!payment) {
+        throw new NotFoundException('Pagamento PIX nao encontrado para a liquidacao informada.');
+      }
+
+      if (payment.method !== 'pix') {
+        throw new BadRequestException('A liquidacao recebida nao corresponde a um pagamento PIX.');
+      }
+
+      const normalizedPendingPayment =
+        payment.status !== PaymentStatusEnum.enum.PAGO && !payment.paidAt
+          ? await this.ensurePixChargeOnRecord(tx, payment)
+          : payment;
+      const expectedCharge = this.buildPixCharge(normalizedPendingPayment);
+
+      if (data.amount != null) {
+        const expectedAmount = moneyToMinorUnits(normalizedPendingPayment.amount);
+        const settledAmount = moneyToMinorUnits(data.amount);
+        if (expectedAmount !== settledAmount) {
+          throw new BadRequestException(
+            `Valor da liquidacao diverge do pagamento. Esperado=${normalizedPendingPayment.amount} Recebido=${this.toMoney(data.amount)}`
+          );
+        }
+      }
+
+      if (data.txid && data.txid !== expectedCharge.txid) {
+        throw new BadRequestException('TXID da liquidacao nao corresponde ao pagamento encontrado.');
+      }
+
+      if (normalizedPendingPayment.status === PaymentStatusEnum.enum.PAGO || normalizedPendingPayment.paidAt) {
+        return {
+          ok: true,
+          alreadyPaid: true,
+          source: data.source,
+          payment: this.normalizePayment(normalizedPendingPayment)
+        };
+      }
+
+      const nextProviderRef = data.providerRef?.trim() || normalizedPendingPayment.providerRef || expectedCharge.providerRef;
+      const paidAt = data.paidAt ? new Date(data.paidAt) : new Date();
+      const updated = (await tx.payment.update({
+        where: { id: normalizedPendingPayment.id },
+        data: {
+          status: PaymentStatusEnum.enum.PAGO,
+          paidAt,
+          providerRef: nextProviderRef
+        }
+      })) as PaymentRecord;
+
+      return {
+        ok: true,
+        alreadyPaid: false,
+        source: data.source,
+        payment: this.normalizePayment(updated)
+      };
+    });
   }
 
   async create(payload: unknown) {

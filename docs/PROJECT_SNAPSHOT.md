@@ -1,6 +1,6 @@
 # PROJECT_SNAPSHOT
 
-Ultima atualizacao: 2026-03-18
+Ultima atualizacao: 2026-03-19
 
 ## Estado atual
 
@@ -18,6 +18,7 @@ Ultima atualizacao: 2026-03-18
 - `Produtos` deixou de existir como superficie operacional; catalogo e ficha tecnica ficam dentro de `Estoque`.
 - Existe agora uma captura publica de pedido em `/pedido`, usando o mesmo intake externo que vai servir para `Google Forms`, pagina propria e futuro `WhatsApp Flow`.
 - O intake externo agora expoe preview seguro para `Google Forms` e `customer-form`, validando payload, frete e total sem criar pedido nem PIX.
+- Os dados oficiais da QUEROBROA (WhatsApp, CNPJ, PIX e conta bancaria) agora estao canonizados em contratos compartilhados, painel interno e fluxo publico.
 - Pedidos de `Entrega` agora podem receber cotacao de frete antes do submit final, com o valor incorporado ao total e ao PIX.
 - `/pedido`, `quick create` e a logica de caixas em `Pedidos` passaram a compartilhar o mesmo catalogo de caixas/sabores e as mesmas imagens originais da marca.
 - Em `/pedido`, quando `Retirada` e selecionada, o ponto de retirada agora e preenchido automaticamente como `Alameda Jau, 731` e fica bloqueado para edicao pelo cliente.
@@ -39,6 +40,7 @@ Ultima atualizacao: 2026-03-18
 - A `Caixa Sabores` de `/pedido` agora mostra uma composicao com as 5 artes oficiais dos sabores no mesmo envelope visual da imagem anterior.
 - O autocomplete de endereco em `/pedido` e `/clientes` saiu do widget legado `google.maps.places.Autocomplete` e passou para a API nova programatica do Google Places, preservando os inputs atuais e eliminando o warning de deprecacao no console.
 - A linha de quantidade dos cards de caixas em `/pedido` saiu do grid aninhado fragil e passou a usar miolo flexivel com container query por card, evitando que o selo `0 caixas` seja esmagado entre input e botao `+` em Safari/desktop.
+- `/pedido` e `/pedidos` agora redirecionam o pos-criacao para `/pedidofinalizado`, com card final isolado, retorno contextual (`Fazer novo pedido` ou `Voltar para pedidos`) e preservacao apenas dos dados cadastrais do cliente no caso publico.
 - `/dashboard` voltou a existir como rota oculta interna, agora com painel real de analytics first-party do site, vitals e performance financeira/operacional da broa.
 - O web passou a instrumentar navegacao, links, funil e web vitals por coleta propria, gravando esses eventos na API para leitura imediata no dashboard.
 - `/dashboard` deixou de depender so de obscuridade: agora abre apenas em host operacional/loopback, usa bridge protegido no web e a API exige token de bridge.
@@ -96,6 +98,7 @@ Ultima atualizacao: 2026-03-18
 - Operacao: `orders`, `payments`, `deliveries`, `production`
 - Estoque: `inventory`, `inventory-products`, `bom`
 - Intake externo: `orders/intake`, `orders/intake/customer-form`, `orders/intake/google-form`, `orders/intake/whatsapp-flow`
+- WhatsApp oficial: webhook Cloud API e auto reply opcional para o link oficial do pedido
 - Cotacao de frete: `deliveries/quotes` + proxy interno do web em `/api/delivery-quote`
 - Proxy de `Google Forms`: web exposto em `/api/google-form` para receber o Apps Script sem abrir a API inteira publicamente
 - Preview do intake externo: `/api/google-form/preview`, `/api/customer-form/preview`, `orders/intake/google-form/preview` e `orders/intake/customer-form/preview`
@@ -124,10 +127,10 @@ Ultima atualizacao: 2026-03-18
 
 ## Validacao operacional mais recente
 
-- Data: 2026-03-18
-- Ciclo executado: `pnpm --filter @querobroapp/web lint`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/api lint`, `node --test tests/public-number-sequencing.test.mjs tests/order-intake-google-form.test.mjs tests/order-intake-whatsapp-flow.test.mjs tests/customer-dedupe-and-intake.test.mjs tests/external-order-schedule-guard.test.mjs`, `pnpm qa:critical-e2e`, `node --test tests/order-intake-preview.test.mjs tests/order-intake-google-form.test.mjs tests/delivery-provider-hybrid-fallback.test.mjs tests/google-form-bridge-payload.test.mjs`, `pnpm validate:delivery-quote`
-- Validacao adicional: browser real em mobile para `/pedido` e `/pedidos`, com pedido publico concluido localmente ate `PIX_PENDING` e cleanup automatico dos dados `[TESTE_E2E]`; browser real adicional em desktop para `/pedido` e `/clientes`, confirmando sugestoes do Google Places, preenchimento do endereco e ausencia do warning legado no console.
-- Resultado: intake publico voltou a criar pedido com sucesso (`Pedido #454` local), o E2E critico concluiu a jornada com pedido `ENTREGUE/PAGO`, o mobile ficou sem elementos fixos intrusivos em `/pedido` e `/pedidos`, o autocomplete novo de endereco passou a preencher `placeId`/coordenadas sem warning de deprecacao, os cards de caixas ficaram estaveis em desktop (`1267x768` e `1024x768`) sem esmagar o selo `caixas`, o preview do intake externo passou sem criar pedido e a cotacao publica de producao respondeu `UBER_DIRECT/UBER_QUOTE` com taxa real.
+- Data: 2026-03-19
+- Ciclo executado: `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web lint`, `pnpm --filter @querobroapp/web build`, `pnpm --filter @querobroapp/web typecheck`, `node --test tests/delivery-pickup-origin.test.mjs tests/pix-settlement-webhook.test.mjs tests/pix-static-config-priority.test.mjs`, `git diff --check`
+- Validacao adicional: browser real em `next start` para `/pedidofinalizado`, confirmando remocao do bloco textual de dados oficiais, exibicao isolada do `PIX copia e cola` e retorno contextual para `/pedido`.
+- Resultado: o BR Code passou a priorizar o perfil oficial da QUEROBROA mesmo com `PIX_*` legado no runtime, o pos-pedido do fluxo publico e do dashboard passou a sair para uma rota final dedicada, e o card final deixou de ficar inline em `/pedido` ou como modal residual em `/pedidos`.
 
 ## Gaps abertos
 

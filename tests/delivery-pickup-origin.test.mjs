@@ -28,13 +28,15 @@ async function loadModules() {
       runCommand('pnpm', ['--filter', '@querobroapp/shared', 'build']);
       runCommand('pnpm', ['--filter', '@querobroapp/api', 'build']);
 
-      const [uberModule, loggiModule, pickupOriginModule] = await Promise.all([
+      const [uberModule, loggiModule, deliveriesModule, pickupOriginModule] = await Promise.all([
         import(pathToFileURL(path.join(API_DIST_DIR, 'uber-direct.provider.js')).href),
         import(pathToFileURL(path.join(API_DIST_DIR, 'loggi.provider.js')).href),
+        import(pathToFileURL(path.join(API_DIST_DIR, 'deliveries.service.js')).href),
         import(pathToFileURL(path.join(API_DIST_DIR, 'pickup-origin.js')).href)
       ]);
 
       return {
+        DeliveriesService: deliveriesModule.DeliveriesService,
         UberDirectProvider: uberModule.UberDirectProvider,
         LoggiProvider: loggiModule.LoggiProvider,
         FIXED_PICKUP_ORIGIN: pickupOriginModule.FIXED_PICKUP_ORIGIN
@@ -97,4 +99,33 @@ test('Loggi quote and shipment payloads always use Alameda Jau 731 as pickup ori
   assert.equal(lineAddress.state, FIXED_PICKUP_ORIGIN.state);
   assert.equal(lineAddress.country, FIXED_PICKUP_ORIGIN.country);
   assert.equal(lineAddress.postalCode, '01420004');
+});
+
+test('pickup origin phone never falls back to PIX key', async () => {
+  const { DeliveriesService } = await loadModules();
+  const previousEnv = {
+    DELIVERY_PICKUP_PHONE: process.env.DELIVERY_PICKUP_PHONE,
+    UBER_DIRECT_PICKUP_PHONE: process.env.UBER_DIRECT_PICKUP_PHONE,
+    LOGGI_PICKUP_PHONE: process.env.LOGGI_PICKUP_PHONE,
+    PIX_STATIC_KEY: process.env.PIX_STATIC_KEY
+  };
+
+  process.env.DELIVERY_PICKUP_PHONE = '';
+  process.env.UBER_DIRECT_PICKUP_PHONE = '';
+  process.env.LOGGI_PICKUP_PHONE = '';
+  process.env.PIX_STATIC_KEY = 'pix-chave@querobroa.com.br';
+
+  try {
+    const service = new DeliveriesService({});
+    const pickupOrigin = service.pickupOrigin();
+    assert.equal(pickupOrigin.phone, '');
+  } finally {
+    for (const [key, value] of Object.entries(previousEnv)) {
+      if (value == null) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
 });

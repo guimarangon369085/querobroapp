@@ -8,6 +8,33 @@ import { formatCurrencyBR } from '@/lib/format';
 type DashboardSummary = {
   asOf: string;
   rangeDays: number;
+  identity: {
+    brandName: string;
+    legalName: string;
+    cnpj: string;
+    cnpjDisplay: string;
+    officialPhoneDisplay: string;
+    pixKey: string;
+    pickupAddressDisplay: string;
+    bank: {
+      bankName: string;
+      bankCode: string;
+      branch: string;
+      accountNumber: string;
+      accountHolder: string;
+    };
+  };
+  integrations: {
+    readyCount: number;
+    pendingCount: number;
+    items: Array<{
+      id: string;
+      label: string;
+      status: 'READY' | 'PENDING';
+      detail: string;
+      nextStep: string;
+    }>;
+  };
   traffic: {
     windowLabel: string;
     totals: {
@@ -151,6 +178,11 @@ const BAR_TONE_CLASSES: Record<DashboardTone, string> = {
   ink: 'bg-[linear-gradient(90deg,#5e4c3d,#c89f77)]'
 };
 
+const INTEGRATION_STATUS_CLASSES: Record<'READY' | 'PENDING', string> = {
+  READY: 'border-emerald-200 bg-emerald-50/90 text-emerald-800',
+  PENDING: 'border-amber-200 bg-amber-50/92 text-amber-800'
+};
+
 function formatNumber(value: number) {
   return Number(value || 0).toLocaleString('pt-BR');
 }
@@ -255,6 +287,33 @@ function StoryPanel({
       </div>
       {children}
     </section>
+  );
+}
+
+function IntegrationRailCard({
+  label,
+  status,
+  detail,
+  nextStep
+}: {
+  label: string;
+  status: 'READY' | 'PENDING';
+  detail: string;
+  nextStep: string;
+}) {
+  return (
+    <div className="rounded-[24px] border border-white/80 bg-white/82 p-4 shadow-[0_10px_24px_rgba(57,39,24,0.06)]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <strong className="text-[color:var(--ink-strong)]">{label}</strong>
+        <span
+          className={`rounded-full border px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] ${INTEGRATION_STATUS_CLASSES[status]}`}
+        >
+          {status === 'READY' ? 'pronto' : 'pendente'}
+        </span>
+      </div>
+      <p className="mt-2 text-sm leading-6 text-neutral-700">{detail}</p>
+      <p className="mt-2 text-sm leading-6 text-neutral-500">Próximo passo: {nextStep}</p>
+    </div>
   );
 }
 
@@ -724,6 +783,72 @@ export default function DashboardScreen() {
 
       {summary ? (
         <>
+          <section className="grid gap-4 xl:grid-cols-[minmax(0,0.96fr)_minmax(0,1.04fr)]">
+            <StoryPanel
+              eyebrow="Trilho oficial"
+              title="Identidade bancária e canais canônicos"
+              description="Esses são os dados que a operação deve tratar como fonte de verdade para atendimento, PIX e conferência."
+              tone="ink"
+            >
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-[24px] border border-white/80 bg-white/82 p-4">
+                  <p className="text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-muted)]">
+                    Marca e CNPJ
+                  </p>
+                  <strong className="mt-2 block text-[1.15rem] text-[color:var(--ink-strong)]">{summary.identity.brandName}</strong>
+                  <p className="mt-2 text-sm leading-6 text-neutral-700">{summary.identity.legalName}</p>
+                  <p className="text-sm leading-6 text-neutral-600">CNPJ {summary.identity.cnpjDisplay}</p>
+                </div>
+                <div className="rounded-[24px] border border-white/80 bg-white/82 p-4">
+                  <p className="text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-muted)]">
+                    WhatsApp e PIX
+                  </p>
+                  <strong className="mt-2 block text-[1.15rem] text-[color:var(--ink-strong)]">
+                    {summary.identity.officialPhoneDisplay}
+                  </strong>
+                  <p className="mt-2 text-sm leading-6 text-neutral-700">PIX oficial {summary.identity.pixKey}</p>
+                </div>
+                <div className="rounded-[24px] border border-white/80 bg-white/82 p-4 sm:col-span-2">
+                  <p className="text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-[color:var(--ink-muted)]">
+                    Conta bancária oficial
+                  </p>
+                  <strong className="mt-2 block text-[1.05rem] text-[color:var(--ink-strong)]">
+                    {summary.identity.bank.bankName} · banco {summary.identity.bank.bankCode}
+                  </strong>
+                  <p className="mt-2 text-sm leading-6 text-neutral-700">
+                    Titular {summary.identity.bank.accountHolder} · agência {summary.identity.bank.branch} · conta{' '}
+                    {summary.identity.bank.accountNumber}
+                  </p>
+                  <p className="text-sm leading-6 text-neutral-500">{summary.identity.pickupAddressDisplay}</p>
+                </div>
+              </div>
+            </StoryPanel>
+
+            <StoryPanel
+              eyebrow="Integrações vivas"
+              title="O que já está armado para tempo real"
+              description="Aqui fica claro o que já pode conversar com a operação agora e o que ainda depende de credencial ou emissor externo."
+              tone="mint"
+              tag={
+                <span className="rounded-full border border-white/70 bg-white/82 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-strong)]">
+                  {summary.integrations.readyCount} pronto(s) · {summary.integrations.pendingCount} pendente(s)
+                </span>
+              }
+            >
+              <div className="grid gap-3">
+                {summary.integrations.items.map((item) => (
+                  <IntegrationRailCard
+                    key={item.id}
+                    label={item.label}
+                    status={item.status}
+                    detail={item.detail}
+                    nextStep={item.nextStep}
+                  />
+                ))}
+              </div>
+            </StoryPanel>
+          </section>
+
           <section className="grid gap-4 xl:grid-cols-[minmax(0,1.08fr)_minmax(320px,0.92fr)]">
             <div className="grid gap-4 sm:grid-cols-2">
               {trafficHighlights.map((card) => (

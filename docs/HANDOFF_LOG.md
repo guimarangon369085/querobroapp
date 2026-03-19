@@ -126,6 +126,110 @@ Objetivo da sessao:
 No fim, registrar nova entrada no HANDOFF_LOG.
 ```
 
+## Entrada 047
+
+### 1) Metadados
+
+- Data/hora: 2026-03-18 15:29 -03
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `deploy/querobroa-domain-live`
+- Commit base (opcional): `bb7a507`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Fechar os riscos ativos de deploy publico, bridge externo e validacao de frete no ambiente real.
+- Resultado entregue: Codigo publicado, deploy forcado no Railway para `web` e `api`, endpoints de preview expostos em producao e validacao publica completa verde no dominio final.
+- O que ficou pendente: Sem pendencia critica nesta frente; o lote de deploy ficou estabilizado.
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados:
+- `M apps/api/src/modules/orders/orders.controller.ts`
+- `M apps/api/src/modules/orders/orders.service.ts`
+- `A apps/web/src/app/api/customer-form/preview/route.ts`
+- `A apps/web/src/app/api/google-form/preview/route.ts`
+- `M apps/web/src/lib/api-base-url.ts`
+- `M apps/web/src/lib/server-bridge-api-base-url.ts`
+- `M docs/GOOGLE_FORMS_BRIDGE.md`
+- `M docs/NEXT_STEP_PLAN.md`
+- `M docs/PROJECT_SNAPSHOT.md`
+- `M docs/RAILWAY_DEPLOY.md`
+- `M package.json`
+- `M packages/shared/src/index.ts`
+- `M scripts/google-form-bridge.gs`
+- `M scripts/test-google-form-bridge.mjs`
+- `A scripts/validate-delivery-quote.mjs`
+- `A scripts/validate-public-deploy.mjs`
+- `A tests/order-intake-preview.test.mjs`
+- Comportamento novo:
+- o web passou a inferir `api.querobroa.com.br` em producao pelo host/protocolo da requisicao, reduzindo risco de fallback para `127.0.0.1`;
+- o intake externo agora tem preview seguro em `google-form` e `customer-form`, validando payload, frete e total sem criar pedido;
+- o projeto ganhou validadores operacionais reproduziveis para deploy publico e para cotacao real de frete.
+- Publicacao em producao:
+- push do commit `bb7a507` para `origin/deploy/querobroa-domain-live`;
+- deploy forcado no Railway para `passionate-nourishment` (`0442032a-a77b-47bc-a83a-21afcd86c6fe`) e `querobroapp` (`360e7cc7-ad70-4d14-bc94-cadf216e8b11`);
+- os dois services terminaram em `SUCCESS`.
+- Riscos/regressoes:
+- o payload de preview precisa usar `scheduledAt` dentro da janela aceita pela Uber Direct; payload fora de 30 dias responde erro de provider como esperado;
+- o `dev-all` local segue sujeito ao prompt interativo do Prisma quando houver drift no SQLite dev.
+
+### 4) Validacao
+
+- Comandos executados:
+- `pnpm --filter @querobroapp/shared build`
+- `pnpm --filter @querobroapp/api typecheck`
+- `pnpm --filter @querobroapp/web typecheck`
+- `pnpm --filter @querobroapp/api lint`
+- `pnpm --filter @querobroapp/web lint`
+- `node --test tests/order-intake-preview.test.mjs tests/order-intake-google-form.test.mjs tests/delivery-provider-hybrid-fallback.test.mjs tests/google-form-bridge-payload.test.mjs`
+- `pnpm --filter @querobroapp/web build`
+- `pnpm qa:critical-e2e`
+- `node scripts/validate-delivery-quote.mjs`
+- `node scripts/validate-public-deploy.mjs`
+- `git push origin deploy/querobroa-domain-live`
+- `npx --yes @railway/cli up -d -s passionate-nourishment -m "fix(deploy): harden public bridge and add intake preview validation"`
+- `npx --yes @railway/cli up -d -s querobroapp -m "fix(deploy): harden public bridge and add intake preview validation"`
+- Testes que passaram:
+- suite local do preview/intake/fallback;
+- `qa:critical-e2e`, concluindo pedido `#1392` como `ENTREGUE` e `PAGO`;
+- validacao publica completa no dominio:
+  `home/pedido/pedidos` `200`, `apiHealth=ok`, preview externo ativo em `/api/google-form/preview`, `deliveryProvider=UBER_DIRECT`, `deliverySource=UBER_QUOTE`, `total=55.5`, `fee=10.5`.
+- Testes nao executados (e motivo):
+- `./scripts/dev-all.sh` foi interrompido apos o Prisma pedir reset interativo do `dev.db`; nao foi forcado reset por seguranca.
+
+### 5) Contexto para retomada
+
+- Decisoes importantes:
+- manter `preview` do intake externo como checagem segura antes de formularios reais e antes de qualquer ajuste de canal publico;
+- usar `pnpm validate:public-deploy` como verificador de deploy final e `pnpm validate:delivery-quote` como checagem rapida de frete real;
+- publicar web e api explicitamente via Railway CLI quando o auto-deploy nao for suficiente ou quando for preciso reduzir latencia de rollout.
+- Suposicoes feitas: Railway conectado ao repo `guimarangon369085/querobroapp`, com `querobroapp` servindo `querobroa.com.br` e `passionate-nourishment` servindo `api.querobroa.com.br`.
+- Bloqueios: nenhum bloqueio ativo no deploy publico; apenas o drift local do SQLite para quem tentar rebootar via `dev-all` sem limpar/alinhavar migrations.
+- Proximo passo recomendado (1 acao objetiva): Voltar ao proximo ajuste funcional/UX do app agora que o lote de deploy publico esta validado ponta a ponta.
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/NEXT_STEP_PLAN.md
+- ultimas 80 linhas de docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+Contexto extra:
+- deploy publico ja validado em producao em 2026-03-18
+- `/api/google-form/preview` e `pnpm validate:public-deploy` estao ativos
+- frete publico validado em producao com `UBER_DIRECT / UBER_QUOTE`
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
 ## Entrada 039
 
 ### 1) Metadados

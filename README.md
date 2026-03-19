@@ -136,8 +136,9 @@ Nota importante:
 
 ## Integracoes externas
 
-- WhatsApp, Uber, Alexa, receipts e conectores de fornecedores foram removidos da estrutura atual.
-- Qualquer reintegracao futura deve recomecar do zero, so depois de a operacao principal estar 100% consolidada.
+- O backend atual ja sustenta intake externo canonico (`/orders/intake/customer-form`, `google-form` e `whatsapp-flow`), envio opcional pela WhatsApp Cloud API e alerta operacional por webhook/ntfy.
+- Agora tambem existe `POST /whatsapp/webhook` para inbound da Meta e `POST /payments/pix-settlements/webhook` como bridge canonica para baixa PIX em tempo real.
+- O trilho bancario foi preparado de forma provider-neutral: a conta oficial hoje e Nubank, mas a integracao de liquidacao entra pelo webhook do ERP para permitir automacao futura via Nubank/Open Finance/bridge externo sem trocar o contrato interno.
 
 ## Scripts principais
 

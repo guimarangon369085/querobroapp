@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export * from './lib/money.js';
 export * from './lib/external-order-schedule.js';
+export * from './lib/business-profile.js';
 
 type DisplayNumberSubject = {
   id?: number | null;
@@ -149,6 +150,22 @@ export const PaymentSchema = z.object({
   providerRef: z.string().optional().nullable(),
   pixCharge: PixChargeSchema.optional().nullable()
 });
+
+export const PixSettlementWebhookSchema = z
+  .object({
+    version: z.literal(1).default(1),
+    paymentId: z.number().int().positive().optional().nullable(),
+    orderId: z.number().int().positive().optional().nullable(),
+    txid: z.string().trim().min(1).max(80).optional().nullable(),
+    providerRef: z.string().trim().min(1).max(160).optional().nullable(),
+    amount: z.number().positive().optional().nullable(),
+    paidAt: z.string().datetime().optional().nullable(),
+    source: z.string().trim().min(1).max(80).default('webhook'),
+    metadata: z.record(z.unknown()).optional()
+  })
+  .refine((value) => Boolean(value.paymentId || value.providerRef || value.txid), {
+    message: 'Informe paymentId, providerRef ou txid.'
+  });
 
 export const OrderIntakeChannelEnum = z.enum([
   'INTERNAL_DASHBOARD',
@@ -678,6 +695,7 @@ export type Product = z.infer<typeof ProductSchema>;
 export type OrderItem = z.infer<typeof OrderItemSchema>;
 export type Order = z.infer<typeof OrderSchema>;
 export type Payment = z.infer<typeof PaymentSchema>;
+export type PixSettlementWebhook = z.infer<typeof PixSettlementWebhookSchema>;
 export type OrderIntakeCustomerRef = z.infer<typeof OrderIntakeCustomerRefSchema>;
 export type OrderIntakeItem = z.infer<typeof OrderIntakeItemSchema>;
 export type OrderIntakePayment = z.infer<typeof OrderIntakePaymentSchema>;

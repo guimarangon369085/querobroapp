@@ -358,7 +358,7 @@ export function ImmersiveHomeHero() {
         }}
       >
         <a
-          className="brand-wordmark brand-wordmark--micro inline-flex w-fit items-center rounded-full border border-white/14 bg-[rgba(26,15,8,0.34)] px-4 py-2 text-[0.72rem] text-[rgba(255,248,232,0.92)] backdrop-blur-md transition-[background,border-color,transform] duration-500 ease-out hover:border-white/24 hover:bg-[rgba(26,15,8,0.48)] hover:translate-y-[-1px]"
+          className="brand-wordmark brand-wordmark--micro inline-flex min-h-[2.55rem] w-fit items-center rounded-full border border-white/14 bg-[rgba(26,15,8,0.34)] px-6 py-0 text-[0.74rem] text-[rgba(255,248,232,0.92)] backdrop-blur-md transition-[background,border-color,transform] duration-500 ease-out hover:border-white/24 hover:bg-[rgba(26,15,8,0.48)] hover:translate-y-[-1px]"
           href="https://www.instagram.com/querobroa/"
           rel="noreferrer"
           target="_blank"

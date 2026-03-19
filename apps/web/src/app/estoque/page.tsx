@@ -11,6 +11,7 @@ import {
 } from 'react';
 import type {
   Bom,
+  BomItem as CatalogBomItem,
   InventoryMovement,
   InventoryMassSummary,
   InventoryOverviewItem,
@@ -22,7 +23,7 @@ import type {
 } from '@querobroapp/shared';
 import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
-import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
+import { clearQueryParams, consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
 import { formatDecimalInputBR, formatMoneyInputBR, parseLocaleNumber } from '@/lib/format';
 import { useSurfaceMode } from '@/hooks/use-surface-mode';
 import { useTutorialSpotlight } from '@/hooks/use-tutorial-spotlight';
@@ -68,6 +69,20 @@ type BomItemInput = {
   qtyPerRecipe?: string;
   qtyPerSaleUnit?: string;
   qtyPerUnit?: string;
+};
+
+type BomCatalogItem = CatalogBomItem & {
+  item?: InventoryOverviewItem | null;
+};
+
+type BomCatalogRecord = Omit<Bom, 'id'> & {
+  id: number;
+  product?: Product | null;
+  items?: BomCatalogItem[];
+};
+
+type BomCapacityItem = BomCatalogItem & {
+  perSaleQty: number;
 };
 
 type PurchaseCostRefreshItemResult = {
@@ -149,6 +164,10 @@ function normalizeLookupText(value?: string | null) {
     .toUpperCase();
 }
 
+function hasPerSaleQty(item: BomCapacityItem | null): item is BomCapacityItem {
+  return Boolean(item);
+}
+
 function parseSaleUnitCount(label?: string | null) {
   if (!label) return 1;
   const match = label.match(/(\d+)/);
@@ -216,13 +235,12 @@ function StockPageContent() {
   const bomCatalogDetailsRef = useRef<HTMLDetailsElement | null>(null);
   const inventoryItemsDetailsRef = useRef<HTMLDetailsElement | null>(null);
   const stockCardPendingActionIdsRef = useRef<Set<number>>(new Set());
-  const openedBomProductIdRef = useRef<number | null>(null);
 
   const [products, setProducts] = useState<Product[]>([]);
   const [items, setItems] = useState<InventoryOverviewItem[]>([]);
   const [massSummary, setMassSummary] = useState<InventoryMassSummary>(EMPTY_MASS_SUMMARY);
   const [movements, setMovements] = useState<InventoryMovement[]>([]);
-  const [boms, setBoms] = useState<Bom[]>([]);
+  const [boms, setBoms] = useState<BomCatalogRecord[]>([]);
   const [editingItemId, setEditingItemId] = useState<number | ''>('');
   const [packSize, setPackSize] = useState<string>('0');
   const [packCost, setPackCost] = useState<string>('0');
@@ -245,6 +263,7 @@ function StockPageContent() {
   const [d1Loading, setD1Loading] = useState(false);
   const [d1Error, setD1Error] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [hasLoadedTechnicalCatalog, setHasLoadedTechnicalCatalog] = useState(false);
   const [showInactiveTechnicalEntries, setShowInactiveTechnicalEntries] = useState(false);
   const [stockCardBalanceByItemId, setStockCardBalanceByItemId] = useState<Record<number, string>>({});
   const [stockCardErrorByItemId, setStockCardErrorByItemId] = useState<Record<number, string>>({});
@@ -284,11 +303,12 @@ function StockPageContent() {
       try {
         const [productsData, bomsData] = await Promise.all([
           fetchWithRetry<Product[]>('/inventory-products'),
-          fetchWithRetry<Array<Bom & { product?: Product | null }>>('/boms')
+          fetchWithRetry<BomCatalogRecord[]>('/boms')
         ]);
 
         setProducts([...productsData].sort(compareStockProducts));
         setBoms([...bomsData].sort(compareStockBoms));
+        setHasLoadedTechnicalCatalog(true);
         setLoadError(null);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Falha ao recarregar produtos/BOM.';
@@ -666,7 +686,7 @@ function StockPageContent() {
     }
   };
 
-  const startEditBom = useCallback((bom: any, shouldScroll = true) => {
+  const startEditBom = useCallback((bom: BomCatalogRecord, shouldScroll = true) => {
     if (technicalCatalogDetailsRef.current) technicalCatalogDetailsRef.current.open = true;
     if (bomCatalogDetailsRef.current) bomCatalogDetailsRef.current.open = true;
     setEditingBomId(bom.id);
@@ -674,7 +694,7 @@ function StockPageContent() {
     setBomName(bom.name || '');
     setBomSaleUnitLabel(bom.saleUnitLabel || '');
     setBomYieldUnits(String(bom.yieldUnits ?? ''));
-    const items = (bom.items || []).map((item: any) => ({
+    const items = (bom.items || []).map((item) => ({
       itemId: item.itemId,
       qtyPerRecipe: item.qtyPerRecipe == null ? '' : String(item.qtyPerRecipe),
       qtyPerSaleUnit: item.qtyPerSaleUnit == null ? '' : String(item.qtyPerSaleUnit),
@@ -742,17 +762,20 @@ function StockPageContent() {
     const raw = searchParams.get('bomProductId') || searchParams.get('productId');
     if (!raw) return;
     const parsed = Number(raw);
-    if (!Number.isFinite(parsed) || parsed <= 0) return;
-    if (openedBomProductIdRef.current === parsed) return;
-    openedBomProductIdRef.current = parsed;
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      clearQueryParams(['bomProductId', 'productId']);
+      return;
+    }
+    if (!hasLoadedTechnicalCatalog) return;
 
     try {
       startBomForProduct(parsed, true);
+      clearQueryParams(['bomProductId', 'productId']);
     } catch (error) {
-      openedBomProductIdRef.current = null;
+      clearQueryParams(['bomProductId', 'productId']);
       notifyError(error instanceof Error ? error.message : 'Nao foi possivel abrir a ficha tecnica.');
     }
-  }, [searchParams, startBomForProduct, notifyError]);
+  }, [hasLoadedTechnicalCatalog, notifyError, searchParams, startBomForProduct]);
 
   const addBomItem = () => {
     setBomItems((prev) => [...prev, { itemId: '', qtyPerRecipe: '', qtyPerSaleUnit: '', qtyPerUnit: '' }]);
@@ -1002,9 +1025,7 @@ function StockPageContent() {
 
   const activeBoms = useMemo(
     () =>
-      boms.filter((bom: any) =>
-        Boolean(bom.product?.active) || activeProductIds.has(bom.productId)
-      ),
+      boms.filter((bom) => Boolean(bom.product?.active) || activeProductIds.has(bom.productId)),
     [activeProductIds, boms]
   );
 
@@ -1015,7 +1036,7 @@ function StockPageContent() {
   const visibleBoms = showInactiveTechnicalEntries ? boms : activeBoms;
 
   const bomCosts = useMemo(() => {
-    return (visibleBoms as any[]).map((bom) => {
+    return visibleBoms.map((bom) => {
       let cost = 0;
       for (const item of bom.items || []) {
         const perSale = resolveBomItemQtyPerSale(bom, item);
@@ -1032,13 +1053,13 @@ function StockPageContent() {
   );
 
   const capacity = useMemo<StockCapacityEntry[]>(() => {
-    return visibleBoms.map((bom: any) => {
+    return visibleBoms.map((bom) => {
       const perSaleItems = (bom.items || [])
-        .map((item: any) => {
+        .map((item) => {
           const perSaleQty = resolveBomItemQtyPerSale(bom, item);
           return perSaleQty && perSaleQty > 0 ? { ...item, perSaleQty } : null;
         })
-        .filter(Boolean) as Array<any>;
+        .filter(hasPerSaleQty);
 
       let maxUnits = Infinity;
       let limitingItemName = '';
@@ -1488,7 +1509,12 @@ function StockPageContent() {
               capacity={capacity}
               bomCostByBomId={bomCostByBomId}
               selectedBomId={editingBomId}
-              onSelectBom={startEditBom}
+              onSelectBom={(selectedBom) => {
+                const matchingBom = visibleBoms.find((candidate) => candidate.id === selectedBom.id);
+                if (matchingBom) {
+                  startEditBom(matchingBom);
+                }
+              }}
             />
           </BuilderLayoutItemSlot>
 
@@ -1837,7 +1863,7 @@ function StockPageContent() {
                     </div>
 
                     <div className="grid gap-3">
-                      {visibleBoms.map((bom: any) => {
+                      {visibleBoms.map((bom) => {
                         const isExpanded = editingBomId === bom.id;
                         return (
                           <div
@@ -1885,7 +1911,7 @@ function StockPageContent() {
                                   {(bom.items || []).length === 0 ? (
                                     <p>Nenhum item nessa ficha.</p>
                                   ) : (
-                                    (bom.items || []).map((item: any) => (
+                                    (bom.items || []).map((item) => (
                                       <div
                                         key={item.id}
                                         className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/60 bg-white/70 px-3 py-2"

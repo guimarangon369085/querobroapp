@@ -19,7 +19,7 @@ import {
   normalizePhone,
   titleCase
 } from '@/lib/format';
-import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
+import { clearQueryParams, consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
 import { useSurfaceMode } from '@/hooks/use-surface-mode';
 import { useTutorialSpotlight } from '@/hooks/use-tutorial-spotlight';
 import { AppIcon } from '@/components/app-icons';
@@ -223,8 +223,8 @@ function CustomersPageContent() {
   const addressInputRef = useRef<HTMLInputElement | null>(null);
   const modalAddressInputRef = useRef<HTMLInputElement | null>(null);
   const customerDialogRef = useRef<HTMLDivElement | null>(null);
-  const openedCustomerIdRef = useRef<number | null>(null);
   const customerAutofillRef = useRef(createCustomerAutofillState());
+  const openCustomerModalRef = useRef<((customer: CustomerRecord) => Promise<void>) | null>(null);
   const postalCodeLookupAbortRef = useRef<AbortController | null>(null);
   const customerDialogTitleId = useId();
   const { confirm, notifyError, notifySuccess, notifyUndo } = useFeedback();
@@ -655,6 +655,7 @@ function CustomersPageContent() {
       startRepeatOrder(targetOrder);
     }
   };
+  openCustomerModalRef.current = (customer) => openCustomerModal(customer);
 
   const closeCustomerModal = () => {
     cancelEdit();
@@ -766,15 +767,12 @@ function CustomersPageContent() {
     if (!raw) return;
     const parsed = Number(raw);
     if (!Number.isFinite(parsed) || parsed <= 0) return;
-    if (openedCustomerIdRef.current === parsed) return;
 
     const customer = customers.find((entry) => entry.id === parsed);
     if (!customer) return;
-    openedCustomerIdRef.current = parsed;
-    void openCustomerModal(customer);
-    // `startEdit` changes identity on each render, but this effect should react only to the query param/list.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, customers]);
+    clearQueryParams(['editCustomerId']);
+    void openCustomerModalRef.current?.(customer);
+  }, [customers, searchParams]);
 
   const remove = async (id: number) => {
     const customerToRestore = customers.find((entry) => entry.id === id);

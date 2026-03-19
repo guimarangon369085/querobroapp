@@ -23,8 +23,9 @@ import {
   type PixCharge,
   type Product
 } from '@querobroapp/shared';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { writeStoredOrderFinalized } from '@/lib/order-finalized-storage';
 import { useDialogA11y } from '@/lib/use-dialog-a11y';
 import {
   compactWhitespace,
@@ -1132,6 +1133,7 @@ function buildInventoryBalanceCards(
 }
 
 function OrdersPageContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { tutorialMode, isSpotlightSlot } = useTutorialSpotlight(searchParams, TUTORIAL_QUERY_VALUE);
   const [orders, setOrders] = useState<OrderView[]>([]);
@@ -1763,6 +1765,9 @@ function OrdersPageContent() {
       };
       const created = await submitOrderIntake(payload);
       const createdOrder = created.order;
+      if (typeof createdOrder.id !== 'number') {
+        throw new Error('Pedido criado sem identificador valido.');
+      }
       setNewOrderCustomerId('');
       setNewOrderFulfillmentMode('DELIVERY');
       setCustomerSearch('');
@@ -1773,22 +1778,28 @@ function OrdersPageContent() {
       setRestoredLastOrderDraft(null);
       setNewOrderDeliveryQuote(null);
       setNewOrderDeliveryQuoteError(null);
-      const refreshedOrders = await loadAll();
-      const freshCreated = refreshedOrders.find((entry) => entry.id === createdOrder.id);
-      presentSuccess(
-        created.intake.stage !== 'PIX_PENDING'
-          ? 'Pedido criado.'
-          : created.intake.pixCharge?.payable
-            ? 'Pedido criado com PIX pronto.'
-            : 'Pedido criado com PIX de desenvolvimento.',
-        `Pedido #${displayOrderNumber(createdOrder)}`
-      );
       setIsNewOrderModalOpen(false);
-      if (freshCreated) {
-        openOrderDetail(freshCreated);
-      } else {
-        scrollToLayoutSlot('list');
-      }
+      writeStoredOrderFinalized({
+        version: 1,
+        origin: 'INTERNAL_DASHBOARD',
+        savedAt: new Date().toISOString(),
+        returnPath: '/pedidos',
+        returnLabel: 'Voltar para pedidos',
+        productSubtotal: Math.max(roundMoney((createdOrder.total || 0) - (created.intake.deliveryFee || 0)), 0),
+        order: {
+          id: createdOrder.id,
+          publicNumber: createdOrder.publicNumber ?? null,
+          total: createdOrder.total ?? null,
+          scheduledAt: createdOrder.scheduledAt ?? null
+        },
+        intake: {
+          stage: created.intake.stage,
+          deliveryFee: created.intake.deliveryFee,
+          pixCharge: created.intake.pixCharge
+        }
+      });
+      await loadAll();
+      router.push('/pedidofinalizado');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Nao foi possivel criar.';
       setOrderError(message);
