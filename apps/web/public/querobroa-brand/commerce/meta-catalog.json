@@ -7,7 +7,7 @@
     "condition": "new",
     "price": "40.00 BRL",
     "link": "https://querobroa.com.br/pedido?catalog=T",
-    "image_link": "https://querobroa.com.br/querobroa-brand/cardapio/tradicional.jpg",
+    "image_link": "https://querobroa.com.br/querobroa-brand/cardapio/tradicional.jpg?v=fce0ace",
     "brand": "QUEROBROA"
   },
   {
@@ -18,7 +18,7 @@
     "condition": "new",
     "price": "50.00 BRL",
     "link": "https://querobroa.com.br/pedido?catalog=G",
-    "image_link": "https://querobroa.com.br/querobroa-brand/cardapio/goiabada.jpg",
+    "image_link": "https://querobroa.com.br/querobroa-brand/cardapio/goiabada.jpg?v=fce0ace",
     "brand": "QUEROBROA"
   },
   {
@@ -29,7 +29,7 @@
     "condition": "new",
     "price": "52.00 BRL",
     "link": "https://querobroa.com.br/pedido?catalog=D",
-    "image_link": "https://querobroa.com.br/querobroa-brand/cardapio/doce-de-leite.jpg",
+    "image_link": "https://querobroa.com.br/querobroa-brand/cardapio/doce-de-leite.jpg?v=fce0ace",
     "brand": "QUEROBROA"
   },
   {
@@ -40,7 +40,7 @@
     "condition": "new",
     "price": "52.00 BRL",
     "link": "https://querobroa.com.br/pedido?catalog=Q",
-    "image_link": "https://querobroa.com.br/querobroa-brand/cardapio/queijo-do-serro-camadas.jpg",
+    "image_link": "https://querobroa.com.br/querobroa-brand/cardapio/queijo-do-serro-camadas.jpg?v=fce0ace",
     "brand": "QUEROBROA"
   },
   {
@@ -51,7 +51,7 @@
     "condition": "new",
     "price": "52.00 BRL",
     "link": "https://querobroa.com.br/pedido?catalog=R",
-    "image_link": "https://querobroa.com.br/querobroa-brand/cardapio/requeijao-de-corte.jpg",
+    "image_link": "https://querobroa.com.br/querobroa-brand/cardapio/requeijao-de-corte.jpg?v=fce0ace",
     "brand": "QUEROBROA"
   },
   {
@@ -62,7 +62,7 @@
     "condition": "new",
     "price": "45.00 BRL",
     "link": "https://querobroa.com.br/pedido?catalog=MG",
-    "image_link": "https://querobroa.com.br/querobroa-brand/cardapio/mista-goiabada.jpg",
+    "image_link": "https://querobroa.com.br/querobroa-brand/cardapio/mista-goiabada.jpg?v=fce0ace",
     "brand": "QUEROBROA"
   },
   {
@@ -73,7 +73,7 @@
     "condition": "new",
     "price": "47.00 BRL",
     "link": "https://querobroa.com.br/pedido?catalog=MD",
-    "image_link": "https://querobroa.com.br/querobroa-brand/cardapio/mista-doce-de-leite.jpg",
+    "image_link": "https://querobroa.com.br/querobroa-brand/cardapio/mista-doce-de-leite.jpg?v=fce0ace",
     "brand": "QUEROBROA"
   },
   {
@@ -84,7 +84,7 @@
     "condition": "new",
     "price": "47.00 BRL",
     "link": "https://querobroa.com.br/pedido?catalog=MQ",
-    "image_link": "https://querobroa.com.br/querobroa-brand/cardapio/mista-queijo-do-serro.jpg",
+    "image_link": "https://querobroa.com.br/querobroa-brand/cardapio/mista-queijo-do-serro.jpg?v=fce0ace",
     "brand": "QUEROBROA"
   },
   {
@@ -95,7 +95,7 @@
     "condition": "new",
     "price": "47.00 BRL",
     "link": "https://querobroa.com.br/pedido?catalog=MR",
-    "image_link": "https://querobroa.com.br/querobroa-brand/cardapio/mista-requeijao-de-corte.jpg",
+    "image_link": "https://querobroa.com.br/querobroa-brand/cardapio/mista-requeijao-de-corte.jpg?v=fce0ace",
     "brand": "QUEROBROA"
   }
 ]
