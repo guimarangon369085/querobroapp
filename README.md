@@ -155,6 +155,7 @@ pnpm qa:browser-smoke
 pnpm qa:critical-e2e
 pnpm bank:pix:bridge:once
 pnpm bank:pix:bridge
+pnpm bank:pix:bridge:install
 ```
 
 ## Fontes de verdade
