@@ -70,6 +70,12 @@ type BomItemInput = {
   qtyPerUnit?: string;
 };
 
+type BomQuantityCarrier = {
+  qtyPerRecipe?: string | number | null;
+  qtyPerSaleUnit?: string | number | null;
+  qtyPerUnit?: string | number | null;
+};
+
 type BomCatalogItem = CatalogBomItem & {
   item?: InventoryOverviewItem | null;
 };
@@ -191,6 +197,23 @@ function compareStockBoms(
   return leftName.localeCompare(rightName, 'pt-BR');
 }
 
+function hasBomQuantityValue(value: string | number | null | undefined) {
+  if (value == null) return false;
+  return String(value).trim() !== '';
+}
+
+function getPrimaryBomQuantityField(item: BomQuantityCarrier) {
+  if (hasBomQuantityValue(item.qtyPerSaleUnit)) return 'qtyPerSaleUnit' as const;
+  if (hasBomQuantityValue(item.qtyPerUnit)) return 'qtyPerUnit' as const;
+  if (hasBomQuantityValue(item.qtyPerRecipe)) return 'qtyPerRecipe' as const;
+  return 'qtyPerSaleUnit' as const;
+}
+
+function getPrimaryBomQuantityValue(item: BomQuantityCarrier) {
+  const field = getPrimaryBomQuantityField(item);
+  return item[field] ?? '';
+}
+
 function StockPageContent() {
   const searchParams = useSearchParams();
   const { isSpotlightSlot } = useTutorialSpotlight(searchParams, TUTORIAL_QUERY_VALUE);
@@ -210,12 +233,14 @@ function StockPageContent() {
   const [packSize, setPackSize] = useState<string>('0');
   const [packCost, setPackCost] = useState<string>('0');
   const [editingProductId, setEditingProductId] = useState<number | null>(null);
+  const [showProductEditor, setShowProductEditor] = useState(false);
   const [productForm, setProductForm] = useState<Pick<Product, 'name' | 'category' | 'unit' | 'active'>>(
     EMPTY_PRODUCT_FORM
   );
   const [productPriceInput, setProductPriceInput] = useState<string>('0,00');
 
   const [editingBomId, setEditingBomId] = useState<number | null>(null);
+  const [showBomEditor, setShowBomEditor] = useState(false);
   const [bomProductId, setBomProductId] = useState<number | ''>('');
   const [bomName, setBomName] = useState<string>('');
   const [bomSaleUnitLabel, setBomSaleUnitLabel] = useState<string>('Caixa com 7 broas');
@@ -530,6 +555,7 @@ function StockPageContent() {
 
   const resetProductForm = useCallback(() => {
     setEditingProductId(null);
+    setShowProductEditor(false);
     setProductForm(EMPTY_PRODUCT_FORM);
     setProductPriceInput('0,00');
   }, []);
@@ -537,6 +563,7 @@ function StockPageContent() {
   const startEditProduct = useCallback((product: Product) => {
     if (technicalCatalogDetailsRef.current) technicalCatalogDetailsRef.current.open = true;
     if (productCatalogDetailsRef.current) productCatalogDetailsRef.current.open = true;
+    setShowProductEditor(true);
     setEditingProductId(product.id ?? null);
     setProductForm({
       name: product.name,
@@ -547,6 +574,16 @@ function StockPageContent() {
     setProductPriceInput(formatMoneyInputBR(product.price ?? 0) || '0,00');
     scrollToLayoutSlot('bom', { focus: true, focusSelector: 'input, select, textarea, button' });
     bomSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
+
+  const resetBomEditor = useCallback(() => {
+    setEditingBomId(null);
+    setShowBomEditor(false);
+    setBomProductId('');
+    setBomName('');
+    setBomSaleUnitLabel('Caixa com 7 broas');
+    setBomYieldUnits('');
+    setBomItems([]);
   }, []);
 
   const saveProduct = async (event?: FormEvent) => {
@@ -643,6 +680,7 @@ function StockPageContent() {
   const startEditBom = useCallback((bom: BomCatalogRecord, shouldScroll = true) => {
     if (technicalCatalogDetailsRef.current) technicalCatalogDetailsRef.current.open = true;
     if (bomCatalogDetailsRef.current) bomCatalogDetailsRef.current.open = true;
+    setShowBomEditor(true);
     setEditingBomId(bom.id);
     setBomProductId(bom.productId);
     setBomName(bom.name || '');
@@ -675,6 +713,7 @@ function StockPageContent() {
 
     if (technicalCatalogDetailsRef.current) technicalCatalogDetailsRef.current.open = true;
     if (bomCatalogDetailsRef.current) bomCatalogDetailsRef.current.open = true;
+    setShowBomEditor(true);
     setEditingBomId(null);
     setBomProductId(product.id ?? '');
     setBomName(product.name || '');
@@ -692,11 +731,17 @@ function StockPageContent() {
       technicalCatalogDetailsRef.current.open = true;
     }
 
-    if (section === 'product' && productCatalogDetailsRef.current) {
-      productCatalogDetailsRef.current.open = true;
+    if (section === 'product') {
+      setShowProductEditor(true);
+      if (productCatalogDetailsRef.current) {
+        productCatalogDetailsRef.current.open = true;
+      }
     }
-    if (section === 'bom' && bomCatalogDetailsRef.current) {
-      bomCatalogDetailsRef.current.open = true;
+    if (section === 'bom') {
+      setShowBomEditor(true);
+      if (bomCatalogDetailsRef.current) {
+        bomCatalogDetailsRef.current.open = true;
+      }
     }
     if (section === 'items' && inventoryItemsDetailsRef.current) {
       inventoryItemsDetailsRef.current.open = true;
@@ -761,7 +806,12 @@ function StockPageContent() {
       return;
     }
 
-    if (!bomName.trim()) {
+    const inferredBomName =
+      bomName.trim() ||
+      products.find((entry) => entry.id === Number(bomProductId))?.name?.trim() ||
+      '';
+
+    if (!inferredBomName) {
       notifyError('Informe o nome da ficha tecnica.');
       scrollToLayoutSlot('bom', { focus: true, focusSelector: 'input, select, button' });
       return;
@@ -793,7 +843,7 @@ function StockPageContent() {
 
     const payload = {
       productId: Number(bomProductId),
-      name: bomName,
+      name: inferredBomName,
       saleUnitLabel: bomSaleUnitLabel || null,
       yieldUnits: parsedYieldUnits,
       items: parsedItems
@@ -805,10 +855,7 @@ function StockPageContent() {
       } else {
         await apiFetch('/boms', { method: 'POST', body: JSON.stringify(payload) });
       }
-      setEditingBomId(null);
-      setBomProductId('');
-      setBomName('');
-      setBomItems([]);
+      resetBomEditor();
       await load();
       notifySuccess(editingBomId ? 'Ficha tecnica atualizada com sucesso.' : 'Ficha tecnica criada com sucesso.');
       scrollToLayoutSlot('bom');
@@ -828,6 +875,9 @@ function StockPageContent() {
     if (!accepted) return;
     try {
       await apiFetch(`/boms/${id}`, { method: 'DELETE' });
+      if (editingBomId === id) {
+        resetBomEditor();
+      }
       await load();
       notifySuccess('Ficha tecnica removida com sucesso.');
     } catch (err) {
@@ -835,7 +885,13 @@ function StockPageContent() {
     }
   };
 
-  const canSaveBom = Boolean(bomProductId) && bomName.trim().length > 0;
+  const canSaveBom = Boolean(
+    bomProductId &&
+      (
+        bomName.trim().length > 0 ||
+        products.find((entry) => entry.id === Number(bomProductId))?.name?.trim()
+      )
+  );
 
   const saveStockCardBalance = useCallback(
     async (item: InventoryOverviewItem) => {
@@ -977,6 +1033,23 @@ function StockPageContent() {
     ? products.filter((product) => isTechnicalCatalogProduct(product))
     : activeProducts;
   const visibleBoms = showInactiveTechnicalEntries ? boms : activeBoms;
+  const bomByProductId = useMemo(() => {
+    const map = new Map<number, BomCatalogRecord>();
+    for (const bom of visibleBoms) {
+      if (!map.has(bom.productId)) {
+        map.set(bom.productId, bom);
+      }
+    }
+    return map;
+  }, [visibleBoms]);
+  const visibleTechnicalCatalogEntries = useMemo(
+    () =>
+      visibleProducts.map((product) => ({
+        product,
+        bom: product.id ? bomByProductId.get(product.id) || null : null
+      })),
+    [bomByProductId, visibleProducts]
+  );
 
   const d1Shortages = useMemo(() => d1Rows.filter((row) => row.shortageQty > 0), [d1Rows]);
 
@@ -1179,22 +1252,6 @@ function StockPageContent() {
 
           <BuilderLayoutItemSlot id="movements">
             <div className="app-panel grid gap-4">
-              <div className="grid gap-1">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
-                  5. Auditoria
-                </p>
-                <p className="text-sm text-neutral-600">Audite e limpe aqui. Fora da rotina.</p>
-              </div>
-
-              <div className="flex flex-wrap gap-2 text-xs">
-                <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
-                  {movements.length} movimentacao(oes) registradas
-                </span>
-                <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
-                  {recentMovements.length} registro(s) mais recente(s) no resumo
-                </span>
-              </div>
-
               <details className="app-details" open={!isOperationMode}>
                 <summary>Historico de movimentacoes</summary>
                 <div className="mt-3 grid gap-3">
@@ -1244,27 +1301,147 @@ function StockPageContent() {
             <details ref={technicalCatalogDetailsRef} className="app-details" open={!isOperationMode}>
               <summary>6. Catalogo tecnico</summary>
               <div className="app-panel mt-3 grid gap-4">
-                <div ref={bomSectionRef} className="grid gap-1">
+                <div
+                  ref={bomSectionRef}
+                  className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-white/70 bg-white/75 px-4 py-4"
+                >
                   <div className="grid gap-1">
-                    <h3 className="text-lg font-semibold">Cadastro raro</h3>
-                    <p className="text-sm text-neutral-600">Produtos, fichas e custos ficam aqui.</p>
+                    <h3 className="text-lg font-semibold text-neutral-900">Produtos e ficha basica</h3>
+                    <p className="text-sm text-neutral-600">
+                      Expanda um produto para ver somente os insumos e a quantidade da ficha tecnica.
+                    </p>
+                    <p className="text-sm text-neutral-500">
+                      {visibleProducts.length} produto(s) visivel(is)
+                      {!showInactiveTechnicalEntries && inactiveProducts.length > 0
+                        ? ` • ${inactiveProducts.length} inativo(s) oculto(s)`
+                        : ''}
+                      {!showInactiveTechnicalEntries && inactiveBomsCount > 0
+                        ? ` • ${inactiveBomsCount} ficha(s) oculta(s)`
+                        : ''}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="app-button app-button-primary"
+                      onClick={() => {
+                        resetProductForm();
+                        setShowProductEditor(true);
+                        if (technicalCatalogDetailsRef.current) technicalCatalogDetailsRef.current.open = true;
+                        scrollToLayoutSlot('bom', {
+                          focus: true,
+                          focusSelector: 'summary, button, input, select, textarea'
+                        });
+                        bomSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }}
+                    >
+                      Novo produto
+                    </button>
+                    {inactiveProducts.length > 0 ? (
+                      <button
+                        type="button"
+                        className="app-button app-button-ghost"
+                        onClick={() => setShowInactiveTechnicalEntries((current) => !current)}
+                      >
+                        {showInactiveTechnicalEntries
+                          ? 'Ocultar inativos'
+                          : `Mostrar inativos (${inactiveProducts.length})`}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
 
-                <details
-                  ref={productCatalogDetailsRef}
-                  className="app-details"
-                  open={!isOperationMode || Boolean(editingProductId)}
-                >
-                  <summary>Produtos ativos e status</summary>
-                  <div className="mt-3 grid gap-4 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
-                    <form
-                      className="grid gap-3 rounded-2xl border border-white/70 bg-white/75 p-4"
-                      onSubmit={saveProduct}
-                    >
-                      <p className="text-sm text-neutral-600">
-                        Use apenas quando nome, preco ou status do produto mudar.
-                      </p>
+                <div className="grid gap-3">
+                  {visibleTechnicalCatalogEntries.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-white/70 bg-white/65 px-4 py-6 text-sm text-neutral-500">
+                      {products.length === 0
+                        ? 'Nenhum produto cadastrado no catalogo.'
+                        : inactiveProducts.length > 0 && !showInactiveTechnicalEntries
+                          ? `Nenhum produto ativo visivel agora. ${inactiveProducts.length} inativo(s) oculto(s).`
+                          : 'Nenhum produto ativo visivel no catalogo.'}
+                    </div>
+                  ) : (
+                    visibleTechnicalCatalogEntries.map(({ product, bom }) => (
+                      <details key={product.id} className="app-details">
+                        <summary>{product.name}</summary>
+                        <div className="mt-3 grid gap-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex flex-wrap gap-2 text-xs">
+                              <span
+                                className={`rounded-full px-2 py-1 font-semibold uppercase tracking-[0.14em] ${
+                                  product.active
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-neutral-200 text-neutral-700'
+                                }`}
+                              >
+                                {product.active ? 'Ativo' : 'Inativo'}
+                              </span>
+                              <span className="rounded-full border border-white/80 bg-white/70 px-2 py-1 text-neutral-700">
+                                {bom?.items?.length || 0} item(ns)
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                className="app-button app-button-ghost"
+                                onClick={() => startEditProduct(product)}
+                              >
+                                Editar produto
+                              </button>
+                              <button
+                                type="button"
+                                className="app-button app-button-ghost"
+                                onClick={() => {
+                                  if (!product.id) return;
+                                  void startBomForProduct(product.id);
+                                }}
+                              >
+                                {bom ? 'Editar ficha' : 'Criar ficha'}
+                              </button>
+                              <button
+                                type="button"
+                                className="app-button app-button-danger"
+                                onClick={() => {
+                                  if (!product.id) return;
+                                  void removeProduct(product.id);
+                                }}
+                              >
+                                Remover
+                              </button>
+                            </div>
+                          </div>
+
+                          {!bom || (bom.items || []).length === 0 ? (
+                            <div className="rounded-2xl border border-dashed border-white/70 bg-white/65 px-4 py-5 text-sm text-neutral-500">
+                              Nenhuma ficha tecnica cadastrada para este produto.
+                            </div>
+                          ) : (
+                            <div className="grid gap-2">
+                              {(bom.items || []).map((item) => (
+                                <div
+                                  key={item.id}
+                                  className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/70 bg-white/70 px-4 py-3"
+                                >
+                                  <p className="font-medium text-neutral-800">
+                                    {item.item?.name || `Item ${item.itemId}`}
+                                  </p>
+                                  <p className="text-sm font-semibold text-neutral-700">
+                                    {getPrimaryBomQuantityValue(item) || '-'} {item.item?.unit || ''}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </details>
+                    ))
+                  )}
+                </div>
+
+                {showProductEditor || !isOperationMode ? (
+                  <details ref={productCatalogDetailsRef} className="app-details" open>
+                    <summary>{editingProductId ? 'Editar produto' : 'Novo produto'}</summary>
+                    <form className="mt-3 grid gap-3 rounded-2xl border border-white/70 bg-white/75 p-4" onSubmit={saveProduct}>
                       <input
                         className="app-input"
                         placeholder="Nome do produto"
@@ -1281,144 +1458,49 @@ function StockPageContent() {
                         onChange={(event) => setProductPriceInput(event.target.value)}
                         onBlur={() => setProductPriceInput(formatMoneyInputBR(productPriceInput) || '0,00')}
                       />
-                      <details className="app-details">
-                        <summary>Mais detalhes do produto</summary>
-                        <div className="mt-3 grid gap-3 md:grid-cols-2">
-                          <input
-                            className="app-input"
-                            placeholder="Categoria"
-                            value={productForm.category ?? ''}
-                            onChange={(event) =>
-                              setProductForm((current) => ({ ...current, category: event.target.value }))
-                            }
-                          />
-                          <input
-                            className="app-input"
-                            placeholder="Unidade"
-                            value={productForm.unit ?? ''}
-                            onChange={(event) =>
-                              setProductForm((current) => ({ ...current, unit: event.target.value }))
-                            }
-                          />
-                          <label className="flex items-center gap-2 text-sm text-neutral-700 md:col-span-2">
-                            <input
-                              type="checkbox"
-                              checked={Boolean(productForm.active)}
-                              onChange={(event) =>
-                                setProductForm((current) => ({ ...current, active: event.target.checked }))
-                              }
-                            />
-                            Produto ativo
-                          </label>
-                        </div>
-                      </details>
+                      <label className="flex items-center gap-2 text-sm text-neutral-700">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(productForm.active)}
+                          onChange={(event) =>
+                            setProductForm((current) => ({ ...current, active: event.target.checked }))
+                          }
+                        />
+                        Produto ativo
+                      </label>
                       <div className="app-form-actions">
-                        {editingProductId ? (
-                          <button
-                            type="button"
-                            className="app-button app-button-ghost"
-                            onClick={resetProductForm}
-                          >
-                            Cancelar
-                          </button>
-                        ) : null}
+                        <button type="button" className="app-button app-button-ghost" onClick={resetProductForm}>
+                          Cancelar
+                        </button>
                         <button type="submit" className="app-button app-button-primary">
                           {editingProductId ? 'Atualizar produto' : 'Criar produto'}
                         </button>
                       </div>
                     </form>
+                  </details>
+                ) : null}
 
-                    <div className="grid gap-3">
-                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/70 bg-white/60 px-4 py-3 text-sm">
-                        <div className="text-neutral-600">
-                          Mostrando {visibleProducts.length} produto(s)
-                          {!showInactiveTechnicalEntries && inactiveProducts.length > 0
-                            ? ` • ${inactiveProducts.length} inativo(s) oculto(s)`
-                            : ''}
-                        </div>
-                        {inactiveProducts.length > 0 ? (
-                          <button
-                            type="button"
-                            className="app-button app-button-ghost"
-                            onClick={() => setShowInactiveTechnicalEntries((current) => !current)}
-                          >
-                            {showInactiveTechnicalEntries
-                              ? 'Ocultar inativos'
-                              : `Mostrar inativos (${inactiveProducts.length})`}
-                          </button>
-                        ) : null}
-                      </div>
-
-                      {visibleProducts.length === 0 ? (
-                        <div className="rounded-2xl border border-dashed border-white/70 bg-white/65 px-4 py-6 text-sm text-neutral-500">
-                          {products.length === 0
-                            ? 'Nenhum produto cadastrado no catalogo.'
-                            : 'Nenhum produto ativo visivel no catalogo.'}
-                        </div>
-                      ) : (
-                        visibleProducts.map((product) => (
-                          <div
-                            key={product.id}
-                            className="rounded-2xl border border-white/70 bg-white/75 px-4 py-3"
-                          >
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <p className="truncate font-semibold text-neutral-900">{product.name}</p>
-                                  <span
-                                    className={`rounded-full px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${
-                                      product.active
-                                        ? 'bg-emerald-100 text-emerald-800'
-                                        : 'bg-neutral-200 text-neutral-700'
-                                    }`}
-                                  >
-                                    {product.active ? 'Ativo' : 'Inativo'}
-                                  </span>
-                                </div>
-                                <p className="mt-1 text-sm text-neutral-500">
-                                  {(product.category || 'Sem categoria')} • {(product.unit || 'unidade')} •{' '}
-                                  {formatCurrencyBR(product.price || 0)}
-                                </p>
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  className="app-button app-button-ghost"
-                                  onClick={() => startEditProduct(product)}
-                                >
-                                  Editar
-                                </button>
-                                <button
-                                  type="button"
-                                  className="app-button app-button-danger"
-                                  onClick={() => {
-                                    if (!product.id) return;
-                                    void removeProduct(product.id);
-                                  }}
-                                >
-                                  Remover
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </details>
-
-                <details
-                  ref={bomCatalogDetailsRef}
-                  className="app-details"
-                  open={!isOperationMode || Boolean(editingBomId)}
-                >
-                  <summary>Fichas tecnicas por produto</summary>
-                  <div className="mt-3 grid gap-4">
-                    <div className="grid gap-3 md:grid-cols-2">
+                {showBomEditor || !isOperationMode ? (
+                  <details ref={bomCatalogDetailsRef} className="app-details" open>
+                    <summary>{editingBomId ? 'Editar ficha tecnica' : 'Nova ficha tecnica'}</summary>
+                    <div className="mt-3 grid gap-4 rounded-2xl border border-white/70 bg-white/75 p-4">
                       <select
                         className="app-select"
                         value={bomProductId}
-                        onChange={(e) => setBomProductId(e.target.value ? Number(e.target.value) : '')}
+                        onChange={(event) => {
+                          const nextProductId = event.target.value ? Number(event.target.value) : '';
+                          setBomProductId(nextProductId);
+                          if (!nextProductId) {
+                            setBomName('');
+                            setBomYieldUnits('');
+                            return;
+                          }
+                          const selectedProduct = products.find((entry) => entry.id === nextProductId);
+                          setBomName(selectedProduct?.name || '');
+                          if (!editingBomId) {
+                            setBomYieldUnits('');
+                          }
+                        }}
                       >
                         <option value="">Produto</option>
                         {visibleProducts.map((product) => (
@@ -1427,190 +1509,96 @@ function StockPageContent() {
                           </option>
                         ))}
                       </select>
-                      <input
-                        className="app-input"
-                        placeholder="Nome da ficha tecnica"
-                        value={bomName}
-                        onChange={(e) => setBomName(e.target.value)}
-                      />
-                    </div>
 
-                    <details className="app-details">
-                      <summary>Mais detalhes da ficha</summary>
-                      <div className="mt-3 grid gap-3 md:grid-cols-2">
-                        <input
-                          className="app-input"
-                          placeholder="Unidade de venda (ex: Caixa com 7)"
-                          value={bomSaleUnitLabel}
-                          onChange={(e) => setBomSaleUnitLabel(e.target.value)}
-                        />
-                        <input
-                          className="app-input"
-                          placeholder="Rendimento (broas por receita)"
-                          value={bomYieldUnits}
-                          onChange={(e) => setBomYieldUnits(e.target.value)}
-                        />
+                      <div className="grid gap-3">
+                        {bomItems.map((item, index) => {
+                          const quantityField = getPrimaryBomQuantityField(item);
+                          const quantityValue = getPrimaryBomQuantityValue(item);
+                          return (
+                            <div
+                              key={`${item.itemId}-${index}`}
+                              className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_auto]"
+                            >
+                              <select
+                                className="app-select"
+                                value={item.itemId}
+                                onChange={(event) =>
+                                  updateBomItem(index, {
+                                    itemId: event.target.value ? Number(event.target.value) : ''
+                                  })
+                                }
+                              >
+                                <option value="">Item</option>
+                                {items.map((inventoryItem) => (
+                                  <option key={inventoryItem.id} value={inventoryItem.id}>
+                                    {inventoryItem.name}
+                                  </option>
+                                ))}
+                              </select>
+                              <input
+                                className="app-input"
+                                placeholder="Quantidade"
+                                value={quantityValue}
+                                onChange={(event) =>
+                                  updateBomItem(index, {
+                                    [quantityField]: event.target.value
+                                  } as Partial<BomItemInput>)
+                                }
+                                onBlur={() =>
+                                  updateBomItem(index, {
+                                    [quantityField]: formatDecimalInputBR(String(quantityValue || ''), {
+                                      maxFractionDigits: 4
+                                    })
+                                  } as Partial<BomItemInput>)
+                                }
+                              />
+                              <button
+                                type="button"
+                                className="app-button app-button-danger"
+                                onClick={() => removeBomItem(index)}
+                              >
+                                Remover
+                              </button>
+                            </div>
+                          );
+                        })}
                       </div>
-                    </details>
 
-                    <div className="grid gap-3">
-                      {bomItems.map((item, index) => (
-                        <div
-                          key={`${item.itemId}-${index}`}
-                          className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
-                        >
-                          <select
-                            className="app-select"
-                            value={item.itemId}
-                            onChange={(e) =>
-                              updateBomItem(index, {
-                                itemId: e.target.value ? Number(e.target.value) : ''
-                              })
-                            }
-                          >
-                            <option value="">Item</option>
-                            {items.map((invItem) => (
-                              <option key={invItem.id} value={invItem.id}>
-                                {invItem.name}
-                              </option>
-                            ))}
-                          </select>
-                          <input
-                            className="app-input"
-                            placeholder="Qtd por venda"
-                            value={item.qtyPerSaleUnit ?? ''}
-                            onChange={(e) =>
-                              updateBomItem(index, {
-                                qtyPerRecipe: '',
-                                qtyPerSaleUnit: e.target.value,
-                                qtyPerUnit: ''
-                              })
-                            }
-                            onBlur={() =>
-                              updateBomItem(index, {
-                                qtyPerRecipe: '',
-                                qtyPerSaleUnit: formatDecimalInputBR(item.qtyPerSaleUnit || '', {
-                                  maxFractionDigits: 4
-                                }),
-                                qtyPerUnit: ''
-                              })
-                            }
-                          />
+                      <div className="app-form-actions app-form-actions--mobile-sticky">
+                        <button type="button" className="app-button app-button-ghost" onClick={addBomItem}>
+                          Adicionar item
+                        </button>
+                        <button type="button" className="app-button app-button-ghost" onClick={resetBomEditor}>
+                          Cancelar
+                        </button>
+                        {editingBomId ? (
                           <button
                             type="button"
                             className="app-button app-button-danger"
-                            onClick={() => removeBomItem(index)}
+                            onClick={() => void removeBom(editingBomId)}
                           >
-                            Remover
+                            Remover ficha
                           </button>
-                        </div>
-                      ))}
+                        ) : null}
+                        <button
+                          type="button"
+                          className="app-button app-button-primary disabled:cursor-not-allowed disabled:opacity-60"
+                          onClick={saveBom}
+                          disabled={!canSaveBom}
+                        >
+                          {editingBomId ? 'Atualizar ficha tecnica' : 'Criar ficha tecnica'}
+                        </button>
+                      </div>
                     </div>
+                  </details>
+                ) : null}
 
-                    <div className="app-form-actions app-form-actions--mobile-sticky">
-                      <button type="button" className="app-button app-button-ghost" onClick={addBomItem}>
-                        Adicionar item
-                      </button>
-                      <button
-                        type="button"
-                        className="app-button app-button-primary disabled:cursor-not-allowed disabled:opacity-60"
-                        onClick={saveBom}
-                        disabled={!canSaveBom}
-                      >
-                        {editingBomId ? 'Atualizar ficha tecnica' : 'Criar ficha tecnica'}
-                      </button>
-                    </div>
-
-                    <div className="grid gap-3">
-                      {visibleBoms.map((bom) => {
-                        const isExpanded = editingBomId === bom.id;
-                        return (
-                          <div
-                            key={bom.id}
-                            className={`app-panel app-panel--expandable ${
-                              isExpanded ? 'app-panel--expanded' : ''
-                            }`}
-                          >
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                              <button
-                                type="button"
-                                className="min-w-0 flex-1 text-left"
-                                onClick={() => startEditBom(bom)}
-                              >
-                                <div className="flex items-center gap-3">
-                                  <p className="truncate font-semibold">{bom.name}</p>
-                                  <span className="app-panel__chevron" aria-hidden="true" />
-                                </div>
-                                <p className="mt-1 text-sm text-neutral-500">
-                                  Produto: {bom.product?.name || 'Produto'} • {bom.saleUnitLabel || 'Unidade'}
-                                </p>
-                              </button>
-                              <div className="flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  className="app-button app-button-ghost"
-                                  onClick={() => startEditBom(bom)}
-                                >
-                                  Editar
-                                </button>
-                                <button
-                                  type="button"
-                                  className="app-button app-button-danger"
-                                  onClick={() => {
-                                    void removeBom(bom.id);
-                                  }}
-                                >
-                                  Remover
-                                </button>
-                              </div>
-                            </div>
-                            <div className="app-panel__expand" aria-hidden={!isExpanded}>
-                              <div className="app-panel__expand-inner">
-                                <div className="app-panel__expand-surface grid gap-2 text-sm text-neutral-500">
-                                  {(bom.items || []).length === 0 ? (
-                                    <p>Nenhum item nessa ficha.</p>
-                                  ) : (
-                                    (bom.items || []).map((item) => (
-                                      <div
-                                        key={item.id}
-                                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/60 bg-white/70 px-3 py-2"
-                                      >
-                                        <div>
-                                          <p className="font-medium text-neutral-800">
-                                            {item.item?.name || `Item ${item.itemId}`}
-                                          </p>
-                                          <p className="text-xs text-neutral-500">
-                                            Qtd: {item.qtyPerSaleUnit ?? item.qtyPerUnit ?? item.qtyPerRecipe ?? '-'}{' '}
-                                            {item.item?.unit || ''}
-                                            {' • '}
-                                            Valor: {formatCurrencyBR(item.item?.purchasePackCost ?? 0)}
-                                          </p>
-                                        </div>
-                                      </div>
-                                    ))
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                      {visibleBoms.length === 0 ? (
-                        <div className="rounded-2xl border border-dashed border-white/70 bg-white/65 px-4 py-6 text-sm text-neutral-500">
-                          {inactiveBomsCount > 0 && !showInactiveTechnicalEntries
-                            ? `Sem ficha ativa visivel. ${inactiveBomsCount} oculta(s).`
-                            : 'Nenhuma ficha tecnica cadastrada.'}
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </details>
-
-                <details
-                  ref={inventoryItemsDetailsRef}
-                  className="app-details"
-                  open={!isOperationMode}
-                >
+                {!isOperationMode ? (
+                  <details
+                    ref={inventoryItemsDetailsRef}
+                    className="app-details"
+                    open={!isOperationMode}
+                  >
                   <summary>Insumos e custos de compra</summary>
                   <div className="mt-3 grid gap-4">
                     <BuilderLayoutItemSlot id="packaging">
@@ -1756,7 +1744,8 @@ function StockPageContent() {
                       </div>
                     </BuilderLayoutItemSlot>
                   </div>
-                </details>
+                  </details>
+                ) : null}
               </div>
             </details>
           </BuilderLayoutItemSlot>
