@@ -65,6 +65,7 @@ Criterio de pronto:
 - Manter na home desktop as trocas de coluna defasadas entre si, sem blackout simultaneo nas 3 faixas.
 - Manter na home o contraste mais leve sobre as fotos e a navegacao desktop com botoes maiores, sem voltar a achatar o impacto visual.
 - Manter o desktop de `/pedido` mais direto, sem blocos introdutorios redundantes acima do formulario.
+- Manter o popup de status em `/pedidos` com clique direto no proprio icone de etapa, sem regressao para setas laterais e sem perder os recalculos/gatilhos intermediarios no backend.
 - Manter `/pedido` abrindo direto em `Dados`, sem header/resumo duplicado no topo e sem labels redundantes de seção.
 - Manter `/pedido` sem colapsos em desktop/mobile intermediario, com grids elasticos para agendamento, caixas e `Caixa Sabores` em qualquer navegador.
 - Manter em `/pedido` a mensagem explicita de que pedido novo nao entra para hoje, sempre mostrando o primeiro horario liberado antes do erro final.

@@ -28,6 +28,7 @@ test('soft delete customer still referenced by order and status rollback', async
   });
 
   const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const scheduledAt = new Date(Date.UTC(2032, 0, 15, 14, 0, 0)).toISOString();
 
   const product = await request(apiUrl, '/inventory-products', {
     method: 'POST',
@@ -55,31 +56,40 @@ test('soft delete customer still referenced by order and status rollback', async
     method: 'POST',
     body: {
       customerId: customer.id,
+      scheduledAt,
       items: [{ productId: product.id, quantity: 1 }]
     }
   });
   created.orderId = order.id;
 
-  const statusSequence = ['CONFIRMADO', 'EM_PREPARACAO', 'PRONTO', 'ENTREGUE'];
-  for (const status of statusSequence) {
-    const updated = await request(apiUrl, `/orders/${order.id}/status`, {
-      method: 'PATCH',
-      body: { status }
-    });
-    assert.equal(updated.status, status);
-  }
-
-  const backToPronto = await request(apiUrl, `/orders/${order.id}/status`, {
+  const delivered = await request(apiUrl, `/orders/${order.id}/status`, {
     method: 'PATCH',
-    body: { status: 'PRONTO' }
+    body: { status: 'ENTREGUE' }
   });
-  assert.equal(backToPronto.status, 'PRONTO');
+  assert.equal(delivered.status, 'ENTREGUE');
+
+  const backToConfirmado = await request(apiUrl, `/orders/${order.id}/status`, {
+    method: 'PATCH',
+    body: { status: 'CONFIRMADO' }
+  });
+  assert.equal(backToConfirmado.status, 'CONFIRMADO');
+
+  const backToAberto = await request(apiUrl, `/orders/${order.id}/status`, {
+    method: 'PATCH',
+    body: { status: 'ABERTO' }
+  });
+  assert.equal(backToAberto.status, 'ABERTO');
 
   const cancelled = await request(apiUrl, `/orders/${order.id}/status`, {
     method: 'PATCH',
     body: { status: 'CANCELADO' }
   });
   assert.equal(cancelled.status, 'CANCELADO');
+
+  await requestExpectError(apiUrl, `/orders/${order.id}/status`, 400, {
+    method: 'PATCH',
+    body: { status: 'PRONTO' }
+  });
 
   await request(apiUrl, `/customers/${customer.id}`, { method: 'DELETE' });
 
@@ -90,6 +100,7 @@ test('soft delete customer still referenced by order and status rollback', async
     method: 'POST',
     body: {
       customerId: customer.id,
+      scheduledAt,
       items: [{ productId: product.id, quantity: 1 }]
     }
   });

@@ -406,24 +406,22 @@ test(
       'Baixa dos ingredientes no PREPARO nao foi registrada por completo'
     );
 
-    await request(apiUrl, `/orders/${order.id}/status`, {
-      method: 'PATCH',
-      body: { status: 'CONFIRMADO' }
-    });
-    await request(apiUrl, `/orders/${order.id}/status`, {
+    const orderInPreparation = await request(apiUrl, `/orders/${order.id}/status`, {
       method: 'PATCH',
       body: { status: 'EM_PREPARACAO' }
     });
+    assert.equal(orderInPreparation.status, 'EM_PREPARACAO');
 
     const eventsAfterOven = await request(apiUrl, '/orders/mass-prep-events');
     const eventInOven = eventsAfterOven.find((event) => event.id === createdMassPrepEvent.id);
     assert.ok(eventInOven, 'Evento FAZER MASSA deveria continuar existente');
     assert.equal(eventInOven.status, 'NO_FORNO');
 
-    await request(apiUrl, `/orders/${order.id}/status`, {
+    const orderDelivered = await request(apiUrl, `/orders/${order.id}/status`, {
       method: 'PATCH',
-      body: { status: 'PRONTO' }
+      body: { status: 'ENTREGUE' }
     });
+    assert.equal(orderDelivered.status, 'ENTREGUE');
 
     const eventsAfterReady = await request(apiUrl, '/orders/mass-prep-events');
     const eventReady = eventsAfterReady.find((event) => event.id === createdMassPrepEvent.id);

@@ -566,70 +566,89 @@ function OrderWorkflowIllustration({
     stroke: 'currentColor',
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
-    strokeWidth: 1.8
+    strokeWidth: 2.35
+  };
+
+  const textProps = {
+    fill: 'currentColor',
+    fontFamily: 'Arial, Helvetica, sans-serif',
+    fontWeight: 700
   };
 
   if (name === 'phone-check') {
     return (
-      <svg aria-hidden="true" className={className} viewBox="0 0 48 48">
-        <rect {...sharedProps} x="10" y="5" width="18" height="38" rx="4.5" />
-        <path {...sharedProps} d="M16.5 25.5 21 30l8-9" />
+      <svg aria-hidden="true" className={className} viewBox="0 0 64 64">
+        <rect {...sharedProps} x="12" y="7" width="20" height="48" rx="4.5" />
+        <path {...sharedProps} d="M18.5 33.5 24 39l10.5-10.5" />
       </svg>
     );
   }
 
   if (name === 'mixer') {
     return (
-      <svg aria-hidden="true" className={className} viewBox="0 0 48 48">
-        <path {...sharedProps} d="M10 34h8l2 6h13" />
-        <path {...sharedProps} d="M19 16c0-4.5 4-7 9.5-7 7 0 12.5 3.5 12.5 8.5 0 3-1.6 5.4-4.1 6.8" />
-        <path {...sharedProps} d="M20 17h15.5" />
-        <path {...sharedProps} d="M19 18v16" />
-        <path {...sharedProps} d="M31 20.5v13" />
-        <path {...sharedProps} d="M24 28.5c2.2-2.1 7.4-2.1 9.8 0v3.5c0 4-2.8 7-7 7s-7-3-7-7v-3.5Z" />
-        <circle {...sharedProps} cx="14" cy="8.5" r="2.5" />
+      <svg aria-hidden="true" className={className} viewBox="0 0 64 64">
+        <circle {...sharedProps} cx="16" cy="10.5" r="2.8" />
+        <path {...sharedProps} d="M14 31V22.5c0-7.8 9-12.5 22.5-12.5 13.9 0 21.5 4.3 21.5 11.4 0 5.3-4.1 9.8-10.2 11.1" />
+        <path {...sharedProps} d="M14.5 24.5h27.5" />
+        <path {...sharedProps} d="M21 24.5v28.5" />
+        <path {...sharedProps} d="M21 53H10.5" />
+        <path {...sharedProps} d="M20.5 53h14l2.5 4H50" />
+        <path {...sharedProps} d="M28 32.5c2.6-1.5 10.6-1.5 13.2 0v10.4c0 6.3-3.7 10.3-9.8 10.3s-9.8-4-9.8-10.3V32.5c0-1.9 1.5-3.4 3.4-3.4h12.8c1.9 0 3.4 1.5 3.4 3.4" />
+        <path {...sharedProps} d="M42 29.5v12" />
+        <text {...textProps} x="25.2" y="21.4" fontSize="6.1" letterSpacing="1.3">
+          SMEG
+        </text>
       </svg>
     );
   }
 
   if (name === 'oven') {
     return (
-      <svg aria-hidden="true" className={className} viewBox="0 0 48 48">
-        <rect {...sharedProps} x="7" y="8" width="34" height="31" rx="3.5" />
-        <path {...sharedProps} d="M7 17h34" />
-        <circle {...sharedProps} cx="15" cy="12.5" r="1.5" />
-        <circle {...sharedProps} cx="23.5" cy="12.5" r="1.5" />
-        <circle {...sharedProps} cx="32" cy="12.5" r="1.5" />
-        <path {...sharedProps} d="M17 31c0-2.1 2.1-2.8 2.1-5 0-2.4-2.1-3-2.1-5" />
-        <path {...sharedProps} d="M24 31c0-2.1 2.1-2.8 2.1-5 0-2.4-2.1-3-2.1-5" />
-        <path {...sharedProps} d="M31 31c0-2.1 2.1-2.8 2.1-5 0-2.4-2.1-3-2.1-5" />
+      <svg aria-hidden="true" className={className} viewBox="0 0 64 64">
+        <rect {...sharedProps} x="8.5" y="14" width="47" height="36" rx="3.5" />
+        <path {...sharedProps} d="M8.5 24h47" />
+        <circle {...sharedProps} cx="18" cy="18.8" r="2.6" />
+        <circle {...sharedProps} cx="31.5" cy="18.8" r="2.6" />
+        <circle {...sharedProps} cx="45" cy="18.8" r="2.6" />
+        <rect {...sharedProps} x="18" y="29.2" width="28" height="15.8" rx="1.8" />
+        <path {...sharedProps} d="M26 41c0-2.4 2.3-3.2 2.3-5.6 0-2.3-2.3-3.1-2.3-5.5" />
+        <path {...sharedProps} d="M32.3 41c0-2.4 2.3-3.2 2.3-5.6 0-2.3-2.3-3.1-2.3-5.5" />
+        <path {...sharedProps} d="M38.6 41c0-2.4 2.3-3.2 2.3-5.6 0-2.3-2.3-3.1-2.3-5.5" />
       </svg>
     );
   }
 
   if (name === 'bag-check') {
     return (
-      <svg aria-hidden="true" className={className} viewBox="0 0 48 48">
-        <path {...sharedProps} d="M14 18h20l-2 20H16l-2-20Z" />
-        <path {...sharedProps} d="M18 18v-3.5c0-3.3 2.7-6 6-6s6 2.7 6 6V18" />
-        <path {...sharedProps} d="M31.5 11.5 36 16l8-8" />
-        <path {...sharedProps} d="M20 29.5c1.5-1 5.7-1 8 0" />
-        <text x="18.3" y="27.4" fontSize="6.2" fontWeight="700" fill="currentColor">
-          @QB
+      <svg aria-hidden="true" className={className} viewBox="0 0 64 64">
+        <path {...sharedProps} d="M20 26h25l-2.7 27H22.7L20 26Z" />
+        <path {...sharedProps} d="M24.5 26v-5.8c0-5 3.6-8.7 8.4-8.7 4.8 0 8.4 3.7 8.4 8.7V26" />
+        <path {...sharedProps} d="M42.5 11.5 48 17l9-9" />
+        <text
+          {...textProps}
+          x="24"
+          y="44"
+          fontSize="5.15"
+          textLength="17.8"
+          lengthAdjust="spacingAndGlyphs"
+        >
+          @QUEROBROA
         </text>
       </svg>
     );
   }
 
   return (
-    <svg aria-hidden="true" className={className} viewBox="0 0 48 48">
-      <circle {...sharedProps} cx="14" cy="35" r="4" />
-      <circle {...sharedProps} cx="33" cy="35" r="4" />
-      <path {...sharedProps} d="M18 35h11.5c3.2 0 5.5-2.3 5.5-5.2v-6.3h-8.5" />
-      <path {...sharedProps} d="M8 31h8l4-13h7l3.2 9.5" />
-      <path {...sharedProps} d="M34.5 15.5h3l2 7" />
-      <path {...sharedProps} d="M38.5 11.5c2.2 0 4 1.8 4 4v1.5" />
-      <path {...sharedProps} d="M24 18v-3.5c0-1.7 1.4-3 3-3h4" />
+    <svg aria-hidden="true" className={className} viewBox="0 0 64 64">
+      <circle {...sharedProps} cx="18" cy="49" r="3.7" />
+      <circle {...sharedProps} cx="45" cy="49" r="3.7" />
+      <rect {...sharedProps} x="14" y="31" width="11.5" height="12.5" rx="1.2" />
+      <path {...sharedProps} d="M25.5 43h9.5l4.5 5.5h7.5" />
+      <path {...sharedProps} d="M34.5 43V35h6.7l4.3 4.3" />
+      <path {...sharedProps} d="M49.5 48.5h3.3c3 0 5.2-2.3 5.2-5.2v-6.1" />
+      <path {...sharedProps} d="M54 26.5h4.8l2.7 5.2" />
+      <path {...sharedProps} d="M57.3 37.3 61 35.2" />
+      <path {...sharedProps} d="M34 30.4h-5.4c-1.6 0-2.9 1.3-2.9 2.9V43" />
     </svg>
   );
 }
@@ -691,15 +710,6 @@ const orderWorkflowStatusMeta: Record<
   }
 };
 
-const orderStatusTransitions: Record<string, string[]> = {
-  ABERTO: ['CONFIRMADO', 'CANCELADO'],
-  CONFIRMADO: ['ABERTO', 'EM_PREPARACAO', 'CANCELADO'],
-  EM_PREPARACAO: ['CONFIRMADO', 'PRONTO', 'CANCELADO'],
-  PRONTO: ['EM_PREPARACAO', 'ENTREGUE', 'CANCELADO'],
-  ENTREGUE: ['PRONTO', 'CANCELADO'],
-  CANCELADO: []
-};
-
 type MassPrepEventStatus = MassPrepEvent['status'];
 type MassPrepWorkflowStatus = MassPrepEventStatus;
 const MASS_PREP_EVENT_STATUSES: MassPrepEventStatus[] = [
@@ -759,22 +769,6 @@ function toOrderWorkflowStatus(status?: string | null): OrderWorkflowStatus | nu
   return ORDER_WORKFLOW_STATUSES.includes(status as OrderWorkflowStatus)
     ? (status as OrderWorkflowStatus)
     : null;
-}
-
-function resolveAdjacentOrderWorkflowStatus(
-  currentStatus: string | null | undefined,
-  direction: 'backward' | 'forward'
-): OrderWorkflowStatus | null {
-  const normalizedCurrent = toOrderWorkflowStatus(currentStatus);
-  if (!normalizedCurrent) return null;
-
-  const currentIndex = ORDER_WORKFLOW_STATUSES.indexOf(normalizedCurrent);
-  const candidateIndex = direction === 'forward' ? currentIndex + 1 : currentIndex - 1;
-  const candidate = ORDER_WORKFLOW_STATUSES[candidateIndex];
-  if (!candidate) return null;
-
-  const allowedTransitions = orderStatusTransitions[currentStatus || ''] || [];
-  return allowedTransitions.includes(candidate) ? candidate : null;
 }
 
 function resolveAdjacentMassPrepWorkflowStatus(
@@ -2853,14 +2847,6 @@ function OrdersPageContent() {
   const selectedOrderWorkflowIndex = selectedOrderWorkflowStatus
     ? ORDER_WORKFLOW_STATUSES.indexOf(selectedOrderWorkflowStatus)
     : -1;
-  const selectedOrderPreviousWorkflowStatus = resolveAdjacentOrderWorkflowStatus(
-    selectedOrder?.status,
-    'backward'
-  );
-  const selectedOrderNextWorkflowStatus = resolveAdjacentOrderWorkflowStatus(
-    selectedOrder?.status,
-    'forward'
-  );
   const selectedMassPrepStatus = selectedMassPrepEvent?.status ?? null;
   const selectedMassPrepWorkflowIndex = selectedMassPrepStatus
     ? MASS_PREP_EVENT_STATUSES.indexOf(selectedMassPrepStatus)
@@ -2976,14 +2962,9 @@ function OrdersPageContent() {
     selectedMassPrepEvent
   ]);
 
-  const moveSelectedOrderStatusBackward = async () => {
-    if (!selectedOrder?.id || !selectedOrderPreviousWorkflowStatus) return;
-    await updateStatus(selectedOrder.id, selectedOrderPreviousWorkflowStatus);
-  };
-
-  const moveSelectedOrderStatusForward = async () => {
-    if (!selectedOrder?.id || !selectedOrderNextWorkflowStatus) return;
-    await updateStatus(selectedOrder.id, selectedOrderNextWorkflowStatus);
+  const selectOrderWorkflowStatus = async (targetStatus: OrderWorkflowStatus) => {
+    if (!selectedOrder?.id || selectedOrderIsCancelled || selectedOrderWorkflowStatus === targetStatus) return;
+    await updateStatus(selectedOrder.id, targetStatus);
   };
 
   const saveSelectedOrderEdit = async () => {
@@ -3966,14 +3947,36 @@ function OrdersPageContent() {
 
                     return (
                       <li key={status} className="order-workflow-strip__item">
-                        <div className="order-workflow-strip__step">
+                        <button
+                          type="button"
+                          className="order-workflow-strip__step group"
+                          onClick={() => {
+                            void selectOrderWorkflowStatus(status);
+                          }}
+                          disabled={isStatusUpdatePending || selectedOrderIsCancelled || isCurrent}
+                          aria-current={isCurrent ? 'step' : undefined}
+                          aria-label={
+                            isCurrent
+                              ? `${stageMeta.label}: etapa atual`
+                              : `Mover pedido para ${stageMeta.label}`
+                          }
+                          title={
+                            isCurrent
+                              ? `${stageMeta.label}: etapa atual`
+                              : `Mover pedido para ${stageMeta.label}`
+                          }
+                        >
                           <span
-                            className={`flex h-12 w-12 items-center justify-center rounded-[18px] border ${
+                            className={`flex h-12 w-12 items-center justify-center rounded-[18px] border transition-[transform,box-shadow,border-color,background-color,color] ${
                               isCurrent
                                 ? stageMeta.activeClassName
                                 : isPassed
                                   ? 'border-neutral-300 bg-white/94 text-neutral-700'
                                   : 'border-neutral-200 bg-white text-neutral-300'
+                            } ${
+                              !isCurrent && !selectedOrderIsCancelled
+                                ? 'group-hover:-translate-y-0.5 group-hover:shadow-[0_10px_24px_rgba(15,23,42,0.08)]'
+                                : ''
                             }`}
                           >
                             <OrderWorkflowIllustration
@@ -3992,7 +3995,7 @@ function OrdersPageContent() {
                           >
                             {stageMeta.label}
                           </span>
-                        </div>
+                        </button>
                         {index < ORDER_WORKFLOW_STATUSES.length - 1 ? (
                           <span
                             className={`order-workflow-strip__connector mx-2 mt-6 h-[2px] w-10 shrink-0 rounded-full ${
@@ -4004,34 +4007,6 @@ function OrdersPageContent() {
                     );
                   })}
                 </ol>
-              </div>
-              <div className="flex w-full items-center gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
-                <button
-                  type="button"
-                  className="app-button app-button-ghost flex-1 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none"
-                  onClick={moveSelectedOrderStatusBackward}
-                  disabled={
-                    isStatusUpdatePending ||
-                    !selectedOrderPreviousWorkflowStatus ||
-                    selectedOrderIsCancelled
-                  }
-                  aria-label="Voltar etapa"
-                >
-                  <AppIcon name="back" className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  className="app-button app-button-primary flex-1 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none"
-                  onClick={moveSelectedOrderStatusForward}
-                  disabled={
-                    isStatusUpdatePending ||
-                    !selectedOrderNextWorkflowStatus ||
-                    selectedOrderIsCancelled
-                  }
-                  aria-label="Avancar etapa"
-                >
-                  <AppIcon name="back" className="h-4 w-4 rotate-180" />
-                </button>
               </div>
             </div>
             {selectedOrderIsCancelled ? (

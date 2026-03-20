@@ -75,6 +75,64 @@ const statusTransitions: Record<string, string[]> = {
   ENTREGUE: ['PRONTO', 'CANCELADO'],
   CANCELADO: []
 };
+const ORDER_WORKFLOW_STATUSES = ['ABERTO', 'CONFIRMADO', 'EM_PREPARACAO', 'PRONTO', 'ENTREGUE'] as const;
+
+type OrderStatusValue = z.infer<typeof OrderStatusEnum>;
+type OrderWorkflowStatus = (typeof ORDER_WORKFLOW_STATUSES)[number];
+
+function isOrderWorkflowStatus(status: string): status is OrderWorkflowStatus {
+  return ORDER_WORKFLOW_STATUSES.includes(status as OrderWorkflowStatus);
+}
+
+function resolveOrderStatusPath(currentStatus: string, targetStatus: OrderStatusValue) {
+  if (currentStatus === targetStatus) {
+    return [] as OrderStatusValue[];
+  }
+
+  const directTransitions = statusTransitions[currentStatus] || [];
+  if (directTransitions.includes(targetStatus)) {
+    return [targetStatus];
+  }
+
+  if (!isOrderWorkflowStatus(currentStatus) || !isOrderWorkflowStatus(targetStatus)) {
+    throw new BadRequestException(`Transicao invalida: ${currentStatus} -> ${targetStatus}`);
+  }
+
+  const currentIndex = ORDER_WORKFLOW_STATUSES.indexOf(currentStatus);
+  const targetIndex = ORDER_WORKFLOW_STATUSES.indexOf(targetStatus);
+  if (currentIndex < 0 || targetIndex < 0) {
+    throw new BadRequestException(`Transicao invalida: ${currentStatus} -> ${targetStatus}`);
+  }
+
+  const direction = targetIndex > currentIndex ? 1 : -1;
+  const path: OrderStatusValue[] = [];
+  let cursor = currentStatus;
+
+  for (
+    let index = currentIndex + direction;
+    direction > 0 ? index <= targetIndex : index >= targetIndex;
+    index += direction
+  ) {
+    const candidate = ORDER_WORKFLOW_STATUSES[index];
+    if (!candidate) {
+      break;
+    }
+
+    const allowedTransitions = statusTransitions[cursor] || [];
+    if (!allowedTransitions.includes(candidate)) {
+      throw new BadRequestException(`Transicao invalida: ${currentStatus} -> ${targetStatus}`);
+    }
+
+    path.push(candidate);
+    cursor = candidate;
+  }
+
+  if (path[path.length - 1] !== targetStatus) {
+    throw new BadRequestException(`Transicao invalida: ${currentStatus} -> ${targetStatus}`);
+  }
+
+  return path;
+}
 
 const MASS_PREP_EVENT_SCOPE = 'MASS_PREP_EVENT';
 const ORDER_INTAKE_SCOPE = 'ORDER_INTAKE';
@@ -2576,30 +2634,42 @@ export class OrdersService {
 
   async updateStatus(orderId: number, nextStatus: unknown) {
     const status = OrderStatusEnum.parse(nextStatus);
-    const order = await this.getRaw(orderId);
-
-    const allowed = statusTransitions[order.status] || [];
-    if (!allowed.includes(status)) {
-      throw new BadRequestException(`Transicao invalida: ${order.status} -> ${status}`);
-    }
 
     return this.prisma.$transaction(async (tx) => {
-      const updatedOrder = await tx.order.update({
+      const existingOrder = await tx.order.findUnique({
         where: { id: orderId },
-        data: { status },
         include: { items: true, customer: true, payments: true }
       });
-      if (status === 'CANCELADO') {
-        await this.clearOrderFormulaArtifacts(tx, orderId);
-        await this.clearMassPrepEventArtifact(tx, orderId);
-        await this.syncPaperBagReservationsForCustomerDateGroup(tx, {
-          customerId: updatedOrder.customerId,
-          targetDate: this.orderTargetDate(updatedOrder).date
+      if (!existingOrder) {
+        throw new NotFoundException('Pedido nao encontrado');
+      }
+
+      const path = resolveOrderStatusPath(existingOrder.status, status);
+      if (path.length === 0) {
+        return this.withFinancial(existingOrder);
+      }
+
+      let updatedOrder = existingOrder;
+
+      for (const stepStatus of path) {
+        updatedOrder = await tx.order.update({
+          where: { id: orderId },
+          data: { status: stepStatus },
+          include: { items: true, customer: true, payments: true }
         });
+        if (stepStatus === 'CANCELADO') {
+          await this.clearOrderFormulaArtifacts(tx, orderId);
+          await this.clearMassPrepEventArtifact(tx, orderId);
+          await this.syncPaperBagReservationsForCustomerDateGroup(tx, {
+            customerId: updatedOrder.customerId,
+            targetDate: this.orderTargetDate(updatedOrder).date
+          });
+        }
+        if (stepStatus === 'EM_PREPARACAO' || stepStatus === 'PRONTO' || stepStatus === 'ENTREGUE') {
+          await this.syncMassPrepEventStatusFromOrderStatus(tx, orderId, stepStatus);
+        }
       }
-      if (status === 'EM_PREPARACAO' || status === 'PRONTO' || status === 'ENTREGUE') {
-        await this.syncMassPrepEventStatusFromOrderStatus(tx, orderId, status);
-      }
+
       return this.withFinancial(updatedOrder);
     });
   }
