@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException, Inject } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Customer as PrismaCustomer, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
@@ -155,7 +155,7 @@ export class OrdersService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(PaymentsService) private readonly paymentsService: PaymentsService,
-    @Inject(WhatsAppService) private readonly whatsAppService: WhatsAppService,
+    @Inject(forwardRef(() => WhatsAppService)) private readonly whatsAppService: WhatsAppService,
     @Inject(DeliveriesService) private readonly deliveriesService: DeliveriesService,
     @Inject(OrderNotificationsService) private readonly orderNotificationsService: OrderNotificationsService
   ) {}
@@ -2056,7 +2056,6 @@ export class OrdersService {
 
   async intakeWhatsAppFlow(payload: unknown) {
     const data = whatsappFlowIntakeSchema.parse(payload);
-    await this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt));
     return this.intake({
       ...data,
       payment: data.payment ?? {

@@ -2,6 +2,54 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ensureApiServer, request } from './lib/api-server.mjs';
 
+async function postJson(apiUrl, requestPath, body) {
+  const response = await fetch(`${apiUrl}${requestPath}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+
+  const raw = await response.text();
+  const parsed = raw ? JSON.parse(raw) : null;
+  return {
+    ok: response.ok,
+    status: response.status,
+    body: parsed
+  };
+}
+
+async function submitWithScheduleRetry(apiUrl, requestPath, buildBody, initialScheduledAt) {
+  let scheduledAt = initialScheduledAt;
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const response = await postJson(apiUrl, requestPath, buildBody(scheduledAt));
+    if (response.ok) {
+      return {
+        scheduledAt,
+        body: response.body
+      };
+    }
+
+    if (
+      response.status === 400 &&
+      response.body &&
+      (response.body.reason === 'SLOT_TAKEN' || response.body.reason === 'DAY_FULL') &&
+      response.body.nextAvailableAt
+    ) {
+      scheduledAt = response.body.nextAvailableAt;
+      continue;
+    }
+
+    throw new Error(
+      `POST ${requestPath} -> ${response.status}\n${JSON.stringify(response.body)}`
+    );
+  }
+
+  throw new Error(`Nao foi possivel encontrar horario disponivel para ${requestPath}.`);
+}
+
 test('order intake whatsapp-flow: cria pedido idempotente com cobranca PIX', async (t) => {
   const { apiUrl, shutdown } = await ensureApiServer();
   const created = {
@@ -31,6 +79,9 @@ test('order intake whatsapp-flow: cria pedido idempotente com cobranca PIX', asy
   });
 
   const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const phone = `11${String(Date.now()).slice(-9)}`;
+  const availability = await request(apiUrl, '/orders/public-schedule');
+  const scheduledAt = availability.nextAvailableAt;
   const product = await request(apiUrl, '/inventory-products', {
     method: 'POST',
     body: {
@@ -43,17 +94,17 @@ test('order intake whatsapp-flow: cria pedido idempotente com cobranca PIX', asy
   });
   created.productId = product.id;
 
-  const payload = {
+  const buildPayload = (resolvedScheduledAt) => ({
     version: 1,
     intent: 'CONFIRMED',
     customer: {
       name: `Cliente WhatsApp ${suffix}`,
-      phone: '11988887777',
+      phone,
       address: 'Rua WhatsApp, 10'
     },
     fulfillment: {
       mode: 'DELIVERY',
-      scheduledAt: new Date(Date.UTC(2030, 1, 12, 15, 0, 0)).toISOString()
+      scheduledAt: resolvedScheduledAt
     },
     order: {
       items: [{ productId: product.id, quantity: 1 }]
@@ -65,12 +116,16 @@ test('order intake whatsapp-flow: cria pedido idempotente com cobranca PIX', asy
     source: {
       externalId: `wpp-${suffix}`
     }
-  };
-
-  const first = await request(apiUrl, '/orders/intake/whatsapp-flow', {
-    method: 'POST',
-    body: payload
   });
+
+  const firstAttempt = await submitWithScheduleRetry(
+    apiUrl,
+    '/orders/intake/whatsapp-flow',
+    buildPayload,
+    scheduledAt
+  );
+  const payload = buildPayload(firstAttempt.scheduledAt);
+  const first = firstAttempt.body;
 
   created.orderId = first.order.id;
   created.customerId = first.intake.customerId;

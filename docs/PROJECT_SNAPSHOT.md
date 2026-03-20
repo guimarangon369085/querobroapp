@@ -18,6 +18,7 @@ Ultima atualizacao: 2026-03-20
 - `Produtos` deixou de existir como superficie operacional; catalogo e ficha tecnica ficam dentro de `Estoque`.
 - Existe agora uma captura publica de pedido em `/pedido`, usando o mesmo intake externo que vai servir para `Google Forms`, pagina propria e futuro `WhatsApp Flow`.
 - O intake externo agora expoe preview seguro para `Google Forms` e `customer-form`, validando payload, frete e total sem criar pedido nem PIX.
+- O backend agora expoe um bridge estruturado de `WhatsApp Flow` com sessao propria (`launch/session/submit`) reaproveitando o intake canonico de pedidos; quando ativado, o pedido cai na mesma base operacional vista em `/pedidos`.
 - Os dados oficiais da QUEROBROA (WhatsApp, CNPJ, PIX e conta bancaria) agora estao canonizados em contratos compartilhados, painel interno e fluxo publico.
 - O backend agora aceita conciliacao segura de PIX por nome + valor em `POST /payments/pix-reconciliations/webhook`, mantendo a baixa canonica por `txid/paymentId` em `pix-settlements`.
 - Pedidos de `Entrega` agora podem receber cotacao de frete antes do submit final, com o valor incorporado ao total e ao PIX.
@@ -108,7 +109,7 @@ Ultima atualizacao: 2026-03-20
 - Operacao: `orders`, `payments`, `deliveries`, `production`
 - Estoque: `inventory`, `inventory-products`, `bom`
 - Intake externo: `orders/intake`, `orders/intake/customer-form`, `orders/intake/google-form`, `orders/intake/whatsapp-flow`
-- WhatsApp oficial: webhook Cloud API e auto reply opcional para o link oficial do pedido
+- WhatsApp oficial: webhook Cloud API, auto reply opcional e bridge estruturado de `WhatsApp Flow` para intake canonico
 - Cotacao de frete: `deliveries/quotes` + proxy interno do web em `/api/delivery-quote`
 - Proxy de `Google Forms`: web exposto em `/api/google-form` para receber o Apps Script sem abrir a API inteira publicamente
 - Preview do intake externo: `/api/google-form/preview`, `/api/customer-form/preview`, `orders/intake/google-form/preview` e `orders/intake/customer-form/preview`
@@ -148,7 +149,7 @@ Ultima atualizacao: 2026-03-20
 
 1. `Google Forms` ja e viavel como canal temporario, mas ainda falta configuracao real do Apps Script e URL publica final.
 2. O dominio publico ja responde em `querobroa.com.br`, `www`, `ops` e `api`, mas o web ainda precisa publicar o bundle mais novo para expor os endpoints de preview (`/api/google-form/preview` e `/api/customer-form/preview`) e fechar a validacao publica automatizada.
-3. `WhatsApp Flow` segue sem numero dedicado; a migracao futura deve reutilizar o contrato externo atual.
+3. `WhatsApp Flow` ja tem bridge backend reaproveitando o intake canonico, mas ainda falta numero dedicado/Flow publicado na Meta e persistencia explicita do canal na UI para diferenciar origem.
 4. O runtime de frete agora esta em modo hibrido `Uber Direct -> Loggi`, mas ainda vale validar o disparo real de shipment em producao sem criar entrega acidental e calibrar a cotacao final contra corridas manuais historicas.
 5. Mobile segue atras do web no fluxo operacional novo.
 6. Ainda vale ampliar cobertura de testes alem dos gates atuais, principalmente em cenarios de edge case de dominio.

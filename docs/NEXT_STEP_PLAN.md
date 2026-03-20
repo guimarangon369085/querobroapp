@@ -1,6 +1,6 @@
 # NEXT_STEP_PLAN
 
-Ultima atualizacao: 2026-03-18
+Ultima atualizacao: 2026-03-20
 
 ## Objetivo da fase atual
 
@@ -86,25 +86,27 @@ Criterio de pronto:
 
 ## Prioridade 4 (agora)
 
-### Migracao futura para WhatsApp Flow
+### Ativacao final do WhatsApp Flow
 
-- Reaproveitar o contrato externo atual (`customer-form`) em vez de criar outro dominio.
-- Trocar apenas a origem do payload quando houver numero dedicado.
+- Publicar o Flow na Meta e preencher `WHATSAPP_FLOW_ORDER_INTAKE_ID`.
+- Apontar `WHATSAPP_FLOW_API_BASE_URL` para a API publica final, se necessario.
+- Validar o disparo real do convite no webhook e o submit do Flow caindo em `/pedidos`.
+- Persistir a origem do canal no modelo/UI se for necessario distinguir pedido vindo do WhatsApp no operacional.
 - Manter `PIX` simples no curto prazo: chave/copia e cola entregue ao cliente.
 - Postergar automacao de confirmacao financeira ate existir provedor adequado.
 
 Criterio de pronto:
-- numero dedicado entra sem refazer o fluxo de dominio.
+- numero dedicado entra no mesmo contrato canonico sem refazer o fluxo de dominio.
 
 ## Ordem de execucao
 
 1. Publicar o dominio real e validar `/`, `/pedido` e `/pedidos`.
 2. Teste real de `/pedido` e do `Google Forms`, incluindo `Entrega`.
 3. Refino final de `Estoque` e `Pedidos`, com foco agora em performance/agregacao do dashboard e fatiamento de `orders-screen`.
-4. Migracao futura para `WhatsApp Flow` sobre o mesmo contrato externo.
+4. Ativacao final de `WhatsApp Flow` sobre o intake canonico ja pronto.
 
 ## Riscos de nao fazer
 
 - O link publico pode parecer pronto sem estar realmente publicado com host, DNS e token corretos.
 - Um formulario externo mal configurado pode criar friccao mesmo com o backend pronto.
-- Se o contrato externo divergir entre canais, a migracao para `WhatsApp Flow` vai reintroduzir retrabalho.
+- Se a ativacao final do `WhatsApp Flow` divergir do intake canonico ja implementado, o canal vai reintroduzir retrabalho e inconsistencias operacionais.
