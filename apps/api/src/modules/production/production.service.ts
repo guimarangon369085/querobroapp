@@ -368,6 +368,16 @@ export class ProductionService {
     return this.toQty(Math.max(Math.floor(item.quantity || 0), 0));
   }
 
+  private remainingBroasForItem(
+    item: OrderWithItems['items'][number],
+    bom: BomWithItems | undefined,
+    producedByOrderItem: Map<number, number>
+  ) {
+    const totalBroas = this.totalBroasForItem(item, bom);
+    const producedBroas = Math.min(totalBroas, producedByOrderItem.get(item.id) || 0);
+    return this.toQty(Math.max(totalBroas - producedBroas, 0));
+  }
+
   private isOfficialBroaItem(item: Pick<OrderWithItems['items'][number], 'product'>) {
     return Boolean(resolveOfficialBroaFlavorCodeFromProductName(item.product?.name));
   }
@@ -551,6 +561,8 @@ export class ProductionService {
 
   async requirements(date?: string): Promise<ProductionRequirementsResponse> {
     const targetDate = this.parseDateParam(date);
+    const runtime = await this.syncRuntimeState(await this.loadProductionRuntime());
+    const producedByOrderItem = this.producedBroasByOrderItem(runtime);
 
     const [orders, boms, items, movements] = await Promise.all([
       this.prisma.order.findMany({
@@ -605,6 +617,16 @@ export class ProductionService {
       const productNameById = new Map(
         order.items.map((item) => [item.productId, item.product?.name || `Produto ${item.productId}`])
       );
+      const remainingOrderItems = order.items
+        .map((item) => {
+          const bom = bomByProductId.get(item.productId);
+          const remainingBroas = this.remainingBroasForItem(item, bom, producedByOrderItem);
+          return {
+            productId: item.productId,
+            quantity: remainingBroas
+          };
+        })
+        .filter((item) => item.quantity > 0);
       const broaSummary = buildOfficialBroaFlavorSummary(
         order.items.map((item) => ({
           productId: item.productId,
@@ -612,8 +634,9 @@ export class ProductionService {
         })),
         productNameById
       );
+      const remainingBroaSummary = buildOfficialBroaFlavorSummary(remainingOrderItems, productNameById);
       requiredMassRecipes = this.toQty(
-        requiredMassRecipes + broaSummary.totalBroas / MASS_READY_BROAS_PER_RECIPE
+        requiredMassRecipes + remainingBroaSummary.totalBroas / MASS_READY_BROAS_PER_RECIPE
       );
 
       if (broaSummary.totalBroas > 0) {
@@ -650,7 +673,7 @@ export class ProductionService {
         }
 
         for (const code of ['G', 'D', 'Q', 'R'] as const) {
-          const broasQty = broaSummary.flavorCounts[code] || 0;
+          const broasQty = remainingBroaSummary.flavorCounts[code] || 0;
           if (broasQty <= 0) continue;
           const definition = orderFillingIngredientsByFlavorCode[code];
           const fillingItem =
@@ -668,6 +691,7 @@ export class ProductionService {
 
       for (const item of order.items) {
         const bom = bomByProductId.get(item.productId);
+        const remainingBroas = this.remainingBroasForItem(item, bom, producedByOrderItem);
         if (!bom || bom.items.length === 0) {
           warnings.push({
             type: 'BOM_MISSING',
@@ -705,7 +729,11 @@ export class ProductionService {
             continue;
           }
 
-          const requiredQty = this.toQty(perBroa * item.quantity);
+          const requiredUnits = this.shouldConsumeOnBatch(item, bomItem) ? remainingBroas : item.quantity;
+          const requiredQty = this.toQty(perBroa * requiredUnits);
+          if (requiredQty <= 0) {
+            continue;
+          }
           const breakdownItem: ProductionRequirementBreakdown = {
             productId: item.productId,
             productName: item.product?.name || `Produto ${item.productId}`,

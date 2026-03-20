@@ -216,12 +216,13 @@ test(
     });
     created.customerId = customer.id;
 
-    const scheduledAt = new Date(Date.UTC(2030, 2, 11, 9, 0, 0)).toISOString();
+    const firstScheduledAt = new Date(Date.UTC(2030, 2, 11, 9, 0, 0)).toISOString();
+    const secondScheduledAt = new Date(Date.UTC(2030, 2, 11, 9, 15, 0)).toISOString();
     const firstOrder = await request(apiUrl, '/orders', {
       method: 'POST',
       body: {
         customerId: customer.id,
-        scheduledAt,
+        scheduledAt: firstScheduledAt,
         items: [{ productId: productTraditional.id, quantity: 7 }]
       }
     });
@@ -231,7 +232,7 @@ test(
       method: 'POST',
       body: {
         customerId: customer.id,
-        scheduledAt,
+        scheduledAt: secondScheduledAt,
         items: [{ productId: productTraditional.id, quantity: 7 }]
       }
     });

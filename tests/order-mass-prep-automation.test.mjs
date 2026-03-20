@@ -56,6 +56,25 @@ test(
     t.after(async () => {
       if (created.orderId) {
         try {
+          const movements = await request(apiUrl, '/inventory-movements');
+          const cleanupMovements = movements
+            .filter((movement) => movement.orderId === created.orderId)
+            .sort((left, right) => right.id - left.id);
+
+          for (const movement of cleanupMovements) {
+            try {
+              await request(apiUrl, `/inventory-movements/${movement.id}`, { method: 'DELETE' });
+            } catch {
+              // melhor esforco
+            }
+          }
+        } catch {
+          // melhor esforco
+        }
+      }
+
+      if (created.orderId) {
+        try {
           await request(apiUrl, `/orders/${created.orderId}`, { method: 'DELETE' });
         } catch {
           // melhor esforco
@@ -405,6 +424,21 @@ test(
       ).length >= 6,
       'Baixa dos ingredientes no PREPARO nao foi registrada por completo'
     );
+
+    await requestExpectError(apiUrl, `/orders/${order.id}/items`, 400, {
+      method: 'PUT',
+      body: {
+        items: [{ productId: productTraditional.id, quantity: 2 }]
+      }
+    });
+
+    await requestExpectError(apiUrl, `/orders/${order.id}/items`, 400, {
+      method: 'POST',
+      body: {
+        productId: productTraditional.id,
+        quantity: 1
+      }
+    });
 
     const orderInPreparation = await request(apiUrl, `/orders/${order.id}/status`, {
       method: 'PATCH',

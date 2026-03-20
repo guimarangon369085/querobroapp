@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ensureApiServer, request } from './lib/api-server.mjs';
+import { ensureApiServer, request, requestExpectError } from './lib/api-server.mjs';
 
 const TEST_REASON = '[TESTE_E2E] production-quantity-semantics';
 
@@ -152,7 +152,7 @@ test(
     });
     created.customerId = customer.id;
 
-    const scheduledAt = new Date(Date.UTC(2000, 0, 1, 9, 0, 0)).toISOString();
+    const scheduledAt = new Date(Date.UTC(2032, 0, 15, 9, 0, 0)).toISOString();
     const order = await request(apiUrl, '/orders', {
       method: 'POST',
       body: {
@@ -163,7 +163,7 @@ test(
     });
     created.orderId = order.id;
 
-    const requirements = await request(apiUrl, '/production/requirements?date=2000-01-01');
+    const requirements = await request(apiUrl, '/production/requirements?date=2032-01-15');
     const requirementRow = requirements.rows.find((row) => row.ingredientId === inventoryItem.id);
     assert.ok(requirementRow, 'Item customizado deveria aparecer no D+1');
     assert.ok(approxEqual(requirementRow.requiredQty, 20));
@@ -204,5 +204,19 @@ test(
     );
     assert.ok(batchMovement, 'Baixa da fornada deveria existir para item customizado');
     assert.ok(approxEqual(batchMovement.quantity, 20));
+
+    const requirementsAfterBatch = await request(apiUrl, '/production/requirements?date=2032-01-15');
+    const requirementRowAfterBatch = requirementsAfterBatch.rows.find(
+      (row) => row.ingredientId === inventoryItem.id
+    );
+    assert.equal(
+      requirementRowAfterBatch,
+      undefined,
+      'Item consumido integralmente na fornada nao deveria continuar aparecendo no D+1'
+    );
+
+    await requestExpectError(apiUrl, `/orders/${order.id}`, 400, {
+      method: 'DELETE'
+    });
   }
 );

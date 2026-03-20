@@ -614,6 +614,38 @@ export class OrdersService {
     });
   }
 
+  private async hasPhysicalInventoryMovements(tx: TransactionClient, orderId: number) {
+    const movements = await tx.inventoryMovement.count({
+      where: {
+        orderId,
+        OR: [{ source: null }, { source: { notIn: [...ORDER_FORMULA_SOURCES] } }]
+      }
+    });
+    return movements > 0;
+  }
+
+  private async assertOrderItemsMutable(
+    tx: TransactionClient,
+    order: Pick<OrderWithRelations, 'id' | 'status'>
+  ) {
+    if (!['ABERTO', 'CONFIRMADO'].includes(order.status)) {
+      throw new BadRequestException('Pedido nao permite alterar itens neste status');
+    }
+    if (await this.hasPhysicalInventoryMovements(tx, order.id)) {
+      throw new BadRequestException(
+        'Pedido nao permite alterar itens apos gerar movimentacoes fisicas de estoque.'
+      );
+    }
+  }
+
+  private async assertOrderRemovable(tx: TransactionClient, orderId: number) {
+    if (await this.hasPhysicalInventoryMovements(tx, orderId)) {
+      throw new BadRequestException(
+        'Pedido com movimentacoes fisicas de estoque nao pode ser excluido.'
+      );
+    }
+  }
+
   private async clearMassPrepEventArtifact(tx: TransactionClient, orderId: number) {
     await tx.idempotencyRecord.deleteMany({
       where: {
@@ -2470,6 +2502,7 @@ export class OrdersService {
       const order = await tx.order.findUnique({ where: { id } });
       if (!order) throw new NotFoundException('Pedido nao encontrado');
       const targetDate = this.orderTargetDate(order).date;
+      await this.assertOrderRemovable(tx, id);
 
       await this.clearOrderFormulaArtifacts(tx, id);
       await tx.order.delete({ where: { id } });
@@ -2486,9 +2519,7 @@ export class OrdersService {
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({ where: { id: orderId }, include: { items: true } });
       if (!order) throw new NotFoundException('Pedido nao encontrado');
-      if (['CANCELADO', 'ENTREGUE'].includes(order.status)) {
-        throw new BadRequestException('Pedido nao permite alterar itens neste status');
-      }
+      await this.assertOrderItemsMutable(tx, order);
 
       const product = await tx.product.findUnique({ where: { id: data.productId } });
       if (!product) throw new NotFoundException('Produto nao encontrado');
@@ -2538,9 +2569,7 @@ export class OrdersService {
         include: { items: true, payments: true }
       });
       if (!order) throw new NotFoundException('Pedido nao encontrado');
-      if (['CANCELADO', 'ENTREGUE'].includes(order.status)) {
-        throw new BadRequestException('Pedido nao permite alterar itens neste status');
-      }
+      await this.assertOrderItemsMutable(tx, order);
 
       const quantityByProductId = new Map<number, number>();
       for (const item of data.items) {
@@ -2599,9 +2628,7 @@ export class OrdersService {
         include: { items: true, payments: true }
       });
       if (!order) throw new NotFoundException('Pedido nao encontrado');
-      if (['CANCELADO', 'ENTREGUE'].includes(order.status)) {
-        throw new BadRequestException('Pedido nao permite alterar itens neste status');
-      }
+      await this.assertOrderItemsMutable(tx, order);
 
       const item = await tx.orderItem.findUnique({ where: { id: itemId } });
       if (!item || item.orderId !== orderId) throw new NotFoundException('Item nao encontrado');
