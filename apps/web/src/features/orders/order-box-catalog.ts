@@ -16,6 +16,13 @@ export type OrderCardArt =
       rightSrc: string;
       leftObjectPosition?: string;
       rightObjectPosition?: string;
+    }
+  | {
+      mode: 'columns';
+      columns: ReadonlyArray<{
+        src: string;
+        objectPosition?: string;
+      }>;
     };
 
 export const ORDER_BOX_UNITS = 7;
@@ -67,10 +74,6 @@ const ORDER_CARDAPIO_IMAGE_PATHS = {
 } as const;
 
 export const ORDER_SABORES_REFERENCE_IMAGE = ORDER_CARDAPIO_IMAGE_PATHS.sabores;
-export const ORDER_GENERIC_CARD_ART: OrderCardArt = {
-  mode: 'single',
-  src: ORDER_SABORES_REFERENCE_IMAGE
-};
 
 export const ORDER_FLAVOR_CARD_ART_BY_CODE: Record<OrderFlavorCode, OrderCardArt> = {
   T: {
@@ -99,6 +102,23 @@ export const ORDER_FLAVOR_CARD_ART_BY_CODE: Record<OrderFlavorCode, OrderCardArt
     objectPosition: 'center center'
   }
 };
+
+export const ORDER_SABORES_CARD_ART: OrderCardArt = {
+  mode: 'columns',
+  columns: ORDER_FLAVOR_CODES.map((code) => {
+    const art = ORDER_FLAVOR_CARD_ART_BY_CODE[code];
+    return art.mode === 'single'
+      ? {
+          src: art.src,
+          objectPosition: art.objectPosition
+        }
+      : {
+          src: ORDER_SABORES_REFERENCE_IMAGE
+        };
+  })
+};
+
+export const ORDER_GENERIC_CARD_ART: OrderCardArt = ORDER_SABORES_CARD_ART;
 
 const ORDER_MISTA_CARD_ART_BY_CODE: Record<OrderMistaShortcutCode, OrderCardArt> = {
   G: {
@@ -320,7 +340,11 @@ export function resolveOrderCardImage(productName?: string | null) {
   const code = resolveOrderFlavorCodeFromName(productName);
   if (!code) return ORDER_SABORES_REFERENCE_IMAGE;
   const art = ORDER_FLAVOR_CARD_ART_BY_CODE[code];
-  return art.mode === 'single' ? art.src : art.rightSrc;
+  return art.mode === 'single'
+    ? art.src
+    : art.mode === 'split'
+      ? art.rightSrc
+      : art.columns[0]?.src || ORDER_SABORES_REFERENCE_IMAGE;
 }
 
 export function resolveOrderCardArt(productName?: string | null) {

@@ -38,6 +38,32 @@ export function OrderCardArtwork({
           src={art.src}
           style={{ objectPosition: art.objectPosition || 'center center' }}
         />
+      ) : art.mode === 'columns' ? (
+        <div
+          className="absolute inset-0"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `repeat(${art.columns.length}, minmax(0, 1fr))`
+          }}
+        >
+          {art.columns.map((column, index) => (
+            <div
+              key={`${column.src}-${index}`}
+              className={`relative min-w-0 overflow-hidden ${index > 0 ? 'border-l border-white/20' : ''}`}
+            >
+              <Image
+                alt=""
+                aria-hidden="true"
+                className={imageClassName}
+                fill
+                priority={priority}
+                sizes={sizes}
+                src={column.src}
+                style={{ objectPosition: column.objectPosition || 'center center' }}
+              />
+            </div>
+          ))}
+        </div>
       ) : (
         <>
           <div className="absolute inset-0" style={{ clipPath: DIAGONAL_LEFT_CLIP }}>

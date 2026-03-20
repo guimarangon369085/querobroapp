@@ -1,6 +1,4 @@
 'use client';
-
-import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -15,6 +13,7 @@ import { resolveAnalyticsSessionId, trackAnalyticsEvent } from '@/lib/analytics'
 import { OrderCardArtwork } from '@/features/orders/order-card-artwork';
 import {
   ORDER_BOX_CATALOG,
+  ORDER_SABORES_CARD_ART,
   ORDER_BOX_UNITS,
   ORDER_FLAVOR_CODES,
   type OrderBoxCode,
@@ -337,8 +336,6 @@ function formatCustomBoxParts(counts: Record<FlavorCode, number>) {
     .join(' • ');
 }
 
-const PUBLIC_ORDER_SABORES_COLLAGE_CODES: readonly FlavorCode[] = ['T', 'G', 'D', 'Q', 'R'] as const;
-
 function PublicOrderSaboresCollage() {
   return (
     <div className="relative aspect-[16/10] overflow-hidden rounded-[18px] bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.92),transparent_34%),linear-gradient(155deg,rgba(248,239,230,0.98),rgba(238,222,202,0.92))] xl:aspect-[21/10]">
@@ -346,30 +343,14 @@ function PublicOrderSaboresCollage() {
         Composicao com os cinco sabores oficiais da Caixa Sabores: Tradicional, Goiabada, Doce de Leite,
         Queijo do Serro e Requeijao de Corte.
       </span>
-      <div
-        className="absolute inset-[10px] grid grid-cols-5 gap-[6px] sm:inset-4 sm:gap-3"
-        aria-hidden="true"
-      >
-        {PUBLIC_ORDER_SABORES_COLLAGE_CODES.map((code) => {
-          const art = boxCatalog[code].art;
-          if (art.mode !== 'single') return null;
-          return (
-            <div
-              key={code}
-              className="relative min-w-0 overflow-hidden rounded-[14px] border border-white/85 bg-white/92 shadow-[0_18px_36px_rgba(70,44,26,0.16)]"
-            >
-              <Image
-                alt=""
-                className="h-full w-full object-cover"
-                fill
-                sizes="(max-width: 768px) 15vw, 120px"
-                src={art.src}
-                style={{ objectPosition: art.objectPosition || 'center center' }}
-              />
-              <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_18%,rgba(46,29,20,0.14)_100%)]" />
-            </div>
-          );
-        })}
+      <div className="absolute inset-[10px] sm:inset-4" aria-hidden="true">
+        <OrderCardArtwork
+          alt="Composicao com os cinco sabores oficiais"
+          art={ORDER_SABORES_CARD_ART}
+          className="rounded-[14px] border border-white/85 bg-white/92 shadow-[0_18px_36px_rgba(70,44,26,0.16)]"
+          overlayClassName="absolute inset-0 bg-[linear-gradient(180deg,transparent_18%,rgba(46,29,20,0.14)_100%)]"
+          sizes="(max-width: 768px) 70vw, 420px"
+        />
       </div>
       <div
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.16),transparent_40%),linear-gradient(180deg,rgba(65,40,24,0.04)_0%,rgba(65,40,24,0.14)_100%)]"
@@ -1320,7 +1301,7 @@ export function PublicOrderPage() {
                 </div>
               </section>
 
-              <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
+              <section className="public-order-fulfillment-section rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
                 <div className="mb-4 sm:mb-5">
                   <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">
                     Entrega ou retirada

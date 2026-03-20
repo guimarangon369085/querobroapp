@@ -53,8 +53,7 @@ const HOME_HERO_IMAGES: HeroImage[] = Array.from({ length: HERO_IMAGE_COUNT }, (
   };
 });
 
-const MOBILE_AUTOPLAY_MS = 2000;
-const DESKTOP_AUTOPLAY_MS = 6000;
+const HOME_AUTOPLAY_MS = 2000;
 const DESKTOP_STAGGER_MS = 340;
 const INITIAL_INDEX = 4;
 const DESKTOP_COLUMN_OFFSETS = [0, 3, 6] as const;
@@ -137,15 +136,14 @@ export function ImmersiveHomeHero() {
 
   useEffect(() => {
     if (prefersReducedMotion) return;
-    const autoplayMs = isDesktopViewport ? DESKTOP_AUTOPLAY_MS : MOBILE_AUTOPLAY_MS;
     const autoplay = window.setInterval(() => {
       step(1);
-    }, autoplayMs);
+    }, HOME_AUTOPLAY_MS);
 
     return () => {
       window.clearInterval(autoplay);
     };
-  }, [isDesktopViewport, prefersReducedMotion, step]);
+  }, [prefersReducedMotion, step]);
 
   useEffect(() => {
     return () => {
