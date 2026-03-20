@@ -829,8 +829,10 @@ type DayGridDragIntentState = {
   baseMinutes: number;
   lane: number;
   height: number;
+  target: HTMLButtonElement;
+  startClientX: number;
   startClientY: number;
-  startedAtMs: number;
+  holdTimeoutId: number;
 };
 
 function safeDateFromIso(iso?: string | null) {
@@ -1160,6 +1162,12 @@ function OrdersPageContent() {
   const [dayGridDragState, setDayGridDragState] = useState<DayGridDragState | null>(null);
   const dayGridDragIntentRef = useRef<DayGridDragIntentState | null>(null);
   const dayGridSuppressClickRef = useRef<string | null>(null);
+  const dayGridScrollLockRef = useRef<{
+    bodyOverflow: string;
+    bodyTouchAction: string;
+    htmlOverflow: string;
+    htmlTouchAction: string;
+  } | null>(null);
   const [isStatusUpdatePending, setIsStatusUpdatePending] = useState(false);
   const [isMassPrepStockModalOpen, setIsMassPrepStockModalOpen] = useState(false);
   const [selectedMassPrepEvent, setSelectedMassPrepEvent] = useState<MassPrepEvent | null>(null);
@@ -2303,10 +2311,72 @@ function OrdersPageContent() {
     openCalendarEntry(entry);
   };
 
+  const lockDayGridScroll = useCallback(() => {
+    if (typeof document === 'undefined' || dayGridScrollLockRef.current) return;
+    const body = document.body;
+    const html = document.documentElement;
+    dayGridScrollLockRef.current = {
+      bodyOverflow: body.style.overflow,
+      bodyTouchAction: body.style.touchAction,
+      htmlOverflow: html.style.overflow,
+      htmlTouchAction: html.style.touchAction
+    };
+    body.style.overflow = 'hidden';
+    body.style.touchAction = 'none';
+    html.style.overflow = 'hidden';
+    html.style.touchAction = 'none';
+  }, []);
+
+  const unlockDayGridScroll = useCallback(() => {
+    if (typeof document === 'undefined' || !dayGridScrollLockRef.current) return;
+    const body = document.body;
+    const html = document.documentElement;
+    body.style.overflow = dayGridScrollLockRef.current.bodyOverflow;
+    body.style.touchAction = dayGridScrollLockRef.current.bodyTouchAction;
+    html.style.overflow = dayGridScrollLockRef.current.htmlOverflow;
+    html.style.touchAction = dayGridScrollLockRef.current.htmlTouchAction;
+    dayGridScrollLockRef.current = null;
+  }, []);
+
+  const activateDayGridDrag = useCallback(
+    (intent: DayGridDragIntentState) => {
+      if (dayGridDragIntentRef.current?.pointerId !== intent.pointerId) return;
+      if (intent.target.isConnected) {
+        intent.target.setPointerCapture(intent.pointerId);
+      }
+      lockDayGridScroll();
+      setDayGridDragState({
+        pointerId: intent.pointerId,
+        eventKey: intent.eventKey,
+        orderId: intent.orderId,
+        previousScheduledAtIso: intent.previousScheduledAtIso,
+        baseDate: intent.baseDate,
+        baseMinutes: intent.baseMinutes,
+        previewMinutes: intent.baseMinutes,
+        lane: intent.lane,
+        height: intent.height,
+        startClientY: intent.startClientY
+      });
+      dayGridDragIntentRef.current = null;
+    },
+    [lockDayGridScroll]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (dayGridDragIntentRef.current) {
+        window.clearTimeout(dayGridDragIntentRef.current.holdTimeoutId);
+        dayGridDragIntentRef.current = null;
+      }
+      unlockDayGridScroll();
+    };
+  }, [unlockDayGridScroll]);
+
   const handleDayGridEventPointerDown = (
     event: PointerEvent<HTMLButtonElement>,
     item: { entry: CalendarOrderEntry; lane: number; height: number }
   ) => {
+    if (!event.isPrimary) return;
     if (item.entry.kind !== 'ORDER') return;
     const orderId = item.entry.order.id;
     if (!orderId) return;
@@ -2317,9 +2387,12 @@ function OrdersPageContent() {
       dayGridEndMinutes - dayGridSnapMinutes
     );
 
-    event.currentTarget.setPointerCapture(event.pointerId);
+    if (dayGridDragIntentRef.current) {
+      window.clearTimeout(dayGridDragIntentRef.current.holdTimeoutId);
+      dayGridDragIntentRef.current = null;
+    }
     dayGridSuppressClickRef.current = null;
-    dayGridDragIntentRef.current = {
+    const intent: DayGridDragIntentState = {
       pointerId: event.pointerId,
       eventKey: `timeline-${calendarEntryBaseKey(item.entry)}`,
       orderId,
@@ -2328,9 +2401,13 @@ function OrdersPageContent() {
       baseMinutes,
       lane: item.lane,
       height: item.height,
+      target: event.currentTarget,
+      startClientX: event.clientX,
       startClientY: event.clientY,
-      startedAtMs: Date.now()
+      holdTimeoutId: 0
     };
+    intent.holdTimeoutId = window.setTimeout(() => activateDayGridDrag(intent), dayGridDragHoldMs);
+    dayGridDragIntentRef.current = intent;
   };
 
   const handleDayGridEventPointerMove = (event: PointerEvent<HTMLButtonElement>) => {
@@ -2358,33 +2435,11 @@ function OrdersPageContent() {
     const intent = dayGridDragIntentRef.current;
     if (!intent || event.pointerId !== intent.pointerId) return;
 
-    const holdElapsedMs = Date.now() - intent.startedAtMs;
+    const distanceX = Math.abs(event.clientX - intent.startClientX);
     const distanceY = Math.abs(event.clientY - intent.startClientY);
-    if (holdElapsedMs < dayGridDragHoldMs || distanceY < dayGridDragStartDistancePx) return;
+    if (Math.max(distanceX, distanceY) < dayGridDragStartDistancePx) return;
 
-    event.preventDefault();
-    const pixelsPerMinute = dayGridHeight / dayGridDurationMinutes;
-    const rawDeltaMinutes = (event.clientY - intent.startClientY) / pixelsPerMinute;
-    const snappedDeltaMinutes =
-      Math.round(rawDeltaMinutes / dayGridSnapMinutes) * dayGridSnapMinutes;
-    const nextMinutes = clampNumber(
-      intent.baseMinutes + snappedDeltaMinutes,
-      dayGridStartMinutes,
-      dayGridEndMinutes - dayGridSnapMinutes
-    );
-
-    setDayGridDragState({
-      pointerId: intent.pointerId,
-      eventKey: intent.eventKey,
-      orderId: intent.orderId,
-      previousScheduledAtIso: intent.previousScheduledAtIso,
-      baseDate: intent.baseDate,
-      baseMinutes: intent.baseMinutes,
-      previewMinutes: nextMinutes,
-      lane: intent.lane,
-      height: intent.height,
-      startClientY: intent.startClientY
-    });
+    window.clearTimeout(intent.holdTimeoutId);
     dayGridDragIntentRef.current = null;
   };
 
@@ -2393,10 +2448,12 @@ function OrdersPageContent() {
 
     const currentDrag = dayGridDragState;
     setDayGridDragState(null);
+    unlockDayGridScroll();
+
+    dayGridSuppressClickRef.current = currentDrag.eventKey;
 
     if (currentDrag.previewMinutes === currentDrag.baseMinutes) return;
 
-    dayGridSuppressClickRef.current = currentDrag.eventKey;
     await persistOrderSchedule(
       currentDrag.orderId,
       dateWithMinutes(currentDrag.baseDate, currentDrag.previewMinutes),
@@ -2408,24 +2465,29 @@ function OrdersPageContent() {
   };
 
   const handleDayGridEventPointerUp = async (event: PointerEvent<HTMLButtonElement>) => {
+    const intent = dayGridDragIntentRef.current;
+    if (intent?.pointerId === event.pointerId) {
+      window.clearTimeout(intent.holdTimeoutId);
+      dayGridDragIntentRef.current = null;
+    }
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    if (dayGridDragIntentRef.current?.pointerId === event.pointerId) {
-      dayGridDragIntentRef.current = null;
     }
     await finishDayGridDrag(event.pointerId);
   };
 
   const handleDayGridEventPointerCancel = (event: PointerEvent<HTMLButtonElement>) => {
+    const intent = dayGridDragIntentRef.current;
+    if (intent?.pointerId === event.pointerId) {
+      window.clearTimeout(intent.holdTimeoutId);
+      dayGridDragIntentRef.current = null;
+    }
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    if (dayGridDragIntentRef.current?.pointerId === event.pointerId) {
-      dayGridDragIntentRef.current = null;
-    }
     if (dayGridDragState && event.pointerId === dayGridDragState.pointerId) {
       setDayGridDragState(null);
+      unlockDayGridScroll();
     }
   };
 
