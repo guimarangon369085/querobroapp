@@ -147,6 +147,28 @@ textarea:focus-visible {
   outline-offset: 2px;
 }
 
+@media (hover: none) and (pointer: coarse) {
+  .app-shell button,
+  .app-shell a,
+  .app-shell [role='button'] {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .app-shell input,
+  .app-shell textarea,
+  .app-shell select,
+  .app-shell [contenteditable='true'],
+  .app-shell [data-allow-context-menu='true'] {
+    -webkit-touch-callout: default;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+}
+
 section {
   position: relative;
 }

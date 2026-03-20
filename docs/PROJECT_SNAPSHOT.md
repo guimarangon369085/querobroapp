@@ -50,6 +50,7 @@ Ultima atualizacao: 2026-03-20
 - O popup de detalhe de pedido em `/pedidos` removeu o bloco completo de PIX e reorganizou o resumo logo abaixo de `Caixas`, exibindo `Produtos`, `Frete` e `Total` na ordem operacional.
 - O backend de estoque agora bloqueia edicao de itens e exclusao de pedido depois que o pedido ja gerou movimentacoes fisicas (`MASS_PREP`, `PRODUCTION_BATCH` ou equivalentes), evitando dessintonia entre composicao do pedido e baixa real.
 - O calculo de `D+1`/`production/requirements` agora desconta o que ja foi produzido na runtime de fornadas para o mesmo pedido, em vez de continuar projetando demanda cheia apos a baixa real do batch.
+- O shell operacional mobile agora bloqueia `touch callout`/menu de contexto irrelevante nas superficies interativas do app, reduzindo conflito entre long-press nativo do iPhone e gestos como arrastar pedidos no calendario, sem desabilitar selecao em campos de texto.
 - `/pedido` e `/pedidos` agora redirecionam o pos-criacao para `/pedidofinalizado`, com card final isolado, retorno contextual (`Fazer novo pedido` ou `Voltar para pedidos`) e preservacao apenas dos dados cadastrais do cliente no caso publico.
 - `/pedidofinalizado` agora roda sem shell operacional, sem menu lateral e sem topbar, isolado como rota publica de conclusao.
 - `/dashboard` voltou a existir como rota oculta interna, agora com painel real de analytics first-party do site, vitals e performance financeira/operacional da broa.
@@ -96,6 +97,7 @@ Ultima atualizacao: 2026-03-20
 - `/pedidos`: modal `Novo pedido` alinhado visualmente com `/pedido`, sem miniatura redundante e com CTA de frete abaixo do resumo.
 - `/pedidos`: modal `Novo pedido` agora se comporta melhor em mobile, sem deformar popup ou quebrar o bloco de quantidade.
 - `/pedidos`: mobile sem CTA flutuante no canto; a acao principal fica inline no proprio painel da agenda.
+- `/pedidos`: no mobile, long-press em cards e controles operacionais nao aciona mais menu/contexto nativo que atrapalhava o drag no calendario; inputs seguem com comportamento normal de selecao/edicao.
 - `/pedidos` e a conclusao publica agora traduzem pagamento quitado como `PIX recebido`, sem alterar o status interno `PAGO` no backend.
 - `/clientes`: cadastro e edicao rapida.
 - `/clientes`: autocomplete de endereco agora usa a API nova do Google Places e continua promovendo rua, bairro, cidade e UF ao selecionar a sugestao.
