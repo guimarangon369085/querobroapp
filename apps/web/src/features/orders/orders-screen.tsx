@@ -20,7 +20,6 @@ import {
   type InventoryItem,
   type InventoryMovement,
   type OrderIntake,
-  type PixCharge,
   type Product
 } from '@querobroapp/shared';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -59,10 +58,7 @@ import {
 import { type DeliveryQuote, type MassPrepEvent, type OrderView } from './orders-model';
 import {
   fetchInternalDeliveryQuote,
-  fetchOrderPixCharge,
   fetchOrdersWorkspace,
-  refreshOrderDeliveryQuote,
-  sendOrderPixChargeWhatsApp,
   submitOrderIntake
 } from './orders-api';
 
@@ -1182,11 +1178,6 @@ function OrdersPageContent() {
   const [selectedOrderEditNotes, setSelectedOrderEditNotes] = useState<string>('');
   const [selectedOrderEditError, setSelectedOrderEditError] = useState<string | null>(null);
   const [isSavingSelectedOrderEdit, setIsSavingSelectedOrderEdit] = useState(false);
-  const [selectedOrderPixCharge, setSelectedOrderPixCharge] = useState<PixCharge | null>(null);
-  const [selectedOrderPixChargeLoading, setSelectedOrderPixChargeLoading] = useState(false);
-  const [selectedOrderPixChargeError, setSelectedOrderPixChargeError] = useState<string | null>(null);
-  const [isSendingSelectedOrderPixWhatsApp, setIsSendingSelectedOrderPixWhatsApp] = useState(false);
-  const [isRefreshingSelectedOrderDeliveryQuote, setIsRefreshingSelectedOrderDeliveryQuote] = useState(false);
   const [selectedOrderEditingBoxKey, setSelectedOrderEditingBoxKey] = useState<string | null>(null);
   const [selectedOrderEditingBoxDraftByProductId, setSelectedOrderEditingBoxDraftByProductId] = useState<
     Record<number, number>
@@ -1252,19 +1243,6 @@ function OrdersPageContent() {
     setIsOrderDetailModalOpen(false);
     setSelectedOrder(null);
   }, []);
-
-  const sendSelectedOrderPixWhatsApp = useCallback(async () => {
-    if (!selectedOrder?.id) return;
-    setIsSendingSelectedOrderPixWhatsApp(true);
-    try {
-      await sendOrderPixChargeWhatsApp(selectedOrder.id);
-      notifySuccess('PIX enviado no WhatsApp.');
-    } catch (error) {
-      notifyError(error instanceof Error ? error.message : 'Nao foi possivel enviar o PIX no WhatsApp.');
-    } finally {
-      setIsSendingSelectedOrderPixWhatsApp(false);
-    }
-  }, [notifyError, notifySuccess, selectedOrder?.id]);
 
   const openNewOrderModal = useCallback(() => {
     setIsOrderDetailModalOpen(false);
@@ -1573,53 +1551,6 @@ function OrdersPageContent() {
   }, [isOrderDetailModalOpen, selectedOrder]);
 
   useEffect(() => {
-    if (!selectedOrder || !isOrderDetailModalOpen) {
-      setSelectedOrderPixCharge(null);
-      setSelectedOrderPixChargeError(null);
-      setSelectedOrderPixChargeLoading(false);
-      return;
-    }
-
-    const paymentStatus = selectedOrder.paymentStatus || 'PENDENTE';
-    const balanceDue = toMoney(Math.max(selectedOrder.balanceDue ?? selectedOrder.total ?? 0, 0));
-    if (selectedOrder.status === 'CANCELADO' || paymentStatus === 'PAGO' || balanceDue <= 0) {
-      setSelectedOrderPixCharge(null);
-      setSelectedOrderPixChargeError(null);
-      setSelectedOrderPixChargeLoading(false);
-      return;
-    }
-
-    let active = true;
-    setSelectedOrderPixChargeLoading(true);
-    setSelectedOrderPixChargeError(null);
-    fetchOrderPixCharge(selectedOrder.id!)
-      .then((charge) => {
-        if (!active) return;
-        setSelectedOrderPixCharge(charge);
-      })
-      .catch((error) => {
-        if (!active) return;
-        const message =
-          error instanceof Error && error.message.includes('HTTP 404')
-            ? 'Cobranca PIX ainda nao disponivel.'
-            : error instanceof Error
-            ? error.message
-            : 'Nao foi possivel carregar o PIX.';
-        setSelectedOrderPixCharge(null);
-        setSelectedOrderPixChargeError(message);
-      })
-      .finally(() => {
-        if (active) {
-          setSelectedOrderPixChargeLoading(false);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [isOrderDetailModalOpen, selectedOrder]);
-
-  useEffect(() => {
     if (!tutorialMode) return;
     setNewOrderNotes((prev) => withTestDataTag(prev, 'Pedido do momento'));
   }, [tutorialMode]);
@@ -1802,20 +1733,6 @@ function OrdersPageContent() {
       setIsCreatingOrder(false);
     }
   };
-
-  const refreshSelectedOrderQuote = useCallback(async () => {
-    if (!selectedOrder?.id || selectedOrder.fulfillmentMode !== 'DELIVERY') return;
-    setIsRefreshingSelectedOrderDeliveryQuote(true);
-    try {
-      await refreshOrderDeliveryQuote(selectedOrder.id);
-      await loadAll();
-      notifySuccess('Frete atualizado.');
-    } catch (error) {
-      notifyError(error instanceof Error ? error.message : 'Nao foi possivel recalcular o frete.');
-    } finally {
-      setIsRefreshingSelectedOrderDeliveryQuote(false);
-    }
-  }, [loadAll, notifyError, notifySuccess, selectedOrder]);
 
   const removeOrder = async (orderId: number) => {
     const accepted = await confirm({
@@ -2643,8 +2560,17 @@ function OrdersPageContent() {
   const selectedCustomerPhoneHref = buildWhatsAppUrl(selectedCustomer?.phone);
   const selectedCustomerPhoneLabel =
     formatPhoneBR(selectedCustomer?.phone) || (selectedCustomer?.phone || '').trim() || 'Telefone nao informado';
-  const selectedOrderPaymentStatus = selectedOrder?.paymentStatus || 'PENDENTE';
-  const selectedOrderBalanceDue = toMoney(Math.max(selectedOrder?.balanceDue ?? selectedOrder?.total ?? 0, 0));
+  const selectedOrderDeliveryFee = toMoney(Math.max(selectedOrder?.deliveryFee ?? 0, 0));
+  const selectedOrderProductSubtotal = toMoney(
+    Math.max(roundMoney((selectedOrder?.total ?? 0) - selectedOrderDeliveryFee), 0)
+  );
+  const selectedOrderGrandTotal = toMoney(selectedOrder?.total ?? 0);
+  const selectedOrderDeliveryFeeLabel =
+    selectedOrder?.fulfillmentMode === 'DELIVERY'
+      ? selectedOrderDeliveryFee > 0
+        ? formatCurrencyBR(selectedOrderDeliveryFee)
+        : 'A confirmar'
+      : 'Retirada';
   const selectedCustomerDeletedAtLabel = selectedCustomer?.deletedAt
     ? formatDeletionTimestampLabel(selectedCustomer.deletedAt)
     : null;
@@ -4064,106 +3990,6 @@ function OrdersPageContent() {
               Excluir
             </button>
           </div>
-            <div className="mt-3 grid gap-2 rounded-2xl border border-white/70 bg-white/80 p-3">
-              <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
-                    FRETE
-                </p>
-                <p className="text-sm font-semibold text-neutral-900">
-                  {selectedOrder.fulfillmentMode === 'DELIVERY'
-                    ? (selectedOrder.deliveryFee ?? 0) > 0
-                      ? formatCurrencyBR(selectedOrder.deliveryFee ?? 0)
-                      : 'A confirmar'
-                    : 'Retirada'}
-                </p>
-              </div>
-              {selectedOrder.fulfillmentMode === 'DELIVERY' ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="w-fit rounded-full border border-white/80 bg-white/86 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
-                    {selectedOrder.deliveryProvider === 'LOGGI'
-                      ? 'Loggi'
-                      : selectedOrder.deliveryProvider === 'UBER_DIRECT'
-                        ? 'Uber Envios'
-                      : selectedOrder.deliveryQuoteStatus === 'FALLBACK'
-                        ? 'Fallback local'
-                        : 'Estimativa'}
-                  </span>
-                  <button
-                    type="button"
-                    className="app-button app-button-ghost text-xs"
-                    onClick={() => {
-                      void refreshSelectedOrderQuote();
-                    }}
-                    disabled={isRefreshingSelectedOrderDeliveryQuote}
-                  >
-                    {isRefreshingSelectedOrderDeliveryQuote ? 'Atualizando...' : 'Atualizar frete'}
-                  </button>
-                </div>
-              ) : null}
-            </div>
-            {selectedOrder.fulfillmentMode === 'DELIVERY' ? (
-              <p className="text-xs text-neutral-600">{formatDeliveryEstimateCaption(selectedOrder)}</p>
-            ) : null}
-          </div>
-          <div className="mt-3 grid gap-2 rounded-2xl border border-white/70 bg-white/80 p-3">
-            <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-start sm:justify-between">
-              <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
-                  COBRANCA PIX
-                </p>
-                <p className="text-sm font-semibold text-neutral-900">
-                  {selectedOrderPaymentStatus === 'PAGO'
-                    ? 'PIX recebido.'
-                    : selectedOrderPixCharge?.payable
-                    ? `Saldo ${formatCurrencyBR(selectedOrderBalanceDue)} pronto para enviar no WhatsApp`
-                    : `Saldo ${formatCurrencyBR(selectedOrderBalanceDue)} em modo de desenvolvimento`}
-                </p>
-              </div>
-              <button
-                type="button"
-                className="app-button app-button-primary w-full text-xs disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-                onClick={() => {
-                  void sendSelectedOrderPixWhatsApp();
-                }}
-                disabled={
-                  selectedOrderPaymentStatus === 'PAGO' ||
-                  !selectedOrderPixCharge ||
-                  selectedOrderPixChargeLoading ||
-                  isSendingSelectedOrderPixWhatsApp ||
-                  !selectedCustomer?.phone
-                }
-              >
-                {isSendingSelectedOrderPixWhatsApp ? 'Enviando...' : 'Enviar PIX no WhatsApp'}
-              </button>
-            </div>
-            {selectedOrderPaymentStatus === 'PAGO' ? (
-              <p className="text-xs text-neutral-600">
-                Total pago: {formatCurrencyBR(selectedOrder.amountPaid ?? selectedOrder.total ?? 0)}.
-              </p>
-            ) : selectedOrderPixChargeLoading ? (
-              <p className="text-xs text-neutral-600">Carregando cobranca PIX...</p>
-            ) : selectedOrderPixCharge ? (
-              <>
-                <p className="text-xs text-neutral-600">
-                  O envio leva uma mensagem completa com o contexto do pedido e o codigo PIX copia e cola.
-                </p>
-                {!selectedCustomer?.phone ? (
-                  <p className="text-xs font-medium text-rose-700">Cliente sem telefone valido para WhatsApp.</p>
-                ) : null}
-                {selectedOrderPixCharge.expiresAt ? (
-                  <p className="text-xs text-neutral-600">
-                    Referencia: vence em{' '}
-                    {formatOrderDateTimeLabel(safeDateFromIso(selectedOrderPixCharge.expiresAt)) || 'data invalida'}.
-                  </p>
-                ) : null}
-              </>
-            ) : selectedOrderPixChargeError ? (
-              <p className="text-xs font-medium text-rose-700">{selectedOrderPixChargeError}</p>
-            ) : (
-              <p className="text-xs text-neutral-600">Sem cobranca PIX disponivel.</p>
-            )}
-          </div>
           <div>
             <div className="mb-3 grid gap-3 rounded-2xl border border-white/70 bg-white/80 p-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
               <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
@@ -4472,6 +4298,29 @@ function OrdersPageContent() {
             ) : (
               <p className="mt-3 text-xs text-neutral-500">Sem caixas.</p>
             )}
+            <div className="mt-3 grid gap-2 rounded-2xl border border-white/70 bg-white/80 p-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">Produtos</p>
+                <p className="text-sm font-semibold text-neutral-900">
+                  {formatCurrencyBR(selectedOrderProductSubtotal)}
+                </p>
+              </div>
+              <div className="grid gap-1.5 border-t border-neutral-200/80 pt-2">
+                <div className="flex items-baseline justify-between gap-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">Frete</p>
+                  <p className="text-sm font-semibold text-neutral-900">{selectedOrderDeliveryFeeLabel}</p>
+                </div>
+                {selectedOrder.fulfillmentMode === 'DELIVERY' ? (
+                  <p className="text-xs text-neutral-600">{formatDeliveryEstimateCaption(selectedOrder)}</p>
+                ) : null}
+              </div>
+              <div className="flex items-baseline justify-between gap-3 border-t border-neutral-200/80 pt-2">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">Total</p>
+                <p className="text-base font-semibold text-neutral-950">
+                  {formatCurrencyBR(selectedOrderGrandTotal)}
+                </p>
+              </div>
+            </div>
           </div>
 
             </div>

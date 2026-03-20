@@ -84,7 +84,7 @@ test('delivery quotes charge R$ 12 when Uber stays within the base tier', async 
       expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
       fallbackReason: null,
       breakdownLabel: 'Uber Envios',
-      distanceKm: 6.4
+      distanceKm: 4.6
     })
   };
 
@@ -97,7 +97,7 @@ test('delivery quotes charge R$ 12 when Uber stays within the base tier', async 
   assert.match(String(quote.quoteToken || ''), /^DQ_/);
 });
 
-test('delivery quotes charge R$ 18 when the Uber quote exceeds R$ 12', async () => {
+test('delivery quotes keep R$ 12 within 5 km even when Uber returns a higher raw quote', async () => {
   const { DeliveriesService } = await loadApiModules();
   const service = new DeliveriesService(createPrismaStub());
 
@@ -114,16 +114,16 @@ test('delivery quotes charge R$ 18 when the Uber quote exceeds R$ 12', async () 
       expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
       fallbackReason: null,
       breakdownLabel: 'Uber Envios',
-      distanceKm: 5.2
+      distanceKm: 4.9
     })
   };
 
   const quote = await service.quoteDelivery(quotePayload(), { allowManualFallback: false });
 
-  assert.equal(quote.fee, 18);
+  assert.equal(quote.fee, 12);
 });
 
-test('delivery quotes charge R$ 18 above 10 km even when the Uber quote is below R$ 12', async () => {
+test('delivery quotes charge R$ 18 above 5 km even when the Uber quote is below R$ 12', async () => {
   const { DeliveriesService } = await loadApiModules();
   const service = new DeliveriesService(createPrismaStub());
 
@@ -140,7 +140,7 @@ test('delivery quotes charge R$ 18 above 10 km even when the Uber quote is below
       expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
       fallbackReason: null,
       breakdownLabel: 'Uber Envios',
-      distanceKm: 12.8
+      distanceKm: 5.2
     })
   };
 

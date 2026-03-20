@@ -230,6 +230,65 @@ Contexto extra:
 No fim, registrar nova entrada no HANDOFF_LOG.
 ```
 
+## Entrada 049
+
+### 1) Metadados
+
+- Data/hora: 2026-03-20 16:07 -03
+- Canal origem: Codex Terminal
+- Canal destino: ChatGPT Online/Mobile e Codex Terminal/Cloud
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `deploy/querobroa-domain-live`
+- Commit base (opcional): `f3d877c`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: estabilizar ajustes operacionais pendentes em `/pedidos` e `/pedido`, corrigir regressao da regra de frete e publicar com validacao.
+- Resultado entregue: regra de frete por raio restaurada no backend, cache de quote invalidado por versao de regra, dropdown de endereco simplificado em `/pedido` e resumo do popup de `/pedidos` reorganizado sem bloco PIX.
+- O que ficou pendente: validar em uso real um endereco curto adicional apos o deploy para confirmar `R$ 12` em producao com o mesmo fluxo do cliente.
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados:
+- `apps/api/src/modules/deliveries/deliveries.service.ts`
+- `apps/web/src/app/pedido/public-order-page.tsx`
+- `apps/web/src/components/form/GoogleAddressAutocompleteInput.tsx`
+- `apps/web/src/features/orders/orders-screen.tsx`
+- `tests/delivery-provider-hybrid-fallback.test.mjs`
+- `docs/PROJECT_SNAPSHOT.md`
+- `docs/HANDOFF_LOG.md`
+- Comportamento novo: frete do cliente volta a cobrar `R$ 12` ate `5 km` e `R$ 18` acima disso, sem deixar o valor bruto da Uber sobrescrever a tabela; `/pedido` mostra sugestoes de endereco em lista simples; `/pedidos` exibe apenas `Produtos`, `Frete` e `Total` abaixo de `Caixas`.
+- Riscos/regressoes: baixo risco tecnico apos testes verdes; principal cuidado e garantir que nenhuma cotacao antiga permaneça reutilizada fora do novo hash de regra.
+
+### 4) Validacao
+
+- Comandos executados: `pnpm --filter @querobroapp/web lint`; `pnpm --filter @querobroapp/web typecheck`; `pnpm --filter @querobroapp/web build`; `pnpm --filter @querobroapp/api lint`; `pnpm --filter @querobroapp/api typecheck`; `pnpm --filter @querobroapp/api build`; `node --test tests/delivery-provider-hybrid-fallback.test.mjs tests/delivery-pickup-origin.test.mjs`
+- Testes que passaram: build/lint/typecheck do web; build/lint/typecheck da api; testes de frete por faixa e origem fixa.
+- Testes nao executados (e motivo): validacao publica pos-deploy ainda depende da publicacao desta entrada.
+
+### 5) Contexto para retomada
+
+- Decisoes importantes: a precificacao do cliente fica desacoplada do valor bruto retornado pela Uber e passa a depender apenas do raio operacional; o hash da cotacao inclui versao de regra para invalidar cache antigo.
+- Suposicoes feitas: a tabela operacional vigente e `R$ 12` ate `5 km` e `R$ 18` acima disso a partir da Alameda Jau, 731.
+- Bloqueios: nenhum local.
+- Proximo passo recomendado (1 acao objetiva): publicar nas refs de deploy, aguardar rollout e validar em producao com quote curta e `pnpm validate:public-deploy`.
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/NEXT_STEP_PLAN.md
+- ultimas 80 linhas de docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+[descreva em 1 linha]
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
 ## Entrada 039
 
 ### 1) Metadados

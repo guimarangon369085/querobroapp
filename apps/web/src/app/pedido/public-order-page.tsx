@@ -1370,6 +1370,7 @@ export function PublicOrderPage() {
                     >
                       <GoogleAddressAutocompleteInput
                         className="app-input xl:h-14 xl:text-[1.02rem]"
+                        dropdownVariant="plain"
                         inputRef={addressInputRef}
                         name="street-address"
                         value={form.address}

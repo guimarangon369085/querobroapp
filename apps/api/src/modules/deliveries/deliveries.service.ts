@@ -108,7 +108,8 @@ const DELIVERY_TRACKING_SCOPE = 'DELIVERY_TRACKING';
 const DELIVERY_QUOTE_SCOPE = 'DELIVERY_QUOTE';
 const DELIVERY_BASE_FEE = 12;
 const DELIVERY_EXTENDED_FEE = 18;
-const DELIVERY_BASE_DISTANCE_LIMIT_KM = 10;
+const DELIVERY_BASE_DISTANCE_LIMIT_KM = 5;
+const DELIVERY_PRICING_RULE_VERSION = 'radius-5km-v1';
 const EARTH_RADIUS_KM = 6371;
 @Injectable()
 export class DeliveriesService {
@@ -547,12 +548,8 @@ export class DeliveriesService {
     const distanceKm = this.resolveDeliveryDistanceKm(input, quote);
     const exceedsDistanceLimit =
       typeof distanceKm === 'number' && Number.isFinite(distanceKm) && distanceKm > DELIVERY_BASE_DISTANCE_LIMIT_KM;
-    const exceedsBaseQuote =
-      quote.provider === 'UBER_DIRECT' &&
-      quote.source === 'UBER_QUOTE' &&
-      this.toMoney(quote.fee) > DELIVERY_BASE_FEE;
 
-    return this.toMoney(exceedsDistanceLimit || exceedsBaseQuote ? DELIVERY_EXTENDED_FEE : DELIVERY_BASE_FEE);
+    return this.toMoney(exceedsDistanceLimit ? DELIVERY_EXTENDED_FEE : DELIVERY_BASE_FEE);
   }
 
   private resolveDeliveryDistanceKm(
@@ -708,6 +705,7 @@ export class DeliveriesService {
     return createHash('sha256')
       .update(
         JSON.stringify({
+          pricingRuleVersion: DELIVERY_PRICING_RULE_VERSION,
           mode: draft.mode,
           scheduledAt: draft.scheduledAt,
           pickupAddress: this.pickupOriginKey(),

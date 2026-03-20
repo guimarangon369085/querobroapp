@@ -35,6 +35,7 @@ type GoogleAddressAutocompleteInputProps = Omit<
   ComponentPropsWithoutRef<'input'>,
   'onChange' | 'value'
 > & {
+  dropdownVariant?: 'default' | 'plain';
   googleApiKey?: string;
   googleEnabled?: boolean;
   inputRef?: Ref<HTMLInputElement>;
@@ -84,6 +85,7 @@ function mapGoogleSuggestion(
 export function GoogleAddressAutocompleteInput({
   className,
   disabled,
+  dropdownVariant = 'default',
   googleApiKey,
   googleEnabled = true,
   inputRef,
@@ -270,6 +272,27 @@ export function GoogleAddressAutocompleteInput({
   }, []);
 
   const isListboxOpen = isFocused && suggestions.length > 0;
+  const listboxClassName =
+    dropdownVariant === 'plain'
+      ? 'absolute left-0 right-0 top-[calc(100%+0.35rem)] z-30 overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-sm'
+      : 'absolute left-0 right-0 top-[calc(100%+0.45rem)] z-30 overflow-hidden rounded-[20px] border border-[color:var(--line-soft)] bg-white/96 shadow-[0_18px_34px_rgba(54,31,20,0.12)] backdrop-blur-sm';
+  const listboxInnerClassName = dropdownVariant === 'plain' ? 'grid divide-y divide-neutral-100' : 'grid gap-1 p-2';
+  const optionClassName = (isActive: boolean) =>
+    dropdownVariant === 'plain'
+      ? `flex w-full flex-col px-3 py-2.5 text-left ${
+          isActive
+            ? 'bg-neutral-100 text-neutral-950'
+            : 'bg-white text-neutral-900 transition-colors hover:bg-neutral-50'
+        }`
+      : `flex w-full flex-col rounded-[16px] px-3 py-2.5 text-left transition ${
+          isActive
+            ? 'bg-[rgba(181,68,57,0.12)] text-[color:var(--ink-strong)]'
+            : 'bg-transparent text-[color:var(--ink-strong)] hover:bg-[rgba(126,79,45,0.08)]'
+        }`;
+  const secondaryTextClassName =
+    dropdownVariant === 'plain' ? 'text-xs leading-5 text-neutral-500' : 'text-xs leading-5 text-[color:var(--ink-muted)]';
+  const loadingClassName =
+    dropdownVariant === 'plain' ? 'px-3 py-2 text-xs text-neutral-500' : 'px-3 py-2 text-xs text-[color:var(--ink-muted)]';
 
   const handleSuggestionPick = async (suggestion: GoogleAddressSuggestion) => {
     if (blurTimerRef.current) {
@@ -401,12 +424,8 @@ export function GoogleAddressAutocompleteInput({
       />
 
       {isListboxOpen ? (
-        <div
-          className="absolute left-0 right-0 top-[calc(100%+0.45rem)] z-30 overflow-hidden rounded-[20px] border border-[color:var(--line-soft)] bg-white/96 shadow-[0_18px_34px_rgba(54,31,20,0.12)] backdrop-blur-sm"
-          role="listbox"
-          id={listboxId}
-        >
-          <div className="grid gap-1 p-2">
+        <div className={listboxClassName} role="listbox" id={listboxId}>
+          <div className={listboxInnerClassName}>
             {suggestions.map((suggestion, index) => (
               <button
                 key={suggestion.id}
@@ -414,11 +433,7 @@ export function GoogleAddressAutocompleteInput({
                 id={`${listboxId}-option-${index}`}
                 role="option"
                 aria-selected={activeIndex === index}
-                className={`flex w-full flex-col rounded-[16px] px-3 py-2.5 text-left transition ${
-                  activeIndex === index
-                    ? 'bg-[rgba(181,68,57,0.12)] text-[color:var(--ink-strong)]'
-                    : 'bg-transparent text-[color:var(--ink-strong)] hover:bg-[rgba(126,79,45,0.08)]'
-                }`}
+                className={optionClassName(activeIndex === index)}
                 onMouseDown={(event) => {
                   event.preventDefault();
                 }}
@@ -428,20 +443,14 @@ export function GoogleAddressAutocompleteInput({
               >
                 <span className="text-sm font-semibold leading-5">{suggestion.primary}</span>
                 {suggestion.secondary ? (
-                  <span className="text-xs leading-5 text-[color:var(--ink-muted)]">
-                    {suggestion.secondary}
-                  </span>
+                  <span className={secondaryTextClassName}>{suggestion.secondary}</span>
                 ) : suggestion.kind === 'manual' ? (
-                  <span className="text-xs leading-5 text-[color:var(--ink-muted)]">
-                    Endereco ja usado
-                  </span>
+                  <span className={secondaryTextClassName}>Endereco ja usado</span>
                 ) : null}
               </button>
             ))}
             {isLoading ? (
-              <div className="px-3 py-2 text-xs text-[color:var(--ink-muted)]">
-                Buscando enderecos...
-              </div>
+              <div className={loadingClassName}>Buscando enderecos...</div>
             ) : null}
           </div>
         </div>
