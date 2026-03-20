@@ -100,6 +100,7 @@ Ultima atualizacao: 2026-03-20
 - `/pedidos`: no mobile, long-press em cards e controles operacionais nao aciona mais menu/contexto nativo que atrapalhava o drag no calendario; inputs seguem com comportamento normal de selecao/edicao.
 - `/pedidos`: o drag de eventos no calendario agora tambem bloqueia selecao de texto nos proprios cards e labels durante o gesto, evitando highlight azul acompanhar o arraste no mobile.
 - `/pedidos`: o drag de eventos no calendario mobile agora so arma apos `click and hold`; se o gesto virar scroll antes do hold, o arraste e cancelado. Quando o hold completa, o app bloqueia a rolagem ate soltar, evitando conflito entre scroll vertical e remarcacao de horario.
+- `/pedidos`: durante esse drag armado no mobile, o app tambem cancela `touchmove` de forma nativa e nao-passiva, para impedir que o mesmo gesto continue sendo interpretado pelo Safari/iPhone como scroll da pagina.
 - `/pedidos` e a conclusao publica agora traduzem pagamento quitado como `PIX recebido`, sem alterar o status interno `PAGO` no backend.
 - `/clientes`: cadastro e edicao rapida.
 - `/clientes`: autocomplete de endereco agora usa a API nova do Google Places e continua promovendo rua, bairro, cidade e UF ao selecionar a sugestao.

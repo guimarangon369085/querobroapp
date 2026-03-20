@@ -1167,6 +1167,7 @@ function OrdersPageContent() {
     bodyTouchAction: string;
     htmlOverflow: string;
     htmlTouchAction: string;
+    preventTouchMove: (event: TouchEvent) => void;
   } | null>(null);
   const [isStatusUpdatePending, setIsStatusUpdatePending] = useState(false);
   const [isMassPrepStockModalOpen, setIsMassPrepStockModalOpen] = useState(false);
@@ -2315,22 +2316,28 @@ function OrdersPageContent() {
     if (typeof document === 'undefined' || dayGridScrollLockRef.current) return;
     const body = document.body;
     const html = document.documentElement;
+    const preventTouchMove = (event: TouchEvent) => {
+      event.preventDefault();
+    };
     dayGridScrollLockRef.current = {
       bodyOverflow: body.style.overflow,
       bodyTouchAction: body.style.touchAction,
       htmlOverflow: html.style.overflow,
-      htmlTouchAction: html.style.touchAction
+      htmlTouchAction: html.style.touchAction,
+      preventTouchMove
     };
     body.style.overflow = 'hidden';
     body.style.touchAction = 'none';
     html.style.overflow = 'hidden';
     html.style.touchAction = 'none';
+    document.addEventListener('touchmove', preventTouchMove, { passive: false, capture: true });
   }, []);
 
   const unlockDayGridScroll = useCallback(() => {
     if (typeof document === 'undefined' || !dayGridScrollLockRef.current) return;
     const body = document.body;
     const html = document.documentElement;
+    document.removeEventListener('touchmove', dayGridScrollLockRef.current.preventTouchMove, true);
     body.style.overflow = dayGridScrollLockRef.current.bodyOverflow;
     body.style.touchAction = dayGridScrollLockRef.current.bodyTouchAction;
     html.style.overflow = dayGridScrollLockRef.current.htmlOverflow;
