@@ -19,6 +19,7 @@ Ultima atualizacao: 2026-03-20
 - Existe agora uma captura publica de pedido em `/pedido`, usando o mesmo intake externo que vai servir para `Google Forms`, pagina propria e futuro `WhatsApp Flow`.
 - O intake externo agora expoe preview seguro para `Google Forms` e `customer-form`, validando payload, frete e total sem criar pedido nem PIX.
 - O backend agora expoe um bridge estruturado de `WhatsApp Flow` com sessao propria (`launch/session/submit`) reaproveitando o intake canonico de pedidos; quando ativado, o pedido cai na mesma base operacional vista em `/pedidos`.
+- O feed publico de Commerce Manager / WhatsApp Business agora inclui `Caixa Sabores` como item proprio (`QUEROBROA-S`), apontando para `/pedido?catalog=S`; no web, esse codigo preenche caixas customizaveis em vez de virar caixa oficial fixa.
 - Os dados oficiais da QUEROBROA (WhatsApp, CNPJ, PIX e conta bancaria) agora estao canonizados em contratos compartilhados, painel interno e fluxo publico.
 - O backend agora aceita conciliacao segura de PIX por nome + valor em `POST /payments/pix-reconciliations/webhook`, mantendo a baixa canonica por `txid/paymentId` em `pix-settlements`.
 - Pedidos de `Entrega` agora podem receber cotacao de frete antes do submit final, com o valor incorporado ao total e ao PIX.
@@ -85,6 +86,7 @@ Ultima atualizacao: 2026-03-20
 - `/pedido`: CTA principal abaixo do bloco `Resumo`; em `Entrega` ele calcula o frete antes da finalizacao, e em `Retirada` o frete zera.
 - `/pedido`: desktop sem colapso nos blocos de agendamento e sabores; a copy de agendamento agora avisa claramente que pedido novo nao entra para hoje.
 - `/pedido`: `Caixa Sabores` e fallbacks genericos do catalogo agora usam a mesma composicao oficial em 5 colunas, sem regressao para a arte antiga.
+- `/pedido`: links de catalogo vindos do WhatsApp/Meta com `catalog=S` ou `QUEROBROA-S` agora abrem a montagem da `Caixa Sabores` com caixa customizavel precriada, sem distorcer os calculos das caixas oficiais.
 - `/pedido`: autocomplete de endereco segue no input atual, com sugestoes novas do Google Places e sem warning legado no console.
 - `/pedido`: o menu de sugestoes do endereco agora usa visual simples de caixa de selecao, sem blur/glass effect, para melhorar legibilidade no fluxo publico.
 - `/pedido`: cards de caixas no desktop mantem input e selo de quantidade legiveis lado a lado, sem o bloco `caixas` comprimir ou quebrar em colunas estreitas.
@@ -150,6 +152,9 @@ Ultima atualizacao: 2026-03-20
 
 ## Validacao operacional mais recente
 
+- Data: 2026-03-20
+- Ciclo executado: `pnpm --filter @querobroapp/web lint`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`
+- Resultado: `Caixa Sabores` entrou no feed publico do WhatsApp/Commerce Manager como `QUEROBROA-S`, e o `/pedido` passou a traduzir esse codigo para prefill de caixa customizavel sem mexer na logica de caixas oficiais.
 - Data: 2026-03-20
 - Ciclo executado: `pnpm --filter @querobroapp/api typecheck`, `pnpm --filter @querobroapp/api lint`, `pnpm --filter @querobroapp/api build`, `node --test tests/production-quantity-semantics.test.mjs tests/order-mass-prep-automation.test.mjs tests/order-packaging-grouping.test.mjs tests/production-broa-operational-rules.test.mjs tests/customer-order-delete-status.test.mjs`
 - Resultado: pedidos deixam de aceitar mutacao/exclusao apos baixa fisica de estoque, e o `D+1` passa a refletir corretamente o saldo ja produzido quando uma fornada foi iniciada.

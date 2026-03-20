@@ -44,6 +44,8 @@ export const ORDER_FLAVOR_CODES = ['T', 'G', 'D', 'Q', 'R'] as const;
 export type OrderMistaShortcutCode = (typeof ORDER_MISTA_SHORTCUT_CODES)[number];
 export type OrderFlavorCode = (typeof ORDER_FLAVOR_CODES)[number];
 export const ORDER_BOX_CATALOG_CONTENT_ID_PREFIX = 'QUEROBROA-' as const;
+export const ORDER_CUSTOM_BOX_CATALOG_CODE = 'S' as const;
+export type OrderCatalogPrefillCode = OrderBoxCode | typeof ORDER_CUSTOM_BOX_CATALOG_CODE;
 
 export const ORDER_FLAVOR_OFFICIAL_BOX_NAME_BY_CODE: Record<OrderFlavorCode, string> = {
   T: 'Caixa Tradicional (T)',
@@ -250,7 +252,9 @@ export function buildOrderBoxCatalogContentId(code: OrderBoxCode) {
   return `${ORDER_BOX_CATALOG_CONTENT_ID_PREFIX}${code}`;
 }
 
-export function resolveOrderBoxCodeFromCatalogContentId(value?: string | null): OrderBoxCode | null {
+export function resolveOrderCatalogPrefillCodeFromCatalogContentId(
+  value?: string | null
+): OrderCatalogPrefillCode | null {
   const normalized = String(value || '').trim().toUpperCase();
   if (!normalized) return null;
 
@@ -258,9 +262,18 @@ export function resolveOrderBoxCodeFromCatalogContentId(value?: string | null): 
     ? normalized.slice(ORDER_BOX_CATALOG_CONTENT_ID_PREFIX.length)
     : normalized;
 
+  if (candidate === ORDER_CUSTOM_BOX_CATALOG_CODE) {
+    return ORDER_CUSTOM_BOX_CATALOG_CODE;
+  }
+
   return Object.prototype.hasOwnProperty.call(ORDER_BOX_CATALOG, candidate)
     ? (candidate as OrderBoxCode)
     : null;
+}
+
+export function resolveOrderBoxCodeFromCatalogContentId(value?: string | null): OrderBoxCode | null {
+  const code = resolveOrderCatalogPrefillCodeFromCatalogContentId(value);
+  return code === ORDER_CUSTOM_BOX_CATALOG_CODE ? null : code;
 }
 
 export function parseMetaCheckoutProductsParam(value?: string | null) {
@@ -271,16 +284,24 @@ export function parseMetaCheckoutProductsParam(value?: string | null) {
     },
     {} as Record<OrderBoxCode, number>
   );
+  let customBoxCount = 0;
 
   for (const entry of String(value || '').split(',')) {
     const [rawProductId = '', rawQuantity = ''] = entry.split(':');
-    const code = resolveOrderBoxCodeFromCatalogContentId(rawProductId);
+    const code = resolveOrderCatalogPrefillCodeFromCatalogContentId(rawProductId);
     const quantity = Math.max(Math.floor(Number(rawQuantity) || 0), 0);
     if (!code || quantity <= 0) continue;
+    if (code === ORDER_CUSTOM_BOX_CATALOG_CODE) {
+      customBoxCount += quantity;
+      continue;
+    }
     counts[code] += quantity;
   }
 
-  return counts;
+  return {
+    boxes: counts,
+    customBoxCount
+  };
 }
 
 export const ORDER_BRAND_GALLERY_IMAGES = [

@@ -55,6 +55,17 @@
     "brand": "QUEROBROA"
   },
   {
+    "id": "QUEROBROA-S",
+    "title": "Caixa Sabores",
+    "description": "Monte 1 caixa com 7 broas escolhendo os sabores no pedido.",
+    "availability": "in stock",
+    "condition": "new",
+    "price": "52.00 BRL",
+    "link": "https://querobroa.com.br/pedido?catalog=S",
+    "image_link": "https://querobroa.com.br/querobroa-brand/cardapio/sabores-caixa.jpg?v=fce0ace",
+    "brand": "QUEROBROA"
+  },
+  {
     "id": "QUEROBROA-MG",
     "title": "Caixa Mista Goiabada",
     "description": "1 caixa com 4 broas tradicionais e 3 de goiabada.",

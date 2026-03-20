@@ -15,6 +15,7 @@ import {
   ORDER_BOX_CATALOG,
   ORDER_SABORES_CARD_ART,
   ORDER_BOX_UNITS,
+  ORDER_CUSTOM_BOX_CATALOG_CODE,
   ORDER_FLAVOR_CODES,
   type OrderBoxCode,
   type OrderFlavorCode,
@@ -22,7 +23,7 @@ import {
   deriveFlavorUnitsFromBoxCounts,
   parseMetaCheckoutProductsParam,
   formatOrderFlavorComposition,
-  resolveOrderBoxCodeFromCatalogContentId,
+  resolveOrderCatalogPrefillCodeFromCatalogContentId,
   sumOrderFlavorCounts
 } from '@/features/orders/order-box-catalog';
 import {
@@ -144,18 +145,27 @@ function sanitizeStoredBoxCounts(value: unknown) {
 function buildPrefilledBoxCountsFromSearchParams(source: { get(name: string): string | null }) {
   const next = { ...initialFormState.boxes };
   let hasPrefill = false;
+  let customBoxCount = 0;
 
-  const catalogCode = resolveOrderBoxCodeFromCatalogContentId(source.get('catalog'));
+  const catalogCode = resolveOrderCatalogPrefillCodeFromCatalogContentId(source.get('catalog'));
   if (catalogCode) {
-    next[catalogCode] = '1';
+    if (catalogCode === ORDER_CUSTOM_BOX_CATALOG_CODE) {
+      customBoxCount += 1;
+    } else {
+      next[catalogCode] = '1';
+    }
     hasPrefill = true;
   }
 
-  const metaCheckoutBoxCounts = parseMetaCheckoutProductsParam(source.get('products'));
-  for (const code of Object.keys(metaCheckoutBoxCounts) as BoxCode[]) {
-    const quantity = Math.max(Math.floor(metaCheckoutBoxCounts[code] || 0), 0);
+  const metaCheckoutPrefill = parseMetaCheckoutProductsParam(source.get('products'));
+  for (const code of Object.keys(metaCheckoutPrefill.boxes) as BoxCode[]) {
+    const quantity = Math.max(Math.floor(metaCheckoutPrefill.boxes[code] || 0), 0);
     if (quantity <= 0) continue;
     next[code] = String(quantity);
+    hasPrefill = true;
+  }
+  customBoxCount += Math.max(Math.floor(metaCheckoutPrefill.customBoxCount || 0), 0);
+  if (metaCheckoutPrefill.customBoxCount > 0) {
     hasPrefill = true;
   }
 
@@ -164,6 +174,7 @@ function buildPrefilledBoxCountsFromSearchParams(source: { get(name: string): st
 
   return {
     boxes: next,
+    customBoxCount,
     couponCode: couponCode || null
   };
 }
@@ -503,7 +514,7 @@ export function PublicOrderPage() {
 
     urlPrefillSignatureRef.current = signature;
     setDraftSessionId(createPublicOrderDraftSessionId());
-    setCustomBoxes([]);
+    setCustomBoxes(Array.from({ length: prefill.customBoxCount }, () => createEmptyCustomBoxDraft()));
     setError(null);
     setDeliveryQuote(null);
     setDeliveryQuoteError(null);

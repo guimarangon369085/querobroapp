@@ -50,6 +50,14 @@ const items = [
     imagePath: '/querobroa-brand/cardapio/requeijao-de-corte.jpg'
   },
   {
+    id: 'QUEROBROA-S',
+    code: 'S',
+    title: 'Caixa Sabores',
+    description: 'Monte 1 caixa com 7 broas escolhendo os sabores no pedido.',
+    price: '52.00 BRL',
+    imagePath: '/querobroa-brand/cardapio/sabores-caixa.jpg'
+  },
+  {
     id: 'QUEROBROA-MG',
     code: 'MG',
     title: 'Caixa Mista Goiabada',
