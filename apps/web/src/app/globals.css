@@ -3204,6 +3204,18 @@ input[type='radio'] {
   overflow: hidden;
 }
 
+.orders-calendar-chip,
+.orders-calendar-chip *,
+.orders-day-grid__event,
+.orders-day-grid__event *,
+.orders-day-timeline__event,
+.orders-day-timeline__event *,
+.orders-week-grid__event,
+.orders-week-grid__event * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 .orders-calendar-chip__dot {
   width: 8px;
   height: 8px;
@@ -3652,6 +3664,8 @@ input[type='radio'] {
   text-align: left;
   overflow: hidden;
   cursor: pointer;
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
   touch-action: manipulation;
 }
 

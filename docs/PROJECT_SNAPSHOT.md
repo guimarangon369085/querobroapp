@@ -98,6 +98,7 @@ Ultima atualizacao: 2026-03-20
 - `/pedidos`: modal `Novo pedido` agora se comporta melhor em mobile, sem deformar popup ou quebrar o bloco de quantidade.
 - `/pedidos`: mobile sem CTA flutuante no canto; a acao principal fica inline no proprio painel da agenda.
 - `/pedidos`: no mobile, long-press em cards e controles operacionais nao aciona mais menu/contexto nativo que atrapalhava o drag no calendario; inputs seguem com comportamento normal de selecao/edicao.
+- `/pedidos`: o drag de eventos no calendario agora tambem bloqueia selecao de texto nos proprios cards e labels durante o gesto, evitando highlight azul acompanhar o arraste no mobile.
 - `/pedidos` e a conclusao publica agora traduzem pagamento quitado como `PIX recebido`, sem alterar o status interno `PAGO` no backend.
 - `/clientes`: cadastro e edicao rapida.
 - `/clientes`: autocomplete de endereco agora usa a API nova do Google Places e continua promovendo rua, bairro, cidade e UF ao selecionar a sugestao.
