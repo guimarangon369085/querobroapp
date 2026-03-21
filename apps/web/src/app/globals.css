@@ -1028,6 +1028,18 @@ section {
     );
 }
 
+.stock-page .mass-prep-stock-grid {
+  gap: 8px;
+}
+
+.stock-page .mass-prep-stock-card {
+  padding: 9px 11px;
+}
+
+.stock-page .app-panel__expand-inner {
+  gap: 8px;
+}
+
 .stock-alert-card {
   margin-top: 10px;
   border-radius: 20px;

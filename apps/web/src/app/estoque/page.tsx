@@ -1081,12 +1081,12 @@ function StockPageContent() {
   return (
     <>
       <BuilderLayoutProvider page="estoque">
-        <section className="grid gap-8">
+        <section className="stock-page grid gap-6">
           <BuilderLayoutItemSlot
             id="ops"
             className={isSpotlightSlot('ops') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
           >
-            <div className="app-panel grid gap-5">
+            <div className="app-panel grid gap-4">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="grid gap-1">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
@@ -1129,8 +1129,8 @@ function StockPageContent() {
                 </div>
               ) : null}
 
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-2xl border border-white/70 bg-white/75 p-4">
+              <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-2xl border border-white/70 bg-white/75 p-3 md:p-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
                     Massa pronta
                   </p>
@@ -1141,7 +1141,7 @@ function StockPageContent() {
                     {formatQty(massSummary.broasAvailable)} broa(s) disponiveis agora
                   </p>
                 </div>
-                <div className="rounded-2xl border border-white/70 bg-white/75 p-4">
+                <div className="rounded-2xl border border-white/70 bg-white/75 p-3 md:p-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
                     Potencial total
                   </p>
@@ -1152,7 +1152,7 @@ function StockPageContent() {
                     {formatQty(massSummary.totalPotentialBroas)} broa(s) somando massa pronta e ingredientes
                   </p>
                 </div>
-                <div className="rounded-2xl border border-white/70 bg-white/75 p-4">
+                <div className="rounded-2xl border border-white/70 bg-white/75 p-3 md:p-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
                     Alertas D+1
                   </p>
@@ -1163,7 +1163,7 @@ function StockPageContent() {
                     {impactedOrdersCount} pedido(s) com alerta de ficha tecnica
                   </p>
                 </div>
-                <div className="rounded-2xl border border-white/70 bg-white/75 p-4">
+                <div className="rounded-2xl border border-white/70 bg-white/75 p-3 md:p-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
                     Catalogo ativo
                   </p>
@@ -1251,7 +1251,7 @@ function StockPageContent() {
           </BuilderLayoutItemSlot>
 
           <BuilderLayoutItemSlot id="movements">
-            <div className="app-panel grid gap-4">
+            <div className="app-panel grid gap-3">
               <details className="app-details" open={!isOperationMode}>
                 <summary>Historico de movimentacoes</summary>
                 <div className="mt-3 grid gap-3">
@@ -1299,11 +1299,11 @@ function StockPageContent() {
             className={isSpotlightSlot('bom') ? 'app-spotlight-slot app-spotlight-slot--active' : 'app-spotlight-slot'}
           >
             <details ref={technicalCatalogDetailsRef} className="app-details" open={!isOperationMode}>
-              <summary>6. Catalogo tecnico</summary>
-              <div className="app-panel mt-3 grid gap-4">
+              <summary>Catálogo Técnico</summary>
+              <div className="app-panel mt-2 grid gap-3">
                 <div
                   ref={bomSectionRef}
-                  className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-white/70 bg-white/75 px-4 py-4"
+                  className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-white/70 bg-white/75 px-4 py-3"
                 >
                   <div className="grid gap-1">
                     <h3 className="text-lg font-semibold text-neutral-900">Produtos e ficha basica</h3>
@@ -1351,7 +1351,7 @@ function StockPageContent() {
                   </div>
                 </div>
 
-                <div className="grid gap-3">
+                <div className="grid gap-2">
                   {visibleTechnicalCatalogEntries.length === 0 ? (
                     <div className="rounded-2xl border border-dashed border-white/70 bg-white/65 px-4 py-6 text-sm text-neutral-500">
                       {products.length === 0
@@ -1364,7 +1364,7 @@ function StockPageContent() {
                     visibleTechnicalCatalogEntries.map(({ product, bom }) => (
                       <details key={product.id} className="app-details">
                         <summary>{product.name}</summary>
-                        <div className="mt-3 grid gap-3">
+                        <div className="mt-2 grid gap-2">
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <div className="flex flex-wrap gap-2 text-xs">
                               <span
@@ -1420,7 +1420,7 @@ function StockPageContent() {
                               {(bom.items || []).map((item) => (
                                 <div
                                   key={item.id}
-                                  className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/70 bg-white/70 px-4 py-3"
+                                  className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/70 bg-white/70 px-3 py-2"
                                 >
                                   <p className="font-medium text-neutral-800">
                                     {item.item?.name || `Item ${item.itemId}`}
@@ -1441,7 +1441,7 @@ function StockPageContent() {
                 {showProductEditor || !isOperationMode ? (
                   <details ref={productCatalogDetailsRef} className="app-details" open>
                     <summary>{editingProductId ? 'Editar produto' : 'Novo produto'}</summary>
-                    <form className="mt-3 grid gap-3 rounded-2xl border border-white/70 bg-white/75 p-4" onSubmit={saveProduct}>
+                    <form className="mt-2 grid gap-3 rounded-2xl border border-white/70 bg-white/75 p-3" onSubmit={saveProduct}>
                       <input
                         className="app-input"
                         placeholder="Nome do produto"
@@ -1483,7 +1483,7 @@ function StockPageContent() {
                 {showBomEditor || !isOperationMode ? (
                   <details ref={bomCatalogDetailsRef} className="app-details" open>
                     <summary>{editingBomId ? 'Editar ficha tecnica' : 'Nova ficha tecnica'}</summary>
-                    <div className="mt-3 grid gap-4 rounded-2xl border border-white/70 bg-white/75 p-4">
+                    <div className="mt-2 grid gap-3 rounded-2xl border border-white/70 bg-white/75 p-3">
                       <select
                         className="app-select"
                         value={bomProductId}
@@ -1600,9 +1600,9 @@ function StockPageContent() {
                     open={!isOperationMode}
                   >
                   <summary>Insumos e custos de compra</summary>
-                  <div className="mt-3 grid gap-4">
+                  <div className="mt-2 grid gap-3">
                     <BuilderLayoutItemSlot id="packaging">
-                      <div className="grid gap-4 rounded-2xl border border-white/70 bg-white/75 p-4">
+                      <div className="grid gap-3 rounded-2xl border border-white/70 bg-white/75 p-3">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="grid gap-1">
                             <h4 className="text-base font-semibold text-neutral-900">Preco de compra</h4>
@@ -1682,8 +1682,8 @@ function StockPageContent() {
                     </BuilderLayoutItemSlot>
 
                     <BuilderLayoutItemSlot id="balance">
-                      <div className="grid gap-3">
-                        <div className="rounded-2xl border border-white/70 bg-white/60 px-4 py-3 text-sm text-neutral-600">
+                      <div className="grid gap-2">
+                        <div className="rounded-2xl border border-white/70 bg-white/60 px-3 py-2 text-sm text-neutral-600">
                           Base completa de insumos e embalagens. Use so para manutencao.
                         </div>
                         {items.map((item) => {
