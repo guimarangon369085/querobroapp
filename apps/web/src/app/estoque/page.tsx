@@ -12,6 +12,7 @@ import {
 import type {
   Bom,
   BomItem as CatalogBomItem,
+  InventoryItem,
   InventoryMovement,
   InventoryMassSummary,
   InventoryOverviewItem,
@@ -49,6 +50,20 @@ const EMPTY_PRODUCT_FORM: Pick<Product, 'name' | 'category' | 'unit' | 'active'>
   category: 'Sabores',
   unit: 'unidade',
   active: true
+};
+
+type IngredientFormState = {
+  name: string;
+  unit: string;
+  purchasePackSize: string;
+  purchasePackCost: string;
+};
+
+const EMPTY_INGREDIENT_FORM: IngredientFormState = {
+  name: '',
+  unit: 'g',
+  purchasePackSize: '1000',
+  purchasePackCost: '0,00'
 };
 
 const OFFICIAL_BROA_ORDER_BY_NAME = new Map(
@@ -247,8 +262,11 @@ function StockPageContent() {
   const [movements, setMovements] = useState<InventoryMovement[]>([]);
   const [boms, setBoms] = useState<BomCatalogRecord[]>([]);
   const [editingItemId, setEditingItemId] = useState<number | ''>('');
+  const [showIngredientEditor, setShowIngredientEditor] = useState(false);
   const [packSize, setPackSize] = useState<string>('0');
   const [packCost, setPackCost] = useState<string>('0');
+  const [ingredientForm, setIngredientForm] = useState<IngredientFormState>(EMPTY_INGREDIENT_FORM);
+  const [isCreatingIngredient, setIsCreatingIngredient] = useState(false);
   const [editingProductId, setEditingProductId] = useState<number | null>(null);
   const [showProductEditor, setShowProductEditor] = useState(false);
   const [productForm, setProductForm] = useState<Pick<Product, 'name' | 'category' | 'unit' | 'active'>>(
@@ -494,9 +512,77 @@ function StockPageContent() {
   };
 
   const startEditItem = (item: InventoryOverviewItem) => {
+    if (technicalCatalogDetailsRef.current) technicalCatalogDetailsRef.current.open = true;
+    if (inventoryItemsDetailsRef.current) inventoryItemsDetailsRef.current.open = true;
+    setShowIngredientEditor(true);
     setEditingItemId(item.id!);
     setPackSize(String(item.purchasePackSize ?? 0));
     setPackCost(String(item.purchasePackCost ?? 0));
+  };
+
+  const resetIngredientEditor = useCallback(() => {
+    setShowIngredientEditor(false);
+    setEditingItemId('');
+    setPackSize('0');
+    setPackCost('0');
+    setIngredientForm(EMPTY_INGREDIENT_FORM);
+  }, []);
+
+  const createIngredient = async (event?: FormEvent) => {
+    event?.preventDefault();
+    if (isCreatingIngredient) return;
+
+    if (!ingredientForm.name || ingredientForm.name.trim().length < 2) {
+      notifyError('Informe um nome valido para o ingrediente.');
+      return;
+    }
+
+    if (!ingredientForm.unit || ingredientForm.unit.trim().length < 1) {
+      notifyError('Informe a unidade do ingrediente.');
+      return;
+    }
+
+    const parsedPackSize = parseRequiredNumber(ingredientForm.purchasePackSize, 'Tamanho do pacote');
+    if (parsedPackSize === null) return;
+    if (parsedPackSize <= 0) {
+      notifyError('Tamanho do pacote deve ser maior que zero.');
+      return;
+    }
+
+    const parsedPackCost = parseRequiredNumber(ingredientForm.purchasePackCost, 'Custo de compra');
+    if (parsedPackCost === null) return;
+
+    setIsCreatingIngredient(true);
+    try {
+      const createdItem = await apiFetch<InventoryItem>('/inventory-items', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: ingredientForm.name.trim(),
+          category: 'INGREDIENTE',
+          unit: ingredientForm.unit.trim(),
+          purchasePackSize: parsedPackSize,
+          purchasePackCost: parsedPackCost
+        })
+      });
+
+      if (technicalCatalogDetailsRef.current) technicalCatalogDetailsRef.current.open = true;
+      if (inventoryItemsDetailsRef.current) inventoryItemsDetailsRef.current.open = true;
+      setShowIngredientEditor(true);
+      setEditingItemId(createdItem.id ?? '');
+      setPackSize(String(createdItem.purchasePackSize ?? parsedPackSize));
+      setPackCost(String(createdItem.purchasePackCost ?? parsedPackCost));
+      setIngredientForm(EMPTY_INGREDIENT_FORM);
+      await load();
+      notifySuccess('Ingrediente criado e ja disponivel nas fichas tecnicas.');
+      scrollToLayoutSlot('packaging', {
+        focus: true,
+        focusSelector: 'input, select, textarea, button'
+      });
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel criar o ingrediente.');
+    } finally {
+      setIsCreatingIngredient(false);
+    }
   };
 
   const updateItem = async () => {
@@ -637,7 +723,11 @@ function StockPageContent() {
 
       resetProductForm();
       await load();
-      notifySuccess(editingProductId ? 'Produto atualizado dentro do Estoque.' : 'Produto criado dentro do Estoque.');
+      notifySuccess(
+        editingProductId
+          ? 'Produto atualizado dentro do Estoque.'
+          : 'Produto criado com a ficha base da Broa Tradicional.'
+      );
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Nao foi possivel salvar o produto.');
     }
@@ -760,8 +850,11 @@ function StockPageContent() {
         bomCatalogDetailsRef.current.open = true;
       }
     }
-    if (section === 'items' && inventoryItemsDetailsRef.current) {
-      inventoryItemsDetailsRef.current.open = true;
+    if (section === 'items') {
+      setShowIngredientEditor(true);
+      if (inventoryItemsDetailsRef.current) {
+        inventoryItemsDetailsRef.current.open = true;
+      }
     }
 
     const slotId = section === 'items' ? 'packaging' : 'bom';
@@ -1354,6 +1447,13 @@ function StockPageContent() {
                     >
                       Novo produto
                     </button>
+                    <button
+                      type="button"
+                      className="app-button app-button-ghost"
+                      onClick={() => openTechnicalCatalog('items')}
+                    >
+                      Novo ingrediente
+                    </button>
                     {inactiveProducts.length > 0 ? (
                       <button
                         type="button"
@@ -1459,6 +1559,9 @@ function StockPageContent() {
                   <details ref={productCatalogDetailsRef} className="app-details" open>
                     <summary>{editingProductId ? 'Editar produto' : 'Novo produto'}</summary>
                     <form className="mt-2 grid gap-3 rounded-2xl border border-white/70 bg-white/75 p-3" onSubmit={saveProduct}>
+                      <p className="text-sm text-neutral-600">
+                        Todo produto novo ja nasce com a ficha tecnica da Broa Tradicional para voce ajustar so o que mudar.
+                      </p>
                       <input
                         className="app-input"
                         placeholder="Nome do produto"
@@ -1610,157 +1713,254 @@ function StockPageContent() {
                   </details>
                 ) : null}
 
-                {!isOperationMode ? (
+                {showIngredientEditor || !isOperationMode ? (
                   <details
                     ref={inventoryItemsDetailsRef}
                     className="app-details"
-                    open={!isOperationMode}
+                    open={showIngredientEditor || !isOperationMode}
                   >
-                  <summary>Insumos e custos de compra</summary>
-                  <div className="mt-2 grid gap-3">
-                    <BuilderLayoutItemSlot id="packaging">
-                      <div className="grid gap-3 rounded-2xl border border-white/70 bg-white/75 p-3">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="grid gap-1">
-                            <h4 className="text-base font-semibold text-neutral-900">Preco de compra</h4>
-                            <p className="text-sm text-neutral-600">Use o botao para atualizar pelos links da planilha.</p>
-                          </div>
-                          <button
-                            type="button"
-                            className="app-button app-button-ghost"
-                            onClick={refreshPurchaseCosts}
-                            disabled={isRefreshingPurchaseCosts}
+                    <summary>Insumos e custos de compra</summary>
+                    <div className="mt-2 grid gap-3">
+                      <BuilderLayoutItemSlot id="packaging">
+                        <div className="grid gap-3">
+                          <form
+                            className="grid gap-3 rounded-2xl border border-white/70 bg-white/75 p-3"
+                            onSubmit={createIngredient}
                           >
-                            {isRefreshingPurchaseCosts ? 'Atualizando...' : 'Atualizar precos online'}
-                          </button>
-                        </div>
-                        {purchaseCostRefreshResponse ? (
-                          <div className="rounded-2xl border border-white/70 bg-white/70 px-3 py-3 text-sm text-neutral-700">
-                            <p>
-                              {purchaseCostRefreshResponse.totals.updatedSourceCount} online •{' '}
-                              {purchaseCostRefreshResponse.totals.fallbackSourceCount} manual •{' '}
-                              {purchaseCostRefreshResponse.totals.updatedItemCount} item(ns) atualizado(s)
-                            </p>
-                            {purchaseCostRefreshResponse.results.some((entry) => entry.status !== 'UPDATED') ? (
-                              <div className="mt-2 grid gap-1 text-xs text-neutral-600">
-                                {purchaseCostRefreshResponse.results
-                                  .filter((entry) => entry.status !== 'UPDATED')
-                                  .map((entry) => (
-                                    <p key={`${entry.canonicalName}-${entry.status}`}>
-                                      {entry.canonicalName}: {entry.status === 'FALLBACK' ? 'valor manual' : 'sem item'}.
-                                    </p>
-                                  ))}
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div className="grid gap-1">
+                                <h4 className="text-base font-semibold text-neutral-900">Novo ingrediente</h4>
+                                <p className="text-sm text-neutral-600">
+                                  Tudo que voce cadastrar aqui entra imediatamente na lista usada pelas fichas tecnicas.
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                className="app-button app-button-ghost"
+                                onClick={resetIngredientEditor}
+                              >
+                                Fechar
+                              </button>
+                            </div>
+                            <div className="grid gap-3 md:grid-cols-2">
+                              <input
+                                className="app-input"
+                                placeholder="Nome do ingrediente"
+                                value={ingredientForm.name}
+                                onChange={(event) =>
+                                  setIngredientForm((current) => ({ ...current, name: event.target.value }))
+                                }
+                              />
+                              <input
+                                className="app-input"
+                                placeholder="Unidade (g, ml, uni)"
+                                value={ingredientForm.unit}
+                                onChange={(event) =>
+                                  setIngredientForm((current) => ({ ...current, unit: event.target.value }))
+                                }
+                              />
+                              <input
+                                className="app-input"
+                                inputMode="decimal"
+                                placeholder="Tamanho do pacote"
+                                value={ingredientForm.purchasePackSize}
+                                onChange={(event) =>
+                                  setIngredientForm((current) => ({
+                                    ...current,
+                                    purchasePackSize: event.target.value
+                                  }))
+                                }
+                                onBlur={() =>
+                                  setIngredientForm((current) => ({
+                                    ...current,
+                                    purchasePackSize:
+                                      formatDecimalInputBR(current.purchasePackSize, {
+                                        maxFractionDigits: 4
+                                      }) || '0'
+                                  }))
+                                }
+                              />
+                              <input
+                                className="app-input"
+                                inputMode="decimal"
+                                placeholder="Custo de compra (R$)"
+                                value={ingredientForm.purchasePackCost}
+                                onChange={(event) =>
+                                  setIngredientForm((current) => ({
+                                    ...current,
+                                    purchasePackCost: event.target.value
+                                  }))
+                                }
+                                onBlur={() =>
+                                  setIngredientForm((current) => ({
+                                    ...current,
+                                    purchasePackCost:
+                                      formatMoneyInputBR(current.purchasePackCost || '0') || '0,00'
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="app-form-actions app-form-actions--mobile-sticky">
+                              <button type="button" className="app-button app-button-ghost" onClick={resetIngredientEditor}>
+                                Cancelar
+                              </button>
+                              <button
+                                type="submit"
+                                className="app-button app-button-primary"
+                                disabled={isCreatingIngredient}
+                              >
+                                {isCreatingIngredient ? 'Criando...' : 'Criar ingrediente'}
+                              </button>
+                            </div>
+                          </form>
+
+                          <div className="grid gap-3 rounded-2xl border border-white/70 bg-white/75 p-3">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div className="grid gap-1">
+                                <h4 className="text-base font-semibold text-neutral-900">Preco de compra</h4>
+                                <p className="text-sm text-neutral-600">
+                                  Use o botao para atualizar pelos links da planilha.
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                className="app-button app-button-ghost"
+                                onClick={refreshPurchaseCosts}
+                                disabled={isRefreshingPurchaseCosts}
+                              >
+                                {isRefreshingPurchaseCosts ? 'Atualizando...' : 'Atualizar precos online'}
+                              </button>
+                            </div>
+                            {purchaseCostRefreshResponse ? (
+                              <div className="rounded-2xl border border-white/70 bg-white/70 px-3 py-3 text-sm text-neutral-700">
+                                <p>
+                                  {purchaseCostRefreshResponse.totals.updatedSourceCount} online •{' '}
+                                  {purchaseCostRefreshResponse.totals.fallbackSourceCount} manual •{' '}
+                                  {purchaseCostRefreshResponse.totals.updatedItemCount} item(ns) atualizado(s)
+                                </p>
+                                {purchaseCostRefreshResponse.results.some((entry) => entry.status !== 'UPDATED') ? (
+                                  <div className="mt-2 grid gap-1 text-xs text-neutral-600">
+                                    {purchaseCostRefreshResponse.results
+                                      .filter((entry) => entry.status !== 'UPDATED')
+                                      .map((entry) => (
+                                        <p key={`${entry.canonicalName}-${entry.status}`}>
+                                          {entry.canonicalName}: {entry.status === 'FALLBACK' ? 'valor manual' : 'sem item'}.
+                                        </p>
+                                      ))}
+                                  </div>
+                                ) : null}
                               </div>
                             ) : null}
+                            <div className="grid gap-3 md:grid-cols-3">
+                              <select
+                                className="app-select"
+                                value={editingItemId}
+                                onChange={(e) => {
+                                  const selectedId = e.target.value ? Number(e.target.value) : '';
+                                  if (selectedId === '') {
+                                    setEditingItemId('');
+                                    return;
+                                  }
+                                  const item = items.find((entry) => entry.id === selectedId);
+                                  if (item) startEditItem(item);
+                                }}
+                              >
+                                <option value="">Item</option>
+                                {items.map((item) => (
+                                  <option key={item.id} value={item.id}>
+                                    {item.name}
+                                  </option>
+                                ))}
+                              </select>
+                              <input
+                                className="app-input"
+                                placeholder="Tamanho embalagem"
+                                value={packSize}
+                                onChange={(e) => setPackSize(e.target.value)}
+                                onBlur={() =>
+                                  setPackSize(formatDecimalInputBR(packSize, { maxFractionDigits: 4 }) || '0')
+                                }
+                              />
+                              <input
+                                className="app-input"
+                                placeholder="Custo embalagem (R$)"
+                                value={packCost}
+                                onChange={(e) => setPackCost(e.target.value)}
+                                onBlur={() => setPackCost(formatMoneyInputBR(packCost || '0') || '0,00')}
+                              />
+                            </div>
+                            <div className="app-form-actions app-form-actions--mobile-sticky">
+                              <button className="app-button app-button-primary" onClick={updateItem}>
+                                Salvar preco manual
+                              </button>
+                            </div>
                           </div>
-                        ) : null}
-                        <div className="grid gap-3 md:grid-cols-3">
-                          <select
-                            className="app-select"
-                            value={editingItemId}
-                            onChange={(e) => {
-                              const selectedId = e.target.value ? Number(e.target.value) : '';
-                              if (selectedId === '') {
-                                setEditingItemId('');
-                                return;
-                              }
-                              const item = items.find((entry) => entry.id === selectedId);
-                              if (item) startEditItem(item);
-                            }}
-                          >
-                            <option value="">Item</option>
-                            {items.map((item) => (
-                              <option key={item.id} value={item.id}>
-                                {item.name}
-                              </option>
-                            ))}
-                          </select>
-                          <input
-                            className="app-input"
-                            placeholder="Tamanho embalagem"
-                            value={packSize}
-                            onChange={(e) => setPackSize(e.target.value)}
-                            onBlur={() => setPackSize(formatDecimalInputBR(packSize, { maxFractionDigits: 4 }) || '0')}
-                          />
-                          <input
-                            className="app-input"
-                            placeholder="Custo embalagem (R$)"
-                            value={packCost}
-                            onChange={(e) => setPackCost(e.target.value)}
-                            onBlur={() => setPackCost(formatMoneyInputBR(packCost || '0') || '0,00')}
-                          />
                         </div>
-                        <div className="app-form-actions app-form-actions--mobile-sticky">
-                          <button className="app-button app-button-primary" onClick={updateItem}>
-                            Salvar preco manual
-                          </button>
-                        </div>
-                      </div>
-                    </BuilderLayoutItemSlot>
+                      </BuilderLayoutItemSlot>
 
-                    <BuilderLayoutItemSlot id="balance">
-                      <div className="grid gap-2">
-                        <div className="rounded-2xl border border-white/70 bg-white/60 px-3 py-2 text-sm text-neutral-600">
-                          Base completa de insumos e embalagens. Use so para manutencao.
-                        </div>
-                        {items.map((item) => {
-                          const isExpanded = editingItemId === item.id;
-                          return (
-                            <div
-                              key={item.id}
-                              className={`app-panel app-panel--expandable ${
-                                isExpanded ? 'app-panel--expanded' : ''
-                              }`}
-                            >
-                              <div className="flex flex-wrap items-center justify-between gap-2">
-                                <button
-                                  type="button"
-                                  className="min-w-0 flex-1 text-left"
-                                  onClick={() => startEditItem(item)}
-                                >
-                                  <div className="flex items-center gap-3">
-                                    <p className="truncate font-semibold">{item.name}</p>
-                                    <span className="app-panel__chevron" aria-hidden="true" />
-                                  </div>
-                                  <p className="mt-1 text-sm text-neutral-500">
-                                    {inventoryCategoryLabel(item.category)} • {formatQty(item.balance || 0)} {item.unit}
-                                  </p>
-                                </button>
-                                <button
-                                  type="button"
-                                  className="app-button app-button-danger"
-                                  onClick={() => {
-                                    void removeItem(item.id!);
-                                  }}
-                                >
-                                  Remover
-                                </button>
-                              </div>
-                              <div className="app-panel__expand" aria-hidden={!isExpanded}>
-                                <div className="app-panel__expand-inner">
-                                  <div className="app-panel__expand-surface grid gap-2 text-sm text-neutral-600">
-                                    <p>Custo unitario: R$ {(unitCostMap.get(item.id!) ?? 0).toFixed(4)}</p>
-                                    <p>
-                                      Pack:{' '}
-                                      {item.purchasePackSize && item.purchasePackSize > 0
-                                        ? `${formatQty(item.purchasePackSize)} ${item.unit}`
-                                        : 'nao definido'}
+                      <BuilderLayoutItemSlot id="balance">
+                        <div className="grid gap-2">
+                          <div className="rounded-2xl border border-white/70 bg-white/60 px-3 py-2 text-sm text-neutral-600">
+                            Base completa de insumos e embalagens. Use so para manutencao.
+                          </div>
+                          {items.map((item) => {
+                            const isExpanded = editingItemId === item.id;
+                            return (
+                              <div
+                                key={item.id}
+                                className={`app-panel app-panel--expandable ${
+                                  isExpanded ? 'app-panel--expanded' : ''
+                                }`}
+                              >
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <button
+                                    type="button"
+                                    className="min-w-0 flex-1 text-left"
+                                    onClick={() => startEditItem(item)}
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <p className="truncate font-semibold">{item.name}</p>
+                                      <span className="app-panel__chevron" aria-hidden="true" />
+                                    </div>
+                                    <p className="mt-1 text-sm text-neutral-500">
+                                      {inventoryCategoryLabel(item.category)} • {formatQty(item.balance || 0)} {item.unit}
                                     </p>
-                                    <p>
-                                      Custo pack:{' '}
-                                      {item.purchasePackCost && item.purchasePackCost > 0
-                                        ? formatCurrencyBR(item.purchasePackCost)
-                                        : 'nao definido'}
-                                    </p>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="app-button app-button-danger"
+                                    onClick={() => {
+                                      void removeItem(item.id!);
+                                    }}
+                                  >
+                                    Remover
+                                  </button>
+                                </div>
+                                <div className="app-panel__expand" aria-hidden={!isExpanded}>
+                                  <div className="app-panel__expand-inner">
+                                    <div className="app-panel__expand-surface grid gap-2 text-sm text-neutral-600">
+                                      <p>Custo unitario: R$ {(unitCostMap.get(item.id!) ?? 0).toFixed(4)}</p>
+                                      <p>
+                                        Pack:{' '}
+                                        {item.purchasePackSize && item.purchasePackSize > 0
+                                          ? `${formatQty(item.purchasePackSize)} ${item.unit}`
+                                          : 'nao definido'}
+                                      </p>
+                                      <p>
+                                        Custo pack:{' '}
+                                        {item.purchasePackCost && item.purchasePackCost > 0
+                                          ? formatCurrencyBR(item.purchasePackCost)
+                                          : 'nao definido'}
+                                      </p>
+                                    </div>
                                   </div>
                                 </div>
                               </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </BuilderLayoutItemSlot>
-                  </div>
+                            );
+                          })}
+                        </div>
+                      </BuilderLayoutItemSlot>
+                    </div>
                   </details>
                 ) : null}
               </div>

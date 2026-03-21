@@ -3,10 +3,52 @@ import type { Prisma } from '@prisma/client';
 import { ProductSchema } from '@querobroapp/shared';
 import { normalizeMoney, normalizeText, normalizeTitle } from '../../common/normalize.js';
 import { PrismaService } from '../../prisma.service.js';
+import { normalizeInventoryLookup } from './inventory-formulas.js';
+
+const TRADITIONAL_BROA_TEMPLATE_KEY = normalizeInventoryLookup('Broa Tradicional');
 
 @Injectable()
 export class InventoryProductsService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  private isTraditionalBroaTemplateName(value: string | null | undefined) {
+    if (!value) return false;
+    return normalizeInventoryLookup(value).startsWith(TRADITIONAL_BROA_TEMPLATE_KEY);
+  }
+
+  private async findTraditionalBroaTemplateBom(tx: Prisma.TransactionClient) {
+    const activeCandidates = await tx.bom.findMany({
+      include: {
+        items: true,
+        product: true
+      },
+      where: {
+        product: {
+          active: true
+        }
+      },
+      orderBy: { id: 'desc' }
+    });
+
+    const activeTemplate = activeCandidates.find((candidate) =>
+      this.isTraditionalBroaTemplateName(candidate.product?.name || candidate.name)
+    );
+    if (activeTemplate) return activeTemplate;
+
+    const fallbackCandidates = await tx.bom.findMany({
+      include: {
+        items: true,
+        product: true
+      },
+      orderBy: { id: 'desc' }
+    });
+
+    return (
+      fallbackCandidates.find((candidate) =>
+        this.isTraditionalBroaTemplateName(candidate.product?.name || candidate.name)
+      ) || null
+    );
+  }
 
   private async ensureDefaultBom(
     tx: Prisma.TransactionClient,
@@ -18,12 +60,24 @@ export class InventoryProductsService {
     });
     if (existing) return existing;
 
+    const template = await this.findTraditionalBroaTemplateBom(tx);
+
     return tx.bom.create({
       data: {
         productId: product.id,
         name: product.name,
-        saleUnitLabel: product.unit,
-        yieldUnits: null
+        saleUnitLabel: template?.saleUnitLabel ?? product.unit,
+        yieldUnits: template?.yieldUnits ?? null,
+        items: template?.items?.length
+          ? {
+              create: template.items.map((item) => ({
+                itemId: item.itemId,
+                qtyPerRecipe: item.qtyPerRecipe ?? null,
+                qtyPerSaleUnit: item.qtyPerSaleUnit ?? null,
+                qtyPerUnit: item.qtyPerUnit ?? null
+              }))
+            }
+          : undefined
       }
     });
   }
