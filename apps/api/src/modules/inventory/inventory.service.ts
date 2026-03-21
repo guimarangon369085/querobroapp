@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service.js';
-import { InventoryCategoryEnum, StockMovementTypeEnum } from '@querobroapp/shared';
+import { InventoryCategoryEnum, resolveDisplayNumber, StockMovementTypeEnum } from '@querobroapp/shared';
 import { parseLocaleNumber } from '../../common/normalize.js';
 import { parseWithSchema } from '../../common/validation.js';
 import { z } from 'zod';
@@ -126,6 +126,21 @@ type PrepareMassReadyResponse = {
 @Injectable()
 export class InventoryService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  private attachOrderDisplayNumber<
+    T extends {
+      orderId: number | null;
+      order?: {
+        id?: number | null;
+        publicNumber?: number | null;
+      } | null;
+    }
+  >(movement: T) {
+    return {
+      ...movement,
+      orderDisplayNumber: resolveDisplayNumber(movement.order) ?? movement.orderId ?? null
+    };
+  }
 
   private toQty(value: number) {
     if (!Number.isFinite(value)) return 0;
@@ -427,9 +442,17 @@ export class InventoryService {
 
   listMovements() {
     return this.prisma.inventoryMovement.findMany({
-      include: { item: true },
+      include: {
+        item: true,
+        order: {
+          select: {
+            id: true,
+            publicNumber: true
+          }
+        }
+      },
       orderBy: { id: 'desc' }
-    });
+    }).then((movements) => movements.map((movement) => this.attachOrderDisplayNumber(movement)));
   }
 
   async refreshPurchaseCosts() {
@@ -520,7 +543,20 @@ export class InventoryService {
       if (!order) throw new NotFoundException('Pedido nao encontrado');
     }
 
-    return this.prisma.inventoryMovement.create({ data });
+    return this.prisma.inventoryMovement
+      .create({
+        data,
+        include: {
+          item: true,
+          order: {
+            select: {
+              id: true,
+              publicNumber: true
+            }
+          }
+        }
+      })
+      .then((movement) => this.attachOrderDisplayNumber(movement));
   }
 
   async adjustEffectiveBalance(id: number, payload: unknown) {

@@ -335,6 +335,7 @@ test(
     );
     assert.ok(massReadyConsumptionMovement, 'Consumo de MASSA PRONTA do pedido nao encontrado');
     assert.ok(Math.abs(Number(massReadyConsumptionMovement.quantity) - 1 / 3) <= 0.0001);
+    assert.equal(massReadyConsumptionMovement.orderDisplayNumber, order.publicNumber ?? order.id);
 
     const fillingMovement = orderMovementsAfterCreate.find(
       (movement) =>

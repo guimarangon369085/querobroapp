@@ -63,6 +63,23 @@ function movementTypeLabel(value: string) {
   return movementTypeOptions.find((entry) => entry.value === value)?.label || value;
 }
 
+function movementOrderLabel(movement: Pick<InventoryMovement, 'orderDisplayNumber' | 'orderId'>) {
+  const orderNumber =
+    (typeof movement.orderDisplayNumber === 'number' && movement.orderDisplayNumber > 0
+      ? movement.orderDisplayNumber
+      : null) ??
+    (typeof movement.orderId === 'number' && movement.orderId > 0 ? movement.orderId : null);
+  return orderNumber ? `Pedido #${orderNumber}` : null;
+}
+
+function formatMovementReason(movement: Pick<InventoryMovement, 'reason' | 'orderDisplayNumber' | 'orderId'>) {
+  const baseReason = String(movement.reason || '').trim();
+  const orderLabel = movementOrderLabel(movement);
+  if (!orderLabel) return baseReason || 'Sem observacao';
+  if (!baseReason) return orderLabel;
+  return baseReason.includes(orderLabel) ? baseReason : `${baseReason} • ${orderLabel}`;
+}
+
 type BomItemInput = {
   itemId: number | '';
   qtyPerRecipe?: string;
@@ -1277,7 +1294,7 @@ function StockPageContent() {
                             {itemMap.get(movement.itemId)?.name || `Item ${movement.itemId}`} •{' '}
                             {movementTypeLabel(movement.type)} • {formatQty(movement.quantity)}{' '}
                             {itemMap.get(movement.itemId)?.unit || 'un'} •{' '}
-                            {movement.reason || 'Sem observacao'}
+                            {formatMovementReason(movement)}
                           </div>
                           <button
                             className="app-button app-button-danger"

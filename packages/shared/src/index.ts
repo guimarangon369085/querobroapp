@@ -471,6 +471,7 @@ export const InventoryMovementSchema = z.object({
   id: z.number().int().positive().optional(),
   itemId: z.number().int().positive(),
   orderId: z.number().int().positive().optional().nullable(),
+  orderDisplayNumber: z.number().int().positive().optional().nullable(),
   type: StockMovementTypeEnum,
   quantity: z.number().nonnegative(),
   reason: z.string().optional().nullable(),
