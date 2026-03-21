@@ -1179,6 +1179,8 @@ function OrdersPageContent() {
   const massPrepPendingActionItemIdsRef = useRef<Set<number>>(new Set());
   const [massPrepPrepareError, setMassPrepPrepareError] = useState<string | null>(null);
   const [isPreparingMassReady, setIsPreparingMassReady] = useState(false);
+  const massPrepPrepareInFlightRef = useRef(false);
+  const massPrepPrepareRequestKeyRef = useRef<string | null>(null);
   const [isUpdatingMassPrepStatus, setIsUpdatingMassPrepStatus] = useState(false);
   const [isDeletingMassPrepEvent, setIsDeletingMassPrepEvent] = useState(false);
   const [massPrepStockLoading, setMassPrepStockLoading] = useState(false);
@@ -2918,16 +2920,25 @@ function OrdersPageContent() {
       setMassPrepPrepareError('Falta insumo para 1 receita de MASSA PRONTA.');
       return;
     }
+    if (massPrepPrepareInFlightRef.current) return;
 
+    massPrepPrepareInFlightRef.current = true;
     setMassPrepPrepareError(null);
     setIsPreparingMassReady(true);
     try {
+      const requestKey =
+        massPrepPrepareRequestKeyRef.current ||
+        (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `mass-prep-${Date.now()}-${Math.round(Math.random() * 1_000_000)}`);
+      massPrepPrepareRequestKeyRef.current = requestKey;
       const response = await apiFetch<{ recipesPrepared: number }>('/inventory-mass-ready/prepare', {
         method: 'POST',
         body: JSON.stringify({
           recipes: MASS_PREP_DEFAULT_BATCH_RECIPES,
           orderId: selectedMassPrepEvent.orderId,
-          reason: `Conversao manual via pop-up ${MASS_PREP_EVENT_NAME}`
+          reason: `Conversao manual via pop-up ${MASS_PREP_EVENT_NAME}`,
+          requestKey
         })
       });
 
@@ -2938,6 +2949,7 @@ function OrdersPageContent() {
           refreshedCards.map((card) => [card.itemId, formatInventoryBalanceInput(card.balance)])
         )
       );
+      massPrepPrepareRequestKeyRef.current = null;
       notifySuccess(`MASSA PRONTA +${response.recipesPrepared} receita(s).`);
     } catch (err) {
       const message =
@@ -2947,6 +2959,7 @@ function OrdersPageContent() {
       setMassPrepPrepareError(message);
       notifyError(message);
     } finally {
+      massPrepPrepareInFlightRef.current = false;
       setIsPreparingMassReady(false);
     }
   }, [
@@ -2956,6 +2969,11 @@ function OrdersPageContent() {
     notifySuccess,
     selectedMassPrepEvent
   ]);
+
+  useEffect(() => {
+    massPrepPrepareInFlightRef.current = false;
+    massPrepPrepareRequestKeyRef.current = null;
+  }, [selectedMassPrepEvent?.id]);
 
   const selectOrderWorkflowStatus = async (targetStatus: OrderWorkflowStatus) => {
     if (!selectedOrder?.id || selectedOrderIsCancelled || selectedOrderWorkflowStatus === targetStatus) return;

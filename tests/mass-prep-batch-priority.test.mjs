@@ -212,7 +212,17 @@ test(
     });
     created.customerId = customer.id;
 
-    const scheduledAt = new Date(Date.UTC(2030, 3, 10, 9, 0, 0)).toISOString();
+    const scheduleSeed = Number(suffix.split('-')[1] || 0);
+    const scheduledAt = new Date(
+      Date.UTC(
+        2030,
+        3,
+        10 + (scheduleSeed % 20),
+        9 + (scheduleSeed % 6),
+        (Math.floor(scheduleSeed / 20) % 4) * 15,
+        0
+      )
+    ).toISOString();
     const order = await request(apiUrl, '/orders', {
       method: 'POST',
       body: {
@@ -264,17 +274,38 @@ test(
       }
     });
 
+    const manualPrepareReason = `${TEST_REASON} manual ${suffix}`;
+    const manualPrepareRequest = {
+      recipes: 2,
+      reason: manualPrepareReason,
+      requestKey: `${suffix}-manual-prepare`
+    };
     const manualPrepare = await request(apiUrl, '/inventory-mass-ready/prepare', {
       method: 'POST',
-      body: {
-        recipes: 2,
-        reason: `${TEST_REASON} manual`
-      }
+      body: manualPrepareRequest
     });
     assert.equal(manualPrepare.ok, true);
     assert.equal(manualPrepare.recipesPrepared, 1);
 
+    const repeatedManualPrepare = await request(apiUrl, '/inventory-mass-ready/prepare', {
+      method: 'POST',
+      body: manualPrepareRequest
+    });
+    assert.deepEqual(repeatedManualPrepare, manualPrepare);
+
     const movementsAfterManualPrepare = await request(apiUrl, '/inventory-movements');
+    const manualPrepareMovements = movementsAfterManualPrepare.filter(
+      (movement) =>
+        movement.orderId == null &&
+        movement.source === 'MASS_PREP' &&
+        movement.sourceLabel === 'MANUAL_POPUP' &&
+        String(movement.reason || '') === manualPrepareReason
+    );
+    assert.equal(
+      manualPrepareMovements.length,
+      7,
+      `Preparo manual deduplicado deveria gerar 7 movimentos, recebeu ${manualPrepareMovements.length}`
+    );
     const manualMassReadyIn = movementsAfterManualPrepare.find(
       (movement) =>
         movement.orderId == null &&

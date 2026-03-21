@@ -67,11 +67,13 @@ const inventoryMovementCreateSchema = z.object({
 
 const MASS_PREP_SOURCE = 'MASS_PREP';
 const MASS_PREP_SOURCE_LABEL = 'MANUAL_POPUP';
+const MANUAL_MASS_PREP_IDEMPOTENCY_SCOPE = 'INVENTORY_MANUAL_MASS_PREP';
 
 const prepareMassReadySchema = z.object({
   recipes: z.coerce.number().int().positive().max(2),
   orderId: z.coerce.number().int().positive().optional().nullable(),
-  reason: z.string().trim().optional().nullable()
+  reason: z.string().trim().optional().nullable(),
+  requestKey: z.string().trim().min(1).max(120).optional().nullable()
 });
 
 const setEffectiveBalanceSchema = z.object({
@@ -108,6 +110,19 @@ type InventoryPriceSyncSourceResult = {
   updatedItems: InventoryPriceSyncItemResult[];
 };
 
+type PrepareMassReadyResponse = {
+  ok: true;
+  recipesPrepared: number;
+  massReadyItemId: number;
+  consumedIngredients: Array<{
+    itemId: number;
+    name: string;
+    requiredQty: number;
+    availableQty: number;
+    unit: string;
+  }>;
+};
+
 @Injectable()
 export class InventoryService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
@@ -120,6 +135,24 @@ export class InventoryService {
   private roundMoney(value: number) {
     if (!Number.isFinite(value)) return 0;
     return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+
+  private parsePrepareMassReadyResponse(responseJson: string): PrepareMassReadyResponse {
+    try {
+      const parsed = JSON.parse(responseJson) as PrepareMassReadyResponse;
+      if (
+        parsed?.ok === true &&
+        typeof parsed.massReadyItemId === 'number' &&
+        typeof parsed.recipesPrepared === 'number' &&
+        Array.isArray(parsed.consumedIngredients)
+      ) {
+        return parsed;
+      }
+    } catch {
+      // continua abaixo
+    }
+
+    throw new ConflictException('Registro de preparo manual de MASSA PRONTA corrompido.');
   }
 
   private normalizeInventoryItemName(name: string) {
@@ -523,9 +556,21 @@ export class InventoryService {
         effectiveBalanceByItemId.get(representative.id) || 0
       );
       const desiredEffectiveBalance = this.toQty(data.quantity);
-      const delta = this.toQty(desiredEffectiveBalance - currentEffectiveBalance);
+      const adjustments = familyItems
+        .map((item) => {
+          const currentBalance = this.toQty(balanceByItem.get(item.id) || 0);
+          const targetBalance = item.id === representative.id ? desiredEffectiveBalance : 0;
+          return {
+            itemId: item.id,
+            currentBalance,
+            targetBalance
+          };
+        })
+        .filter(
+          (entry) => Math.abs(this.toQty(entry.currentBalance - entry.targetBalance)) >= 0.0001
+        );
 
-      if (Math.abs(delta) < 0.0001) {
+      if (adjustments.length === 0) {
         return {
           ok: true,
           itemId: representative.id,
@@ -535,29 +580,59 @@ export class InventoryService {
         };
       }
 
-      await tx.inventoryMovement.create({
-        data: {
-          itemId: representative.id,
-          type: delta > 0 ? 'IN' : 'OUT',
-          quantity: Math.abs(delta),
-          reason:
-            data.reason?.trim() ||
-            `Ajuste efetivo via Estoque (${familyDefinition?.canonicalName || representative.name})`
-        }
-      });
+      const adjustmentReason =
+        data.reason?.trim() ||
+        `Ajuste efetivo via Estoque (${familyDefinition?.canonicalName || representative.name})`;
+
+      for (const adjustment of adjustments) {
+        await tx.inventoryMovement.create({
+          data: {
+            itemId: adjustment.itemId,
+            type: 'ADJUST',
+            quantity: adjustment.targetBalance,
+            reason: adjustmentReason
+          }
+        });
+      }
 
       return {
         ok: true,
         itemId: representative.id,
         effectiveBalance: desiredEffectiveBalance,
-        appliedType: delta > 0 ? 'IN' : 'OUT',
-        appliedQuantity: Math.abs(delta)
+        appliedType: 'ADJUST',
+        appliedQuantity: desiredEffectiveBalance
       };
     });
   }
 
   async prepareMassReady(payload: unknown) {
     const data = parseWithSchema(prepareMassReadySchema, payload ?? {});
+    const requestKey = data.requestKey?.trim() || null;
+    const requestHash = JSON.stringify({
+      recipes: data.recipes,
+      orderId: data.orderId ?? null,
+      reason: data.reason?.trim() || null
+    });
+
+    if (requestKey) {
+      const existing = await this.prisma.idempotencyRecord.findUnique({
+        where: {
+          scope_idemKey: {
+            scope: MANUAL_MASS_PREP_IDEMPOTENCY_SCOPE,
+            idemKey: requestKey
+          }
+        }
+      });
+
+      if (existing) {
+        if (existing.requestHash !== requestHash) {
+          throw new BadRequestException(
+            'Chave de preparo manual ja foi usada com outro payload.'
+          );
+        }
+        return this.parsePrepareMassReadyResponse(existing.responseJson);
+      }
+    }
 
     return this.prisma.$transaction(async (tx) => {
       const inventoryItems = await tx.inventoryItem.findMany({ orderBy: { id: 'asc' } });
@@ -679,7 +754,7 @@ export class InventoryService {
         }
       });
 
-      return {
+      const response: PrepareMassReadyResponse = {
         ok: true,
         recipesPrepared,
         massReadyItemId: massReadyItem.id,
@@ -691,6 +766,33 @@ export class InventoryService {
           unit: ingredient.unit
         }))
       };
+
+      if (requestKey) {
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + 7);
+        await tx.idempotencyRecord.upsert({
+          where: {
+            scope_idemKey: {
+              scope: MANUAL_MASS_PREP_IDEMPOTENCY_SCOPE,
+              idemKey: requestKey
+            }
+          },
+          update: {
+            requestHash,
+            responseJson: JSON.stringify(response),
+            expiresAt
+          },
+          create: {
+            scope: MANUAL_MASS_PREP_IDEMPOTENCY_SCOPE,
+            idemKey: requestKey,
+            requestHash,
+            responseJson: JSON.stringify(response),
+            expiresAt
+          }
+        });
+      }
+
+      return response;
     });
   }
 

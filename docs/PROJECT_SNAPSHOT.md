@@ -51,6 +51,8 @@ Ultima atualizacao: 2026-03-20
 - O popup de detalhe de pedido em `/pedidos` removeu o bloco completo de PIX e reorganizou o resumo logo abaixo de `Caixas`, exibindo `Produtos`, `Frete` e `Total` na ordem operacional.
 - O backend de estoque agora bloqueia edicao de itens e exclusao de pedido depois que o pedido ja gerou movimentacoes fisicas (`MASS_PREP`, `PRODUCTION_BATCH` ou equivalentes), evitando dessintonia entre composicao do pedido e baixa real.
 - O calculo de `D+1`/`production/requirements` agora desconta o que ja foi produzido na runtime de fornadas para o mesmo pedido, em vez de continuar projetando demanda cheia apos a baixa real do batch.
+- O ajuste manual de saldo em `Estoque` e no popup de `FAZER MASSA` agora ancora o saldo contado com `ADJUST` absoluto por familia, em vez de simular delta relativo sobre historico antigo.
+- O preparo manual de `MASSA PRONTA` agora usa idempotencia por `requestKey` no backend e trava de duplo disparo no frontend, evitando duplicar a primeira baixa de insumos por tap/click repetido.
 - O shell operacional mobile agora bloqueia `touch callout`/menu de contexto irrelevante nas superficies interativas do app, reduzindo conflito entre long-press nativo do iPhone e gestos como arrastar pedidos no calendario, sem desabilitar selecao em campos de texto.
 - `/pedido` e `/pedidos` agora redirecionam o pos-criacao para `/pedidofinalizado`, com card final isolado, retorno contextual (`Fazer novo pedido` ou `Voltar para pedidos`) e preservacao apenas dos dados cadastrais do cliente no caso publico.
 - `/pedidofinalizado` agora roda sem shell operacional, sem menu lateral e sem topbar, isolado como rota publica de conclusao.
@@ -152,6 +154,9 @@ Ultima atualizacao: 2026-03-20
 
 ## Validacao operacional mais recente
 
+- Data: 2026-03-20
+- Ciclo executado: `pnpm --filter @querobroapp/api typecheck`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/api lint`, `pnpm --filter @querobroapp/web lint`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web build`, `node --test --test-concurrency=1 tests/inventory-overview-effective-balance.test.mjs tests/mass-prep-batch-priority.test.mjs`
+- Resultado: estoque manual passou a usar `ADJUST` absoluto, o popup de `FAZER MASSA` ficou blindado contra duplo disparo, e foi aplicada no ledger local a correcao calculada para neutralizar a duplicidade historica da conversao manual de 13/03/2026 19:42:27.
 - Data: 2026-03-20
 - Ciclo executado: `pnpm --filter @querobroapp/web lint`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`
 - Resultado: `Caixa Sabores` entrou no feed publico do WhatsApp/Commerce Manager como `QUEROBROA-S`, e o `/pedido` passou a traduzir esse codigo para prefill de caixa customizavel sem mexer na logica de caixas oficiais.

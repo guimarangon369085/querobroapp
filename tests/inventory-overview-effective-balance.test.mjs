@@ -14,7 +14,7 @@ function normalizeLookup(value) {
 }
 
 test(
-  'inventory-overview consolida aliases legados e permite ajuste de saldo efetivo',
+  'inventory-overview consolida aliases legados e permite ajuste absoluto de saldo efetivo',
   { timeout: 180000 },
   async (t) => {
     const { apiUrl, shutdown } = await ensureApiServer();
@@ -94,5 +94,48 @@ test(
       !overviewAfter.items.some((item) => normalizeLookup(item.name) === 'MANTEIGA COM SAL'),
       'Alias legado nao deveria reaparecer apos ajuste efetivo'
     );
+
+    const familyMovementsAfterFirstAdjust = await request(apiUrl, '/inventory-movements');
+    const latestFamilyMovementAfterFirstAdjust = familyMovementsAfterFirstAdjust.find((movement) =>
+      familyItemIds.includes(movement.itemId)
+    );
+    assert.ok(latestFamilyMovementAfterFirstAdjust, 'Movimento de ajuste da familia deveria existir');
+    assert.equal(
+      latestFamilyMovementAfterFirstAdjust.type,
+      'ADJUST',
+      'Ajuste efetivo precisa registrar ADJUST absoluto'
+    );
+
+    await request(apiUrl, '/inventory-movements', {
+      method: 'POST',
+      body: {
+        itemId: canonicalItem.id,
+        type: 'OUT',
+        quantity: 21,
+        reason: `${TEST_REASON} saida intermediaria`
+      }
+    });
+
+    await request(apiUrl, `/inventory-items/${butterRowBefore.id}/effective-balance`, {
+      method: 'POST',
+      body: {
+        quantity: 111,
+        reason: `${TEST_REASON} second adjust`
+      }
+    });
+
+    const overviewAfterSecondAdjust = await request(apiUrl, '/inventory-overview');
+    const butterRowAfterSecondAdjust = overviewAfterSecondAdjust.items.find(
+      (item) => normalizeLookup(item.name) === 'MANTEIGA'
+    );
+    assert.ok(butterRowAfterSecondAdjust, 'MANTEIGA deveria continuar visivel apos segundo ajuste');
+    assert.equal(Number(butterRowAfterSecondAdjust.balance), 111);
+
+    const familyMovementsAfterSecondAdjust = await request(apiUrl, '/inventory-movements');
+    const latestFamilyMovementAfterSecondAdjust = familyMovementsAfterSecondAdjust.find((movement) =>
+      familyItemIds.includes(movement.itemId)
+    );
+    assert.ok(latestFamilyMovementAfterSecondAdjust);
+    assert.equal(latestFamilyMovementAfterSecondAdjust.type, 'ADJUST');
   }
 );
