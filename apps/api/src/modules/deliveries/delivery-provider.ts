@@ -22,10 +22,10 @@ export type DeliveryQuoteInput = {
 };
 
 export type DeliveryQuoteOutput = {
-  provider: 'LOCAL' | 'UBER_DIRECT' | 'LOGGI';
+  provider: 'LOCAL';
   fee: number;
   currencyCode: string;
-  source: 'UBER_QUOTE' | 'LOGGI_QUOTE' | 'MANUAL_FALLBACK';
+  source: 'MANUAL_FALLBACK';
   status: 'QUOTED' | 'FALLBACK' | 'FAILED';
   providerQuoteId: string | null;
   expiresAt: string | null;
@@ -40,7 +40,7 @@ export type DeliveryDispatchInput = DeliveryQuoteInput & {
 };
 
 export type DeliveryDispatchOutput = {
-  provider: 'LOCAL' | 'UBER_DIRECT' | 'LOGGI';
+  provider: 'LOCAL';
   status: 'REQUESTED' | 'FAILED';
   trackingId: string;
   providerDeliveryId: string | null;

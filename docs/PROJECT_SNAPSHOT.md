@@ -1,6 +1,6 @@
 # PROJECT_SNAPSHOT
 
-Ultima atualizacao: 2026-03-20
+Ultima atualizacao: 2026-03-21
 
 ## Estado atual
 
@@ -12,7 +12,7 @@ Ultima atualizacao: 2026-03-20
 - `Calendario`, `Inicio`, `Jornada`, `Resumo` e `Builder` nao existem mais como superficies operacionais.
 - Marca lateral usa o mark vetorial interno e o atalho/PWA publico agora usa os icones raster dedicados da marca, com abertura direta em `/pedido`.
 - Numeracao exibida de `Clientes` e `Pedidos` agora usa `publicNumber` sequencial, preenchido por ordem cronologica e desacoplado do `id` interno do banco.
-- API cobre pedido, pagamento, estoque, BOM, D+1, producao, `Uber Direct`, `Loggi` e fallback local interno.
+- API cobre pedido, pagamento, estoque, BOM, D+1, producao e frete local calculado no backend.
 - O processo de qualidade atual inclui `qa:trust`, `qa:browser-smoke`, `qa:critical-e2e`, drift check e testes raiz.
 - Gate operacional de religamento foi validado em 2026-03-11 com `stop-all -> dev-all`, health da API e execucao de smoke + E2E critico.
 - `Produtos` deixou de existir como superficie operacional; catalogo e ficha tecnica ficam dentro de `Estoque`.
@@ -33,8 +33,8 @@ Ultima atualizacao: 2026-03-20
 - A home publica `/` agora fixa tambem o `body` em `position: fixed` enquanto esta montada, para bloquear bounce/rolagem residual em iPhone e navegadores com barras dinamicas.
 - Em `/pedido`, o header sticky compacto e o hero superior com `@QUEROBROA` + galeria foram removidos no desktop; a experiencia passa a abrir direto no formulario/resumo nessa largura.
 - Em `/pedido`, os dois blocos introdutorios do topo foram removidos por completo; a pagina agora abre direto em `Dados`, e os rótulos pequenos redundantes das seções tambem sairam.
-- O frete do cliente agora segue tabela operacional fixa por raio a partir da Alameda Jau, 731: `R$ 12` ate `5 km` e `R$ 18` acima disso; a cotacao continua usando `Uber Direct` como fonte primaria quando disponivel e fallback local manual quando necessario.
-- A cotacao agora protege o caso `origem = destino`, usa hash de quote mais fiel ao payload real e calcula pacote Loggi por caixa fechada em vez de inflar o peso por unidade interna do dashboard.
+- O frete do cliente agora segue tabela operacional fixa por raio a partir da Alameda Jau, 731: `R$ 12` ate `5 km` e `R$ 18` acima disso; a cotacao e o calculo acontecem 100% no backend.
+- A cotacao agora protege o caso `origem = destino` e usa hash de quote mais fiel ao payload real.
 - `/pedido` e o modal de novo pedido em `/pedidos` agora usam o mesmo fluxo em duas etapas para entrega: `Calcular frete` antes de `Finalizar pedido/Criar pedido`.
 - `/pedido` passou a preservar o cadastro ao usar `Fazer outro pedido`, limpando apenas a composicao do pedido e rolando de volta ao topo para uma nova montagem.
 - A cotacao publica de `/pedido` agora usa a assinatura canonica dos sabores para casar com o intake final e evitar refresh indevido do frete na primeira finalizacao.
@@ -154,6 +154,9 @@ Ultima atualizacao: 2026-03-20
 
 ## Validacao operacional mais recente
 
+- Data: 2026-03-21
+- Ciclo executado: `node --test --test-concurrency=1 tests/delivery-provider-hybrid-fallback.test.mjs tests/delivery-pickup-origin.test.mjs tests/order-schedule-capacity.test.mjs tests/external-order-schedule-guard.test.mjs`, `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api typecheck`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web build`, `pnpm qa:browser-smoke`, `pnpm qa:critical-e2e`, `pnpm validate:public-deploy`, `pnpm validate:delivery-quote`
+- Resultado: frete fixo por raio entrou em producao sem rastros ativos de Uber/Loggi, `/pedidos` manteve liberdade de edicao interna e o dominio publico respondeu `200` em `/`, `/pedido` e `/pedidos`, com quote publico validado em `R$ 12` e cenario manual acima de `5 km` retornando `R$ 18`.
 - Data: 2026-03-20
 - Ciclo executado: `pnpm --filter @querobroapp/api typecheck`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/api lint`, `pnpm --filter @querobroapp/web lint`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web build`, `node --test --test-concurrency=1 tests/inventory-overview-effective-balance.test.mjs tests/mass-prep-batch-priority.test.mjs`
 - Resultado: estoque manual passou a usar `ADJUST` absoluto, o popup de `FAZER MASSA` ficou blindado contra duplo disparo, e foi aplicada no ledger local a correcao calculada para neutralizar a duplicidade historica da conversao manual de 13/03/2026 19:42:27.
@@ -172,9 +175,9 @@ Ultima atualizacao: 2026-03-20
 ## Gaps abertos
 
 1. `Google Forms` ja e viavel como canal temporario, mas ainda falta configuracao real do Apps Script e URL publica final.
-2. O dominio publico ja responde em `querobroa.com.br`, `www`, `ops` e `api`, mas o web ainda precisa publicar o bundle mais novo para expor os endpoints de preview (`/api/google-form/preview` e `/api/customer-form/preview`) e fechar a validacao publica automatizada.
+2. O dominio publico ja esta publicado e validado em `querobroa.com.br`, `www`, `ops` e `api`; o gap agora e operacionalizar o canal externo real (`Google Forms`) sobre os endpoints de preview/intake ja expostos.
 3. `WhatsApp Flow` ja tem bridge backend reaproveitando o intake canonico, mas ainda falta numero dedicado/Flow publicado na Meta e persistencia explicita do canal na UI para diferenciar origem.
-4. O runtime de frete agora esta em modo hibrido `Uber Direct -> Loggi`, mas ainda vale validar o disparo real de shipment em producao sem criar entrega acidental e calibrar a cotacao final contra corridas manuais historicas.
+4. Ainda vale validar o frete fixo por raio em producao com cenarios reais de endereco, para confirmar consistencia do calculo e da exibicao publica.
 5. Mobile segue atras do web no fluxo operacional novo.
 6. Ainda vale ampliar cobertura de testes alem dos gates atuais, principalmente em cenarios de edge case de dominio.
 7. O dashboard interno de analytics parte do zero sem historico legado; ele comeca a refletir navegacao nova a partir desta instrumentacao first-party.

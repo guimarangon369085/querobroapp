@@ -6,7 +6,7 @@
 - Producao sob demanda, com antecedencia minima de 1 dia.
 - Restricao forte de capacidade: 14 broas por fornada e ciclo de forno de 50 minutos (35 + 15).
 - Compras mistas: supermercado local e internet, com lead time variavel.
-- Entrega via Uber Entregas manual (com cancelamentos e atrasos recorrentes).
+- Entrega manual com cancelamentos e atrasos recorrentes.
 - Pagamento atual: PIX.
 
 ## Objetivo de UX operacional
@@ -74,8 +74,8 @@ Chegar em uma interface de baixa carga cognitiva, com fluxo de decisao em 1 tril
 ### 4) Expedicao com janela e buffer
 
 - Registrar janela prometida da cliente (ex.: ate 15h).
-- Calcular buffer de despacho (cancelamento/atraso de Uber).
-- Sugerir hora limite de chamada Uber por pedido.
+- Calcular buffer de despacho para variacao operacional.
+- Sugerir hora limite de despacho por pedido.
 
 ### 5) Fechamento financeiro
 

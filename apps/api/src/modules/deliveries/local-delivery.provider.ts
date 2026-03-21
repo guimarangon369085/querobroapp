@@ -7,7 +7,7 @@ export class LocalDeliveryProvider implements DeliveryProvider {
     return roundMoney(value);
   }
 
-  private fallbackFee() {
+  private configuredFee() {
     const raw = Number(process.env.DELIVERY_MANUAL_FALLBACK_FEE || 12);
     if (!Number.isFinite(raw) || raw < 0) return 0;
     return this.toMoney(raw);
@@ -16,14 +16,14 @@ export class LocalDeliveryProvider implements DeliveryProvider {
   async quote(_input: DeliveryQuoteInput): Promise<DeliveryQuoteOutput> {
     return {
       provider: 'LOCAL',
-      fee: this.fallbackFee(),
+      fee: this.configuredFee(),
       currencyCode: 'BRL',
       source: 'MANUAL_FALLBACK',
-      status: 'FALLBACK',
+      status: 'QUOTED',
       providerQuoteId: null,
       expiresAt: null,
-      fallbackReason: 'Cotacao dos provedores indisponivel. Frete provisório aplicado.',
-      breakdownLabel: 'Frete provisório',
+      fallbackReason: null,
+      breakdownLabel: null,
       distanceKm: null,
       rawPayload: null
     };

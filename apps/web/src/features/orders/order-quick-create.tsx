@@ -84,13 +84,6 @@ const flavorOfficialBoxNameByCode = ORDER_FLAVOR_OFFICIAL_BOX_NAME_BY_CODE;
 
 const mistaOfficialBoxNameByCode = ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE;
 
-function formatDeliveryProviderLabel(quote?: DeliveryQuote | null) {
-  if (quote?.breakdownLabel?.trim()) return quote.breakdownLabel.trim();
-  if (quote?.provider === 'UBER_DIRECT') return 'Uber Envios';
-  if (quote?.provider === 'LOGGI') return 'Loggi';
-  return 'Frete';
-}
-
 function formatDateInputValue(date: Date) {
   const year = date.getFullYear();
   const month = `${date.getMonth() + 1}`.padStart(2, '0');
@@ -362,7 +355,6 @@ export function OrderQuickCreate({
   const deliveryFee = requiresDeliveryQuote ? deliveryQuote?.fee ?? 0 : 0;
   const draftGrandTotal = draftTotal + deliveryFee;
   const hasReadyDeliveryQuote = !requiresDeliveryQuote || Boolean(deliveryQuote?.quoteToken);
-  const deliveryProviderLabel = formatDeliveryProviderLabel(deliveryQuote);
   const primaryActionLabel = isCreatingOrder
     ? 'Criando pedido...'
     : requiresDeliveryQuote && isQuotingDelivery
@@ -919,8 +911,7 @@ export function OrderQuickCreate({
             </div>
           ) : requiresDeliveryQuote && deliveryQuote ? (
             <div className="rounded-[20px] border border-[rgba(126,79,45,0.08)] bg-white/80 px-4 py-3 text-xs leading-5 text-[color:var(--ink-muted)]">
-              {deliveryProviderLabel +
-                (deliveryQuote.expiresAt ? ' pronto para uso neste pedido.' : ' cotado para este pedido.')}
+              {deliveryQuote.expiresAt ? 'Frete calculado e pronto para uso neste pedido.' : 'Frete calculado para este pedido.'}
             </div>
           ) : !requiresDeliveryQuote ? (
             <div className="rounded-[20px] border border-[rgba(126,79,45,0.08)] bg-white/80 px-4 py-3 text-xs leading-5 text-[color:var(--ink-muted)]">

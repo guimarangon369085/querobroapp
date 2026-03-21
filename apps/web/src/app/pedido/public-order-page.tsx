@@ -82,10 +82,10 @@ type StoredPublicOrderSnapshot = {
 };
 
 type DeliveryQuote = {
-  provider: 'NONE' | 'LOCAL' | 'UBER_DIRECT' | 'LOGGI';
+  provider: 'NONE' | 'LOCAL';
   fee: number;
   currencyCode: string;
-  source: 'NONE' | 'UBER_QUOTE' | 'LOGGI_QUOTE' | 'MANUAL_FALLBACK';
+  source: 'NONE' | 'MANUAL_FALLBACK';
   status: 'NOT_REQUIRED' | 'PENDING' | 'QUOTED' | 'FALLBACK' | 'EXPIRED' | 'FAILED';
   quoteToken: string | null;
   expiresAt: string | null;

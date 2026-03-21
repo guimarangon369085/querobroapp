@@ -48,10 +48,10 @@ Facilitar a operacao diaria da broa com interface simples, agenda centrada em `P
 7. Se retomar manualmente, leia o snapshot autoatualizado, depois `docs/PROJECT_SNAPSHOT.md`, `docs/NEXT_STEP_PLAN.md` e as ultimas 80 linhas de `docs/HANDOFF_LOG.md`.
 8. Leia `README.md` e `docs/TEST_RESET_PROTOCOL.md` so em reboot, subida local, QA ou teste manual.
 9. Leia `docs/MEMORY_VAULT.md` quando houver ambiguidade real, necessidade de continuidade mais profunda ou mudanca estrutural.
-10. Nao presumir integracoes externas: o codigo atual nao depende de WhatsApp, Uber, Alexa ou conectores de terceiros.
+10. Nao presumir integracoes externas: o codigo atual nao depende de conectores de terceiros para o fluxo principal.
 
 ## Integracoes externas
 
-- WhatsApp, Uber, Alexa, receipts e conectores de fornecedores foram removidos do codigo ativo.
+- Integracoes antigas de terceiros e conectores de fornecedores foram removidos do codigo ativo.
 - A entrega atual usa apenas o fluxo local interno exposto por `deliveries`.
 - Quando a operacao principal estiver 100% estabilizada, qualquer reintegracao deve ser redesenhada do zero, sem reaproveitar contratos antigos por inercia.

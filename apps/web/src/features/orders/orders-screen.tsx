@@ -395,11 +395,6 @@ function formatDeletionTimestampLabel(date?: string | null) {
   });
 }
 
-function isLoopbackBrowserHost(hostname: string) {
-  const normalized = (hostname || '').trim().toLowerCase();
-  return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1';
-}
-
 function compactCustomerLabelForCalendar(value?: string | null) {
   const normalized = (value || '').replace(/\s+\(excluído\)$/i, '').trim();
   if (!normalized) return 'Cliente';
@@ -841,27 +836,12 @@ function safeDateFromIso(iso?: string | null) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function formatDeliveryProviderLabel(provider?: string | null) {
-  if (provider === 'UBER_DIRECT') return 'Uber Envios';
-  if (provider === 'LOGGI') return 'Loggi';
-  if (provider === 'LOCAL') return 'Fallback local';
-  return 'Frete';
-}
-
-function isLiveCarrierQuote(quote?: { provider?: string | null; source?: string | null } | null) {
-  return (
-    (quote?.provider === 'UBER_DIRECT' && quote?.source === 'UBER_QUOTE') ||
-    (quote?.provider === 'LOGGI' && quote?.source === 'LOGGI_QUOTE')
-  );
-}
-
 function formatDeliveryEstimateCaption(order?: OrderView | null) {
   if (!order || order.fulfillmentMode !== 'DELIVERY') return '';
 
   const quoteStatus = order.deliveryQuoteStatus ?? 'NOT_REQUIRED';
   const deliveryFee = toMoney(order.deliveryFee ?? 0);
   const quoteExpiry = formatOrderDateTimeLabel(safeDateFromIso(order.deliveryQuoteExpiresAt ?? null));
-  const providerLabel = formatDeliveryProviderLabel(order.deliveryProvider);
 
   if (quoteStatus === 'FAILED') {
     return 'Cotacao do frete indisponivel. Revise os dados do cliente e atualize o frete.';
@@ -874,18 +854,14 @@ function formatDeliveryEstimateCaption(order?: OrderView | null) {
   }
 
   if (quoteStatus === 'FALLBACK' || order.deliveryFeeSource === 'MANUAL_FALLBACK' || order.deliveryProvider === 'LOCAL') {
-    return 'Frete em fallback local. Atualize para buscar a estimativa real do provedor.';
+    return 'Frete calculado para este pedido.';
   }
 
   if (deliveryFee <= 0) {
     return 'Frete ainda nao cotado.';
   }
 
-  if (order.deliveryProvider === 'UBER_DIRECT' || order.deliveryProvider === 'LOGGI') {
-    return quoteExpiry ? `Estimativa ${providerLabel} valida ate ${quoteExpiry}.` : `Estimativa ${providerLabel} registrada.`;
-  }
-
-  return quoteExpiry ? `Estimativa registrada ate ${quoteExpiry}.` : 'Estimativa de frete registrada.';
+  return quoteExpiry ? `Frete calculado ate ${quoteExpiry}.` : 'Frete calculado para este pedido.';
 }
 
 function startOfLocalDay(date: Date) {
@@ -1647,15 +1623,6 @@ function OrdersPageContent() {
     }
     if (newOrderFulfillmentMode === 'DELIVERY' && !newOrderDeliveryQuote) {
       setOrderError(newOrderDeliveryQuoteError || 'A estimativa de frete e obrigatoria para criar.');
-      return;
-    }
-    if (
-      newOrderFulfillmentMode === 'DELIVERY' &&
-      requiresLiveCarrierQuote &&
-      newOrderDeliveryQuote &&
-      !isLiveCarrierQuote(newOrderDeliveryQuote)
-    ) {
-      setOrderError(newOrderDeliveryQuoteError || 'A estimativa real do frete e obrigatoria para criar.');
       return;
     }
     setOrderError(null);
@@ -2548,8 +2515,6 @@ function OrdersPageContent() {
         })),
     [newOrderItems, productMap]
   );
-  const requiresLiveCarrierQuote =
-    typeof window === 'undefined' ? true : !isLoopbackBrowserHost(window.location.hostname);
   const requiresNewOrderDeliveryQuote = newOrderFulfillmentMode === 'DELIVERY';
   const canCreateOrder =
     Boolean(newOrderCustomerId) &&

@@ -132,9 +132,7 @@ export class OrderNotificationsService {
       return `Frete: ${this.formatMoney(order.deliveryFee)} (pendente)`;
     }
 
-    const providerLabel =
-      provider === 'UBER_DIRECT' ? 'Uber Direct' : provider === 'LOGGI' ? 'Loggi' : provider === 'LOCAL' ? 'Local' : provider;
-    return `Frete: ${this.formatMoney(order.deliveryFee)} via ${providerLabel}`;
+    return `Frete: ${this.formatMoney(order.deliveryFee)}`;
   }
 
   private buildWhatsAppBody(input: OrderAlertInput, operationsUrl: string) {

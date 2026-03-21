@@ -27,81 +27,43 @@ async function loadModules() {
     compiledModulesPromise = (async () => {
       runCommand('pnpm', ['--filter', '@querobroapp/shared', 'build']);
       runCommand('pnpm', ['--filter', '@querobroapp/api', 'build']);
-
-      const [uberModule, deliveriesModule, pickupOriginModule] = await Promise.all([
-        import(pathToFileURL(path.join(API_DIST_DIR, 'uber-direct.provider.js')).href),
+      const [deliveriesModule, pickupOriginModule] = await Promise.all([
         import(pathToFileURL(path.join(API_DIST_DIR, 'deliveries.service.js')).href),
         import(pathToFileURL(path.join(API_DIST_DIR, 'pickup-origin.js')).href)
       ]);
-
       return {
         DeliveriesService: deliveriesModule.DeliveriesService,
-        UberDirectProvider: uberModule.UberDirectProvider,
         FIXED_PICKUP_ORIGIN: pickupOriginModule.FIXED_PICKUP_ORIGIN
       };
     })();
   }
-
   return compiledModulesPromise;
 }
 
-function createInput(overrides = {}) {
-  return {
-    pickupName: 'QUEROBROAPP',
-    pickupPhone: '11999999999',
-    pickupAddress: 'Rua Errada, 123 - Sao Paulo - SP, Brasil',
-    dropoffName: 'Cliente Teste',
-    dropoffPhone: '11911112222',
-    dropoffAddress: 'Alameda Rio Negro, 500 - Barueri - SP, Brasil',
-    dropoffPlaceId: 'place_test',
-    dropoffLat: -23.5057,
-    dropoffLng: -46.8349,
-    scheduledAt: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
-    orderTotal: 89.9,
-    totalUnits: 7,
-    manifestSummary: '1 caixa',
-    items: [{ name: 'Caixa Tradicional', quantity: 1 }],
-    ...overrides
-  };
-}
-
-test('Uber quote payload always uses Alameda Jau 731 as pickup origin and customer address as dropoff', async () => {
-  const { UberDirectProvider, FIXED_PICKUP_ORIGIN } = await loadModules();
-  process.env.UBER_DIRECT_API_MODE = 'LEGACY_CUSTOMER';
-  process.env.UBER_DIRECT_CUSTOMER_ID = 'customer_test';
-
-  const provider = new UberDirectProvider();
-  const payload = provider.buildQuotePayload(createInput());
-
-  assert.equal(payload.pickup_address, FIXED_PICKUP_ORIGIN.fullAddress);
-  assert.equal(payload.dropoff_address, 'Alameda Rio Negro, 500 - Barueri - SP, Brasil');
-});
-
-test('pickup origin ignores legacy Loggi env and never falls back to PIX key', async () => {
-  const { DeliveriesService } = await loadModules();
-  const previousEnv = {
-    DELIVERY_PICKUP_PHONE: process.env.DELIVERY_PICKUP_PHONE,
-    UBER_DIRECT_PICKUP_PHONE: process.env.UBER_DIRECT_PICKUP_PHONE,
-    LOGGI_PICKUP_PHONE: process.env.LOGGI_PICKUP_PHONE,
-    PIX_STATIC_KEY: process.env.PIX_STATIC_KEY
-  };
-
-  process.env.DELIVERY_PICKUP_PHONE = '';
-  process.env.UBER_DIRECT_PICKUP_PHONE = '';
-  process.env.LOGGI_PICKUP_PHONE = '11988887777';
-  process.env.PIX_STATIC_KEY = 'pix-chave@querobroa.com.br';
+test('pickup origin honors DELIVERY_PICKUP_* overrides', async () => {
+  const previousName = process.env.DELIVERY_PICKUP_NAME;
+  const previousPhone = process.env.DELIVERY_PICKUP_PHONE;
+  process.env.DELIVERY_PICKUP_NAME = 'Operacional Broa';
+  process.env.DELIVERY_PICKUP_PHONE = '11900001111';
 
   try {
+    const { DeliveriesService } = await loadModules();
     const service = new DeliveriesService({});
     const pickupOrigin = service.pickupOrigin();
-    assert.equal(pickupOrigin.phone, '');
+
+    assert.equal(pickupOrigin.name, 'Operacional Broa');
+    assert.equal(pickupOrigin.phone, '11900001111');
   } finally {
-    for (const [key, value] of Object.entries(previousEnv)) {
-      if (value == null) {
-        delete process.env[key];
-      } else {
-        process.env[key] = value;
-      }
-    }
+    if (previousName == null) delete process.env.DELIVERY_PICKUP_NAME;
+    else process.env.DELIVERY_PICKUP_NAME = previousName;
+    if (previousPhone == null) delete process.env.DELIVERY_PICKUP_PHONE;
+    else process.env.DELIVERY_PICKUP_PHONE = previousPhone;
   }
+});
+
+test('pickup origin address matches fixed origin', async () => {
+  const { DeliveriesService, FIXED_PICKUP_ORIGIN } = await loadModules();
+  const service = new DeliveriesService({});
+  const pickupOrigin = service.pickupOrigin();
+  assert.strictEqual(pickupOrigin.address, FIXED_PICKUP_ORIGIN.fullAddress);
 });

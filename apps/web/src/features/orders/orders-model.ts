@@ -1,7 +1,7 @@
 import type { Customer, Order, OrderItem, Payment } from '@querobroapp/shared';
 
-type DeliveryProviderCode = 'NONE' | 'LOCAL' | 'UBER_DIRECT' | 'LOGGI';
-type DeliveryFeeSourceCode = 'NONE' | 'UBER_QUOTE' | 'LOGGI_QUOTE' | 'MANUAL_FALLBACK';
+type DeliveryProviderCode = 'NONE' | 'LOCAL';
+type DeliveryFeeSourceCode = 'NONE' | 'MANUAL_FALLBACK';
 
 export const nextStatusByCurrent: Record<string, string | null> = {
   ABERTO: 'CONFIRMADO',
@@ -37,7 +37,7 @@ export type MassPrepEvent = {
 };
 
 export type DeliveryReadiness = {
-  provider: 'NONE' | 'LOCAL' | 'UBER_DIRECT' | 'LOGGI';
+  provider: 'NONE' | 'LOCAL';
   mode: 'PROVIDER';
   ready: boolean;
   reason: string;
@@ -62,7 +62,7 @@ export type DeliveryReadiness = {
 
 export type DeliveryTracking = {
   orderId: number;
-  provider: 'NONE' | 'LOCAL' | 'UBER_DIRECT' | 'LOGGI';
+  provider: 'NONE' | 'LOCAL';
   mode: 'PROVIDER';
   status:
     | 'NOT_REQUESTED'
@@ -87,10 +87,10 @@ export type DeliveryTracking = {
 };
 
 export type DeliveryQuote = {
-  provider: 'NONE' | 'LOCAL' | 'UBER_DIRECT' | 'LOGGI';
+  provider: 'NONE' | 'LOCAL';
   fee: number;
   currencyCode: string;
-  source: 'NONE' | 'UBER_QUOTE' | 'LOGGI_QUOTE' | 'MANUAL_FALLBACK';
+  source: 'NONE' | 'MANUAL_FALLBACK';
   status: 'NOT_REQUIRED' | 'PENDING' | 'QUOTED' | 'FALLBACK' | 'EXPIRED' | 'FAILED';
   quoteToken: string | null;
   expiresAt: string | null;

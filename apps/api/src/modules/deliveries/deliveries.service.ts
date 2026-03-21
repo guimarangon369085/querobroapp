@@ -21,15 +21,14 @@ import {
   externalOrderScheduleErrorMessage,
   isExternalOrderScheduleAllowed
 } from '../../common/external-order-schedule.js';
-import type { DeliveryDispatchInput, DeliveryProvider, DeliveryQuoteInput } from './delivery-provider.js';
+import type { DeliveryDispatchInput, DeliveryQuoteInput } from './delivery-provider.js';
 import { LocalDeliveryProvider } from './local-delivery.provider.js';
 import { FIXED_PICKUP_ORIGIN } from './pickup-origin.js';
-import { UberDirectProvider } from './uber-direct.provider.js';
 
 type OrderWithDeliveryContext = Awaited<ReturnType<DeliveriesService['getOrderForDelivery']>>;
 type DeliveryQuoteDraft = typeof DeliveryQuoteDraftSchema._type;
-type DeliveryProviderCode = 'NONE' | 'LOCAL' | 'UBER_DIRECT' | 'LOGGI';
-type DeliveryQuoteSourceCode = 'NONE' | 'UBER_QUOTE' | 'LOGGI_QUOTE' | 'MANUAL_FALLBACK';
+type DeliveryProviderCode = 'NONE' | 'LOCAL';
+type DeliveryQuoteSourceCode = 'NONE' | 'MANUAL_FALLBACK';
 type DeliveryQuoteStatusCode = 'NOT_REQUIRED' | 'PENDING' | 'QUOTED' | 'FALLBACK' | 'EXPIRED' | 'FAILED';
 type DeliveryJobStatusCode =
   | 'NOT_REQUESTED'
@@ -114,7 +113,6 @@ const EARTH_RADIUS_KM = 6371;
 @Injectable()
 export class DeliveriesService {
   private readonly localProvider = new LocalDeliveryProvider();
-  private readonly uberProvider = new UberDirectProvider();
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
@@ -257,7 +255,7 @@ export class DeliveriesService {
       stored &&
       stored.requestHash === requestHash &&
       !this.isQuoteExpired(stored.quote) &&
-      this.isAcceptableDeliveryQuote(stored.quote, options?.allowManualFallback)
+        this.isAcceptableDeliveryQuote(stored.quote)
     ) {
       return stored.quote;
     }
@@ -349,11 +347,10 @@ export class DeliveriesService {
       return { reusedExisting: false, tracking: blocked };
     }
 
-    const provider = this.selectDispatchProvider(order.deliveryProvider);
     const input = this.buildProviderInput(readiness.draft, providerQuoteId);
 
     try {
-      const dispatch = await provider.createDelivery(input);
+      const dispatch = await this.localProvider.createDelivery(input);
       const tracking = await this.saveTracking(orderId, {
         orderId,
         provider: dispatch.provider,
@@ -474,92 +471,50 @@ export class DeliveriesService {
         existing &&
         existing.requestHash === requestHash &&
         !this.isQuoteExpired(existing.quote) &&
-        this.isAcceptableDeliveryQuote(existing.quote, options?.allowManualFallback)
+        this.isAcceptableDeliveryQuote(existing.quote)
       ) {
         return existing.quote;
       }
     }
 
     const input = this.buildQuoteInput(draft);
-    const quote = this.applyCustomerDeliveryPricing(
-      input,
-      await this.fetchProviderQuote(input, {
-        allowManualFallback: options?.allowManualFallback ?? true
-      })
-    );
+    this.assertQuoteInputReady(input);
+    const distanceKm = this.resolveDeliveryDistanceKm(input);
     const normalized = DeliveryQuoteResponseSchema.parse({
-      provider: quote.provider,
-      fee: this.toMoney(quote.fee),
-      currencyCode: quote.currencyCode || 'BRL',
-      source: quote.source,
-      status: quote.status,
+      provider: 'LOCAL',
+      fee: this.resolveFixedDeliveryFee(distanceKm),
+      currencyCode: 'BRL',
+      source: 'MANUAL_FALLBACK',
+      status: 'QUOTED',
       quoteToken,
-      providerQuoteId: quote.providerQuoteId ?? null,
-      expiresAt: quote.expiresAt ?? null,
-      fallbackReason: quote.fallbackReason ?? null,
-      breakdownLabel: quote.breakdownLabel ?? null
+      providerQuoteId: null,
+      expiresAt: null,
+      fallbackReason: null,
+      breakdownLabel: null
     });
 
     await this.saveQuoteRecord(quoteToken, requestHash, normalized);
     return normalized;
   }
 
-  private async fetchProviderQuote(input: DeliveryQuoteInput, options?: { allowManualFallback?: boolean }) {
+  private resolveFixedDeliveryFee(distanceKm: number | null) {
+    const exceedsDistanceLimit =
+      typeof distanceKm === 'number' && Number.isFinite(distanceKm) && distanceKm > DELIVERY_BASE_DISTANCE_LIMIT_KM;
+    return this.toMoney(exceedsDistanceLimit ? DELIVERY_EXTENDED_FEE : DELIVERY_BASE_FEE);
+  }
+
+  private assertQuoteInputReady(input: DeliveryQuoteInput) {
     if (!input.dropoffAddress.trim()) {
       throw new BadRequestException('Endereco de entrega obrigatorio para cotar frete.');
     }
     if (this.isPickupAndDropoffSameAddress(input.pickupAddress, input.dropoffAddress)) {
       throw new BadRequestException(
-        'O endereco de entrega coincide com o ponto de coleta da Alameda Jau 731. Selecione retirada ou informe outro destino.'
+        'O endereco de entrega coincide com o ponto de retirada. Selecione retirada ou informe outro destino.'
       );
     }
-
-    if (this.uberProvider.isConfigured()) {
-      try {
-        return await this.uberProvider.quote(input);
-      } catch (error) {
-        if (
-          options?.allowManualFallback !== false &&
-          (error instanceof BadGatewayException || this.uberProvider.isCoverageLimitError(error))
-        ) {
-          return this.localProvider.quote(input);
-        }
-        throw error;
-      }
-    }
-
-    return this.localProvider.quote(input);
   }
 
-  private applyCustomerDeliveryPricing(
-    input: DeliveryQuoteInput,
-    quote: Awaited<ReturnType<DeliveriesService['fetchProviderQuote']>>
-  ) {
-    return {
-      ...quote,
-      fee: this.resolveCustomerDeliveryFee(input, quote)
-    };
-  }
-
-  private resolveCustomerDeliveryFee(
-    input: DeliveryQuoteInput,
-    quote: Awaited<ReturnType<DeliveriesService['fetchProviderQuote']>>
-  ) {
-    const distanceKm = this.resolveDeliveryDistanceKm(input, quote);
-    const exceedsDistanceLimit =
-      typeof distanceKm === 'number' && Number.isFinite(distanceKm) && distanceKm > DELIVERY_BASE_DISTANCE_LIMIT_KM;
-
-    return this.toMoney(exceedsDistanceLimit ? DELIVERY_EXTENDED_FEE : DELIVERY_BASE_FEE);
-  }
-
-  private resolveDeliveryDistanceKm(
-    input: DeliveryQuoteInput,
-    quote: Awaited<ReturnType<DeliveriesService['fetchProviderQuote']>>
-  ) {
-    if (typeof quote.distanceKm === 'number' && Number.isFinite(quote.distanceKm) && quote.distanceKm > 0) {
-      return this.toMoney(quote.distanceKm);
-    }
-
+  private resolveDeliveryDistanceKm(input: DeliveryQuoteInput) {
     const dropoffLat = typeof input.dropoffLat === 'number' && Number.isFinite(input.dropoffLat) ? input.dropoffLat : null;
     const dropoffLng = typeof input.dropoffLng === 'number' && Number.isFinite(input.dropoffLng) ? input.dropoffLng : null;
     if (dropoffLat == null || dropoffLng == null) {
@@ -609,9 +564,7 @@ export class DeliveriesService {
     throw new BadRequestException(externalOrderScheduleErrorMessage());
   }
 
-  private isAcceptableDeliveryQuote(quote: DeliveryQuoteResponse, allowManualFallback = true) {
-    if (quote.provider === 'UBER_DIRECT' && quote.source === 'UBER_QUOTE') return true;
-    if (!allowManualFallback) return false;
+  private isAcceptableDeliveryQuote(quote: DeliveryQuoteResponse) {
     return quote.provider === 'LOCAL' && quote.source === 'MANUAL_FALLBACK';
   }
 
@@ -668,24 +621,10 @@ export class DeliveriesService {
 
   private pickupOrigin() {
     return {
-      name:
-        this.normalizeText(process.env.DELIVERY_PICKUP_NAME) ||
-        this.normalizeText(process.env.UBER_DIRECT_PICKUP_NAME) ||
-        'Quero Broa',
-      phone:
-        this.normalizeText(process.env.DELIVERY_PICKUP_PHONE) ||
-        this.normalizeText(process.env.UBER_DIRECT_PICKUP_PHONE) ||
-        '',
+      name: this.normalizeText(process.env.DELIVERY_PICKUP_NAME) || 'Quero Broa',
+      phone: this.normalizeText(process.env.DELIVERY_PICKUP_PHONE) || '',
       address: FIXED_PICKUP_ORIGIN.fullAddress
     };
-  }
-
-  private selectDispatchProvider(provider: string | null | undefined): DeliveryProvider {
-    const normalized = this.normalizeProvider(provider);
-    if (normalized === 'UBER_DIRECT' && this.uberProvider.isConfigured()) {
-      return this.uberProvider;
-    }
-    return this.localProvider;
   }
 
   private quoteRequestHash(draft: DeliveryQuoteDraft) {
@@ -1004,7 +943,7 @@ export class DeliveriesService {
   }
 
   private normalizeProvider(provider: string | null | undefined): DeliveryTrackingRecord['provider'] {
-    if (provider === 'LOCAL' || provider === 'UBER_DIRECT' || provider === 'LOGGI' || provider === 'NONE') {
+    if (provider === 'LOCAL' || provider === 'NONE') {
       return provider;
     }
     return 'LOCAL';
@@ -1040,7 +979,7 @@ export class DeliveriesService {
   }
 
   private normalizeQuoteSource(source: string | null | undefined): DeliveryQuoteResponse['source'] {
-    if (source === 'NONE' || source === 'UBER_QUOTE' || source === 'LOGGI_QUOTE' || source === 'MANUAL_FALLBACK') {
+    if (source === 'NONE' || source === 'MANUAL_FALLBACK') {
       return source;
     }
     return 'NONE';

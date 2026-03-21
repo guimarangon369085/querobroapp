@@ -2,8 +2,31 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ensureApiServer, request, requestExpectError } from './lib/api-server.mjs';
 
-function localScheduleIso(year, monthIndex, day, hour, minute) {
-  return new Date(Date.UTC(year, monthIndex, day, hour + 3, minute, 0, 0)).toISOString();
+function resolveScheduleDate(seed = Date.now()) {
+  const baseDate = new Date(Date.UTC(2030, 0, 1, 0, 0, 0, 0));
+  const offsetDays = Math.abs(Number(seed) || 0) % 320;
+  baseDate.setUTCDate(baseDate.getUTCDate() + offsetDays);
+  return baseDate;
+}
+
+function addUtcDays(baseDate, days) {
+  const nextDate = new Date(baseDate);
+  nextDate.setUTCDate(nextDate.getUTCDate() + days);
+  return nextDate;
+}
+
+function localScheduleIso(baseDate, hour, minute) {
+  return new Date(
+    Date.UTC(
+      baseDate.getUTCFullYear(),
+      baseDate.getUTCMonth(),
+      baseDate.getUTCDate(),
+      hour + 3,
+      minute,
+      0,
+      0
+    )
+  ).toISOString();
 }
 
 async function createOrderProduct(apiUrl, suffix) {
@@ -83,10 +106,11 @@ test('public schedule availability skips occupied slots', async (t) => {
   });
 
   const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const scheduleDate = resolveScheduleDate(`${suffix}-availability`.length + Date.now());
   const product = await createOrderProduct(apiUrl, suffix);
   created.productId = product.id;
 
-  const firstSchedule = localScheduleIso(2030, 1, 12, 8, 0);
+  const firstSchedule = localScheduleIso(scheduleDate, 8, 0);
   const first = await createIntakeOrder(apiUrl, product.id, `${suffix}-1`, firstSchedule);
   created.orderIds.push(first.order.id);
   created.customerIds.push(first.intake.customerId);
@@ -98,7 +122,7 @@ test('public schedule availability skips occupied slots', async (t) => {
 
   assert.equal(availability.requestedAvailable, false);
   assert.equal(availability.reason, 'SLOT_TAKEN');
-  assert.equal(availability.nextAvailableAt, localScheduleIso(2030, 1, 12, 8, 15));
+  assert.equal(availability.nextAvailableAt, localScheduleIso(scheduleDate, 8, 15));
 });
 
 test('whatsapp-flow rejects the 16th scheduled order on the same day', async (t) => {
@@ -129,6 +153,7 @@ test('whatsapp-flow rejects the 16th scheduled order on the same day', async (t)
   });
 
   const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const scheduleDate = resolveScheduleDate(`${suffix}-day-full`.length + Date.now());
   const product = await createOrderProduct(apiUrl, suffix);
   created.productId = product.id;
 
@@ -139,7 +164,7 @@ test('whatsapp-flow rejects the 16th scheduled order on the same day', async (t)
       apiUrl,
       product.id,
       `${suffix}-${index + 1}`,
-      localScheduleIso(2030, 1, 12, hour, minute)
+      localScheduleIso(scheduleDate, hour, minute)
     );
     created.orderIds.push(createdOrder.order.id);
     created.customerIds.push(createdOrder.intake.customerId);
@@ -157,7 +182,7 @@ test('whatsapp-flow rejects the 16th scheduled order on the same day', async (t)
       },
       fulfillment: {
         mode: 'DELIVERY',
-        scheduledAt: localScheduleIso(2030, 1, 12, 12, 0)
+        scheduledAt: localScheduleIso(scheduleDate, 12, 0)
       },
       order: {
         items: [{ productId: product.id, quantity: 1 }]
@@ -174,11 +199,11 @@ test('whatsapp-flow rejects the 16th scheduled order on the same day', async (t)
   });
 
   assert.equal(body.reason, 'DAY_FULL');
-  assert.equal(body.nextAvailableAt, localScheduleIso(2030, 1, 13, 8, 0));
+  assert.equal(body.nextAvailableAt, localScheduleIso(addUtcDays(scheduleDate, 1), 8, 0));
   assert.match(String(body.message || ''), /15 pedidos/i);
 });
 
-test('order update rejects moving into an occupied slot', async (t) => {
+test('order update allows moving an internal dashboard order into an occupied slot', async (t) => {
   const { apiUrl, shutdown } = await ensureApiServer();
   const created = {
     productId: null,
@@ -206,25 +231,25 @@ test('order update rejects moving into an occupied slot', async (t) => {
   });
 
   const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const scheduleDate = resolveScheduleDate(`${suffix}-internal-update`.length + Date.now());
   const product = await createOrderProduct(apiUrl, suffix);
   created.productId = product.id;
 
-  const firstSchedule = localScheduleIso(2030, 1, 14, 8, 0);
-  const secondSchedule = localScheduleIso(2030, 1, 14, 8, 15);
+  const firstSchedule = localScheduleIso(scheduleDate, 8, 0);
+  const secondSchedule = localScheduleIso(scheduleDate, 8, 15);
   const first = await createIntakeOrder(apiUrl, product.id, `${suffix}-first`, firstSchedule, 'INTERNAL_DASHBOARD');
   const second = await createIntakeOrder(apiUrl, product.id, `${suffix}-second`, secondSchedule, 'INTERNAL_DASHBOARD');
 
   created.orderIds.push(first.order.id, second.order.id);
   created.customerIds.push(first.intake.customerId, second.intake.customerId);
 
-  const body = await requestExpectError(apiUrl, `/orders/${second.order.id}`, 400, {
+  const updated = await request(apiUrl, `/orders/${second.order.id}`, {
     method: 'PUT',
     body: {
       scheduledAt: firstSchedule
     }
   });
 
-  assert.equal(body.reason, 'SLOT_TAKEN');
-  assert.equal(body.nextAvailableAt, secondSchedule);
-  assert.match(String(body.message || ''), /horário/i);
+  assert.equal(updated.id, second.order.id);
+  assert.equal(updated.scheduledAt, firstSchedule);
 });

@@ -1,6 +1,6 @@
 # NEXT_STEP_PLAN
 
-Ultima atualizacao: 2026-03-20
+Ultima atualizacao: 2026-03-21
 
 ## Objetivo da fase atual
 
@@ -9,7 +9,7 @@ Consolidar o lancamento publico do app sobre o mesmo nucleo operacional:
 - landing publica em `/`
 - operacao interna em `Pedidos`
 - captura externa em `/pedido` e `Google Forms`
-- entrega com frete cotado antes do PIX, agora em modo hibrido `Uber Direct -> Loggi`
+- entrega com frete cotado antes do PIX, calculado internamente por raio
 
 ## Gate operacional (concluido em 2026-03-11)
 
@@ -18,7 +18,7 @@ Consolidar o lancamento publico do app sobre o mesmo nucleo operacional:
 - QA executado antes e apos religamento: `pnpm qa:browser-smoke` e `pnpm qa:critical-e2e`.
 - Resultado: gates verdes e jornada critica concluindo pedido como `ENTREGUE` e `PAGO`.
 
-## Prioridade 1 (agora)
+## Prioridade 1 (concluida em 2026-03-21)
 
 ### Publicar o dominio real com captura publica e operacao no mesmo app
 
@@ -27,6 +27,7 @@ Consolidar o lancamento publico do app sobre o mesmo nucleo operacional:
 - Garantir `/` como landing publica, `/pedido` como captura publica e `/pedidos` como superficie operacional.
 - Publicar a URL final do `web` para a pagina `/pedido`.
 - Validar uma abertura externa real nas 3 rotas finais do dominio.
+- Validacao executada: `pnpm validate:public-deploy` e `pnpm validate:delivery-quote`, com `200` em `/`, `/pedido` e `/pedidos`, `apiHealth=ok` e quote publico `LOCAL / MANUAL_FALLBACK`.
 
 Criterio de pronto:
 - `www.querobroa.com.br`, `www.querobroa.com.br/pedido` e `www.querobroa.com.br/pedidos` abrem no deploy final e usam a mesma base operacional.
@@ -38,7 +39,7 @@ Criterio de pronto:
 - Configurar `ORDER_FORM_BRIDGE_TOKEN` onde houver auth ligada.
 - Montar o `Google Form` real com os labels definidos em `docs/GOOGLE_FORMS_BRIDGE.md`.
 - Colar o `scripts/google-form-bridge.gs` no Apps Script do formulario.
-- Publicar no deploy final o bundle que expoe `POST /api/google-form/preview` e `POST /api/customer-form/preview`.
+- Garantir o uso do bundle ja publicado que expoe `POST /api/google-form/preview` e `POST /api/customer-form/preview`.
 - Validar uma submissao real ponta a ponta caindo no app com `PIX_PENDING`.
 - Validar no mesmo teste um pedido `Entrega` com frete somado antes do PIX.
 - Rodar `pnpm validate:public-deploy` apos o deploy e manter `pnpm validate:delivery-quote` como checagem rapida de frete real.
@@ -101,13 +102,12 @@ Criterio de pronto:
 
 ## Ordem de execucao
 
-1. Publicar o dominio real e validar `/`, `/pedido` e `/pedidos`.
-2. Teste real de `/pedido` e do `Google Forms`, incluindo `Entrega`.
-3. Refino final de `Estoque` e `Pedidos`, com foco agora em performance/agregacao do dashboard e fatiamento de `orders-screen`.
-4. Ativacao final de `WhatsApp Flow` sobre o intake canonico ja pronto.
+1. Teste real de `/pedido` e do `Google Forms`, incluindo `Entrega`.
+2. Refino final de `Estoque` e `Pedidos`, com foco agora em performance/agregacao do dashboard e fatiamento de `orders-screen`.
+3. Ativacao final de `WhatsApp Flow` sobre o intake canonico ja pronto.
 
 ## Riscos de nao fazer
 
-- O link publico pode parecer pronto sem estar realmente publicado com host, DNS e token corretos.
+- O deploy publico ja esta no ar; o risco agora e o canal externo parecer pronto sem Apps Script/token realmente configurados de ponta a ponta.
 - Um formulario externo mal configurado pode criar friccao mesmo com o backend pronto.
 - Se a ativacao final do `WhatsApp Flow` divergir do intake canonico ja implementado, o canal vai reintroduzir retrabalho e inconsistencias operacionais.

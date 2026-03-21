@@ -1274,14 +1274,14 @@ export class OrdersService {
   }
 
   private normalizeDeliveryProvider(provider: string | null | undefined) {
-    if (provider === 'NONE' || provider === 'LOCAL' || provider === 'UBER_DIRECT' || provider === 'LOGGI') {
+    if (provider === 'NONE' || provider === 'LOCAL') {
       return provider;
     }
     return 'NONE';
   }
 
   private normalizeDeliveryFeeSource(source: string | null | undefined) {
-    if (source === 'NONE' || source === 'UBER_QUOTE' || source === 'LOGGI_QUOTE' || source === 'MANUAL_FALLBACK') {
+    if (source === 'NONE' || source === 'MANUAL_FALLBACK') {
       return source;
     }
     return 'NONE';
@@ -2036,9 +2036,11 @@ export class OrdersService {
       const deliveryFee = this.toMoney(deliveryQuote.fee ?? 0);
       const total = this.computeOrderTotal(subtotal, discount, deliveryFee);
 
-      await this.ensureOrderScheduleCapacityAllowed(tx, scheduledAt, {
-        reference: data.source.channel === 'CUSTOMER_LINK' || data.source.channel === 'WHATSAPP_FLOW' ? new Date() : undefined
-      });
+      if (isExternalIntakeChannel) {
+        await this.ensureOrderScheduleCapacityAllowed(tx, scheduledAt, {
+          reference: new Date()
+        });
+      }
 
       const createdOrder = await tx.order.create({
         data: {
@@ -2466,12 +2468,6 @@ export class OrdersService {
       const total = this.computeOrderTotal(subtotal, discount, this.toMoney(existing.deliveryFee ?? 0));
       const amountPaid = this.getPaidAmount(existing.payments || []);
       this.ensureOrderTotalCoversPaid(total, amountPaid);
-
-      if (nextScheduledAt !== undefined) {
-        await this.ensureOrderScheduleCapacityAllowed(tx, nextScheduledAt, {
-          excludeOrderId: id
-        });
-      }
 
       const updated = await tx.order.update({
         where: { id },

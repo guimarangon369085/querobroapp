@@ -457,7 +457,7 @@ ensure_api_server
 ensure_web_server
 
 check_route "pedidos" "/pedidos" "PEDIDOS"
-check_route "clientes" "/clientes" "Clientes"
+check_route "clientes" "/clientes" "CLIENTES"
 check_route "produtos" "/produtos" "" "/estoque"
 check_route "estoque" "/estoque" "" "/estoque"
 
