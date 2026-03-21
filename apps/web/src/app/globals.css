@@ -4168,6 +4168,10 @@ input[type='radio'] {
   grid-column: 1 / -1;
 }
 
+.public-order-schedule-grid__complement {
+  grid-column: auto;
+}
+
 .public-order-box-grid {
   display: grid;
   gap: clamp(12px, 1.6vw, 18px);
@@ -4388,6 +4392,10 @@ input[type='radio'] {
 
   .public-order-schedule-grid__address {
     grid-column: auto;
+  }
+
+  .public-order-schedule-grid__complement {
+    grid-column: 1 / 2;
   }
 }
 

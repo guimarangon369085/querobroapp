@@ -1439,6 +1439,19 @@ export function PublicOrderPage() {
                       />
                     </FormField>
                   </div>
+                  <div className="public-order-schedule-grid__complement">
+                    <FormField label="Complemento">
+                      <input
+                        className="app-input xl:h-14 xl:text-[1.02rem]"
+                        name="address-line2"
+                        value={form.deliveryNotes}
+                        onChange={(event) => setForm((current) => ({ ...current, deliveryNotes: event.target.value }))}
+                        placeholder="Apto, Bloco, Casa"
+                        autoComplete={form.fulfillmentMode === 'DELIVERY' ? 'address-line2' : 'off'}
+                        autoCapitalize="sentences"
+                      />
+                    </FormField>
+                  </div>
                   <FormField label="Data">
                     <input
                       className="app-input xl:h-14 xl:text-[1.02rem]"
@@ -1493,20 +1506,6 @@ export function PublicOrderPage() {
                     </span>
                   </div>
                 ) : null}
-
-                <div className="mt-4">
-                  <FormField label="Complemento">
-                    <input
-                      className="app-input xl:h-14 xl:text-[1.02rem]"
-                      name="address-line2"
-                      value={form.deliveryNotes}
-                      onChange={(event) => setForm((current) => ({ ...current, deliveryNotes: event.target.value }))}
-                      placeholder="Portao azul, interfone, bloco"
-                      autoComplete={form.fulfillmentMode === 'DELIVERY' ? 'address-line2' : 'off'}
-                      autoCapitalize="sentences"
-                    />
-                  </FormField>
-                </div>
               </section>
             </div>
 
