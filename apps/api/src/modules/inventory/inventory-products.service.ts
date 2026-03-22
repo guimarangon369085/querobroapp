@@ -8,6 +8,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import sharp from 'sharp';
 
 const TRADITIONAL_BROA_TEMPLATE_KEY = normalizeInventoryLookup('Broa Tradicional');
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -17,29 +18,10 @@ const DATA_DIR = configuredStorageDir || path.join(repoRoot, 'data', 'builder');
 const PRODUCT_UPLOADS_DIR = path.join(DATA_DIR, 'uploads', 'products');
 const PRODUCT_UPLOADS_PREFIX = '/uploads/products';
 const PRODUCT_IMAGE_ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
-
-function extensionFromMime(mimeType?: string | null) {
-  switch ((mimeType || '').toLowerCase()) {
-    case 'image/jpeg':
-      return 'jpg';
-    case 'image/png':
-      return 'png';
-    case 'image/webp':
-      return 'webp';
-    case 'image/gif':
-      return 'gif';
-    default:
-      return '';
-  }
-}
-
-function extensionFromFilename(fileName?: string | null) {
-  if (!fileName) return '';
-  const ext = path.extname(fileName).replace('.', '').toLowerCase();
-  if (!ext) return '';
-  if (ext === 'jpeg') return 'jpg';
-  return ['jpg', 'png', 'webp', 'gif'].includes(ext) ? ext : '';
-}
+export const PRODUCT_IMAGE_MAX_UPLOAD_BYTES = 24 * 1024 * 1024;
+const PRODUCT_IMAGE_MAX_WIDTH = 1600;
+const PRODUCT_IMAGE_MAX_HEIGHT = 1600;
+const PRODUCT_IMAGE_OUTPUT_QUALITY = 82;
 
 function isSafeManagedProductImageName(fileName?: string | null) {
   const normalized = (fileName || '').trim();
@@ -57,6 +39,29 @@ export class InventoryProductsService {
 
   private async ensureImageStorage() {
     await fs.mkdir(PRODUCT_UPLOADS_DIR, { recursive: true });
+  }
+
+  private async normalizeProductImage(buffer: Buffer) {
+    try {
+      return await sharp(buffer, {
+        failOn: 'none',
+        limitInputPixels: 64 * 1000 * 1000
+      })
+        .rotate()
+        .resize({
+          width: PRODUCT_IMAGE_MAX_WIDTH,
+          height: PRODUCT_IMAGE_MAX_HEIGHT,
+          fit: 'inside',
+          withoutEnlargement: true
+        })
+        .webp({
+          quality: PRODUCT_IMAGE_OUTPUT_QUALITY,
+          effort: 4
+        })
+        .toBuffer();
+    } catch {
+      throw new BadRequestException('Nao foi possivel processar a imagem enviada.');
+    }
   }
 
   private async removeManagedProductImageIfUnused(params: {
@@ -183,15 +188,16 @@ export class InventoryProductsService {
     if (!PRODUCT_IMAGE_ALLOWED_MIME.has((file.mimetype || '').toLowerCase())) {
       throw new BadRequestException('Formato invalido. Envie jpg, png, webp ou gif.');
     }
-    if (file.buffer.length > 8 * 1024 * 1024) {
-      throw new BadRequestException('Arquivo excede 8MB.');
+    const receivedBytes = Math.max(file.size ?? 0, file.buffer.length);
+    if (receivedBytes > PRODUCT_IMAGE_MAX_UPLOAD_BYTES) {
+      throw new BadRequestException('Arquivo excede o limite bruto de 24MB.');
     }
 
     await this.ensureImageStorage();
-    const ext = extensionFromFilename(file.originalname) || extensionFromMime(file.mimetype) || 'jpg';
+    const normalizedImageBuffer = await this.normalizeProductImage(file.buffer);
     const id = `prd_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
-    const fileName = `${id}.${ext}`;
-    await fs.writeFile(path.join(PRODUCT_UPLOADS_DIR, fileName), file.buffer);
+    const fileName = `${id}.webp`;
+    await fs.writeFile(path.join(PRODUCT_UPLOADS_DIR, fileName), normalizedImageBuffer);
 
     return {
       imageUrl: `${PRODUCT_UPLOADS_PREFIX}/${fileName}`

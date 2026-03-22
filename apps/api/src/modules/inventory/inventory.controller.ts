@@ -1,6 +1,9 @@
 import { Body, Controller, Get, Param, Post, Put, Delete, Inject, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { InventoryService } from './inventory.service.js';
-import { InventoryProductsService } from './inventory-products.service.js';
+import {
+  InventoryProductsService,
+  PRODUCT_IMAGE_MAX_UPLOAD_BYTES
+} from './inventory-products.service.js';
 import { parseWithSchema } from '../../common/validation.js';
 import { z } from 'zod';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -30,7 +33,7 @@ export class InventoryController {
   }
 
   @Post('inventory-products/image-upload')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 8 * 1024 * 1024 } }))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: PRODUCT_IMAGE_MAX_UPLOAD_BYTES } }))
   uploadProductImage(
     @UploadedFile()
     file?: {
