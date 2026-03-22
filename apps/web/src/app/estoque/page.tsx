@@ -52,19 +52,28 @@ const EMPTY_PRODUCT_FORM: Pick<Product, 'name' | 'category' | 'unit' | 'active'>
   active: true
 };
 
-type IngredientFormState = {
+type InventoryItemFormState = {
   name: string;
   unit: string;
   purchasePackSize: string;
   purchasePackCost: string;
 };
 
-const EMPTY_INGREDIENT_FORM: IngredientFormState = {
-  name: '',
-  unit: 'g',
-  purchasePackSize: '1000',
-  purchasePackCost: '0,00'
-};
+function buildInventoryItemFormState(
+  item?: Partial<Pick<InventoryItem, 'name' | 'unit' | 'purchasePackSize' | 'purchasePackCost'>>
+): InventoryItemFormState {
+  return {
+    name: item?.name ?? '',
+    unit: item?.unit ?? 'g',
+    purchasePackSize:
+      formatDecimalInputBR(item?.purchasePackSize ?? 1000, {
+        maxFractionDigits: 4
+      }) || '0',
+    purchasePackCost: formatMoneyInputBR(item?.purchasePackCost ?? 0) || '0,00'
+  };
+}
+
+const EMPTY_INVENTORY_ITEM_FORM: InventoryItemFormState = buildInventoryItemFormState();
 
 const OFFICIAL_BROA_ORDER_BY_NAME = new Map(
   OFFICIAL_BROAS.map((broa, index) => [normalizeLookupText(broa.name), index])
@@ -263,10 +272,10 @@ function StockPageContent() {
   const [boms, setBoms] = useState<BomCatalogRecord[]>([]);
   const [editingItemId, setEditingItemId] = useState<number | ''>('');
   const [showIngredientEditor, setShowIngredientEditor] = useState(false);
-  const [packSize, setPackSize] = useState<string>('0');
-  const [packCost, setPackCost] = useState<string>('0');
-  const [ingredientForm, setIngredientForm] = useState<IngredientFormState>(EMPTY_INGREDIENT_FORM);
-  const [isCreatingIngredient, setIsCreatingIngredient] = useState(false);
+  const [inventoryItemForm, setInventoryItemForm] = useState<InventoryItemFormState>(
+    EMPTY_INVENTORY_ITEM_FORM
+  );
+  const [isSavingInventoryItem, setIsSavingInventoryItem] = useState(false);
   const [editingProductId, setEditingProductId] = useState<number | null>(null);
   const [showProductEditor, setShowProductEditor] = useState(false);
   const [productForm, setProductForm] = useState<Pick<Product, 'name' | 'category' | 'unit' | 'active'>>(
@@ -511,107 +520,101 @@ function StockPageContent() {
     }
   };
 
-  const startEditItem = (item: InventoryOverviewItem) => {
+  const startCreateIngredientEditor = useCallback(() => {
+    if (technicalCatalogDetailsRef.current) technicalCatalogDetailsRef.current.open = true;
+    if (inventoryItemsDetailsRef.current) inventoryItemsDetailsRef.current.open = true;
+    setShowIngredientEditor(true);
+    setEditingItemId('');
+    setInventoryItemForm(EMPTY_INVENTORY_ITEM_FORM);
+  }, []);
+
+  const startEditItem = useCallback((item: InventoryOverviewItem) => {
     if (technicalCatalogDetailsRef.current) technicalCatalogDetailsRef.current.open = true;
     if (inventoryItemsDetailsRef.current) inventoryItemsDetailsRef.current.open = true;
     setShowIngredientEditor(true);
     setEditingItemId(item.id!);
-    setPackSize(String(item.purchasePackSize ?? 0));
-    setPackCost(String(item.purchasePackCost ?? 0));
-  };
+    setInventoryItemForm(buildInventoryItemFormState(item));
+  }, []);
 
   const resetIngredientEditor = useCallback(() => {
     setShowIngredientEditor(false);
     setEditingItemId('');
-    setPackSize('0');
-    setPackCost('0');
-    setIngredientForm(EMPTY_INGREDIENT_FORM);
+    setInventoryItemForm(EMPTY_INVENTORY_ITEM_FORM);
   }, []);
 
-  const createIngredient = async (event?: FormEvent) => {
+  const saveInventoryItem = async (event?: FormEvent) => {
     event?.preventDefault();
-    if (isCreatingIngredient) return;
+    if (isSavingInventoryItem) return;
+    const isEditing = editingItemId !== '';
 
-    if (!ingredientForm.name || ingredientForm.name.trim().length < 2) {
-      notifyError('Informe um nome valido para o ingrediente.');
+    if (!inventoryItemForm.name || inventoryItemForm.name.trim().length < 2) {
+      notifyError('Informe um nome valido para o item.');
       return;
     }
 
-    if (!ingredientForm.unit || ingredientForm.unit.trim().length < 1) {
-      notifyError('Informe a unidade do ingrediente.');
+    if (!inventoryItemForm.unit || inventoryItemForm.unit.trim().length < 1) {
+      notifyError('Informe a unidade do item.');
       return;
     }
 
-    const parsedPackSize = parseRequiredNumber(ingredientForm.purchasePackSize, 'Tamanho do pacote');
+    const parsedPackSize = parseRequiredNumber(inventoryItemForm.purchasePackSize, 'Tamanho do pacote');
     if (parsedPackSize === null) return;
     if (parsedPackSize <= 0) {
       notifyError('Tamanho do pacote deve ser maior que zero.');
       return;
     }
 
-    const parsedPackCost = parseRequiredNumber(ingredientForm.purchasePackCost, 'Custo de compra');
+    const parsedPackCost = parseRequiredNumber(inventoryItemForm.purchasePackCost, 'Custo de compra');
     if (parsedPackCost === null) return;
 
-    setIsCreatingIngredient(true);
+    setIsSavingInventoryItem(true);
     try {
-      const createdItem = await apiFetch<InventoryItem>('/inventory-items', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: ingredientForm.name.trim(),
-          category: 'INGREDIENTE',
-          unit: ingredientForm.unit.trim(),
-          purchasePackSize: parsedPackSize,
-          purchasePackCost: parsedPackCost
-        })
-      });
+      const savedItem = await apiFetch<InventoryItem>(
+        isEditing ? `/inventory-items/${editingItemId}` : '/inventory-items',
+        {
+          method: isEditing ? 'PUT' : 'POST',
+          body: JSON.stringify({
+            name: inventoryItemForm.name.trim(),
+            ...(isEditing ? {} : { category: 'INGREDIENTE' }),
+            unit: inventoryItemForm.unit.trim(),
+            purchasePackSize: parsedPackSize,
+            purchasePackCost: parsedPackCost
+          })
+        }
+      );
 
       if (technicalCatalogDetailsRef.current) technicalCatalogDetailsRef.current.open = true;
       if (inventoryItemsDetailsRef.current) inventoryItemsDetailsRef.current.open = true;
       setShowIngredientEditor(true);
-      setEditingItemId(createdItem.id ?? '');
-      setPackSize(String(createdItem.purchasePackSize ?? parsedPackSize));
-      setPackCost(String(createdItem.purchasePackCost ?? parsedPackCost));
-      setIngredientForm(EMPTY_INGREDIENT_FORM);
+      setEditingItemId(savedItem.id ?? '');
+      setInventoryItemForm(
+        buildInventoryItemFormState({
+          name: savedItem.name ?? inventoryItemForm.name.trim(),
+          unit: savedItem.unit ?? inventoryItemForm.unit.trim(),
+          purchasePackSize: savedItem.purchasePackSize ?? parsedPackSize,
+          purchasePackCost: savedItem.purchasePackCost ?? parsedPackCost
+        })
+      );
       await load();
-      notifySuccess('Ingrediente criado e ja disponivel nas fichas tecnicas.');
+      notifySuccess(
+        isEditing
+          ? 'Item atualizado e mantido disponivel nas fichas tecnicas.'
+          : 'Ingrediente criado e ja disponivel nas fichas tecnicas.'
+      );
       scrollToLayoutSlot('packaging', {
         focus: true,
         focusSelector: 'input, select, textarea, button'
       });
     } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Nao foi possivel criar o ingrediente.');
+      notifyError(
+        err instanceof Error
+          ? err.message
+          : isEditing
+            ? 'Nao foi possivel atualizar o item.'
+            : 'Nao foi possivel criar o ingrediente.'
+      );
     } finally {
-      setIsCreatingIngredient(false);
-    }
-  };
-
-  const updateItem = async () => {
-    if (!editingItemId) return;
-    const parsedPackSize = parseRequiredNumber(packSize, 'Tamanho da embalagem');
-    if (parsedPackSize === null) return;
-    if (parsedPackSize <= 0) {
-      notifyError('Tamanho da embalagem deve ser maior que zero.');
-      return;
-    }
-
-    const parsedPackCost = parseRequiredNumber(packCost, 'Custo da embalagem');
-    if (parsedPackCost === null) return;
-
-    try {
-      await apiFetch(`/inventory-items/${editingItemId}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          purchasePackSize: parsedPackSize,
-          purchasePackCost: parsedPackCost
-        })
-      });
-      setEditingItemId('');
-      setPackSize('0');
-      setPackCost('0');
-      await load();
-      notifySuccess('Custo de compra atualizado.');
-    } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Nao foi possivel atualizar o custo.');
+      setIsSavingInventoryItem(false);
     }
   };
 
@@ -649,6 +652,9 @@ function StockPageContent() {
     if (!accepted) return;
     try {
       await apiFetch(`/inventory-items/${id}`, { method: 'DELETE' });
+      if (editingItemId === id) {
+        resetIngredientEditor();
+      }
       await load();
       notifySuccess('Item removido do estoque.');
     } catch (err) {
@@ -851,10 +857,7 @@ function StockPageContent() {
       }
     }
     if (section === 'items') {
-      setShowIngredientEditor(true);
-      if (inventoryItemsDetailsRef.current) {
-        inventoryItemsDetailsRef.current.open = true;
-      }
+      startCreateIngredientEditor();
     }
 
     const slotId = section === 'items' ? 'packaging' : 'bom';
@@ -865,7 +868,7 @@ function StockPageContent() {
     if (section !== 'items') {
       bomSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-  }, []);
+  }, [startCreateIngredientEditor]);
 
   useEffect(() => {
     const raw = searchParams.get('bomProductId') || searchParams.get('productId');
@@ -1116,6 +1119,11 @@ function StockPageContent() {
     }
     return map;
   }, [items]);
+
+  const editingInventoryItem = useMemo(
+    () => (editingItemId ? items.find((item) => item.id === editingItemId) ?? null : null),
+    [editingItemId, items]
+  );
 
   const activeProducts = useMemo(
     () => products.filter((product) => product.active && isTechnicalCatalogProduct(product)),
@@ -1725,53 +1733,96 @@ function StockPageContent() {
                         <div className="grid gap-3">
                           <form
                             className="grid gap-3 rounded-2xl border border-white/70 bg-white/75 p-3"
-                            onSubmit={createIngredient}
+                            onSubmit={saveInventoryItem}
                           >
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div className="grid gap-1">
-                                <h4 className="text-base font-semibold text-neutral-900">Novo ingrediente</h4>
+                                <h4 className="text-base font-semibold text-neutral-900">
+                                  {editingInventoryItem
+                                    ? `Editar ${inventoryCategoryLabel(editingInventoryItem.category).toLowerCase()}`
+                                    : 'Novo ingrediente'}
+                                </h4>
                                 <p className="text-sm text-neutral-600">
-                                  Tudo que voce cadastrar aqui entra imediatamente na lista usada pelas fichas tecnicas.
+                                  {editingInventoryItem
+                                    ? 'Qualquer ajuste salvo aqui atualiza imediatamente o item usado nas fichas tecnicas.'
+                                    : 'Tudo que voce cadastrar aqui entra imediatamente na lista usada pelas fichas tecnicas.'}
                                 </p>
                               </div>
-                              <button
-                                type="button"
-                                className="app-button app-button-ghost"
-                                onClick={resetIngredientEditor}
-                              >
-                                Fechar
-                              </button>
+                              <div className="flex flex-wrap gap-2">
+                                {editingInventoryItem ? (
+                                  <button
+                                    type="button"
+                                    className="app-button app-button-ghost"
+                                    onClick={startCreateIngredientEditor}
+                                  >
+                                    Novo ingrediente
+                                  </button>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  className="app-button app-button-ghost"
+                                  onClick={resetIngredientEditor}
+                                >
+                                  Fechar
+                                </button>
+                              </div>
                             </div>
                             <div className="grid gap-3 md:grid-cols-2">
+                              {items.length > 0 ? (
+                                <select
+                                  className="app-select md:col-span-2"
+                                  value={editingItemId}
+                                  onChange={(event) => {
+                                    const selectedId = event.target.value ? Number(event.target.value) : '';
+                                    if (selectedId === '') {
+                                      startCreateIngredientEditor();
+                                      return;
+                                    }
+                                    const item = items.find((entry) => entry.id === selectedId);
+                                    if (item) startEditItem(item);
+                                  }}
+                                >
+                                  <option value="">
+                                    {editingInventoryItem
+                                      ? 'Criar novo ingrediente'
+                                      : 'Selecione um item existente para editar'}
+                                  </option>
+                                  {items.map((item) => (
+                                    <option key={item.id} value={item.id}>
+                                      {item.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : null}
                               <input
                                 className="app-input"
-                                placeholder="Nome do ingrediente"
-                                value={ingredientForm.name}
+                                placeholder="Nome do item"
+                                value={inventoryItemForm.name}
                                 onChange={(event) =>
-                                  setIngredientForm((current) => ({ ...current, name: event.target.value }))
+                                  setInventoryItemForm((current) => ({ ...current, name: event.target.value }))
                                 }
                               />
                               <input
                                 className="app-input"
                                 placeholder="Unidade (g, ml, uni)"
-                                value={ingredientForm.unit}
+                                value={inventoryItemForm.unit}
                                 onChange={(event) =>
-                                  setIngredientForm((current) => ({ ...current, unit: event.target.value }))
+                                  setInventoryItemForm((current) => ({ ...current, unit: event.target.value }))
                                 }
                               />
                               <input
                                 className="app-input"
                                 inputMode="decimal"
                                 placeholder="Tamanho do pacote"
-                                value={ingredientForm.purchasePackSize}
+                                value={inventoryItemForm.purchasePackSize}
                                 onChange={(event) =>
-                                  setIngredientForm((current) => ({
+                                  setInventoryItemForm((current) => ({
                                     ...current,
                                     purchasePackSize: event.target.value
                                   }))
                                 }
                                 onBlur={() =>
-                                  setIngredientForm((current) => ({
+                                  setInventoryItemForm((current) => ({
                                     ...current,
                                     purchasePackSize:
                                       formatDecimalInputBR(current.purchasePackSize, {
@@ -1784,15 +1835,15 @@ function StockPageContent() {
                                 className="app-input"
                                 inputMode="decimal"
                                 placeholder="Custo de compra (R$)"
-                                value={ingredientForm.purchasePackCost}
+                                value={inventoryItemForm.purchasePackCost}
                                 onChange={(event) =>
-                                  setIngredientForm((current) => ({
+                                  setInventoryItemForm((current) => ({
                                     ...current,
                                     purchasePackCost: event.target.value
                                   }))
                                 }
                                 onBlur={() =>
-                                  setIngredientForm((current) => ({
+                                  setInventoryItemForm((current) => ({
                                     ...current,
                                     purchasePackCost:
                                       formatMoneyInputBR(current.purchasePackCost || '0') || '0,00'
@@ -1807,9 +1858,15 @@ function StockPageContent() {
                               <button
                                 type="submit"
                                 className="app-button app-button-primary"
-                                disabled={isCreatingIngredient}
+                                disabled={isSavingInventoryItem}
                               >
-                                {isCreatingIngredient ? 'Criando...' : 'Criar ingrediente'}
+                                {isSavingInventoryItem
+                                  ? editingInventoryItem
+                                    ? 'Salvando...'
+                                    : 'Criando...'
+                                  : editingInventoryItem
+                                    ? 'Salvar item'
+                                    : 'Criar ingrediente'}
                               </button>
                             </div>
                           </form>
@@ -1817,9 +1874,11 @@ function StockPageContent() {
                           <div className="grid gap-3 rounded-2xl border border-white/70 bg-white/75 p-3">
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div className="grid gap-1">
-                                <h4 className="text-base font-semibold text-neutral-900">Preco de compra</h4>
+                                <h4 className="text-base font-semibold text-neutral-900">
+                                  Atualizacao online de custos
+                                </h4>
                                 <p className="text-sm text-neutral-600">
-                                  Use o botao para atualizar pelos links da planilha.
+                                  Use o botao para atualizar pelos links da planilha. Para ajustes manuais, edite o item no formulario acima.
                                 </p>
                               </div>
                               <button
@@ -1851,48 +1910,9 @@ function StockPageContent() {
                                 ) : null}
                               </div>
                             ) : null}
-                            <div className="grid gap-3 md:grid-cols-3">
-                              <select
-                                className="app-select"
-                                value={editingItemId}
-                                onChange={(e) => {
-                                  const selectedId = e.target.value ? Number(e.target.value) : '';
-                                  if (selectedId === '') {
-                                    setEditingItemId('');
-                                    return;
-                                  }
-                                  const item = items.find((entry) => entry.id === selectedId);
-                                  if (item) startEditItem(item);
-                                }}
-                              >
-                                <option value="">Item</option>
-                                {items.map((item) => (
-                                  <option key={item.id} value={item.id}>
-                                    {item.name}
-                                  </option>
-                                ))}
-                              </select>
-                              <input
-                                className="app-input"
-                                placeholder="Tamanho embalagem"
-                                value={packSize}
-                                onChange={(e) => setPackSize(e.target.value)}
-                                onBlur={() =>
-                                  setPackSize(formatDecimalInputBR(packSize, { maxFractionDigits: 4 }) || '0')
-                                }
-                              />
-                              <input
-                                className="app-input"
-                                placeholder="Custo embalagem (R$)"
-                                value={packCost}
-                                onChange={(e) => setPackCost(e.target.value)}
-                                onBlur={() => setPackCost(formatMoneyInputBR(packCost || '0') || '0,00')}
-                              />
-                            </div>
-                            <div className="app-form-actions app-form-actions--mobile-sticky">
-                              <button className="app-button app-button-primary" onClick={updateItem}>
-                                Salvar preco manual
-                              </button>
+                            <div className="rounded-2xl border border-white/70 bg-white/70 px-3 py-3 text-sm text-neutral-600">
+                              Selecione um item no formulario acima ou toque em um card abaixo para editar nome,
+                              unidade, pacote e custo manual.
                             </div>
                           </div>
                         </div>
