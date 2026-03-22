@@ -20,17 +20,6 @@ else
   pnpm --filter @querobroapp/api exec prisma db push --accept-data-loss --schema prisma/schema.prod.prisma
   pnpm --filter @querobroapp/api exec prisma db execute --stdin --schema prisma/schema.prod.prisma <<'SQL'
 UPDATE "Customer"
-SET "activeEmailKey" = LOWER(TRIM("email"))
-WHERE "id" IN (
-  SELECT MIN("id")
-  FROM "Customer"
-  WHERE "deletedAt" IS NULL
-    AND "email" IS NOT NULL
-    AND TRIM("email") <> ''
-  GROUP BY LOWER(TRIM("email"))
-);
-
-UPDATE "Customer"
 SET "activePhoneKey" = TRIM("phone")
 WHERE "id" IN (
   SELECT MIN("id")
@@ -41,7 +30,6 @@ WHERE "id" IN (
   GROUP BY TRIM("phone")
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS "Customer_activeEmailKey_key" ON "Customer"("activeEmailKey");
 CREATE UNIQUE INDEX IF NOT EXISTS "Customer_activePhoneKey_key" ON "Customer"("activePhoneKey");
 CREATE INDEX IF NOT EXISTS "Customer_phone_idx" ON "Customer"("phone");
 
