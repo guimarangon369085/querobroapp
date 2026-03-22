@@ -198,6 +198,7 @@ type ExternalOrderSubmissionPreview = z.infer<typeof ExternalOrderSubmissionPrev
 type MassPrepEvent = z.infer<typeof massPrepEventSchema>;
 type OrderFlavorCode = 'T' | 'G' | 'D' | 'Q' | 'R';
 type FillingFlavorCode = Exclude<OrderFlavorCode, 'T'>;
+type OrderPricingFlavorKind = 'TRADITIONAL' | 'GOIABADA' | 'PREMIUM';
 type InventoryLookupItem = {
   id: number;
   name: string;
@@ -357,29 +358,11 @@ export class OrdersService {
     return null;
   }
 
-  private buildFlavorSummaryFromItems(
-    items: Array<{ productId: number; quantity: number }>,
-    productNameById: Map<number, string>
-  ) {
-    const flavorCounts: Record<OrderFlavorCode, number> = {
-      T: 0,
-      G: 0,
-      D: 0,
-      Q: 0,
-      R: 0
-    };
-    let totalUnits = 0;
-
-    for (const item of items) {
-      const quantity = Math.max(Math.floor(item.quantity || 0), 0);
-      if (quantity <= 0) continue;
-      totalUnits += quantity;
-      const flavorCode = this.resolveOrderFlavorCodeFromProductName(productNameById.get(item.productId));
-      if (!flavorCode) continue;
-      flavorCounts[flavorCode] += quantity;
-    }
-
-    return { totalUnits, flavorCounts };
+  private resolveOrderPricingFlavorKindFromProductName(value?: string | null): OrderPricingFlavorKind {
+    const flavorCode = this.resolveOrderFlavorCodeFromProductName(value);
+    if (flavorCode === 'T') return 'TRADITIONAL';
+    if (flavorCode === 'G') return 'GOIABADA';
+    return 'PREMIUM';
   }
 
   private buildOfficialBroaSummaryFromItems(
@@ -389,11 +372,47 @@ export class OrdersService {
     return buildOfficialBroaFlavorSummary(items, productNameById);
   }
 
-  private calculateSubtotalFromFlavorSummary(params: {
+  private sumTripletsByCounts(counts: number[]) {
+    return counts.reduce((sum, quantity) => sum + Math.floor(Math.max(quantity || 0, 0) / 3), 0);
+  }
+
+  private maxSameFlavorFullBoxesAfterTriplets(counts: number[], tripletsToUse: number) {
+    const normalizedCounts = counts.map((quantity) => Math.max(Math.floor(quantity || 0), 0));
+    const memo = new Map<string, number>();
+
+    const walk = (index: number, remainingTriplets: number): number => {
+      const memoKey = `${index}:${remainingTriplets}`;
+      const cached = memo.get(memoKey);
+      if (typeof cached === 'number') return cached;
+
+      if (index >= normalizedCounts.length) {
+        return remainingTriplets === 0 ? 0 : Number.NEGATIVE_INFINITY;
+      }
+
+      const quantity = normalizedCounts[index] || 0;
+      const maxTripletsHere = Math.min(Math.floor(quantity / 3), remainingTriplets);
+      let best = Number.NEGATIVE_INFINITY;
+      for (let usedTriplets = 0; usedTriplets <= maxTripletsHere; usedTriplets += 1) {
+        const remainingBoxes = walk(index + 1, remainingTriplets - usedTriplets);
+        if (!Number.isFinite(remainingBoxes)) continue;
+        const totalBoxes = Math.floor((quantity - usedTriplets * 3) / ORDER_BOX_UNITS) + remainingBoxes;
+        if (totalBoxes > best) best = totalBoxes;
+      }
+
+      memo.set(memoKey, best);
+      return best;
+    };
+
+    const result = walk(0, Math.max(Math.floor(tripletsToUse || 0), 0));
+    return Number.isFinite(result) ? result : 0;
+  }
+
+  private calculateSubtotalFromProductQuantities(params: {
     totalUnits: number;
-    flavorCounts: Record<OrderFlavorCode, number>;
+    quantityByProductId: Map<number, number>;
+    productNameById: Map<number, string>;
   }) {
-    const { totalUnits, flavorCounts } = params;
+    const { totalUnits, quantityByProductId, productNameById } = params;
     if (totalUnits <= 0) return 0;
 
     const fullBoxes = Math.floor(totalUnits / ORDER_BOX_UNITS);
@@ -402,17 +421,25 @@ export class OrdersService {
       return moneyFromMinorUnits(Math.round((ORDER_BOX_PRICE_CUSTOM_MINOR_UNITS / ORDER_BOX_UNITS) * openUnits));
     }
 
-    const countTraditional = Math.max(Math.floor(flavorCounts.T || 0), 0);
-    const countGoiabada = Math.max(Math.floor(flavorCounts.G || 0), 0);
-    const countDoce = Math.max(Math.floor(flavorCounts.D || 0), 0);
-    const countQueijo = Math.max(Math.floor(flavorCounts.Q || 0), 0);
-    const countRequeijao = Math.max(Math.floor(flavorCounts.R || 0), 0);
+    let countTraditional = 0;
+    const goiabadaCounts: number[] = [];
+    const premiumCounts: number[] = [];
 
-    const goiabadaTriplets = Math.floor(countGoiabada / 3);
-    const otherTriplets =
-      Math.floor(countDoce / 3) +
-      Math.floor(countQueijo / 3) +
-      Math.floor(countRequeijao / 3);
+    for (const [productId, quantity] of quantityByProductId.entries()) {
+      const kind = this.resolveOrderPricingFlavorKindFromProductName(productNameById.get(productId));
+      if (kind === 'TRADITIONAL') {
+        countTraditional += quantity;
+        continue;
+      }
+      if (kind === 'GOIABADA') {
+        goiabadaCounts.push(quantity);
+        continue;
+      }
+      premiumCounts.push(quantity);
+    }
+
+    const goiabadaTriplets = this.sumTripletsByCounts(goiabadaCounts);
+    const otherTriplets = this.sumTripletsByCounts(premiumCounts);
 
     const discountTraditional = ORDER_BOX_PRICE_CUSTOM_MINOR_UNITS - ORDER_BOX_PRICE_TRADITIONAL_MINOR_UNITS;
     const discountMixedGoiabada =
@@ -445,9 +472,8 @@ export class OrdersService {
         for (let traditionalBoxes = 0; traditionalBoxes <= maxTraditionalBoxes; traditionalBoxes += 1) {
           const usedBoxes = mixedGoiabada + mixedOther + traditionalBoxes;
           const remainingBoxSlots = fullBoxes - usedBoxes;
-          const remainingGoiabada = countGoiabada - mixedGoiabada * 3;
           const goiabadaBoxes = Math.min(
-            Math.floor(remainingGoiabada / ORDER_BOX_UNITS),
+            this.maxSameFlavorFullBoxesAfterTriplets(goiabadaCounts, mixedGoiabada),
             remainingBoxSlots
           );
 
@@ -482,8 +508,21 @@ export class OrdersService {
       select: { id: true, name: true }
     });
     const productNameById = new Map(products.map((product) => [product.id, product.name]));
-    const summary = this.buildFlavorSummaryFromItems(items, productNameById);
-    return this.calculateSubtotalFromFlavorSummary(summary);
+    const quantityByProductId = new Map<number, number>();
+    let totalUnits = 0;
+
+    for (const item of items) {
+      const quantity = Math.max(Math.floor(item.quantity || 0), 0);
+      if (quantity <= 0) continue;
+      totalUnits += quantity;
+      quantityByProductId.set(item.productId, (quantityByProductId.get(item.productId) || 0) + quantity);
+    }
+
+    return this.calculateSubtotalFromProductQuantities({
+      totalUnits,
+      quantityByProductId,
+      productNameById
+    });
   }
 
   private async ensureInventoryItemByAliases(
@@ -1381,6 +1420,36 @@ export class OrdersService {
       .filter((item): item is { productId: number; quantity: number } => Boolean(item));
   }
 
+  private normalizeExternalSubmissionItems(
+    items?: Array<{ productId: number; quantity?: number | null }>
+  ) {
+    const quantityByProductId = new Map<number, number>();
+
+    for (const item of items || []) {
+      const productId = Number(item.productId || 0);
+      const quantity = Math.max(Math.floor(item.quantity || 0), 0);
+      if (!Number.isFinite(productId) || productId <= 0 || quantity <= 0) continue;
+      quantityByProductId.set(productId, (quantityByProductId.get(productId) || 0) + quantity);
+    }
+
+    return Array.from(quantityByProductId.entries()).map(([productId, quantity]) => ({
+      productId,
+      quantity
+    }));
+  }
+
+  private async resolveExternalSubmissionItems(data: ExternalOrderSubmissionPayload) {
+    const explicitItems = this.normalizeExternalSubmissionItems(
+      (data as ExternalOrderSubmissionPayload & {
+        items?: Array<{ productId: number; quantity?: number | null }>;
+      }).items
+    );
+    if (explicitItems.length > 0) return explicitItems;
+
+    const productIdByCode = await this.resolveActiveFlavorProductIdByCode();
+    return this.buildOrderItemsFromFlavorCounts(data.flavors, productIdByCode);
+  }
+
   private async intakeExternalSubmission(
     data: ExternalOrderSubmissionPayload,
     params: {
@@ -1388,8 +1457,7 @@ export class OrdersService {
     }
   ) {
     await this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt));
-    const productIdByCode = await this.resolveActiveFlavorProductIdByCode();
-    const items = this.buildOrderItemsFromFlavorCounts(data.flavors, productIdByCode);
+    const items = await this.resolveExternalSubmissionItems(data);
 
     return this.intake({
       version: 1,
@@ -1434,8 +1502,7 @@ export class OrdersService {
   ): Promise<ExternalOrderSubmissionPreview> {
     await this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt));
 
-    const productIdByCode = await this.resolveActiveFlavorProductIdByCode();
-    const items = this.buildOrderItemsFromFlavorCounts(data.flavors, productIdByCode);
+    const items = await this.resolveExternalSubmissionItems(data);
     const pricedOrder = await this.priceOrderItems(this.prisma, items);
     const scheduledAt = this.parseOptionalDateTime(data.fulfillment.scheduledAt);
     const deliveryQuote = await this.deliveriesService.resolveDeliverySelection(

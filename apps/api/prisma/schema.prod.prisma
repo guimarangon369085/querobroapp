@@ -44,6 +44,7 @@ model Product {
   category  String?
   unit      String?
   price     Float
+  imageUrl  String?
   active    Boolean         @default(true)
   createdAt DateTime        @default(now())
   items     OrderItem[]

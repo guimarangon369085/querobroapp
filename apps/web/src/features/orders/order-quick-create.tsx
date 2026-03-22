@@ -9,25 +9,14 @@ import { formatCurrencyBR } from '@/lib/format';
 import { OrderCardArtwork } from './order-card-artwork';
 import type { DeliveryQuote } from './orders-model';
 import {
-  ORDER_BOX_CATALOG,
   ORDER_BOX_UNITS,
-  ORDER_FLAVOR_OFFICIAL_BOX_NAME_BY_CODE,
-  ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE,
-  ORDER_MISTA_SHORTCUT_CODES,
+  buildRuntimeOrderCatalog,
   compactOrderProductName,
-  normalizeOrderFlavorName,
   resolveOrderCardArt,
-  resolveOrderMistaCardArt,
-  resolveOrderFlavorCodeFromName,
-  type OrderFlavorCode,
-  type OrderMistaShortcutCode
+  resolveOrderVirtualBoxLabel
 } from './order-box-catalog';
 
 const BOX_UNITS = ORDER_BOX_UNITS;
-const MISTA_SHORTCUT_CODES = ORDER_MISTA_SHORTCUT_CODES;
-
-type MistaShortcutCode = OrderMistaShortcutCode;
-type FlavorShortcutCode = OrderFlavorCode;
 
 type SelectOption = {
   id: number;
@@ -79,10 +68,6 @@ type OrderQuickCreateProps = {
   onDecrementProduct: (productId: number) => void;
   onAddProductUnits: (productId: number, units: number) => void;
 };
-
-const flavorOfficialBoxNameByCode = ORDER_FLAVOR_OFFICIAL_BOX_NAME_BY_CODE;
-
-const mistaOfficialBoxNameByCode = ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE;
 
 function formatDateInputValue(date: Date) {
   const year = date.getFullYear();
@@ -194,67 +179,7 @@ function formatVirtualBoxProgress(totalUnits: number, remainingUnits: number) {
 }
 
 function resolveVirtualBoxOfficialName(parts: VirtualBoxPart[]) {
-  const normalizedParts = parts
-    .map((part) => ({
-      code: resolveOrderFlavorCodeFromName(part.productName),
-      units: Math.max(Math.floor(part.units || 0), 0),
-      productName: part.productName
-    }))
-    .filter((part) => part.units > 0);
-
-  if (normalizedParts.length === 2) {
-    const traditionalPart = normalizedParts.find((part) => part.code === 'T' && part.units === 4);
-    const pairedFlavorPart = normalizedParts.find(
-      (part) => part.code && part.code !== 'T' && part.units === 3
-    );
-    if (
-      traditionalPart &&
-      pairedFlavorPart &&
-      (pairedFlavorPart.code === 'G' ||
-        pairedFlavorPart.code === 'D' ||
-        pairedFlavorPart.code === 'Q' ||
-        pairedFlavorPart.code === 'R')
-    ) {
-      return mistaOfficialBoxNameByCode[pairedFlavorPart.code];
-    }
-  }
-
-  if (normalizedParts.length === 1 && normalizedParts[0]?.units === BOX_UNITS && normalizedParts[0].code) {
-    return flavorOfficialBoxNameByCode[normalizedParts[0].code];
-  }
-
-  if (normalizedParts.length === 1 && normalizedParts[0]) {
-    return `Caixa de ${normalizedParts[0].productName}`;
-  }
-
-  return 'Caixa Sabores';
-}
-
-function resolveFlavorShortcutProductIds(products: Product[]) {
-  const ids: Partial<Record<FlavorShortcutCode, number>> = {};
-
-  for (const product of products) {
-    if (typeof product.id !== 'number') continue;
-    const normalized = normalizeOrderFlavorName(product.name);
-
-    if (!ids.T && normalized.includes('tradicional')) {
-      ids.T = product.id;
-    }
-    if (!ids.G && normalized.includes('goiabada')) {
-      ids.G = product.id;
-    }
-    if (!ids.D && normalized.includes('doce')) {
-      ids.D = product.id;
-    }
-    if (!ids.Q && normalized.includes('queijo')) {
-      ids.Q = product.id;
-    }
-    if (!ids.R && normalized.includes('requeij')) {
-      ids.R = product.id;
-    }
-  }
-
-  return ids;
+  return resolveOrderVirtualBoxLabel(parts);
 }
 
 function buildVirtualBoxPartitions(
@@ -346,7 +271,7 @@ export function OrderQuickCreate({
   onDecrementProduct,
   onAddProductUnits
 }: OrderQuickCreateProps) {
-  const [mistaShortcutStack, setMistaShortcutStack] = useState<MistaShortcutCode[]>([]);
+  const [mistaShortcutStack, setMistaShortcutStack] = useState<number[]>([]);
   const quantityByProductId = new Map(
     newOrderItems.map((item) => [item.productId, item.quantity] as const)
   );
@@ -368,18 +293,11 @@ export function OrderQuickCreate({
     (hasReadyDeliveryQuote
       ? !canCreateOrder
       : !selectedCustomerId || newOrderItems.length === 0);
-  const flavorShortcutProductIds = useMemo(
-    () => resolveFlavorShortcutProductIds(productsForCards),
-    [productsForCards]
-  );
+  const runtimeCatalog = useMemo(() => buildRuntimeOrderCatalog(productsForCards), [productsForCards]);
   const mistaShortcutOptions = useMemo(
     () =>
-      MISTA_SHORTCUT_CODES.map((code) => ({
-        code,
-        art: resolveOrderMistaCardArt(code),
-        label: ORDER_BOX_CATALOG[`M${code}`].label
-      })),
-    []
+      runtimeCatalog.boxEntries.filter((entry) => entry.kind === 'MIXED'),
+    [runtimeCatalog]
   );
   const virtualBoxPartitions = useMemo(() => {
     const remainingByProductId = new Map<number, number>(
@@ -387,9 +305,8 @@ export function OrderQuickCreate({
     );
     const mistaBoxes: VirtualBoxPart[][] = [];
 
-    for (const code of mistaShortcutStack) {
-      const traditionalId = flavorShortcutProductIds.T;
-      const flavorId = flavorShortcutProductIds[code];
+    for (const flavorId of mistaShortcutStack) {
+      const traditionalId = runtimeCatalog.traditionalFlavor?.id;
       if (!traditionalId || !flavorId) continue;
 
       const traditionalBalance = remainingByProductId.get(traditionalId) || 0;
@@ -406,7 +323,7 @@ export function OrderQuickCreate({
         },
         {
           productId: flavorId,
-          productName: compactOrderProductName(productMap.get(flavorId)?.name ?? `Sabor ${code}`),
+          productName: compactOrderProductName(productMap.get(flavorId)?.name ?? `Produto ${flavorId}`),
           units: 3
         }
       ]);
@@ -422,7 +339,7 @@ export function OrderQuickCreate({
       openBox: remainingPartitions.openBox,
       openBoxUnits: remainingPartitions.openBoxUnits
     };
-  }, [flavorShortcutProductIds, mistaShortcutStack, newOrderItems, productMap]);
+  }, [mistaShortcutStack, newOrderItems, productMap, runtimeCatalog.traditionalFlavor?.id]);
   const computedTotalUnits =
     virtualBoxPartitions.boxes.length * BOX_UNITS + virtualBoxPartitions.openBoxUnits;
   const remainingUnitsToCloseBox = virtualBoxPartitions.openBoxUnits
@@ -452,14 +369,13 @@ export function OrderQuickCreate({
     }
   }, [mistaShortcutStack.length, newOrderItems.length]);
 
-  const applyMistaShortcut = (code: MistaShortcutCode) => {
-    const traditionalId = flavorShortcutProductIds.T;
-    const flavorId = flavorShortcutProductIds[code];
+  const applyMistaShortcut = (flavorId: number) => {
+    const traditionalId = runtimeCatalog.traditionalFlavor?.id;
     if (!traditionalId || !flavorId) return;
 
     onAddProductUnits(traditionalId, 4);
     onAddProductUnits(flavorId, 3);
-    setMistaShortcutStack((current) => [...current, code]);
+    setMistaShortcutStack((current) => [...current, flavorId]);
   };
 
   const handlePrimaryAction = () => {
@@ -685,7 +601,7 @@ export function OrderQuickCreate({
         {productsForCards.map((product) => {
           const selectedQty = quantityByProductId.get(product.id!) || 0;
           const isSelected = selectedQty > 0;
-          const productArt = resolveOrderCardArt(product.name);
+          const productArt = resolveOrderCardArt(product);
           return (
             <div
               key={product.id}
@@ -792,25 +708,25 @@ export function OrderQuickCreate({
           </span>
         </div>
         <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          {mistaShortcutOptions.map(({ code, art, label }) => {
-            const canApplyShortcut = Boolean(flavorShortcutProductIds.T && flavorShortcutProductIds[code]);
+          {mistaShortcutOptions.map((entry) => {
+            const canApplyShortcut = Boolean(runtimeCatalog.traditionalFlavor && runtimeCatalog.flavorProductById.get(entry.productId));
             return (
               <button
-                key={`mista-shortcut-${code}`}
+                key={`mista-shortcut-${entry.productId}`}
                 type="button"
                 className="flex items-center gap-3 rounded-2xl border border-white/80 bg-white/82 px-3 py-3 text-left transition hover:border-[rgba(126,79,45,0.18)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55"
-                onClick={() => applyMistaShortcut(code)}
+                onClick={() => applyMistaShortcut(entry.productId)}
                 disabled={!canApplyShortcut}
               >
                 <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-2xl border border-white/85 bg-white shadow-[0_10px_22px_rgba(70,44,26,0.08)]">
-                  <OrderCardArtwork alt={label} art={art} sizes="48px" />
+                  <OrderCardArtwork alt={entry.label} art={entry.art} sizes="48px" />
                 </div>
                 <div className="min-w-0">
                   <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
-                    {code}
+                    M
                   </p>
                   <p className="line-clamp-2 text-sm font-semibold text-[color:var(--ink-strong)]">
-                    {label.replace(/^Mista\s+/i, '')}
+                    {entry.label.replace(/^Mista\s+/i, '')}
                   </p>
                 </div>
               </button>

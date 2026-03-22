@@ -52,3 +52,89 @@ test('order intake google-form preview: valida payload sem criar pedido', async 
   assert.equal(typeof preview.order.total, 'number');
   assert.equal(preview.order.total >= preview.order.subtotal, true);
 });
+
+test('order intake google-form preview: aceita items explicitos para sabor dinamico', async (t) => {
+  const formToken = String(process.env.ORDER_FORM_BRIDGE_TOKEN || '').trim();
+  const { apiUrl, shutdown } = await ensureApiServer();
+  const created = {
+    traditionalProductId: null,
+    specialProductId: null
+  };
+
+  t.after(async () => {
+    const cleanups = [
+      created.specialProductId
+        ? () => request(apiUrl, `/inventory-products/${created.specialProductId}`, { method: 'DELETE' })
+        : null,
+      created.traditionalProductId
+        ? () => request(apiUrl, `/inventory-products/${created.traditionalProductId}`, { method: 'DELETE' })
+        : null
+    ].filter(Boolean);
+
+    for (const cleanup of cleanups) {
+      try {
+        await cleanup();
+      } catch {
+        // cleanup best effort
+      }
+    }
+
+    await shutdown();
+  });
+
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const traditionalProduct = await request(apiUrl, '/inventory-products', {
+    method: 'POST',
+    body: {
+      name: `Broa Tradicional (T) [TESTE_E2E] ${suffix}`,
+      category: 'Sabores',
+      unit: 'unidade',
+      price: 40,
+      active: true
+    }
+  });
+  created.traditionalProductId = traditionalProduct.id;
+
+  const specialProduct = await request(apiUrl, '/inventory-products', {
+    method: 'POST',
+    body: {
+      name: `Broa Especial [TESTE_E2E] ${suffix}`,
+      category: 'Sabores',
+      unit: 'unidade',
+      price: 55,
+      active: true
+    }
+  });
+  created.specialProductId = specialProduct.id;
+
+  const preview = await request(apiUrl, '/orders/intake/google-form/preview', {
+    method: 'POST',
+    headers: formToken ? { Authorization: `Bearer ${formToken}` } : undefined,
+    body: {
+      version: 1,
+      customer: {
+        name: `Cliente Preview Dinamico ${suffix}`,
+        phone: '11977776666'
+      },
+      fulfillment: {
+        mode: 'PICKUP',
+        scheduledAt: new Date(Date.UTC(2030, 2, 15, 14, 30, 0)).toISOString()
+      },
+      items: [
+        { productId: traditionalProduct.id, quantity: 4 },
+        { productId: specialProduct.id, quantity: 3 }
+      ],
+      notes: 'Preview com items explicitos',
+      source: {
+        externalId: `google-form-preview-items-${suffix}`
+      }
+    }
+  });
+
+  assert.equal(preview.channel, 'CUSTOMER_LINK');
+  assert.equal(preview.fulfillmentMode, 'PICKUP');
+  assert.equal(preview.order.items.length, 2);
+  assert.equal(preview.order.totalUnits, 7);
+  assert.equal(preview.order.subtotal, 47);
+  assert.equal(preview.order.items.some((item) => item.productId === specialProduct.id), true);
+});

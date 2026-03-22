@@ -4,27 +4,27 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   formatExternalOrderMinimumSchedule,
   resolveExternalOrderMinimumSchedule,
-  type ExternalOrderSubmission
+  type ExternalOrderSubmission,
+  type Product
 } from '@querobroapp/shared';
 import { GoogleAddressAutocompleteInput } from '@/components/form/GoogleAddressAutocompleteInput';
 import { FormField } from '@/components/form/FormField';
 import { useFeedback } from '@/components/feedback-provider';
 import { resolveAnalyticsSessionId, trackAnalyticsEvent } from '@/lib/analytics';
+import { apiFetch } from '@/lib/api';
 import { OrderCardArtwork } from '@/features/orders/order-card-artwork';
 import {
-  ORDER_BOX_CATALOG,
-  ORDER_SABORES_CARD_ART,
   ORDER_BOX_UNITS,
   ORDER_CUSTOM_BOX_CATALOG_CODE,
-  ORDER_FLAVOR_CODES,
-  type OrderBoxCode,
-  type OrderFlavorCode,
-  calculateOrderSubtotalFromFlavorSummary,
-  deriveFlavorUnitsFromBoxCounts,
+  buildRuntimeOrderCatalog,
+  calculateOrderSubtotalFromProductItems,
+  formatOrderProductComposition,
+  resolveOrderSaboresCardArt,
+  type OrderCardArt,
   parseMetaCheckoutProductsParam,
-  formatOrderFlavorComposition,
   resolveOrderCatalogPrefillCodeFromCatalogContentId,
-  sumOrderFlavorCounts
+  resolveRuntimeOrderBoxKey,
+  resolveRuntimeOrderFlavorProductId
 } from '@/features/orders/order-box-catalog';
 import {
   PUBLIC_ORDER_DRAFT_SESSION_STORAGE_KEY,
@@ -37,15 +37,11 @@ import {
 } from './public-order-storage';
 import { writeStoredOrderFinalized } from '@/lib/order-finalized-storage';
 
-const boxCatalog = ORDER_BOX_CATALOG;
-const FLAVOR_CODES = ORDER_FLAVOR_CODES;
 const GOOGLE_MAPS_API_KEY = (process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '').trim();
 const PUBLIC_ORDER_HOUR_OPTIONS = Array.from({ length: 24 }, (_, index) => `${index}`.padStart(2, '0'));
 const PUBLIC_ORDER_MINUTE_OPTIONS = ['00', '15', '30', '45'] as const;
 const PUBLIC_ORDER_META_COUPON_NOTE_PREFIX = 'Cupom Meta:';
 
-type BoxCode = OrderBoxCode;
-type FlavorCode = OrderFlavorCode;
 type SelectedBoxSummary = {
   key: string;
   label: string;
@@ -55,7 +51,7 @@ type SelectedBoxSummary = {
 };
 type CustomBoxDraft = {
   id: string;
-  flavors: Record<FlavorCode, number>;
+  flavors: Record<string, number>;
 };
 
 type PublicOrderFormState = {
@@ -70,14 +66,14 @@ type PublicOrderFormState = {
   date: string;
   time: string;
   notes: string;
-  boxes: Record<BoxCode, string>;
+  boxes: Record<string, string>;
 };
 
 type StoredPublicOrderSnapshot = {
-  version: 1;
+  version: 1 | 2;
   savedAt: string;
-  boxes: Record<BoxCode, string>;
-  customBoxes: Array<Record<FlavorCode, number>>;
+  boxes: Record<string, string>;
+  customBoxes: Array<Record<string, number>>;
   notes: string;
 };
 
@@ -119,31 +115,23 @@ const initialFormState: PublicOrderFormState = {
   date: '',
   time: '',
   notes: '',
-  boxes: {
-    T: '',
-    G: '',
-    D: '',
-    Q: '',
-    R: '',
-    MG: '',
-    MD: '',
-    MQ: '',
-    MR: ''
-  }
+  boxes: {}
 };
 
 function sanitizeStoredBoxCounts(value: unknown) {
-  const source = value && typeof value === 'object' ? (value as Partial<Record<BoxCode, unknown>>) : {};
-  const next = { ...initialFormState.boxes };
-  for (const code of Object.keys(initialFormState.boxes) as BoxCode[]) {
-    const quantity = parseCountValue(String(source[code] ?? ''));
-    next[code] = quantity > 0 ? String(quantity) : '';
+  const source = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  const next: Record<string, string> = {};
+  for (const [key, rawValue] of Object.entries(source)) {
+    const quantity = parseCountValue(String(rawValue ?? ''));
+    if (quantity > 0) {
+      next[key] = String(quantity);
+    }
   }
   return next;
 }
 
 function buildPrefilledBoxCountsFromSearchParams(source: { get(name: string): string | null }) {
-  const next = { ...initialFormState.boxes };
+  const next: Record<string, string> = {};
   let hasPrefill = false;
   let customBoxCount = 0;
 
@@ -152,14 +140,14 @@ function buildPrefilledBoxCountsFromSearchParams(source: { get(name: string): st
     if (catalogCode === ORDER_CUSTOM_BOX_CATALOG_CODE) {
       customBoxCount += 1;
     } else {
-      next[catalogCode] = '1';
+      next[catalogCode] = String(parseCountValue(next[catalogCode]) + 1);
     }
     hasPrefill = true;
   }
 
   const metaCheckoutPrefill = parseMetaCheckoutProductsParam(source.get('products'));
-  for (const code of Object.keys(metaCheckoutPrefill.boxes) as BoxCode[]) {
-    const quantity = Math.max(Math.floor(metaCheckoutPrefill.boxes[code] || 0), 0);
+  for (const [code, rawQuantity] of Object.entries(metaCheckoutPrefill.boxes)) {
+    const quantity = Math.max(Math.floor(rawQuantity || 0), 0);
     if (quantity <= 0) continue;
     next[code] = String(quantity);
     hasPrefill = true;
@@ -193,13 +181,11 @@ function mergeMetaCouponIntoNotes(currentNotes: string, couponCode: string | nul
 }
 
 function sanitizeStoredCustomBox(value: unknown) {
-  const source = value && typeof value === 'object' ? (value as Partial<Record<FlavorCode, unknown>>) : {};
-  return FLAVOR_CODES.reduce(
-    (accumulator, code) => {
-      accumulator[code] = Math.max(Math.floor(Number(source[code] ?? 0) || 0), 0);
-      return accumulator;
-    },
-    { T: 0, G: 0, D: 0, Q: 0, R: 0 } as Record<FlavorCode, number>
+  const source = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  return Object.fromEntries(
+    Object.entries(source)
+      .map(([key, rawValue]) => [key, Math.max(Math.floor(Number(rawValue) || 0), 0)] as const)
+      .filter(([, quantity]) => quantity > 0)
   );
 }
 
@@ -332,7 +318,7 @@ function resolvePublicOrderDraftSessionId() {
 function createEmptyCustomBoxDraft(): CustomBoxDraft {
   return {
     id: createCustomBoxId(),
-    flavors: { T: 0, G: 0, D: 0, Q: 0, R: 0 }
+    flavors: {}
   };
 }
 
@@ -340,24 +326,25 @@ function pluralize(count: number, singular: string, plural: string) {
   return count === 1 ? singular : plural;
 }
 
-function formatCustomBoxParts(counts: Record<FlavorCode, number>) {
-  return FLAVOR_CODES.map((code) => ({ code, quantity: counts[code] || 0 }))
+function formatCustomBoxParts(
+  counts: Record<string, number>,
+  flavorProducts: Array<{ id: number; label: string }>
+) {
+  return flavorProducts
+    .map((product) => ({ product, quantity: counts[String(product.id)] || 0 }))
     .filter((entry) => entry.quantity > 0)
-    .map((entry) => `${entry.quantity} ${boxCatalog[entry.code].label}`)
+    .map((entry) => `${entry.quantity} ${entry.product.label}`)
     .join(' • ');
 }
 
-function PublicOrderSaboresCollage() {
+function PublicOrderSaboresCollage({ art }: { art: OrderCardArt }) {
   return (
     <div className="relative aspect-[16/10] overflow-hidden rounded-[18px] bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.92),transparent_34%),linear-gradient(155deg,rgba(248,239,230,0.98),rgba(238,222,202,0.92))] xl:aspect-[21/10]">
-      <span className="sr-only">
-        Composicao com os cinco sabores oficiais da Caixa Sabores: Tradicional, Goiabada, Doce de Leite,
-        Queijo do Serro e Requeijao de Corte.
-      </span>
+      <span className="sr-only">Composicao da Caixa Sabores com os sabores ativos do catalogo.</span>
       <div className="absolute inset-[10px] sm:inset-4" aria-hidden="true">
         <OrderCardArtwork
-          alt="Composicao com os cinco sabores oficiais"
-          art={ORDER_SABORES_CARD_ART}
+          alt="Composicao da Caixa Sabores"
+          art={art}
           className="rounded-[14px] border border-white/85 bg-white/92 shadow-[0_18px_36px_rgba(70,44,26,0.16)]"
           overlayClassName="absolute inset-0 bg-[linear-gradient(180deg,transparent_18%,rgba(46,29,20,0.14)_100%)]"
           sizes="(max-width: 768px) 70vw, 420px"
@@ -367,22 +354,6 @@ function PublicOrderSaboresCollage() {
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.16),transparent_40%),linear-gradient(180deg,rgba(65,40,24,0.04)_0%,rgba(65,40,24,0.14)_100%)]"
         aria-hidden="true"
       />
-      <div
-        className="pointer-events-none absolute inset-y-0 left-[20%] hidden w-px -translate-x-1/2 bg-white/20 sm:block"
-        aria-hidden="true"
-      />
-      <div
-        className="pointer-events-none absolute inset-y-0 left-[40%] hidden w-px -translate-x-1/2 bg-white/20 sm:block"
-        aria-hidden="true"
-      />
-      <div
-        className="pointer-events-none absolute inset-y-0 left-[60%] hidden w-px -translate-x-1/2 bg-white/20 sm:block"
-        aria-hidden="true"
-      />
-      <div
-        className="pointer-events-none absolute inset-y-0 left-[80%] hidden w-px -translate-x-1/2 bg-white/20 sm:block"
-        aria-hidden="true"
-      />
     </div>
   );
 }
@@ -390,6 +361,7 @@ function PublicOrderSaboresCollage() {
 export function PublicOrderPage() {
   const router = useRouter();
   const { notifyError } = useFeedback();
+  const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
   const [form, setForm] = useState<PublicOrderFormState>(initialFormState);
   const [customBoxes, setCustomBoxes] = useState<CustomBoxDraft[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -415,6 +387,19 @@ export function PublicOrderPage() {
   const minimumTimeParts = useMemo(() => parseTimeValueParts(minimumTimeValue), [minimumTimeValue]);
   const selectedHourValue = selectedTimeParts?.hour ?? '';
   const selectedMinuteValue = selectedTimeParts?.minute ?? '';
+  const runtimeOrderCatalog = useMemo(() => buildRuntimeOrderCatalog(catalogProducts), [catalogProducts]);
+  const runtimeBoxEntries = runtimeOrderCatalog.boxEntries;
+  const flavorProducts = runtimeOrderCatalog.flavorProducts;
+  const productMapById = useMemo(
+    () =>
+      new Map(
+        catalogProducts
+          .filter((product): product is Product & { id: number } => typeof product.id === 'number')
+          .map((product) => [product.id, product] as const)
+      ),
+    [catalogProducts]
+  );
+  const saboresCardArt = useMemo(() => resolveOrderSaboresCardArt(catalogProducts), [catalogProducts]);
   const availableMinuteOptions = useMemo(() => {
     if (
       form.date === minimumDateValue &&
@@ -475,6 +460,26 @@ export function PublicOrderPage() {
       time: buildTimeValue(selectedHourValue, nextMinute)
     }));
   }, [availableMinuteOptions, selectedHourValue, selectedMinuteValue]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void apiFetch<Product[]>('/inventory-products')
+      .then((products) => {
+        if (!cancelled) {
+          setCatalogProducts(Array.isArray(products) ? products : []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCatalogProducts([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -607,28 +612,40 @@ export function PublicOrderPage() {
   }, []);
 
   const parsedBoxCounts = useMemo(() => {
-    return Object.fromEntries(
-      (Object.keys(boxCatalog) as BoxCode[]).map((code) => [code, parseCountValue(form.boxes[code])])
-    ) as Record<BoxCode, number>;
-  }, [form.boxes]);
+    const normalized = Object.fromEntries(
+      runtimeBoxEntries.map((entry) => [entry.key, 0] as const)
+    ) as Record<string, number>;
+
+    for (const [rawKey, rawValue] of Object.entries(form.boxes)) {
+      const resolvedKey = resolveRuntimeOrderBoxKey(rawKey, runtimeOrderCatalog);
+      if (!resolvedKey) continue;
+      const quantity = parseCountValue(String(rawValue));
+      if (quantity <= 0) continue;
+      normalized[resolvedKey] = (normalized[resolvedKey] || 0) + quantity;
+    }
+
+    return normalized;
+  }, [form.boxes, runtimeBoxEntries, runtimeOrderCatalog]);
 
   const officialBoxCount = useMemo(
     () => Object.values(parsedBoxCounts).reduce((sum, quantity) => sum + quantity, 0),
     [parsedBoxCounts]
   );
 
-  const officialUnits = useMemo(() => deriveFlavorUnitsFromBoxCounts(parsedBoxCounts), [parsedBoxCounts]);
   const customBoxSummaries = useMemo(
     () =>
       customBoxes.map((box, index) => {
-        const flavors = {
-          T: Math.max(Math.floor(box.flavors.T || 0), 0),
-          G: Math.max(Math.floor(box.flavors.G || 0), 0),
-          D: Math.max(Math.floor(box.flavors.D || 0), 0),
-          Q: Math.max(Math.floor(box.flavors.Q || 0), 0),
-          R: Math.max(Math.floor(box.flavors.R || 0), 0)
-        } satisfies Record<FlavorCode, number>;
-        const totalUnits = sumOrderFlavorCounts(flavors);
+        const flavors: Record<string, number> = {};
+
+        for (const [rawKey, rawValue] of Object.entries(box.flavors)) {
+          const productId = resolveRuntimeOrderFlavorProductId(rawKey, runtimeOrderCatalog);
+          const quantity = Math.max(Math.floor(rawValue || 0), 0);
+          if (!productId || quantity <= 0) continue;
+          const productKey = String(productId);
+          flavors[productKey] = (flavors[productKey] || 0) + quantity;
+        }
+
+        const totalUnits = Object.values(flavors).reduce((sum, quantity) => sum + quantity, 0);
         return {
           id: box.id,
           index,
@@ -639,7 +656,7 @@ export function PublicOrderPage() {
           remainingUnits: Math.max(ORDER_BOX_UNITS - totalUnits, 0)
         };
       }),
-    [customBoxes]
+    [customBoxes, runtimeOrderCatalog]
   );
   const activeCustomBoxes = useMemo(
     () => customBoxSummaries.filter((entry) => entry.isActive),
@@ -653,57 +670,88 @@ export function PublicOrderPage() {
     () => officialBoxCount + activeCustomBoxes.length,
     [activeCustomBoxes.length, officialBoxCount]
   );
-  const computedUnits = useMemo(() => {
-    const combined = { ...officialUnits };
-    for (const box of activeCustomBoxes) {
-      for (const code of FLAVOR_CODES) {
-        combined[code] += box.flavors[code];
+  const computedOrderItems = useMemo(() => {
+    const quantityByProductId = new Map<number, number>();
+
+    for (const [boxKey, boxCount] of Object.entries(parsedBoxCounts)) {
+      const normalizedBoxCount = Math.max(Math.floor(boxCount || 0), 0);
+      if (normalizedBoxCount <= 0) continue;
+      const boxEntry = runtimeOrderCatalog.boxEntryByKey.get(boxKey);
+      if (!boxEntry) continue;
+
+      for (const [productIdKey, unitsPerBox] of Object.entries(boxEntry.unitsByProductId)) {
+        const productId = Number(productIdKey);
+        const nextQuantity = normalizedBoxCount * Math.max(Math.floor(unitsPerBox || 0), 0);
+        if (!Number.isFinite(productId) || productId <= 0 || nextQuantity <= 0) continue;
+        quantityByProductId.set(productId, (quantityByProductId.get(productId) || 0) + nextQuantity);
       }
     }
-    return combined;
-  }, [activeCustomBoxes, officialUnits]);
+
+    for (const box of activeCustomBoxes) {
+      for (const [productIdKey, quantity] of Object.entries(box.flavors)) {
+        const productId = Number(productIdKey);
+        const normalizedQuantity = Math.max(Math.floor(quantity || 0), 0);
+        if (!Number.isFinite(productId) || productId <= 0 || normalizedQuantity <= 0) continue;
+        quantityByProductId.set(productId, (quantityByProductId.get(productId) || 0) + normalizedQuantity);
+      }
+    }
+
+    return Array.from(quantityByProductId.entries()).map(([productId, quantity]) => ({
+      productId,
+      quantity
+    }));
+  }, [activeCustomBoxes, parsedBoxCounts, runtimeOrderCatalog.boxEntryByKey]);
   const totalBroas = useMemo(
-    () => Object.values(computedUnits).reduce((sum, quantity) => sum + quantity, 0),
-    [computedUnits]
+    () => computedOrderItems.reduce((sum, item) => sum + item.quantity, 0),
+    [computedOrderItems]
   );
   const estimatedTotal = useMemo(
-    () =>
-      calculateOrderSubtotalFromFlavorSummary({
-        totalUnits: totalBroas,
-        flavorCounts: computedUnits
-      }),
-    [computedUnits, totalBroas]
+    () => calculateOrderSubtotalFromProductItems(computedOrderItems, productMapById),
+    [computedOrderItems, productMapById]
   );
   const scheduledAtIso = useMemo(() => toLocalIso(form.date, form.time), [form.date, form.time]);
   const selectedBoxes = useMemo<SelectedBoxSummary[]>(
     () => [
-      ...(Object.keys(parsedBoxCounts) as BoxCode[])
-        .map((code) => ({ code, quantity: parsedBoxCounts[code], meta: boxCatalog[code] }))
+      ...runtimeBoxEntries
+        .map((entry) => ({ entry, quantity: parsedBoxCounts[entry.key] || 0 }))
         .filter((entry) => entry.quantity > 0)
         .map((entry) => ({
-          key: entry.code,
-          label: entry.meta.label,
+          key: entry.entry.key,
+          label: entry.entry.label,
           quantity: entry.quantity,
           quantityLabel: `${entry.quantity} cx`,
-          detail: entry.meta.detail
+          detail: entry.entry.detail
         })),
       ...activeCustomBoxes.map((box) => ({
         key: box.id,
         label: `Caixa Sabores #${box.index + 1}`,
         quantity: 1,
         quantityLabel: box.isComplete ? '1 cx' : `${box.totalUnits}/7`,
-        detail: formatCustomBoxParts(box.flavors)
+        detail: formatCustomBoxParts(box.flavors, flavorProducts)
       }))
     ],
-    [activeCustomBoxes, parsedBoxCounts]
+    [activeCustomBoxes, flavorProducts, parsedBoxCounts, runtimeBoxEntries]
   );
   const flavorManifestItems = useMemo(
     () =>
-      FLAVOR_CODES.map((code) => ({
-        name: boxCatalog[code].label,
-        quantity: computedUnits[code]
-      })).filter((entry) => entry.quantity > 0),
-    [computedUnits]
+      computedOrderItems
+        .map((item) => ({
+          productId: item.productId,
+          name: productMapById.get(item.productId)?.name || 'Produto',
+          quantity: item.quantity
+        }))
+        .filter((entry) => entry.quantity > 0),
+    [computedOrderItems, productMapById]
+  );
+  const legacyFlavorCounts = useMemo(
+    () => ({
+      T: computedOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.T?.id)?.quantity || 0,
+      G: computedOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.G?.id)?.quantity || 0,
+      D: computedOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.D?.id)?.quantity || 0,
+      Q: computedOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.Q?.id)?.quantity || 0,
+      R: computedOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.R?.id)?.quantity || 0
+    }),
+    [computedOrderItems, runtimeOrderCatalog.flavorProductByLegacyCode]
   );
   const deliveryFee = deliveryQuote?.fee ?? 0;
   const displayTotal = estimatedTotal + deliveryFee;
@@ -779,7 +827,7 @@ export function PublicOrderPage() {
     };
   }, [syncMinimumSchedule]);
 
-  const setBoxQuantity = (code: BoxCode, nextValue: number | string) => {
+  const setBoxQuantity = (code: string, nextValue: number | string) => {
     const normalized = typeof nextValue === 'number' ? String(Math.max(Math.floor(nextValue), 0)) : nextValue;
     setForm((current) => ({
       ...current,
@@ -798,28 +846,31 @@ export function PublicOrderPage() {
     setCustomBoxes((current) => current.filter((entry) => entry.id !== boxId));
   };
 
-  const adjustCustomBoxFlavor = (boxId: string, code: FlavorCode, delta: number) => {
+  const adjustCustomBoxFlavor = (boxId: string, flavorKey: string, delta: number) => {
     setCustomBoxes((current) =>
       current.map((entry) => {
         if (entry.id !== boxId) return entry;
-        const currentValue = Math.max(Math.floor(entry.flavors[code] || 0), 0);
+        const currentValue = Math.max(Math.floor(entry.flavors[flavorKey] || 0), 0);
         if (delta < 0) {
           return {
             ...entry,
             flavors: {
               ...entry.flavors,
-              [code]: Math.max(currentValue + delta, 0)
+              [flavorKey]: Math.max(currentValue + delta, 0)
             }
           };
         }
 
-        const totalUnits = sumOrderFlavorCounts(entry.flavors);
+        const totalUnits = Object.values(entry.flavors).reduce(
+          (sum, quantity) => sum + Math.max(Math.floor(quantity || 0), 0),
+          0
+        );
         if (totalUnits >= ORDER_BOX_UNITS) return entry;
         return {
           ...entry,
           flavors: {
             ...entry.flavors,
-            [code]: currentValue + delta
+            [flavorKey]: currentValue + delta
           }
         };
       })
@@ -1111,7 +1162,7 @@ export function PublicOrderPage() {
       }
     }
 
-    const payloadBase: ExternalOrderSubmission = {
+    const payloadBase = {
       version: 1,
       customer: {
         name: form.name.trim(),
@@ -1137,7 +1188,8 @@ export function PublicOrderPage() {
               expiresAt: deliveryQuote.expiresAt
             } as ExternalOrderSubmission['delivery'])
           : undefined,
-      flavors: computedUnits,
+      flavors: legacyFlavorCounts,
+      items: computedOrderItems,
       notes: form.notes.trim() || null,
       source: {
         channel: 'PUBLIC_FORM',
@@ -1145,6 +1197,8 @@ export function PublicOrderPage() {
         externalId: draftSessionId,
         idempotencyKey: null
       }
+    } satisfies ExternalOrderSubmission & {
+      items: Array<{ productId: number; quantity: number }>;
     };
 
     const submissionFingerprint = hashPublicOrderSubmission({
@@ -1152,10 +1206,10 @@ export function PublicOrderPage() {
       customer: payloadBase.customer,
       fulfillment: payloadBase.fulfillment,
       delivery: payloadBase.delivery,
-      flavors: payloadBase.flavors,
+      items: payloadBase.items,
       notes: payloadBase.notes
     });
-    const payload: ExternalOrderSubmission = {
+    const payload = {
       ...payloadBase,
       source: {
         ...payloadBase.source,
@@ -1517,14 +1571,13 @@ export function PublicOrderPage() {
               </div>
 
               <div className="public-order-box-grid">
-                {(Object.keys(boxCatalog) as BoxCode[]).map((code) => {
-                  const meta = boxCatalog[code];
-                  const quantity = parsedBoxCounts[code];
+                {runtimeBoxEntries.map((entry) => {
+                  const quantity = parsedBoxCounts[entry.key] || 0;
                   const active = quantity > 0;
                   return (
                       <article
-                        key={code}
-                        className={`public-order-box-card group grid gap-3 overflow-hidden rounded-[22px] border p-3 shadow-[0_14px_28px_rgba(74,47,31,0.08)] transition-transform duration-300 hover:-translate-y-1 sm:gap-4 sm:rounded-[26px] sm:p-4 sm:shadow-[0_16px_38px_rgba(74,47,31,0.08)] xl:gap-4 xl:p-5 ${meta.accentClassName} ${
+                        key={entry.key}
+                        className={`public-order-box-card group grid gap-3 overflow-hidden rounded-[22px] border p-3 shadow-[0_14px_28px_rgba(74,47,31,0.08)] transition-transform duration-300 hover:-translate-y-1 sm:gap-4 sm:rounded-[26px] sm:p-4 sm:shadow-[0_16px_38px_rgba(74,47,31,0.08)] xl:gap-4 xl:p-5 ${entry.accentClassName} ${
                           active ? 'ring-1 ring-[rgba(181,68,57,0.16)]' : ''
                         }`}
                       >
@@ -1532,21 +1585,21 @@ export function PublicOrderPage() {
                         <div className="public-order-box-card__media relative shrink-0">
                           <div className="relative h-full w-full overflow-hidden rounded-[18px] border border-white/80 bg-white/70 shadow-[0_12px_24px_rgba(74,47,31,0.12)] transition-transform duration-300 group-hover:translate-y-[-2px] sm:rounded-[22px] sm:shadow-[0_14px_28px_rgba(74,47,31,0.12)] xl:rounded-[24px]">
                             <OrderCardArtwork
-                              alt={meta.label}
-                              art={meta.art}
+                              alt={entry.label}
+                              art={entry.art}
                               sizes="(max-width: 640px) 96px, (max-width: 1279px) 118px, (max-width: 1535px) 42vw, 22vw"
                             />
                           </div>
                         </div>
                         <div className="public-order-box-card__body">
                           <h3 className="public-order-box-card__title text-[0.96rem] font-semibold leading-tight tracking-[-0.02em] text-[color:var(--ink-strong)] sm:text-lg xl:text-[1.08rem]">
-                            {meta.label}
+                            {entry.label}
                           </h3>
                           <p className="public-order-box-card__detail mt-2 text-[0.76rem] leading-[1.35] text-[color:var(--ink-muted)] sm:text-sm sm:leading-6 xl:text-[0.84rem] xl:leading-6">
-                            {meta.detail}
+                            {entry.detail}
                           </p>
                           <p className="public-order-box-card__price mt-1 text-sm font-semibold text-[color:var(--ink-strong)] xl:pt-3 xl:text-[1rem]">
-                            {formatCurrencyBRL(meta.priceEstimate)}
+                            {formatCurrencyBRL(entry.priceEstimate)}
                           </p>
                         </div>
                       </div>
@@ -1554,9 +1607,9 @@ export function PublicOrderPage() {
                       <div className="public-order-box-card__controls">
                         <button
                           type="button"
-                          onClick={() => setBoxQuantity(code, Math.max(quantity - 1, 0))}
+                          onClick={() => setBoxQuantity(entry.key, Math.max(quantity - 1, 0))}
                           className="h-12 rounded-[16px] border border-white/85 bg-white/86 text-2xl font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:h-14 sm:rounded-[18px] xl:h-16 xl:text-[2rem]"
-                          aria-label={`Diminuir ${meta.label}`}
+                          aria-label={`Diminuir ${entry.label}`}
                         >
                           −
                         </button>
@@ -1564,10 +1617,10 @@ export function PublicOrderPage() {
                           <input
                             className="app-input h-12 text-center text-base font-semibold sm:h-14 sm:text-lg xl:h-16 xl:text-xl"
                             inputMode="numeric"
-                            value={form.boxes[code]}
-                            onChange={(event) => setBoxQuantity(code, event.target.value)}
+                            value={quantity > 0 ? String(quantity) : ''}
+                            onChange={(event) => setBoxQuantity(entry.key, event.target.value)}
                             placeholder="0"
-                            aria-label={meta.label}
+                            aria-label={entry.label}
                           />
                           <div className="public-order-box-card__pill rounded-[16px] border border-white/80 bg-white/80 sm:rounded-[18px]">
                             <span className="public-order-box-card__pill-count">{quantity}</span>
@@ -1578,9 +1631,9 @@ export function PublicOrderPage() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => setBoxQuantity(code, quantity + 1)}
+                          onClick={() => setBoxQuantity(entry.key, quantity + 1)}
                           className="h-12 rounded-[16px] border border-white/85 bg-white/86 text-2xl font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:h-14 sm:rounded-[18px] xl:h-16 xl:text-[2rem]"
-                          aria-label={`Aumentar ${meta.label}`}
+                          aria-label={`Aumentar ${entry.label}`}
                         >
                           +
                         </button>
@@ -1650,30 +1703,38 @@ export function PublicOrderPage() {
                         </div>
 
                         <div className="mt-3 grid gap-2">
-                          {FLAVOR_CODES.map((code) => {
-                            const meta = boxCatalog[code];
-                            const quantity = box.flavors[code];
+                          {flavorProducts.map((product) => {
+                            const quantity = box.flavors[String(product.id)] || 0;
+                            const productArt = {
+                              mode: 'single',
+                              src: product.imageUrl || '',
+                              objectPosition: 'center center'
+                            } as const;
                             return (
                               <div
-                                key={`${box.id}-${code}`}
+                                key={`${box.id}-${product.id}`}
                                 className="public-order-custom-row rounded-[16px] border border-white/80 bg-white/82 px-3 py-2.5"
                               >
                                 <div className="public-order-custom-row__info">
                                   <div className="relative h-10 w-10 shrink-0">
                                     <div className="relative h-full w-full overflow-hidden rounded-xl border border-white/80 bg-white shadow-[0_8px_18px_rgba(70,44,26,0.08)]">
-                                      <OrderCardArtwork alt={meta.label} art={meta.art} sizes="40px" />
+                                      <OrderCardArtwork
+                                        alt={product.label}
+                                        art={product.imageUrl ? productArt : saboresCardArt}
+                                        sizes="40px"
+                                      />
                                     </div>
                                   </div>
                                   <p className="public-order-custom-row__label text-[0.82rem] font-semibold text-[color:var(--ink-strong)] sm:text-sm">
-                                    {meta.label}
+                                    {product.label}
                                   </p>
                                 </div>
                                 <button
                                   type="button"
                                   className="public-order-custom-row__button h-10 rounded-[14px] border border-white/85 bg-white text-[1.15rem] font-semibold text-[color:var(--ink-strong)] transition hover:bg-white sm:text-xl"
-                                  onClick={() => adjustCustomBoxFlavor(box.id, code, -1)}
+                                  onClick={() => adjustCustomBoxFlavor(box.id, String(product.id), -1)}
                                   disabled={quantity <= 0}
-                                  aria-label={`Diminuir ${meta.label} na Caixa Sabores #${box.index + 1}`}
+                                  aria-label={`Diminuir ${product.label} na Caixa Sabores #${box.index + 1}`}
                                 >
                                   −
                                 </button>
@@ -1683,9 +1744,9 @@ export function PublicOrderPage() {
                                 <button
                                   type="button"
                                   className="public-order-custom-row__button h-10 rounded-[14px] border border-white/85 bg-white text-[1.15rem] font-semibold text-[color:var(--ink-strong)] transition hover:bg-white sm:text-xl"
-                                  onClick={() => adjustCustomBoxFlavor(box.id, code, 1)}
+                                  onClick={() => adjustCustomBoxFlavor(box.id, String(product.id), 1)}
                                   disabled={box.totalUnits >= ORDER_BOX_UNITS}
-                                  aria-label={`Aumentar ${meta.label} na Caixa Sabores #${box.index + 1}`}
+                                  aria-label={`Aumentar ${product.label} na Caixa Sabores #${box.index + 1}`}
                                 >
                                   +
                                 </button>
@@ -1696,7 +1757,7 @@ export function PublicOrderPage() {
 
                         {box.isActive ? (
                           <p className="mt-3 text-[0.82rem] leading-5 text-[color:var(--ink-muted)]">
-                            {formatCustomBoxParts(box.flavors)}
+                            {formatCustomBoxParts(box.flavors, flavorProducts)}
                           </p>
                         ) : null}
                       </article>
@@ -1704,7 +1765,7 @@ export function PublicOrderPage() {
                   </div>
                 ) : (
                   <div className="mt-4 rounded-[20px] border border-white/80 bg-white/80 p-3">
-                    <PublicOrderSaboresCollage />
+                    <PublicOrderSaboresCollage art={saboresCardArt} />
                   </div>
                 )}
               </div>
@@ -1871,7 +1932,7 @@ export function PublicOrderPage() {
                     Composicao
                   </p>
                   <p className="mt-3 text-sm leading-6 text-[color:var(--ink-strong)]">
-                    {formatOrderFlavorComposition(computedUnits)}
+                    {formatOrderProductComposition(computedOrderItems, productMapById)}
                   </p>
                 </div>
 

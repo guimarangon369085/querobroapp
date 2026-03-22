@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import helmet from 'helmet';
 import { AppModule } from './app.module.js';
 import { UPLOADS_DIR } from './modules/runtime-config/runtime-config.service.js';
+import { PRODUCT_UPLOADS_DIR } from './modules/inventory/inventory-products.service.js';
 import { ZodExceptionFilter } from './common/filters/zod-exception.filter.js';
 import { getSecurityRuntimeConfig } from './security/security-config.js';
 import { PrismaService } from './prisma.service.js';
@@ -286,6 +287,7 @@ async function bootstrap() {
   app.useBodyParser('json', { limit: '20mb' });
   app.useBodyParser('urlencoded', { limit: '20mb', extended: true });
   app.useStaticAssets(UPLOADS_DIR, { prefix: '/uploads/builder/home/' });
+  app.useStaticAssets(PRODUCT_UPLOADS_DIR, { prefix: '/uploads/products/' });
 
   const allowedOrigins = parseAllowedOrigins();
   app.enableCors({

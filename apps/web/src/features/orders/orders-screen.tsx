@@ -44,16 +44,10 @@ import { OrdersBoard } from './orders-board';
 import { OrderQuickCreate } from './order-quick-create';
 import {
   ORDER_BOX_UNITS,
-  ORDER_FLAVOR_CODES,
-  ORDER_FLAVOR_OFFICIAL_BOX_NAME_BY_CODE,
-  ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE,
-  ORDER_MISTA_SHORTCUT_CODES,
-  buildOrderFlavorSummaryFromItems,
-  calculateOrderSubtotalFromFlavorSummary,
+  buildRuntimeOrderCatalog,
+  calculateOrderSubtotalFromProductItems,
   compactOrderProductName,
-  normalizeOrderFlavorName,
-  resolveOrderFlavorCodeFromName,
-  type OrderFlavorCode
+  resolveOrderVirtualBoxLabel
 } from './order-box-catalog';
 import { type DeliveryQuote, type MassPrepEvent, type OrderView } from './orders-model';
 import {
@@ -126,10 +120,6 @@ type CustomerLastOrderDraft = {
   notes: string;
 };
 
-const orderFlavorOfficialBoxNameByCode = ORDER_FLAVOR_OFFICIAL_BOX_NAME_BY_CODE;
-
-const orderMistaOfficialBoxNameByCode = ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE;
-
 function unitsToCloseOrderBox(quantity: number) {
   const normalized = Math.max(Math.floor(quantity), 0);
   if (normalized <= 0) return ORDER_BOX_UNITS;
@@ -153,34 +143,7 @@ function calculateOrderSubtotalFromItems(
   items: Array<{ productId: number; quantity: number }>,
   productMap: Map<number, Product>
 ) {
-  return calculateOrderSubtotalFromFlavorSummary(buildOrderFlavorSummaryFromItems(items, productMap));
-}
-
-function resolveOrderFlavorProductIds(products: Product[]) {
-  const ids: Partial<Record<OrderFlavorCode, number>> = {};
-
-  for (const product of products) {
-    if (typeof product.id !== 'number') continue;
-    const normalized = normalizeOrderFlavorName(product.name);
-
-    if (!ids.T && normalized.includes('tradicional')) {
-      ids.T = product.id;
-    }
-    if (!ids.G && normalized.includes('goiabada')) {
-      ids.G = product.id;
-    }
-    if (!ids.D && normalized.includes('doce')) {
-      ids.D = product.id;
-    }
-    if (!ids.Q && normalized.includes('queijo') && !normalized.includes('requeij')) {
-      ids.Q = product.id;
-    }
-    if (!ids.R && normalized.includes('requeij')) {
-      ids.R = product.id;
-    }
-  }
-
-  return ids;
+  return calculateOrderSubtotalFromProductItems(items, productMap);
 }
 
 function buildOrderVirtualBoxPartitions(
@@ -238,40 +201,7 @@ function formatOrderVirtualBoxParts(parts: OrderVirtualBoxPart[]) {
 }
 
 function resolveOrderVirtualBoxOfficialName(parts: OrderVirtualBoxPart[]) {
-  const normalizedParts = parts
-    .map((part) => ({
-      code: resolveOrderFlavorCodeFromName(part.productName),
-      units: Math.max(Math.floor(part.units || 0), 0),
-      productName: part.productName
-    }))
-    .filter((part) => part.units > 0);
-
-  if (normalizedParts.length === 2) {
-    const traditionalPart = normalizedParts.find((part) => part.code === 'T' && part.units === 4);
-    const pairedFlavorPart = normalizedParts.find(
-      (part) => part.code && part.code !== 'T' && part.units === 3
-    );
-    if (
-      traditionalPart &&
-      pairedFlavorPart &&
-      (pairedFlavorPart.code === 'G' ||
-        pairedFlavorPart.code === 'D' ||
-        pairedFlavorPart.code === 'Q' ||
-        pairedFlavorPart.code === 'R')
-    ) {
-      return orderMistaOfficialBoxNameByCode[pairedFlavorPart.code];
-    }
-  }
-
-  if (normalizedParts.length === 1 && normalizedParts[0]?.units === ORDER_BOX_UNITS && normalizedParts[0].code) {
-    return orderFlavorOfficialBoxNameByCode[normalizedParts[0].code];
-  }
-
-  if (normalizedParts.length === 1 && normalizedParts[0]) {
-    return `Caixa de ${normalizedParts[0].productName}`;
-  }
-
-  return 'Caixa Sabores';
+  return resolveOrderVirtualBoxLabel(parts);
 }
 
 function mapOrderVirtualBoxPartsToItems(boxes: OrderVirtualBoxPart[][]) {
@@ -1810,28 +1740,20 @@ function OrdersPageContent() {
 
     return sortQuickCreateProducts(products.filter((product) => product.active !== false));
   }, [products]);
-  const orderFlavorProductIds = useMemo(
-    () => resolveOrderFlavorProductIds(orderableProducts.length > 0 ? orderableProducts : products),
+  const runtimeOrderCatalog = useMemo(
+    () => buildRuntimeOrderCatalog(orderableProducts.length > 0 ? orderableProducts : products),
     [orderableProducts, products]
   );
   const selectedOrderEditableFlavorEntries = useMemo(() => {
-    return ORDER_FLAVOR_CODES.flatMap((code) => {
-      const productId = orderFlavorProductIds[code];
-      if (!productId) return [];
-      const productName = compactOrderProductName(productMap.get(productId)?.name ?? code);
-      return [
-        {
-          code,
-          productId,
-          productName
-        }
-      ];
-    });
-  }, [orderFlavorProductIds, productMap]);
-  const selectedOrderEditableFlavorByCode = useMemo(
+    return runtimeOrderCatalog.flavorProducts.map((product) => ({
+      productId: product.id,
+      productName: compactOrderProductName(productMap.get(product.id)?.name ?? product.name)
+    }));
+  }, [productMap, runtimeOrderCatalog.flavorProducts]);
+  const selectedOrderEditableFlavorByProductId = useMemo(
     () =>
       new Map(
-        selectedOrderEditableFlavorEntries.map((entry) => [entry.code, entry] as const)
+        selectedOrderEditableFlavorEntries.map((entry) => [entry.productId, entry] as const)
       ),
     [selectedOrderEditableFlavorEntries]
   );
@@ -3076,11 +2998,13 @@ function OrdersPageContent() {
   );
 
   const applySelectedOrderEditingBoxMistaShortcut = useCallback(
-    (code: (typeof ORDER_MISTA_SHORTCUT_CODES)[number]) => {
+    (pairedFlavorProductId: number) => {
       if (!selectedOrderEditingBox || !selectedOrderAllowsBoxEdit) return;
 
-      const traditionalFlavor = selectedOrderEditableFlavorByCode.get('T');
-      const pairedFlavor = selectedOrderEditableFlavorByCode.get(code);
+      const traditionalFlavor = runtimeOrderCatalog.traditionalFlavor
+        ? selectedOrderEditableFlavorByProductId.get(runtimeOrderCatalog.traditionalFlavor.id)
+        : null;
+      const pairedFlavor = selectedOrderEditableFlavorByProductId.get(pairedFlavorProductId);
       if (!traditionalFlavor || !pairedFlavor) {
         setSelectedOrderEditingBoxError('Falta sabor para essa mista.');
         return;
@@ -3105,7 +3029,8 @@ function OrdersPageContent() {
       setSelectedOrderEditingBoxError(null);
     },
     [
-      selectedOrderEditableFlavorByCode,
+      runtimeOrderCatalog.traditionalFlavor,
+      selectedOrderEditableFlavorByProductId,
       selectedOrderEditingBox,
       selectedOrderEditingBoxDraftTotalUnits,
       selectedOrderAllowsBoxEdit
@@ -4265,10 +4190,12 @@ function OrdersPageContent() {
                                 Mistas
                               </p>
                               <div className="mt-1 flex flex-wrap gap-1.5">
-                                {ORDER_MISTA_SHORTCUT_CODES.map((code) => {
-                                  const pairedFlavor = selectedOrderEditableFlavorByCode.get(code);
+                                {runtimeOrderCatalog.boxEntries
+                                  .filter((entry) => entry.kind === 'MIXED')
+                                  .map((entry) => {
+                                  const pairedFlavor = selectedOrderEditableFlavorByProductId.get(entry.productId);
                                   const canApplyMista =
-                                    Boolean(selectedOrderEditableFlavorByCode.get('T')) &&
+                                    Boolean(runtimeOrderCatalog.traditionalFlavor) &&
                                     Boolean(pairedFlavor) &&
                                     selectedOrderAllowsBoxEdit &&
                                     !isSavingSelectedOrderEditingBox &&
@@ -4276,14 +4203,14 @@ function OrdersPageContent() {
                                     selectedOrderEditingBoxDraftTotalUnits === 0;
                                   return (
                                     <button
-                                      key={`selected-order-box-mista-${box.key}-${code}`}
+                                      key={`selected-order-box-mista-${box.key}-${entry.productId}`}
                                       type="button"
                                       className="app-button app-button-ghost px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-                                      onClick={() => applySelectedOrderEditingBoxMistaShortcut(code)}
+                                      onClick={() => applySelectedOrderEditingBoxMistaShortcut(entry.productId)}
                                       disabled={!canApplyMista}
-                                      aria-label={`Aplicar caixa mista ${code}`}
+                                      aria-label={`Aplicar ${entry.label}`}
                                     >
-                                      {code}
+                                      {entry.label.replace(/^Mista\s+/i, '')}
                                     </button>
                                   );
                                 })}

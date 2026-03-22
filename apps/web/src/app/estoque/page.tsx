@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type FormEvent
 } from 'react';
 import type {
@@ -24,6 +25,7 @@ import type {
 } from '@querobroapp/shared';
 import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { resolveBuilderImageSrc } from '@/lib/builder';
 import { clearQueryParams, consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
 import { formatDecimalInputBR, formatMoneyInputBR, parseLocaleNumber } from '@/lib/format';
 import { useSurfaceMode } from '@/hooks/use-surface-mode';
@@ -45,10 +47,11 @@ const OFFICIAL_BROAS = [
   { code: 'R', name: 'Broa Requeijão de corte (R)', boxPrice: 52 }
 ] as const;
 
-const EMPTY_PRODUCT_FORM: Pick<Product, 'name' | 'category' | 'unit' | 'active'> = {
+const EMPTY_PRODUCT_FORM: Pick<Product, 'name' | 'category' | 'unit' | 'active' | 'imageUrl'> = {
   name: '',
   category: 'Sabores',
   unit: 'unidade',
+  imageUrl: null,
   active: true
 };
 
@@ -278,10 +281,15 @@ function StockPageContent() {
   const [isSavingInventoryItem, setIsSavingInventoryItem] = useState(false);
   const [editingProductId, setEditingProductId] = useState<number | null>(null);
   const [showProductEditor, setShowProductEditor] = useState(false);
-  const [productForm, setProductForm] = useState<Pick<Product, 'name' | 'category' | 'unit' | 'active'>>(
+  const [productForm, setProductForm] = useState<
+    Pick<Product, 'name' | 'category' | 'unit' | 'active' | 'imageUrl'>
+  >(
     EMPTY_PRODUCT_FORM
   );
   const [productPriceInput, setProductPriceInput] = useState<string>('0,00');
+  const [productImageFile, setProductImageFile] = useState<File | null>(null);
+  const [productImagePreviewUrl, setProductImagePreviewUrl] = useState<string>('');
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
 
   const [editingBomId, setEditingBomId] = useState<number | null>(null);
   const [showBomEditor, setShowBomEditor] = useState(false);
@@ -426,6 +434,15 @@ function StockPageContent() {
 
     return () => window.clearInterval(intervalId);
   }, [d1Date, load, loadD1]);
+
+  useEffect(
+    () => () => {
+      if (productImagePreviewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(productImagePreviewUrl);
+      }
+    },
+    [productImagePreviewUrl]
+  );
 
   const parseRequiredNumber = (raw: string | number | null | undefined, fieldLabel: string) => {
     const parsed = parseLocaleNumber(raw);
@@ -667,6 +684,8 @@ function StockPageContent() {
     setShowProductEditor(false);
     setProductForm(EMPTY_PRODUCT_FORM);
     setProductPriceInput('0,00');
+    setProductImageFile(null);
+    setProductImagePreviewUrl('');
   }, []);
 
   const startEditProduct = useCallback((product: Product) => {
@@ -678,9 +697,12 @@ function StockPageContent() {
       name: product.name,
       category: product.category ?? 'Sabores',
       unit: product.unit ?? 'unidade',
+      imageUrl: product.imageUrl ?? null,
       active: product.active
     });
     setProductPriceInput(formatMoneyInputBR(product.price ?? 0) || '0,00');
+    setProductImageFile(null);
+    setProductImagePreviewUrl(product.imageUrl || '');
     scrollToLayoutSlot('bom', { focus: true, focusSelector: 'input, select, textarea, button' });
     bomSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
@@ -695,8 +717,17 @@ function StockPageContent() {
     setBomItems([]);
   }, []);
 
+  const handleProductImageSelection = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    if (!file) return;
+
+    setProductImageFile(file);
+    setProductImagePreviewUrl(URL.createObjectURL(file));
+  }, []);
+
   const saveProduct = async (event?: FormEvent) => {
     event?.preventDefault();
+    if (isSavingProduct) return;
 
     if (!productForm.name || productForm.name.trim().length < 2) {
       notifyError('Informe um nome valido para o produto.');
@@ -705,16 +736,33 @@ function StockPageContent() {
 
     const parsedPrice = parseRequiredNumber(productPriceInput, 'Preco de venda');
     if (parsedPrice === null) return;
+    if (!editingProductId && !productImageFile && !productForm.imageUrl) {
+      notifyError('Envie uma imagem para criar o produto.');
+      return;
+    }
 
-    const payload = {
-      name: productForm.name.trim(),
-      category: productForm.category?.trim() || '',
-      unit: productForm.unit?.trim() || 'unidade',
-      active: productForm.active,
-      price: Math.round(parsedPrice * 100) / 100
-    };
-
+    setIsSavingProduct(true);
     try {
+      let nextImageUrl = productForm.imageUrl ?? null;
+      if (productImageFile) {
+        const formData = new FormData();
+        formData.append('file', productImageFile);
+        const uploadResult = await apiFetch<{ imageUrl: string }>('/inventory-products/image-upload', {
+          method: 'POST',
+          body: formData
+        });
+        nextImageUrl = uploadResult.imageUrl || null;
+      }
+
+      const payload = {
+        name: productForm.name.trim(),
+        category: productForm.category?.trim() || '',
+        unit: productForm.unit?.trim() || 'unidade',
+        imageUrl: nextImageUrl,
+        active: productForm.active,
+        price: Math.round(parsedPrice * 100) / 100
+      };
+
       if (editingProductId) {
         await apiFetch(`/inventory-products/${editingProductId}`, {
           method: 'PUT',
@@ -736,6 +784,8 @@ function StockPageContent() {
       );
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Nao foi possivel salvar o produto.');
+    } finally {
+      setIsSavingProduct(false);
     }
   };
 
@@ -772,6 +822,7 @@ function StockPageContent() {
                 name: productToRestore.name,
                 category: productToRestore.category ?? '',
                 unit: productToRestore.unit ?? 'unidade',
+                imageUrl: productToRestore.imageUrl ?? null,
                 price: productToRestore.price ?? 0,
                 active: productToRestore.active ?? true
               })
@@ -1570,6 +1621,35 @@ function StockPageContent() {
                       <p className="text-sm text-neutral-600">
                         Todo produto novo ja nasce com a ficha tecnica da Broa Tradicional para voce ajustar so o que mudar.
                       </p>
+                      <div className="grid gap-3 rounded-2xl border border-white/70 bg-white/70 p-3 md:grid-cols-[120px_minmax(0,1fr)]">
+                        <div className="relative aspect-square overflow-hidden rounded-2xl border border-white/80 bg-white/80">
+                          {productImagePreviewUrl ? (
+                            <img
+                              alt={productForm.name || 'Preview do produto'}
+                              className="h-full w-full object-cover"
+                              src={resolveBuilderImageSrc(productImagePreviewUrl)}
+                            />
+                          ) : (
+                            <div className="flex h-full items-center justify-center px-3 text-center text-xs text-neutral-500">
+                              Sem imagem
+                            </div>
+                          )}
+                        </div>
+                        <div className="grid gap-2">
+                          <label className="text-sm font-medium text-neutral-800">
+                            {editingProductId ? 'Trocar imagem do produto' : 'Imagem do produto'}
+                          </label>
+                          <input
+                            className="app-input"
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp,image/gif"
+                            onChange={handleProductImageSelection}
+                          />
+                          <p className="text-xs text-neutral-500">
+                            Essa mesma imagem sera usada no catalogo e dentro da Caixa Sabores.
+                          </p>
+                        </div>
+                      </div>
                       <input
                         className="app-input"
                         placeholder="Nome do produto"
@@ -1600,8 +1680,12 @@ function StockPageContent() {
                         <button type="button" className="app-button app-button-ghost" onClick={resetProductForm}>
                           Cancelar
                         </button>
-                        <button type="submit" className="app-button app-button-primary">
-                          {editingProductId ? 'Atualizar produto' : 'Criar produto'}
+                        <button type="submit" className="app-button app-button-primary" disabled={isSavingProduct}>
+                          {isSavingProduct
+                            ? 'Salvando...'
+                            : editingProductId
+                              ? 'Atualizar produto'
+                              : 'Criar produto'}
                         </button>
                       </div>
                     </form>

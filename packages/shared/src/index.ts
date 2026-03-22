@@ -103,6 +103,7 @@ export const ProductSchema = z.object({
   category: z.string().optional().nullable(),
   unit: z.string().optional().nullable(),
   price: z.number().nonnegative(),
+  imageUrl: z.string().min(1).max(2048).optional().nullable(),
   active: z.boolean().default(true),
   createdAt: z.string().optional().nullable()
 });
@@ -305,6 +306,11 @@ export const ExternalOrderFlavorCountsSchema = z
   })
   .default({});
 
+export const ExternalOrderSubmissionItemSchema = z.object({
+  productId: z.number().int().positive(),
+  quantity: z.coerce.number().int().nonnegative().default(0)
+});
+
 export const ExternalOrderSubmissionSchema = z
   .object({
     version: z.literal(1).default(1),
@@ -323,6 +329,7 @@ export const ExternalOrderSubmissionSchema = z
     }),
     delivery: DeliveryQuoteSelectionSchema.optional(),
     flavors: ExternalOrderFlavorCountsSchema,
+    items: z.array(ExternalOrderSubmissionItemSchema).default([]),
     notes: z.string().optional().nullable(),
     source: z
       .object({
@@ -334,17 +341,21 @@ export const ExternalOrderSubmissionSchema = z
       .default({})
   })
   .superRefine((value, ctx) => {
-    const total =
+    const flavorTotal =
       (value.flavors.T || 0) +
       (value.flavors.G || 0) +
       (value.flavors.D || 0) +
       (value.flavors.Q || 0) +
       (value.flavors.R || 0);
-    if (total <= 0) {
+    const itemTotal = (value.items || []).reduce(
+      (sum, item) => sum + Math.max(Math.floor(item.quantity || 0), 0),
+      0
+    );
+    if (flavorTotal <= 0 && itemTotal <= 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'Informe ao menos 1 broa.',
-        path: ['flavors']
+        path: ['items']
       });
     }
   });

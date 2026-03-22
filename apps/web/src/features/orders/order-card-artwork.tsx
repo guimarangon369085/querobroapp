@@ -1,7 +1,7 @@
 'use client';
 
-import Image from 'next/image';
 import type { OrderCardArt } from './order-box-catalog';
+import { resolveBuilderImageSrc } from '@/lib/builder';
 
 type OrderCardArtworkProps = {
   art: OrderCardArt;
@@ -25,19 +25,26 @@ export function OrderCardArtwork({
   imageClassName = 'h-full w-full object-cover',
   overlayClassName = 'absolute inset-0 bg-[linear-gradient(180deg,transparent_22%,rgba(46,29,20,0.14)_100%)]'
 }: OrderCardArtworkProps) {
+  const loading = priority ? 'eager' : 'lazy';
+  const fetchPriority = priority ? 'high' : 'auto';
+
+  const renderArtworkImage = (src: string, objectPosition?: string) => (
+    <img
+      alt=""
+      aria-hidden="true"
+      className={imageClassName}
+      fetchPriority={fetchPriority}
+      loading={loading}
+      sizes={sizes}
+      src={resolveBuilderImageSrc(src)}
+      style={{ objectPosition: objectPosition || 'center center' }}
+    />
+  );
+
   return (
     <div aria-label={alt} className={`relative h-full w-full overflow-hidden ${className}`} role="img">
       {art.mode === 'single' ? (
-        <Image
-          alt=""
-          aria-hidden="true"
-          className={imageClassName}
-          fill
-          priority={priority}
-          sizes={sizes}
-          src={art.src}
-          style={{ objectPosition: art.objectPosition || 'center center' }}
-        />
+        renderArtworkImage(art.src, art.objectPosition)
       ) : art.mode === 'columns' ? (
         <div
           className="absolute inset-0"
@@ -51,44 +58,17 @@ export function OrderCardArtwork({
               key={`${column.src}-${index}`}
               className={`relative min-w-0 overflow-hidden ${index > 0 ? 'border-l border-white/20' : ''}`}
             >
-              <Image
-                alt=""
-                aria-hidden="true"
-                className={imageClassName}
-                fill
-                priority={priority}
-                sizes={sizes}
-                src={column.src}
-                style={{ objectPosition: column.objectPosition || 'center center' }}
-              />
+              {renderArtworkImage(column.src, column.objectPosition)}
             </div>
           ))}
         </div>
       ) : (
         <>
           <div className="absolute inset-0" style={{ clipPath: DIAGONAL_LEFT_CLIP }}>
-            <Image
-              alt=""
-              aria-hidden="true"
-              className={imageClassName}
-              fill
-              priority={priority}
-              sizes={sizes}
-              src={art.leftSrc}
-              style={{ objectPosition: art.leftObjectPosition || 'center center' }}
-            />
+            {renderArtworkImage(art.leftSrc, art.leftObjectPosition)}
           </div>
           <div className="absolute inset-0" style={{ clipPath: DIAGONAL_RIGHT_CLIP }}>
-            <Image
-              alt=""
-              aria-hidden="true"
-              className={imageClassName}
-              fill
-              priority={priority}
-              sizes={sizes}
-              src={art.rightSrc}
-              style={{ objectPosition: art.rightObjectPosition || 'center center' }}
-            />
+            {renderArtworkImage(art.rightSrc, art.rightObjectPosition)}
           </div>
         </>
       )}
