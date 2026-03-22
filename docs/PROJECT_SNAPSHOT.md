@@ -1,6 +1,6 @@
 # PROJECT_SNAPSHOT
 
-Ultima atualizacao: 2026-03-21
+Ultima atualizacao: 2026-03-22
 
 ## Estado atual
 
@@ -67,6 +67,7 @@ Ultima atualizacao: 2026-03-21
 - A alocacao de `publicNumber` na API deixou de depender de colisao proposital no contador; o intake externo voltou a criar pedidos sem abortar a transacao do Postgres.
 - A criacao de pedido agora dispara alerta operacional assincrono no backend, com `ntfy` como canal gratuito principal para iPhone/PWA e WhatsApp/webhook como canais opcionais.
 - A navegacao operacional foi normalizada: o item principal antes chamado `Agenda` agora se chama `PEDIDOS`, e o menu passou a usar labels em caixa alta de forma consistente.
+- `Clientes` nao coleta mais nem exibe email em nenhuma superficie ativa; nas paginas internas a ficha pode ficar incompleta enquanto o atendimento evolui, e o `/pedido` publico manteve as travas de cadastro sem esse campo.
 
 ## O que um usuario consegue fazer hoje
 
@@ -154,6 +155,9 @@ Ultima atualizacao: 2026-03-21
 
 ## Validacao operacional mais recente
 
+- Data: 2026-03-22
+- Ciclo executado: `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api exec prisma generate`, `pnpm --filter @querobroapp/api exec prisma generate --schema prisma/schema.prod.prisma`, `pnpm --filter @querobroapp/api typecheck`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, `rg -n "email|activeEmailKey" apps/api/src apps/web/src packages/shared/src tests -g'*.ts' -g'*.tsx' -g'*.mjs'`
+- Resultado: cliente deixou de ter `email` no contrato e no banco ativo; `/clientes` passou a aceitar cadastro interno incompleto exigindo apenas nome, enquanto o fluxo publico preservou as validacoes de preenchimento sem esse campo.
 - Data: 2026-03-21
 - Ciclo executado: `node --test --test-concurrency=1 tests/delivery-provider-hybrid-fallback.test.mjs tests/delivery-pickup-origin.test.mjs tests/order-schedule-capacity.test.mjs tests/external-order-schedule-guard.test.mjs`, `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api typecheck`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web build`, `pnpm qa:browser-smoke`, `pnpm qa:critical-e2e`, `pnpm validate:public-deploy`, `pnpm validate:delivery-quote`
 - Resultado: frete fixo por raio entrou em producao sem rastros ativos de Uber/Loggi, `/pedidos` manteve liberdade de edicao interna e o dominio publico respondeu `200` em `/`, `/pedido` e `/pedidos`, com quote publico validado em `R$ 12` e cenario manual acima de `5 km` retornando `R$ 18`.

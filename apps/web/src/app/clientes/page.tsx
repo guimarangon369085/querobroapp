@@ -38,14 +38,13 @@ import {
 } from '@/lib/customer-autofill';
 import { submitOrderIntake } from '@/features/orders/orders-api';
 
-type CustomerRecord = Customer & { email?: string | null };
+type CustomerRecord = Customer;
 type CustomerFormState = Partial<CustomerRecord>;
 
 const emptyCustomer: CustomerFormState = {
   name: '',
   firstName: '',
   lastName: '',
-  email: '',
   phone: '',
   address: '',
   addressLine1: '',
@@ -438,17 +437,8 @@ function CustomersPageContent() {
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!form.name || form.name.trim().length < 2) {
-      setError('Informe um nome valido.');
-      return;
-    }
-    const normalizedPhone = normalizePhone(form.phone || '');
-    if (!normalizedPhone || normalizedPhone.length < 10) {
-      setError('Informe um telefone valido (com DDD).');
-      return;
-    }
-    if (!form.addressLine1 && !form.address) {
-      setError('Informe o endereco (rua e numero).');
+    if (!form.name || !form.name.trim()) {
+      setError('Informe ao menos o nome do cliente.');
       return;
     }
     setError(null);
@@ -476,7 +466,6 @@ function CustomersPageContent() {
       firstName: promotedFirstName ? titleCase(promotedFirstName) : fallbackFirst,
       lastName: promotedLastName ? titleCase(promotedLastName) : fallbackLast,
       phone: normalizePhone(form.phone || ''),
-      email: compactWhitespace(form.email || '') || null,
       address: normalizeAddress(form.address || ''),
       addressLine1: normalizeAddress(promotedAddressLine1),
       addressLine2: normalizeAddress(form.addressLine2 || ''),
@@ -546,7 +535,6 @@ function CustomersPageContent() {
       name: customer.name,
       firstName: promotedFirstName,
       lastName: promotedLastName,
-      email: customer.email ?? '',
       phone: formatPhoneBR(customer.phone ?? ''),
       address: customer.address ?? '',
       addressLine1: promotedAddressLine1,
@@ -792,16 +780,15 @@ function CustomersPageContent() {
       await load();
       if (customerToRestore) {
         notifyUndo(`Cliente ${customerToRestore.name} excluido.`, async () => {
-          await apiFetch('/customers', {
-            method: 'POST',
-            body: JSON.stringify({
-              name: customerToRestore.name,
-              firstName: customerToRestore.firstName ?? null,
-              lastName: customerToRestore.lastName ?? null,
-              email: customerToRestore.email ?? null,
-              phone: customerToRestore.phone ?? null,
-              address: customerToRestore.address ?? null,
-              addressLine1: customerToRestore.addressLine1 ?? null,
+            await apiFetch('/customers', {
+              method: 'POST',
+              body: JSON.stringify({
+                name: customerToRestore.name,
+                firstName: customerToRestore.firstName ?? null,
+                lastName: customerToRestore.lastName ?? null,
+                phone: customerToRestore.phone ?? null,
+                address: customerToRestore.address ?? null,
+                addressLine1: customerToRestore.addressLine1 ?? null,
               addressLine2: customerToRestore.addressLine2 ?? null,
               neighborhood: customerToRestore.neighborhood ?? null,
               city: customerToRestore.city ?? null,
@@ -891,16 +878,6 @@ function CustomersPageContent() {
               inputMode="tel"
               autoComplete="tel"
               onChange={(e) => setForm((prev) => ({ ...prev, phone: formatPhoneBR(e.target.value) }))}
-            />
-          </FormField>
-          <FormField label="Email">
-            <input
-              className="app-input"
-              type="email"
-              placeholder="cliente@exemplo.com"
-              value={form.email || ''}
-              autoComplete="email"
-              onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
             />
           </FormField>
           <FormField label="Endereço">
@@ -1282,10 +1259,6 @@ function CustomersPageContent() {
                       {formatPhoneBR(form.phone || '') || 'Sem telefone'}
                     </p>
                     <p className="mt-1">
-                      <span className="font-semibold text-neutral-900">Email:</span>{' '}
-                      {form.email || 'Sem email'}
-                    </p>
-                    <p className="mt-1">
                       <span className="font-semibold text-neutral-900">Endereço:</span>{' '}
                       {[
                         form.address || form.addressLine1 || '',
@@ -1324,16 +1297,6 @@ function CustomersPageContent() {
                           onChange={(event) =>
                             setForm((prev) => ({ ...prev, phone: formatPhoneBR(event.target.value) }))
                           }
-                        />
-                      </FormField>
-                      <FormField label="Email">
-                        <input
-                          className="app-input"
-                          type="email"
-                          placeholder="cliente@exemplo.com"
-                          value={form.email || ''}
-                          autoComplete="email"
-                          onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
                         />
                       </FormField>
                       <FormField label="Endereço">

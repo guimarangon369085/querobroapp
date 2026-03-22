@@ -4,9 +4,7 @@ import { CustomerSchema, resolveDisplayNumber } from '@querobroapp/shared';
 import { normalizePhone, normalizeTitle, normalizeText } from '../../common/normalize.js';
 import { allocateNextPublicNumber } from '../../common/public-sequence.js';
 
-type CustomerPayload = ReturnType<typeof CustomerSchema.parse> & {
-  email?: string | null;
-};
+type CustomerPayload = ReturnType<typeof CustomerSchema.parse>;
 type CustomerCreatePayload = Omit<CustomerPayload, 'id' | 'createdAt'>;
 type CustomerUpdatePayload = Partial<CustomerCreatePayload>;
 
@@ -106,7 +104,6 @@ export class CustomersService {
     const normalizedState = normalizeText(data.state ?? undefined)?.toUpperCase() ?? null;
     const normalizedPostalCode = normalizeText(data.postalCode ?? undefined);
     const normalizedCountry = normalizeTitle(data.country ?? undefined);
-    const normalizedEmail = normalizeText(data.email ?? undefined)?.toLowerCase() ?? null;
     const normalizedPlaceId = normalizeText(data.placeId ?? undefined);
     const normalizedDeliveryNotes = normalizeText(data.deliveryNotes ?? undefined);
 
@@ -117,20 +114,7 @@ export class CustomersService {
             orderBy: { id: 'desc' }
           })
         : null;
-      const existingByEmail = normalizedEmail
-        ? await tx.customer.findFirst({
-            where: { deletedAt: null, email: normalizedEmail },
-            orderBy: { id: 'desc' }
-          })
-        : null;
-
-      if (existingByPhone && existingByEmail && existingByPhone.id !== existingByEmail.id) {
-        throw new BadRequestException(
-          `Email ja vinculado ao cliente #${resolveDisplayNumber(existingByEmail) ?? existingByEmail.id}.`
-        );
-      }
-
-      const reusableCustomer = existingByPhone || existingByEmail;
+      const reusableCustomer = existingByPhone;
 
       if (reusableCustomer) {
         return tx.customer.update({
@@ -140,9 +124,7 @@ export class CustomersService {
             name: reusableCustomer.name || fullName,
             firstName: reusableCustomer.firstName || firstName,
             lastName: reusableCustomer.lastName || lastName,
-            activeEmailKey: reusableCustomer.activeEmailKey || normalizedEmail,
             activePhoneKey: reusableCustomer.activePhoneKey || normalizedPhone,
-            email: reusableCustomer.email || normalizedEmail,
             phone: reusableCustomer.phone || normalizedPhone,
             address: reusableCustomer.address || normalizedAddress,
             addressLine1: reusableCustomer.addressLine1 || addressLine1,
@@ -167,9 +149,7 @@ export class CustomersService {
           name: fullName,
           firstName,
           lastName,
-          activeEmailKey: normalizedEmail,
           activePhoneKey: normalizedPhone,
-          email: normalizedEmail,
           phone: normalizedPhone,
           address: normalizedAddress,
           addressLine1,
@@ -221,8 +201,6 @@ export class CustomersService {
         )
       : undefined;
     const normalizedPhone = data.phone !== undefined ? normalizePhone(data.phone) : undefined;
-    const normalizedEmail =
-      data.email !== undefined ? normalizeText(data.email ?? undefined)?.toLowerCase() ?? null : undefined;
 
     if (normalizedPhone) {
       const conflict = await this.prisma.customer.findFirst({
@@ -240,22 +218,6 @@ export class CustomersService {
       }
     }
 
-    if (normalizedEmail) {
-      const conflict = await this.prisma.customer.findFirst({
-        where: {
-          deletedAt: null,
-          email: normalizedEmail,
-          id: { not: id }
-        },
-        orderBy: { id: 'desc' }
-      });
-      if (conflict) {
-        throw new BadRequestException(
-          `Email ja vinculado ao cliente #${resolveDisplayNumber(conflict) ?? conflict.id}.`
-        );
-      }
-    }
-
     return this.prisma.customer.update({
       where: { id },
       data: {
@@ -263,9 +225,7 @@ export class CustomersService {
         name: data.name ? normalizeTitle(data.name) ?? data.name : undefined,
         firstName,
         lastName,
-        activeEmailKey: normalizedEmail,
         activePhoneKey: normalizedPhone,
-        email: normalizedEmail,
         phone: normalizedPhone,
         address: data.address !== undefined ? normalizeTitle(data.address) ?? null : undefined,
         addressLine1,
@@ -293,7 +253,6 @@ export class CustomersService {
       where: { id },
       data: {
         deletedAt: new Date(),
-        activeEmailKey: null,
         activePhoneKey: null
       }
     });

@@ -1649,9 +1649,7 @@ export class OrdersService {
       name: string;
       firstName: string | null;
       lastName: string | null;
-      activeEmailKey: string | null;
       activePhoneKey: string | null;
-      email: string | null;
       phone: string | null;
       address: string | null;
       addressLine1: string | null;
@@ -1686,9 +1684,6 @@ export class OrdersService {
       data: {
         firstName: canonical.firstName || duplicates.map((entry) => entry.firstName).find(Boolean) || null,
         lastName: canonical.lastName || duplicates.map((entry) => entry.lastName).find(Boolean) || null,
-        email: canonical.email || duplicates.map((entry) => entry.email).find(Boolean) || null,
-        activeEmailKey:
-          canonical.activeEmailKey || duplicates.map((entry) => entry.activeEmailKey).find(Boolean) || null,
         phone: canonical.phone || duplicates.map((entry) => entry.phone).find(Boolean) || null,
         activePhoneKey:
           canonical.activePhoneKey || duplicates.map((entry) => entry.activePhoneKey).find(Boolean) || null,
@@ -1726,7 +1721,6 @@ export class OrdersService {
       where: { id: { in: duplicateIds } },
       data: {
         deletedAt: new Date(),
-        activeEmailKey: null,
         activePhoneKey: null,
         phone: null,
         placeId: null
@@ -1827,9 +1821,7 @@ export class OrdersService {
         name: normalizedName,
         firstName: normalizedName.split(' ')[0] || null,
         lastName: normalizedName.includes(' ') ? normalizedName.split(' ').slice(1).join(' ') : null,
-        activeEmailKey: null,
         activePhoneKey: normalizedPhone,
-        email: null,
         phone: normalizedPhone,
         address: normalizedAddress,
         addressLine1: normalizedAddress,

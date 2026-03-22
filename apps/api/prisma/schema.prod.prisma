@@ -13,9 +13,7 @@ model Customer {
   name          String
   firstName     String?
   lastName      String?
-  activeEmailKey String? @unique
   activePhoneKey String? @unique
-  email         String?
   phone         String?
   address       String?
   addressLine1  String?
@@ -34,7 +32,6 @@ model Customer {
   orders        Order[]
 
   @@index([name])
-  @@index([email])
   @@index([phone])
 }
 
