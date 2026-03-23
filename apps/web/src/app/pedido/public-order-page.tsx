@@ -1118,7 +1118,7 @@ export function PublicOrderPage() {
       return;
     }
     if (!form.phone.trim()) {
-      setError('Informe o telefone com WhatsApp.');
+      setError('Informe o telefone.');
       return;
     }
     if (form.fulfillmentMode === 'DELIVERY' && !form.address.trim()) {
@@ -1351,7 +1351,7 @@ export function PublicOrderPage() {
                       autoComplete="name"
                     />
                   </FormField>
-                  <FormField label="Telefone com WhatsApp">
+                  <FormField label="Telefone">
                     <input
                       className="app-input xl:h-14 xl:text-[1.02rem]"
                       type="tel"

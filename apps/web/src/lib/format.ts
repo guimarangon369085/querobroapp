@@ -22,27 +22,6 @@ export function formatPhoneBR(value?: string | null) {
   return formatPhoneNumberIntl(value);
 }
 
-function normalizePhoneForWhatsApp(value?: string | null) {
-  const normalized = normalizePhone(value);
-  if (!normalized) return '';
-  const digits = normalized.replace(/\D/g, '');
-  if (!digits) return '';
-  if (digits.startsWith('55')) return digits;
-  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
-  return digits;
-}
-
-export function buildWhatsAppUrl(value?: string | null, message?: string) {
-  const phone = normalizePhoneForWhatsApp(value);
-  if (!phone) return '';
-  const params = new URLSearchParams();
-  if (message?.trim()) {
-    params.set('text', message.trim());
-  }
-  const query = params.toString();
-  return `https://wa.me/${phone}${query ? `?${query}` : ''}`;
-}
-
 export function formatPostalCodeBR(value?: string | null) {
   const digits = onlyDigits(value || '').slice(0, POSTAL_CODE_DIGITS_MAX);
   if (!digits) return '';

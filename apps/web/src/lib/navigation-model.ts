@@ -53,8 +53,7 @@ const pathAliases = new Map<string, string>([
   ['/saidas', '/pedidos'],
   ['/caixa', '/pedidos'],
   ['/base', '/clientes'],
-  ['/builder', '/pedidos'],
-  ['/whatsapp-flow', '/pedidos']
+  ['/builder', '/pedidos']
 ]);
 
 function pickItems(hrefs: string[]) {

@@ -18,11 +18,9 @@ Ultima atualizacao: 2026-03-23
 - O lint do monorepo migrou para `ESLint 9` em flat config e passou a ignorar artefatos temporarios de QA (`.next-qa-*` e `.playwright-cli`), evitando falso negativo apos smoke/E2E.
 - Gate operacional de religamento foi validado em 2026-03-11 com `stop-all -> dev-all`, health da API e execucao de smoke + E2E critico.
 - `Produtos` deixou de existir como superficie operacional; catalogo e ficha tecnica ficam dentro de `Estoque`.
-- Existe agora uma captura publica de pedido em `/pedido`, usando o mesmo intake externo que vai servir para `Google Forms`, pagina propria e futuro `WhatsApp Flow`.
+- Existe agora uma captura publica de pedido em `/pedido`, usando o mesmo intake externo que atende `Google Forms` e a pagina propria.
 - O intake externo agora expoe preview seguro para `Google Forms` e `customer-form`, validando payload, frete e total sem criar pedido nem PIX.
-- O backend agora expoe um bridge estruturado de `WhatsApp Flow` com sessao propria (`launch/session/submit`) reaproveitando o intake canonico de pedidos; quando ativado, o pedido cai na mesma base operacional vista em `/pedidos`.
-- O feed publico de Commerce Manager / WhatsApp Business agora inclui `Caixa Sabores` como item proprio (`QUEROBROA-S`), apontando para `/pedido?catalog=S`; no web, esse codigo preenche caixas customizaveis em vez de virar caixa oficial fixa.
-- Os dados oficiais da QUEROBROA (WhatsApp, CNPJ, PIX e conta bancaria) agora estao canonizados em contratos compartilhados, painel interno e fluxo publico.
+- Os dados oficiais da QUEROBROA (telefone, CNPJ, PIX e conta bancaria) agora estao canonizados em contratos compartilhados, painel interno e fluxo publico.
 - O backend agora aceita conciliacao segura de PIX por nome + valor em `POST /payments/pix-reconciliations/webhook`, mantendo a baixa canonica por `txid/paymentId` em `pix-settlements`.
 - Pedidos de `Entrega` agora podem receber cotacao de frete antes do submit final, com o valor incorporado ao total e ao PIX.
 - `/pedido`, `quick create` e a logica de caixas em `Pedidos` passaram a compartilhar o mesmo catalogo de caixas/sabores e as mesmas imagens originais da marca.
@@ -67,7 +65,7 @@ Ultima atualizacao: 2026-03-23
 - O modal `Novo pedido` em `/pedidos` foi reequilibrado para mobile, com shell propria e controles compactos mais estaveis no grid de quantidade.
 - `/pedidos` agora expoe `Novo pedido` inline no topo em mobile e esconde o FAB flutuante abaixo de `xl`.
 - A alocacao de `publicNumber` na API deixou de depender de colisao proposital no contador; o intake externo voltou a criar pedidos sem abortar a transacao do Postgres.
-- A criacao de pedido agora dispara alerta operacional assincrono no backend, com `ntfy` como canal gratuito principal para iPhone/PWA e WhatsApp/webhook como canais opcionais.
+- A criacao de pedido agora dispara alerta operacional assincrono no backend, com `ntfy` como canal gratuito principal para iPhone/PWA e webhook como canal opcional.
 - A navegacao operacional foi normalizada: o item principal antes chamado `Agenda` agora se chama `PEDIDOS`, e o menu passou a usar labels em caixa alta de forma consistente.
 - `Clientes` nao coleta mais nem exibe email em nenhuma superficie ativa; nas paginas internas a ficha pode ficar incompleta enquanto o atendimento evolui, e o `/pedido` publico manteve as travas de cadastro sem esse campo.
 
@@ -91,7 +89,6 @@ Ultima atualizacao: 2026-03-23
 - `/pedido`: CTA principal abaixo do bloco `Resumo`; em `Entrega` ele calcula o frete antes da finalizacao, e em `Retirada` o frete zera.
 - `/pedido`: desktop sem colapso nos blocos de agendamento e sabores; a copy de agendamento agora avisa claramente que pedido novo nao entra para hoje.
 - `/pedido`: `Caixa Sabores` e fallbacks genericos do catalogo agora usam a mesma composicao oficial em 5 colunas, sem regressao para a arte antiga.
-- `/pedido`: links de catalogo vindos do WhatsApp/Meta com `catalog=S` ou `QUEROBROA-S` agora abrem a montagem da `Caixa Sabores` com caixa customizavel precriada, sem distorcer os calculos das caixas oficiais.
 - `/pedido`: autocomplete de endereco segue no input atual, com sugestoes novas do Google Places e sem warning legado no console.
 - `/pedido`: o menu de sugestoes do endereco agora usa visual simples de caixa de selecao, sem blur/glass effect, para melhorar legibilidade no fluxo publico.
 - `/pedido`: cards de caixas no desktop mantem input e selo de quantidade legiveis lado a lado, sem o bloco `caixas` comprimir ou quebrar em colunas estreitas.
@@ -118,7 +115,6 @@ Ultima atualizacao: 2026-03-23
 - `/dashboard`: pagina oculta interna com trafego, navegacao, vitals, funil e financeiro completo, agora em linguagem editorial mais guiada.
 - `/dashboard`: agora acessivel pelo proprio app em host publico, com link direto no menu e leitura via bridge same-origin do web.
 - Rotas antigas (`/`, `/hoje`, `/jornada`, `/inicio`, `/resumo`, `/base`, `/producao`, `/saidas`, `/caixa`) convergem para `Pedidos`.
-- Alias legado de captura (`/whatsapp-flow/pedido/:sessionId`) ainda converte para `Pedidos` ate a troca do canal.
 - `/builder`: redirect para `/pedidos`; o runtime interno segue exposto por `GET /runtime-config`.
 
 ## API (blocos)
@@ -126,8 +122,7 @@ Ultima atualizacao: 2026-03-23
 - Cadastro: `customers`, `inventory-products`
 - Operacao: `orders`, `payments`, `deliveries`, `production`
 - Estoque: `inventory`, `inventory-products`, `bom`
-- Intake externo: `orders/intake`, `orders/intake/customer-form`, `orders/intake/google-form`, `orders/intake/whatsapp-flow`
-- WhatsApp oficial: webhook Cloud API, auto reply opcional e bridge estruturado de `WhatsApp Flow` para intake canonico
+- Intake externo: `orders/intake`, `orders/intake/customer-form`, `orders/intake/google-form`
 - Cotacao de frete: `deliveries/quotes` + proxy interno do web em `/api/delivery-quote`
 - Proxy de `Google Forms`: web exposto em `/api/google-form` para receber o Apps Script sem abrir a API inteira publicamente
 - Preview do intake externo: `/api/google-form/preview`, `/api/customer-form/preview`, `orders/intake/google-form/preview` e `orders/intake/customer-form/preview`
@@ -149,7 +144,7 @@ Ultima atualizacao: 2026-03-23
 - O app agora produz analytics first-party sem GA4 previa, usando o proprio banco para sessao, page view, link click e web vitals.
 - O PWA/atalho mobile agora usa icones raster dedicados da marca (`apple-touch-icon` + `manifest` 192/512).
 - O web agora sincroniza `visualViewport` globalmente no layout e usa essa metrica real em modais, toasts, backdrops, FABs e barras sticky, reduzindo overflow causado por barras dinamicas do navegador fora da home.
-- Os previews sociais das rotas publicas (`/` e `/pedido`) agora usam a descricao curta `Sua vida + broa :) 🙂`, evitando copy tecnica no compartilhamento via WhatsApp.
+- Os previews sociais das rotas publicas (`/` e `/pedido`) agora usam a descricao curta `Sua vida + broa :) 🙂`, evitando copy tecnica no compartilhamento.
 - A home desktop agora usa 3 colunas simultaneas no fundo, com rotacao distribuida sem repeticao entre as imagens visiveis, em vez de estourar uma unica foto widescreen.
 - A transicao da home desktop agora acontece em timings diferentes por coluna, com crossfade proprio em cada painel, evitando apagao/preto simultaneo na troca.
 - A navegacao desktop ganhou botoes maiores na sidebar, e o fade escuro da home foi reduzido em mobile e desktop para deixar as fotos entrarem com mais brilho no primeiro impacto.
@@ -171,7 +166,6 @@ Ultima atualizacao: 2026-03-23
 - Resultado: estoque manual passou a usar `ADJUST` absoluto, o popup de `FAZER MASSA` ficou blindado contra duplo disparo, e foi aplicada no ledger local a correcao calculada para neutralizar a duplicidade historica da conversao manual de 13/03/2026 19:42:27.
 - Data: 2026-03-20
 - Ciclo executado: `pnpm --filter @querobroapp/web lint`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`
-- Resultado: `Caixa Sabores` entrou no feed publico do WhatsApp/Commerce Manager como `QUEROBROA-S`, e o `/pedido` passou a traduzir esse codigo para prefill de caixa customizavel sem mexer na logica de caixas oficiais.
 - Data: 2026-03-20
 - Ciclo executado: `pnpm --filter @querobroapp/api typecheck`, `pnpm --filter @querobroapp/api lint`, `pnpm --filter @querobroapp/api build`, `node --test tests/production-quantity-semantics.test.mjs tests/order-mass-prep-automation.test.mjs tests/order-packaging-grouping.test.mjs tests/production-broa-operational-rules.test.mjs tests/customer-order-delete-status.test.mjs`
 - Resultado: pedidos deixam de aceitar mutacao/exclusao apos baixa fisica de estoque, e o `D+1` passa a refletir corretamente o saldo ja produzido quando uma fornada foi iniciada.
@@ -185,7 +179,7 @@ Ultima atualizacao: 2026-03-23
 
 1. `Google Forms` ja e viavel como canal temporario, mas ainda falta configuracao real do Apps Script e URL publica final.
 2. O dominio publico ja esta publicado e validado em `querobroa.com.br`, `www`, `ops` e `api`; o gap agora e operacionalizar o canal externo real (`Google Forms`) sobre os endpoints de preview/intake ja expostos.
-3. `WhatsApp Flow` ja tem bridge backend reaproveitando o intake canonico, mas ainda falta numero dedicado/Flow publicado na Meta e persistencia explicita do canal na UI para diferenciar origem.
+3. O foco do canal externo segue em `Google Forms` e pagina publica, sem mensageria de terceiros acoplada ao intake.
 4. Ainda vale validar o frete fixo por raio em producao com cenarios reais de endereco, para confirmar consistencia do calculo e da exibicao publica.
 5. Mobile segue atras do web no fluxo operacional novo.
 6. Ainda vale ampliar cobertura de testes alem dos gates atuais, principalmente em cenarios de edge case de dominio.

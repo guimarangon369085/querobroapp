@@ -111,6 +111,15 @@ type DashboardSummary = {
       grossMarginPctInRange: number;
       contributionAfterFreightInRange: number;
     };
+    cogsAudit: {
+      windowLabel: string;
+      ordersCount: number;
+      ingredientsCount: number;
+      warningsCount: number;
+      revenue: number;
+      cogs: number;
+      grossProfit: number;
+    };
     customerMetrics: {
       newCustomersInRange: number;
       returningCustomersInRange: number;
@@ -265,6 +274,12 @@ function formatDateTimeLabel(value: string | null) {
   });
 }
 
+function paymentStatusBadgeClass(status: 'PENDENTE' | 'PARCIAL' | 'PAGO') {
+  if (status === 'PAGO') return 'border-emerald-200 bg-emerald-100 text-emerald-800';
+  if (status === 'PARCIAL') return 'border-amber-200 bg-amber-100 text-amber-800';
+  return 'border-neutral-200 bg-neutral-100 text-neutral-700';
+}
+
 function MetricCard({
   label,
   value,
@@ -317,6 +332,29 @@ function CompactEmpty({ message }: { message: string }) {
   return (
     <div className="rounded-[22px] border border-dashed border-[rgba(126,79,45,0.16)] bg-white/55 p-4 text-sm text-neutral-500">
       {message}
+    </div>
+  );
+}
+
+function CogsAuditStat({
+  label,
+  value,
+  emphasis = false
+}: {
+  label: string;
+  value: string;
+  emphasis?: boolean;
+}) {
+  return (
+    <div
+      className={`rounded-[22px] border px-4 py-3 ${
+        emphasis
+          ? 'border-[rgba(162,81,66,0.18)] bg-[rgba(255,248,246,0.9)]'
+          : 'border-white/80 bg-white/78'
+      }`}
+    >
+      <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">{label}</p>
+      <strong className="mt-1 block text-lg tracking-[-0.03em] text-[color:var(--ink-strong)]">{value}</strong>
     </div>
   );
 }
@@ -640,7 +678,7 @@ export default function DashboardScreen() {
                     label="COGS"
                     value={formatCurrencyBR(summary.business.kpis.estimatedCogsInRange)}
                     tone="rose"
-                    meta={`${formatNumber(summary.business.kpis.costedOrdersInRange)} pedidos no cálculo${
+                    meta={`${formatNumber(summary.business.kpis.costedOrdersInRange)} pedidos no período${
                       summary.business.kpis.cogsWarningsInRange
                         ? ` · ${formatNumber(summary.business.kpis.cogsWarningsInRange)} alerta(s)`
                         : ''
@@ -650,18 +688,6 @@ export default function DashboardScreen() {
                   <MetricCard label="Pós-frete" value={formatCurrencyBR(summary.business.kpis.contributionAfterFreightInRange)} tone="sky" />
                   <MetricCard label="Descontos" value={formatCurrencyBR(summary.business.kpis.discountsInRange)} tone="ink" />
                 </div>
-                {summary.business.cogsWarnings.length ? (
-                  <div className="rounded-[24px] border border-[rgba(162,81,66,0.18)] bg-[rgba(255,244,240,0.96)] p-4 text-sm text-[color:var(--ink-strong)]">
-                    <p className="font-semibold">Alertas de COGS</p>
-                    <div className="mt-2 grid gap-2">
-                      {summary.business.cogsWarnings.slice(0, 6).map((warning) => (
-                        <p key={`${warning.orderId}-${warning.code}-${warning.productId}`} className="text-neutral-700">
-                          #{warning.orderDisplayNumber} · {warning.productName} · {warning.message}
-                        </p>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="grid gap-2">
                     <p className="text-sm font-semibold text-[color:var(--ink-strong)]">Receita</p>
@@ -676,8 +702,66 @@ export default function DashboardScreen() {
             </SectionPanel>
           </section>
 
-          <section className="grid gap-4 xl:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
-            <SectionPanel title="Ingredientes no COGS" tone="ink">
+          <section className="grid gap-4 xl:grid-cols-[minmax(0,0.68fr)_minmax(0,1.32fr)]">
+            <SectionPanel
+              title="COGS da Base"
+              tone="rose"
+              tag={
+                <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-strong)]">
+                  {summary.business.cogsAudit.windowLabel}
+                </span>
+              }
+            >
+              <div className="grid gap-3">
+                <p className="text-sm leading-6 text-neutral-600">
+                  Auditoria completa do custo dos ingredientes consumidos em todos os pedidos ativos da base,
+                  independente do filtro do topo.
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <CogsAuditStat
+                    label="Pedidos auditados"
+                    value={formatNumber(summary.business.cogsAudit.ordersCount)}
+                    emphasis
+                  />
+                  <CogsAuditStat
+                    label="Ingredientes mapeados"
+                    value={formatNumber(summary.business.cogsAudit.ingredientsCount)}
+                  />
+                  <CogsAuditStat label="Receita líquida" value={formatCurrencyBR(summary.business.cogsAudit.revenue)} />
+                  <CogsAuditStat label="COGS total" value={formatCurrencyBR(summary.business.cogsAudit.cogs)} emphasis />
+                  <CogsAuditStat
+                    label="Lucro bruto"
+                    value={formatCurrencyBR(summary.business.cogsAudit.grossProfit)}
+                  />
+                  <CogsAuditStat
+                    label="Alertas técnicos"
+                    value={formatNumber(summary.business.cogsAudit.warningsCount)}
+                  />
+                </div>
+                {summary.business.cogsWarnings.length ? (
+                  <div className="rounded-[24px] border border-[rgba(162,81,66,0.18)] bg-[rgba(255,244,240,0.96)] p-4 text-sm text-[color:var(--ink-strong)]">
+                    <p className="font-semibold">Alertas da base</p>
+                    <div className="mt-2 grid gap-2">
+                      {summary.business.cogsWarnings.slice(0, 6).map((warning) => (
+                        <p key={`${warning.orderId}-${warning.code}-${warning.productId}`} className="text-neutral-700">
+                          #{warning.orderDisplayNumber} · {warning.productName} · {warning.message}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </SectionPanel>
+
+            <SectionPanel
+              title="Ingredientes no COGS"
+              tone="ink"
+              tag={
+                <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-strong)]">
+                  {formatNumber(summary.business.cogsByIngredient.length)} itens
+                </span>
+              }
+            >
               {summary.business.cogsByIngredient.length ? (
                 <div className="grid gap-3">
                   {summary.business.cogsByIngredient.map((entry) => (
@@ -702,74 +786,119 @@ export default function DashboardScreen() {
                   ))}
                 </div>
               ) : (
-                <CompactEmpty message="Sem consumo de ingrediente no período." />
+                <CompactEmpty message="Sem consumo de ingrediente mapeado na base." />
               )}
             </SectionPanel>
+          </section>
 
-            <SectionPanel title="COGS por pedido" tone="rose">
+          <section className="grid gap-4">
+            <SectionPanel
+              title="COGS por pedido"
+              tone="rose"
+              tag={
+                <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-strong)]">
+                  {formatNumber(summary.business.cogsByOrder.length)} pedidos
+                </span>
+              }
+            >
               {summary.business.cogsByOrder.length ? (
                 <div className="grid gap-3">
                   {summary.business.cogsByOrder.map((entry) => (
-                    <div
+                    <details
                       key={entry.orderId}
-                      className="rounded-[24px] border border-white/80 bg-white/82 p-4 shadow-[0_10px_24px_rgba(57,39,24,0.06)]"
+                      className="group overflow-hidden rounded-[24px] border border-white/80 bg-white/86 shadow-[0_10px_24px_rgba(57,39,24,0.06)]"
                     >
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <strong className="text-[color:var(--ink-strong)]">#{entry.orderDisplayNumber} · {entry.customerName}</strong>
-                        <span className="rounded-full border border-white/70 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-strong)]">
-                          {entry.status}
-                        </span>
-                      </div>
-                      <p className="mt-2 text-sm text-neutral-600">
-                        Criado em {formatDateTimeLabel(entry.createdAt)}
-                        {entry.scheduledAt ? ` · Agendado para ${formatDateTimeLabel(entry.scheduledAt)}` : ''}
-                      </p>
-                      <div className="mt-3 grid gap-2 text-sm text-neutral-600 sm:grid-cols-5">
-                        <span>{formatNumber(entry.itemsCount)} item(ns)</span>
-                        <span>{formatNumber(entry.units)} un</span>
-                        <span>{formatCurrencyBR(entry.revenue)}</span>
-                        <span>{formatCurrencyBR(entry.cogs)}</span>
-                        <span>{formatCurrencyBR(entry.grossProfit)}</span>
-                      </div>
-                      <div className="mt-3 grid gap-2">
-                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">Produtos</p>
-                        <div className="grid gap-2 text-sm text-neutral-600">
-                          {entry.products.map((product) => (
-                            <div key={`${entry.orderId}-${product.productId}`} className="flex flex-wrap items-center justify-between gap-2">
-                              <span>{product.productName} · {formatNumber(product.quantity)} un</span>
-                              <span>{formatCurrencyBR(product.cogs)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="mt-3 grid gap-2">
-                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">Ingredientes</p>
-                        <div className="grid gap-2 text-sm text-neutral-600">
-                          {entry.ingredients.map((ingredient) => (
-                            <div
-                              key={`${entry.orderId}-${ingredient.ingredientId}`}
-                              className="flex flex-wrap items-center justify-between gap-2"
-                            >
-                              <span>
-                                {ingredient.ingredientName} · {formatDecimal(ingredient.quantity, 3)} {ingredient.unit}
+                      <summary className="list-none cursor-pointer p-4 sm:p-5">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <strong className="text-[color:var(--ink-strong)]">
+                                #{entry.orderDisplayNumber} · {entry.customerName}
+                              </strong>
+                              <span className="rounded-full border border-white/70 bg-white px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-strong)]">
+                                {entry.status}
                               </span>
-                              <span>{formatCurrencyBR(ingredient.amount)}</span>
+                              <span className={`rounded-full border px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] ${paymentStatusBadgeClass(entry.grossProfit >= 0 ? 'PAGO' : 'PARCIAL')}`}>
+                                {entry.grossProfit >= 0 ? 'Margem positiva' : 'Margem pressionada'}
+                              </span>
+                              {entry.warnings.length ? (
+                                <span className="rounded-full border border-[rgba(162,81,66,0.18)] bg-[rgba(255,244,240,0.92)] px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-strong)]">
+                                  {formatNumber(entry.warnings.length)} alerta(s)
+                                </span>
+                              ) : null}
                             </div>
-                          ))}
+                            <p className="mt-2 text-sm text-neutral-600">
+                              Criado em {formatDateTimeLabel(entry.createdAt)}
+                              {entry.scheduledAt ? ` · Agendado para ${formatDateTimeLabel(entry.scheduledAt)}` : ''}
+                            </p>
+                            <div className="mt-3 grid gap-2 text-sm text-neutral-600 sm:grid-cols-2 xl:grid-cols-5">
+                              <span>{formatNumber(entry.itemsCount)} item(ns)</span>
+                              <span>{formatNumber(entry.units)} un</span>
+                              <span>Receita {formatCurrencyBR(entry.revenue)}</span>
+                              <span>COGS {formatCurrencyBR(entry.cogs)}</span>
+                              <span>Lucro {formatCurrencyBR(entry.grossProfit)}</span>
+                            </div>
+                          </div>
+                          <span className="rounded-full border border-white/80 bg-white/90 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-neutral-600 transition-transform group-open:rotate-180">
+                            Detalhes
+                          </span>
+                        </div>
+                      </summary>
+
+                      <div className="border-t border-white/80 bg-[rgba(255,251,248,0.82)] p-4 sm:p-5">
+                        <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+                          <div className="grid gap-3">
+                            <div className="grid gap-2 rounded-[22px] border border-white/80 bg-white/78 p-4">
+                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">Produtos</p>
+                              <div className="grid gap-2 text-sm text-neutral-600">
+                                {entry.products.map((product) => (
+                                  <div
+                                    key={`${entry.orderId}-${product.productId}`}
+                                    className="flex flex-wrap items-center justify-between gap-2"
+                                  >
+                                    <span>{product.productName} · {formatNumber(product.quantity)} un</span>
+                                    <span>{formatCurrencyBR(product.cogs)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            {entry.warnings.length ? (
+                              <div className="grid gap-2 rounded-[22px] border border-[rgba(162,81,66,0.18)] bg-[rgba(255,244,240,0.9)] p-4 text-sm text-[color:var(--ink-strong)]">
+                                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                                  Alertas técnicos
+                                </p>
+                                {entry.warnings.map((warning) => (
+                                  <p key={`${entry.orderId}-${warning.code}-${warning.productId}`}>
+                                    {warning.productName} · {warning.message}
+                                  </p>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+
+                          <div className="grid gap-2 rounded-[22px] border border-white/80 bg-white/78 p-4">
+                            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">Ingredientes</p>
+                            <div className="grid gap-2 text-sm text-neutral-600">
+                              {entry.ingredients.map((ingredient) => (
+                                <div
+                                  key={`${entry.orderId}-${ingredient.ingredientId}`}
+                                  className="flex flex-wrap items-center justify-between gap-2"
+                                >
+                                  <span>
+                                    {ingredient.ingredientName} · {formatDecimal(ingredient.quantity, 3)} {ingredient.unit}
+                                  </span>
+                                  <span>{formatCurrencyBR(ingredient.amount)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
                         </div>
                       </div>
-                      {entry.warnings.length ? (
-                        <div className="mt-3 grid gap-2 rounded-[18px] border border-[rgba(162,81,66,0.18)] bg-[rgba(255,244,240,0.9)] p-3 text-sm text-[color:var(--ink-strong)]">
-                          {entry.warnings.map((warning) => (
-                            <p key={`${entry.orderId}-${warning.code}-${warning.productId}`}>{warning.productName} · {warning.message}</p>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
+                    </details>
                   ))}
                 </div>
               ) : (
-                <CompactEmpty message="Sem pedidos no período selecionado." />
+                <CompactEmpty message="Sem pedidos auditados na base." />
               )}
             </SectionPanel>
           </section>

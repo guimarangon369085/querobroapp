@@ -94,8 +94,6 @@ export class OrderNotificationsService {
     switch (channel) {
       case 'CUSTOMER_LINK':
         return 'Site';
-      case 'WHATSAPP_FLOW':
-        return 'WhatsApp';
       case 'ADMIN_REPEAT':
         return 'Repeticao';
       case 'INTERNAL_DASHBOARD':
@@ -118,7 +116,7 @@ export class OrderNotificationsService {
     return `Frete: ${this.formatMoney(order.deliveryFee)}`;
   }
 
-  private buildWhatsAppBody(input: OrderAlertInput, operationsUrl: string) {
+  private buildAlertBody(input: OrderAlertInput, operationsUrl: string) {
     const { order, intake } = input;
     const orderNumber = resolveDisplayNumber(order) ?? order.id;
     const lines = [
@@ -265,7 +263,7 @@ export class OrderNotificationsService {
       return;
     }
 
-    const message = this.buildWhatsAppBody(input, config.operationsUrl);
+    const message = this.buildAlertBody(input, config.operationsUrl);
     const webhookPayload = this.buildWebhookPayload(input, config.operationsUrl, message);
     const tasks: Array<Promise<unknown>> = [];
     const title = `Novo pedido #${resolveDisplayNumber(input.order) ?? input.order.id}`;

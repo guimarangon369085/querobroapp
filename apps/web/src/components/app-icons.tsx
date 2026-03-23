@@ -10,8 +10,7 @@ export type AppIconName =
   | 'tools'
   | 'back'
   | 'close'
-  | 'plus'
-  | 'whatsapp';
+  | 'plus';
 
 type IconProps = {
   className?: string;
@@ -166,19 +165,6 @@ export function AppIcon({ name, className }: { name: AppIconName; className?: st
           <circle cx="12" cy="12" r="9.2" fill="#e8f7e8" stroke={ICON_OUTLINE} strokeWidth="1.3" />
           <path d="M12 8.5v7M8.5 12h7" {...iconStroke} />
           <circle cx="16.5" cy="8.8" r="1" fill="#fff" stroke={ICON_OUTLINE} strokeWidth="1" />
-        </svg>
-      );
-    case 'whatsapp':
-      return (
-        <svg {...iconProps(className)} aria-hidden="true">
-          <path
-            d="M12 4.2a7.8 7.8 0 0 0-6.8 11.6L4 20l4.4-1.2A7.8 7.8 0 1 0 12 4.2Z"
-            fill="#25D366"
-          />
-          <path
-            d="M9.8 8.8c.3-.3.8-.3 1.1 0l.6.7c.3.3.3.8 0 1.1l-.4.4c.2.6.6 1.1 1 1.5.4.4.9.8 1.5 1l.4-.4c.3-.3.8-.3 1.1 0l.7.6c.3.3.3.8 0 1.1l-.3.3c-.5.5-1.3.7-2 .4-1.1-.5-2.1-1.2-2.9-2.1-.9-.9-1.6-1.8-2.1-2.9-.3-.7-.1-1.5.4-2l.3-.3Z"
-            fill="#fff"
-          />
         </svg>
       );
     default:

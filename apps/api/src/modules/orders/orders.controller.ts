@@ -111,11 +111,6 @@ export class OrdersController {
     return this.service.intakeGoogleForm(body);
   }
 
-  @Post('intake/whatsapp-flow')
-  intakeWhatsAppFlow(@Body() body: unknown) {
-    return this.service.intakeWhatsAppFlow(body);
-  }
-
   @Public()
   @Get('public-schedule')
   getPublicScheduleAvailability(@Query('scheduledAt') scheduledAt?: string) {
@@ -125,11 +120,6 @@ export class OrdersController {
   @Get(':id/pix-charge')
   pixCharge(@Param('id') id: string) {
     return this.service.getPixCharge(parseWithSchema(idSchema, id));
-  }
-
-  @Post(':id/send-pix-whatsapp')
-  sendPixWhatsApp(@Param('id') id: string) {
-    return this.service.sendPixChargeWhatsApp(parseWithSchema(idSchema, id));
   }
 
   @Get(':id')

@@ -61,18 +61,6 @@ export const PixChargeSchema = z.object({
   payable: z.boolean().default(false)
 });
 
-export const WhatsAppDispatchMessageSchema = z.object({
-  kind: z.enum(['SUMMARY', 'PIX_CODE']),
-  messageId: z.string().min(1)
-});
-
-export const WhatsAppPixDispatchSchema = z.object({
-  provider: z.literal('WHATSAPP_CLOUD_API'),
-  to: z.string().min(1),
-  sentAt: z.string(),
-  messages: z.array(WhatsAppDispatchMessageSchema).min(1)
-});
-
 export const CustomerSchema = z.object({
   id: z.number().int().positive().optional(),
   publicNumber: z.number().int().positive().optional().nullable(),
@@ -180,8 +168,7 @@ export const PixReconciliationWebhookSchema = z.object({
 export const OrderIntakeChannelEnum = z.enum([
   'INTERNAL_DASHBOARD',
   'ADMIN_REPEAT',
-  'CUSTOMER_LINK',
-  'WHATSAPP_FLOW'
+  'CUSTOMER_LINK'
 ]);
 
 export const OrderIntakeIntentEnum = z.enum(['DRAFT', 'CONFIRMED', 'PAID']);
@@ -293,7 +280,7 @@ export const ExternalOrderScheduleAvailabilitySchema = z.object({
   slotTaken: z.boolean()
 });
 
-export const ExternalOrderSubmissionChannelEnum = z.enum(['GOOGLE_FORM', 'PUBLIC_FORM', 'WHATSAPP_FLOW']);
+export const ExternalOrderSubmissionChannelEnum = z.enum(['GOOGLE_FORM', 'PUBLIC_FORM']);
 
 export const ExternalOrderFlavorCountsSchema = z
   .object({
@@ -722,8 +709,6 @@ export type OrderIntakeIntent = z.infer<typeof OrderIntakeIntentEnum>;
 export type OrderIntakeStage = z.infer<typeof OrderIntakeStageEnum>;
 export type OrderFulfillmentMode = z.infer<typeof OrderFulfillmentModeEnum>;
 export type PixChargeStatus = z.infer<typeof PixChargeStatusEnum>;
-export type WhatsAppDispatchMessage = z.infer<typeof WhatsAppDispatchMessageSchema>;
-export type WhatsAppPixDispatch = z.infer<typeof WhatsAppPixDispatchSchema>;
 export type ExternalOrderSubmissionChannel = z.infer<typeof ExternalOrderSubmissionChannelEnum>;
 export type ExternalOrderFlavorCounts = z.infer<typeof ExternalOrderFlavorCountsSchema>;
 export type ExternalOrderSubmission = z.infer<typeof ExternalOrderSubmissionSchema>;

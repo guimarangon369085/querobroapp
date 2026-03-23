@@ -18,6 +18,7 @@
     "prisma:generate:dev": "NODE_ENV=development DATABASE_URL=file:./dev.db prisma generate",
     "prisma:migrate:dev": "NODE_ENV=development DATABASE_URL=file:./dev.db prisma migrate dev",
     "orders:reprice:official": "tsx scripts/reprice-orders-official.ts",
+    "orders:mark-all-paid": "node scripts/mark-all-orders-paid.mjs",
     "prisma:generate:prod": "NODE_ENV=production DATABASE_URL=\"$DATABASE_URL_PROD\" prisma generate --schema prisma/schema.prod.prisma",
     "prisma:push:prod": "NODE_ENV=production DATABASE_URL=\"$DATABASE_URL_PROD\" prisma db push --schema prisma/schema.prod.prisma",
     "prisma:migrate:prod": "pnpm prisma:push:prod"

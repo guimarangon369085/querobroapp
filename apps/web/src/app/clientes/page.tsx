@@ -11,7 +11,6 @@ import { resolveDisplayNumber, type Customer, type OrderIntake, type OrderItem, 
 import { apiFetch } from '@/lib/api';
 import { useDialogA11y } from '@/lib/use-dialog-a11y';
 import {
-  buildWhatsAppUrl,
   compactWhitespace,
   formatPhoneBR,
   formatPostalCodeBR,
@@ -1058,7 +1057,6 @@ function CustomersPageContent() {
       <div className="grid gap-3">
         {filteredCustomers.map((customer) => {
           const customerPhoneLabel = formatPhoneBR(customer.phone) || 'Sem telefone';
-          const customerPhoneHref = buildWhatsAppUrl(customer.phone);
           const customerOrdersCount = customer.id ? orderCountByCustomerId[customer.id] || 0 : 0;
           return (
             <div key={customer.id} className="app-panel">
@@ -1075,21 +1073,7 @@ function CustomersPageContent() {
                     </span>
                   </div>
                   <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-neutral-500">
-                      {customerPhoneHref ? (
-                        <a
-                          href={customerPhoneHref}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex min-w-0 items-center gap-1 break-all underline decoration-dotted underline-offset-2 hover:text-neutral-900"
-                        onClick={(event) => event.stopPropagation()}
-                        aria-label={`Abrir conversa no WhatsApp para ${customerPhoneLabel}`}
-                      >
-                        <AppIcon name="whatsapp" className="h-4 w-4 text-[#25D366]" />
-                        {customerPhoneLabel}
-                      </a>
-                    ) : (
-                      <span>{customerPhoneLabel}</span>
-                    )}
+                    <span>{customerPhoneLabel}</span>
                     <span className="whitespace-nowrap text-xs font-semibold tracking-[0.08em] text-neutral-500">
                       {customerOrdersCount} {customerOrdersCount === 1 ? 'Pedido' : 'Pedidos'}
                     </span>

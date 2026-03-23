@@ -19,7 +19,6 @@ apps/api/dev.db
 apps/api/dev.db-journal
 /apps/mobile
 /apps/web/public/querobroa
-/apps/web/public/querobroa-brand/commerce
 /apps/web/public/querobroa-brand/references
 /apps/web/public/querobroa-brand/icons/querobroa-icon-source.png
 /apps/web/public/querobroa-brand/queijo-brown.jpg

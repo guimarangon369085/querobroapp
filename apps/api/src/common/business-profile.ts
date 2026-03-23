@@ -46,7 +46,6 @@ export function readBusinessRuntimeProfile(): BusinessRuntimeProfile {
     (officialPhoneDigits === OFFICIAL_BUSINESS_PUBLIC_PROFILE.officialPhoneDigits
       ? OFFICIAL_BUSINESS_PUBLIC_PROFILE.officialPhoneDisplay
       : `+${officialPhoneDigits}`);
-  const officialWhatsAppUrl = `https://wa.me/${officialPhoneDigits}`;
   const pickupAddressDisplay = `${pickupAddressLine1} - ${pickupAddressLine2} - ${neighborhood} - ${city}/${state} - CEP ${postalCode}`;
 
   return {
@@ -56,7 +55,6 @@ export function readBusinessRuntimeProfile(): BusinessRuntimeProfile {
     cnpjDisplay,
     officialPhoneDigits,
     officialPhoneDisplay,
-    officialWhatsAppUrl,
     pixKey,
     pickupAddressLine1,
     pickupAddressLine2,

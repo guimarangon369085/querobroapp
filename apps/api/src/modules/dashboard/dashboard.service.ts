@@ -85,6 +85,16 @@ type DashboardIngredientCogsEntry = {
   orderCount: number;
 };
 
+type DashboardCogsAuditSummary = {
+  windowLabel: string;
+  ordersCount: number;
+  ingredientsCount: number;
+  warningsCount: number;
+  revenue: number;
+  cogs: number;
+  grossProfit: number;
+};
+
 const SAO_PAULO_TIMEZONE = 'America/Sao_Paulo';
 const saoPauloFormatter = new Intl.DateTimeFormat('en-CA', {
   timeZone: SAO_PAULO_TIMEZONE,
@@ -289,40 +299,7 @@ export class DashboardService {
   }
 
   private buildIntegrationRails() {
-    const autoReplyEnabled = String(process.env.WHATSAPP_AUTO_REPLY_ENABLED || 'false').trim().toLowerCase() === 'true';
     const rails: IntegrationRail[] = [
-      {
-        id: 'whatsapp_cloud',
-        label: 'WhatsApp Cloud',
-        status: this.hasEnv('WHATSAPP_CLOUD_API_TOKEN') && this.hasEnv('WHATSAPP_CLOUD_PHONE_NUMBER_ID') ? 'READY' : 'PENDING',
-        detail:
-          this.hasEnv('WHATSAPP_CLOUD_API_TOKEN') && this.hasEnv('WHATSAPP_CLOUD_PHONE_NUMBER_ID')
-            ? 'Envio de mensagens pela Cloud API liberado.'
-            : 'Faltam token e/ou phone number ID para disparo real.',
-        nextStep: 'Preencher WHATSAPP_CLOUD_API_TOKEN e WHATSAPP_CLOUD_PHONE_NUMBER_ID.'
-      },
-      {
-        id: 'whatsapp_webhook',
-        label: 'Webhook inbound',
-        status: this.hasEnv('WHATSAPP_WEBHOOK_VERIFY_TOKEN') ? 'READY' : 'PENDING',
-        detail: this.hasEnv('WHATSAPP_WEBHOOK_VERIFY_TOKEN')
-          ? autoReplyEnabled
-            ? 'Handshake do webhook pronto e resposta automatica habilitada.'
-            : 'Handshake do webhook pronto; auto reply ainda desligado.'
-          : 'Endpoint pronto no app, mas ainda sem verify token para conectar na Meta.',
-        nextStep: autoReplyEnabled
-          ? 'Apontar a URL publica /whatsapp/webhook no app da Meta.'
-          : 'Definir WHATSAPP_WEBHOOK_VERIFY_TOKEN e WHATSAPP_AUTO_REPLY_ENABLED=true.'
-      },
-      {
-        id: 'whatsapp_flow',
-        label: 'Flow de pedidos',
-        status: this.hasEnv('WHATSAPP_FLOW_ORDER_INTAKE_ID') ? 'READY' : 'PENDING',
-        detail: this.hasEnv('WHATSAPP_FLOW_ORDER_INTAKE_ID')
-          ? 'Flow oficial configurado para rollout sem trocar o contrato do pedido.'
-          : 'Fallback atual responde com link oficial do /pedido.',
-        nextStep: 'Publicar o Flow e preencher WHATSAPP_FLOW_ORDER_INTAKE_ID.'
-      },
       {
         id: 'pix_settlement_bridge',
         label: 'Baixa PIX em tempo real',
@@ -843,12 +820,17 @@ export class DashboardService {
     const activeOrders = orders.filter((order) => order.status !== 'CANCELADO');
     const rangeOrders = activeOrders.filter((order) => order.createdAt >= rangeStart);
     const todayOrders = activeOrders.filter((order) => order.createdAt >= todayStart);
-    const cogsBreakdown = this.buildOrderCogsBreakdown({
+    const rangeCogsBreakdown = this.buildOrderCogsBreakdown({
       rangeOrders,
       boms,
       inventoryItems
     });
-    const orderCogsByOrderId = new Map(cogsBreakdown.orders.map((entry) => [entry.orderId, entry.cogs]));
+    const auditCogsBreakdown = this.buildOrderCogsBreakdown({
+      rangeOrders: activeOrders,
+      boms,
+      inventoryItems
+    });
+    const orderCogsByOrderId = new Map(rangeCogsBreakdown.orders.map((entry) => [entry.orderId, entry.cogs]));
 
     const customerOrderCount = new Map<number, number>();
     for (const order of activeOrders) {
@@ -902,7 +884,8 @@ export class DashboardService {
       }
     }
 
-    const rangeOrderCost = round2(sumBy(cogsBreakdown.orders, (order) => order.cogs));
+    const rangeOrderCost = round2(sumBy(rangeCogsBreakdown.orders, (order) => order.cogs));
+    const auditOrderCost = round2(sumBy(auditCogsBreakdown.orders, (order) => order.cogs));
 
     const grossRevenueAllTime = sumBy(activeOrders, (order) => order.total || 0);
     const grossRevenueInRange = sumBy(rangeOrders, (order) => order.total || 0);
@@ -973,7 +956,7 @@ export class DashboardService {
       number,
       { productId: number; productName: string; units: number; revenue: number; cogs: number }
     >();
-    for (const order of cogsBreakdown.orders) {
+    for (const order of rangeCogsBreakdown.orders) {
       for (const product of order.products) {
         const current = productMix.get(product.productId) || {
           productId: product.productId,
@@ -1003,6 +986,16 @@ export class DashboardService {
       if (customer.createdAt >= rangeStart) return false;
       return (customerOrderCount.get(customer.id) || 0) >= 2;
     }).length;
+    const auditRevenue = round2(sumBy(auditCogsBreakdown.orders, (entry) => entry.revenue));
+    const cogsAudit: DashboardCogsAuditSummary = {
+      windowLabel: 'Base inteira',
+      ordersCount: auditCogsBreakdown.orders.length,
+      ingredientsCount: auditCogsBreakdown.ingredients.length,
+      warningsCount: auditCogsBreakdown.warnings.length,
+      revenue: auditRevenue,
+      cogs: auditOrderCost,
+      grossProfit: round2(auditRevenue - auditOrderCost)
+    };
 
     return {
       windowLabel: `${rangeDays} dias`,
@@ -1021,12 +1014,13 @@ export class DashboardService {
         deliveryRevenueInRange: round2(deliveryRevenueInRange),
         productNetRevenueInRange: round2(productNetRevenueInRange),
         estimatedCogsInRange: round2(rangeOrderCost),
-        costedOrdersInRange: cogsBreakdown.orders.length,
-        cogsWarningsInRange: cogsBreakdown.warnings.length,
+        costedOrdersInRange: rangeCogsBreakdown.orders.length,
+        cogsWarningsInRange: rangeCogsBreakdown.warnings.length,
         grossProfitInRange: round2(grossProfitInRange),
         grossMarginPctInRange: toPercent(grossProfitInRange, productNetRevenueInRange),
         contributionAfterFreightInRange: round2(contributionAfterFreightInRange)
       },
+      cogsAudit,
       customerMetrics: {
         newCustomersInRange,
         returningCustomersInRange,
@@ -1042,9 +1036,9 @@ export class DashboardService {
         .map(([label, value]) => ({ label, value }))
         .sort((left, right) => right.value - left.value),
       dailySeries,
-      cogsByIngredient: cogsBreakdown.ingredients,
-      cogsByOrder: cogsBreakdown.orders,
-      cogsWarnings: cogsBreakdown.warnings,
+      cogsByIngredient: auditCogsBreakdown.ingredients,
+      cogsByOrder: auditCogsBreakdown.orders,
+      cogsWarnings: auditCogsBreakdown.warnings,
       topProducts,
       recentReceivables: pendingReceivables
         .sort((left, right) => right.amount - left.amount)

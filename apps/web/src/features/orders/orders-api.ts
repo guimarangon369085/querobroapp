@@ -3,8 +3,7 @@ import type {
   OrderIntake,
   OrderIntakeMeta,
   PixCharge,
-  Product,
-  WhatsAppPixDispatch
+  Product
 } from '@querobroapp/shared';
 import { apiFetch } from '@/lib/api';
 import type {
@@ -48,12 +47,6 @@ export function submitOrderIntake(payload: OrderIntake) {
 
 export function fetchOrderPixCharge(orderId: number) {
   return apiFetch<PixCharge>(`/orders/${orderId}/pix-charge`);
-}
-
-export function sendOrderPixChargeWhatsApp(orderId: number) {
-  return apiFetch<WhatsAppPixDispatch>(`/orders/${orderId}/send-pix-whatsapp`, {
-    method: 'POST'
-  });
 }
 
 export function fetchOrderDeliveryReadiness(orderId: number) {

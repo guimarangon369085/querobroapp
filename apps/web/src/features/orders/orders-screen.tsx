@@ -28,7 +28,6 @@ import { writeStoredOrderFinalized } from '@/lib/order-finalized-storage';
 import { useDialogA11y } from '@/lib/use-dialog-a11y';
 import {
   compactWhitespace,
-  buildWhatsAppUrl,
   formatCurrencyBR,
   formatMoneyInputBR,
   formatPhoneBR,
@@ -372,6 +371,12 @@ function orderStatusBadgeClass(status: string) {
   return 'bg-neutral-100 text-neutral-700 border-neutral-200';
 }
 
+function orderPaymentBadgeClass(status?: string | null) {
+  if (status === 'PAGO') return 'bg-violet-100 text-violet-800 border-violet-200';
+  if (status === 'PARCIAL') return 'bg-amber-100 text-amber-800 border-amber-200';
+  return 'bg-neutral-100 text-neutral-700 border-neutral-200';
+}
+
 function massPrepStatusBadgeClass(status?: MassPrepEventStatus | null) {
   if (status === 'PRONTA') return 'bg-emerald-100 text-emerald-800 border-emerald-200';
   if (status === 'NO_FORNO') return 'bg-amber-100 text-amber-800 border-amber-200';
@@ -383,6 +388,17 @@ function formatDisplayedOrderStatus(status?: string | null) {
   if (!status) return '';
   if (status === 'EM_PREPARACAO') return 'NO FORNO';
   return status;
+}
+
+function formatDisplayedPaymentStatus(status?: string | null) {
+  if (!status) return 'PENDENTE';
+  if (status === 'PARCIAL') return 'PARCIAL';
+  if (status === 'PAGO') return 'PAGO';
+  return 'PENDENTE';
+}
+
+function formatWorkflowPaymentToggleLabel(status?: string | null) {
+  return status === 'PAGO' ? 'PAGO' : 'NAO PAGO';
 }
 
 function formatMassPrepStatus(status?: MassPrepEventStatus | null) {
@@ -474,7 +490,8 @@ type OrderWorkflowIllustrationName =
   | 'mixer'
   | 'oven'
   | 'bag-check'
-  | 'scooter';
+  | 'scooter'
+  | 'pix';
 
 function OrderWorkflowIllustration({
   name,
@@ -560,6 +577,17 @@ function OrderWorkflowIllustration({
     );
   }
 
+  if (name === 'pix') {
+    return (
+      <svg aria-hidden="true" className={className} viewBox="0 0 64 64">
+        <path {...sharedProps} d="M21 13h7.4l4.7 4.7-7.2 7.2a4.7 4.7 0 0 1-6.6 0L13 18.6 17.7 14a4.7 4.7 0 0 1 3.3-1z" />
+        <path {...sharedProps} d="m31 22.8 6.1 6.1a4.7 4.7 0 0 0 6.6 0l7.3-7.3-4.7-4.6a4.7 4.7 0 0 0-3.3-1.4h-7.3" />
+        <path {...sharedProps} d="m31 41.2 6.1-6.1a4.7 4.7 0 0 1 6.6 0l7.3 7.3-4.7 4.6a4.7 4.7 0 0 1-3.3 1.4h-7.3" />
+        <path {...sharedProps} d="M21 51h7.4l4.7-4.7-7.2-7.2a4.7 4.7 0 0 0-6.6 0L13 45.4l4.7 4.6A4.7 4.7 0 0 0 21 51z" />
+      </svg>
+    );
+  }
+
   return (
     <svg aria-hidden="true" className={className} viewBox="0 0 64 64">
       <circle {...sharedProps} cx="18" cy="49" r="3.7" />
@@ -576,6 +604,7 @@ function OrderWorkflowIllustration({
 }
 
 type OrderWorkflowStatus = 'ABERTO' | 'CONFIRMADO' | 'EM_PREPARACAO' | 'PRONTO' | 'ENTREGUE';
+type OrderWorkflowStage = OrderWorkflowStatus | 'PAGO';
 
 const ORDER_WORKFLOW_STATUSES: OrderWorkflowStatus[] = [
   'ABERTO',
@@ -584,9 +613,10 @@ const ORDER_WORKFLOW_STATUSES: OrderWorkflowStatus[] = [
   'PRONTO',
   'ENTREGUE'
 ];
+const ORDER_WORKFLOW_STAGES: OrderWorkflowStage[] = [...ORDER_WORKFLOW_STATUSES, 'PAGO'];
 
 const orderWorkflowStatusMeta: Record<
-  OrderWorkflowStatus,
+  OrderWorkflowStage,
   {
     label: string;
     illustration: OrderWorkflowIllustrationName;
@@ -629,6 +659,13 @@ const orderWorkflowStatusMeta: Record<
     activeClassName: 'border-emerald-300 bg-emerald-100 text-emerald-800',
     passedDotClassName: 'bg-emerald-500',
     activeLineClassName: 'bg-emerald-400'
+  },
+  PAGO: {
+    label: 'Pago',
+    illustration: 'pix',
+    activeClassName: 'border-violet-300 bg-violet-100 text-violet-800',
+    passedDotClassName: 'bg-violet-500',
+    activeLineClassName: 'bg-violet-400'
   }
 };
 
@@ -1862,6 +1899,37 @@ function OrdersPageContent() {
     }
   };
 
+  const markOrderPaid = async (orderId: number, options?: { paid?: boolean; paidAt?: string | null }) => {
+    if (isStatusUpdatePending) return;
+    setIsStatusUpdatePending(true);
+    try {
+      const currentOrder = orders.find((entry) => entry.id === orderId) ?? selectedOrder;
+      const shouldMarkPaid = options?.paid ?? true;
+      const body = {
+        ...(typeof options?.paid === 'boolean' ? { paid: options.paid } : {}),
+        ...(options?.paidAt ? { paidAt: options.paidAt } : {})
+      };
+      await apiFetch(`/orders/${orderId}/mark-paid`, {
+        method: 'PATCH',
+        body: JSON.stringify(body)
+      });
+      const refreshedOrders = await loadAll();
+      const freshSelected = refreshedOrders.find((entry) => entry.id === orderId) || null;
+      if (freshSelected && selectedOrder?.id === orderId) {
+        setSelectedOrder(freshSelected);
+      }
+      notifySuccess(
+        shouldMarkPaid
+          ? `Pagamento confirmado para o pedido #${displayOrderNumber(currentOrder)}.`
+          : `Pedido #${displayOrderNumber(currentOrder)} marcado como nao pago.`
+      );
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel atualizar o pagamento.');
+    } finally {
+      setIsStatusUpdatePending(false);
+    }
+  };
+
   const applyLocalOrderSchedule = (orderId: number, scheduledAtIso: string | null) => {
     setOrders((current) =>
       current.map((order) => (order.id === orderId ? { ...order, scheduledAt: scheduledAtIso } : order))
@@ -2880,7 +2948,6 @@ function OrdersPageContent() {
     : null;
   const selectedCustomerNameLabel = selectedOrder ? resolveCustomerName(selectedOrder) : 'Sem cliente';
   const selectedCustomerAddressLabel = formatCustomerFullAddress(selectedCustomer) || 'Endereco nao informado';
-  const selectedCustomerPhoneHref = buildWhatsAppUrl(selectedCustomer?.phone);
   const selectedCustomerPhoneLabel =
     formatPhoneBR(selectedCustomer?.phone) || (selectedCustomer?.phone || '').trim() || 'Telefone nao informado';
   const selectedOrderDeliveryFee = toMoney(Math.max(selectedOrder?.deliveryFee ?? 0, 0));
@@ -3096,6 +3163,7 @@ function OrdersPageContent() {
   const selectedOrderWorkflowIndex = selectedOrderWorkflowStatus
     ? ORDER_WORKFLOW_STATUSES.indexOf(selectedOrderWorkflowStatus)
     : -1;
+  const selectedOrderPaymentStatus = selectedOrder?.paymentStatus || 'PENDENTE';
   const selectedMassPrepStatus = selectedMassPrepEvent?.status ?? null;
   const selectedMassPrepWorkflowIndex = selectedMassPrepStatus
     ? MASS_PREP_EVENT_STATUSES.indexOf(selectedMassPrepStatus)
@@ -3227,8 +3295,15 @@ function OrdersPageContent() {
     massPrepPrepareRequestKeyRef.current = null;
   }, [selectedMassPrepEvent?.id]);
 
-  const selectOrderWorkflowStatus = async (targetStatus: OrderWorkflowStatus) => {
-    if (!selectedOrder?.id || selectedOrderIsCancelled || selectedOrderWorkflowStatus === targetStatus) return;
+  const selectOrderWorkflowStatus = async (targetStatus: OrderWorkflowStage) => {
+    if (!selectedOrder?.id || selectedOrderIsCancelled) return;
+    if (targetStatus === 'PAGO') {
+      await markOrderPaid(selectedOrder.id, {
+        paid: selectedOrderPaymentStatus !== 'PAGO'
+      });
+      return;
+    }
+    if (selectedOrderWorkflowStatus === targetStatus) return;
     await updateStatus(selectedOrder.id, targetStatus);
   };
 
@@ -4050,7 +4125,6 @@ function OrdersPageContent() {
                       formatPhoneBR(historyCustomer?.phone) ||
                       (historyCustomer?.phone || '').trim() ||
                       'Telefone nao informado';
-                    const historyCustomerPhoneHref = buildWhatsAppUrl(historyCustomer?.phone);
                     const statusDotClass = calendarStatusDotClass(order.status || '');
                     const isActive = selectedOrder?.id === order.id;
                     const paymentStatus = order.paymentStatus || 'PENDENTE';
@@ -4083,6 +4157,11 @@ function OrdersPageContent() {
                                 />
                                 {formatDisplayedOrderStatus(order.status)}
                               </span>
+                              <span
+                                className={`inline-flex items-center rounded-full border px-1.5 py-0 text-[10px] font-semibold leading-4 ${orderPaymentBadgeClass(paymentStatus)}`}
+                              >
+                                {formatDisplayedPaymentStatus(paymentStatus)}
+                              </span>
                               {isActive ? (
                                 <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-100 px-1.5 py-0 text-[10px] font-semibold leading-4 text-amber-900">
                                   Em foco
@@ -4097,19 +4176,7 @@ function OrdersPageContent() {
                               <p className="orders-list-panel__line-note">{historyOrderNote}</p>
                             ) : null}
                             <p className="orders-list-panel__line-contact">{historyCustomerAddress}</p>
-                            {historyCustomerPhoneHref ? (
-                              <a
-                                href={historyCustomerPhoneHref}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="orders-list-panel__line-contact orders-list-panel__line-contact--link"
-                                onClick={(event) => event.stopPropagation()}
-                              >
-                                {historyCustomerPhone}
-                              </a>
-                            ) : (
-                              <p className="orders-list-panel__line-contact">{historyCustomerPhone}</p>
-                            )}
+                            <p className="orders-list-panel__line-contact">{historyCustomerPhone}</p>
                           </div>
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="orders-list-panel__line-total">
@@ -4262,11 +4329,28 @@ function OrdersPageContent() {
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
               <div className="min-w-0 sm:flex-1">
                 <ol className="order-workflow-strip">
-                  {ORDER_WORKFLOW_STATUSES.map((status, index) => {
+                  {ORDER_WORKFLOW_STAGES.map((status, index) => {
                     const stageMeta = orderWorkflowStatusMeta[status];
-                    const isCurrent = selectedOrderWorkflowStatus === status;
-                    const isPassed = selectedOrderWorkflowIndex > index;
-                    const isConnectorActive = selectedOrderWorkflowIndex > index;
+                    const isPaymentStage = status === 'PAGO';
+                    const stageLabel = isPaymentStage
+                      ? formatWorkflowPaymentToggleLabel(selectedOrderPaymentStatus)
+                      : stageMeta.label;
+                    const statusIndex = isPaymentStage
+                      ? ORDER_WORKFLOW_STATUSES.length
+                      : ORDER_WORKFLOW_STATUSES.indexOf(status as OrderWorkflowStatus);
+                    const isCurrent = isPaymentStage
+                      ? selectedOrderPaymentStatus === 'PAGO'
+                      : selectedOrderWorkflowStatus === status;
+                    const isPassed = !isPaymentStage && selectedOrderWorkflowIndex > statusIndex;
+                    const nextStage = ORDER_WORKFLOW_STAGES[index + 1];
+                    const isConnectorActive =
+                      nextStage === 'PAGO'
+                        ? selectedOrderPaymentStatus === 'PAGO'
+                        : selectedOrderWorkflowIndex > statusIndex;
+                    const paymentToggleActionLabel =
+                      selectedOrderPaymentStatus === 'PAGO' ? 'Marcar pedido como nao pago' : 'Marcar pedido como pago';
+                    const isDisabled =
+                      isStatusUpdatePending || selectedOrderIsCancelled || (!isPaymentStage && isCurrent);
 
                     return (
                       <li key={status} className="order-workflow-strip__item">
@@ -4276,17 +4360,21 @@ function OrdersPageContent() {
                           onClick={() => {
                             void selectOrderWorkflowStatus(status);
                           }}
-                          disabled={isStatusUpdatePending || selectedOrderIsCancelled || isCurrent}
+                          disabled={isDisabled}
                           aria-current={isCurrent ? 'step' : undefined}
                           aria-label={
-                            isCurrent
-                              ? `${stageMeta.label}: etapa atual`
-                              : `Mover pedido para ${stageMeta.label}`
+                            isPaymentStage
+                              ? paymentToggleActionLabel
+                              : isCurrent
+                                ? `${stageLabel}: etapa atual`
+                                : `Mover pedido para ${stageLabel}`
                           }
                           title={
-                            isCurrent
-                              ? `${stageMeta.label}: etapa atual`
-                              : `Mover pedido para ${stageMeta.label}`
+                            isPaymentStage
+                              ? paymentToggleActionLabel
+                              : isCurrent
+                                ? `${stageLabel}: etapa atual`
+                                : `Mover pedido para ${stageLabel}`
                           }
                         >
                           <span
@@ -4316,10 +4404,10 @@ function OrdersPageContent() {
                                   : 'text-neutral-400'
                             }`}
                           >
-                            {stageMeta.label}
+                            {stageLabel}
                           </span>
                         </button>
-                        {index < ORDER_WORKFLOW_STATUSES.length - 1 ? (
+                        {index < ORDER_WORKFLOW_STAGES.length - 1 ? (
                           <span
                             className={`order-workflow-strip__connector mx-2 mt-6 h-[2px] w-10 shrink-0 rounded-full ${
                               isConnectorActive ? stageMeta.activeLineClassName : 'bg-neutral-200'
@@ -4353,23 +4441,17 @@ function OrdersPageContent() {
                 ) : null}
               </div>
               <p className="mt-0.5 break-words text-xs text-neutral-600">{selectedCustomerAddressLabel}</p>
-              {selectedCustomerPhoneHref ? (
-                <a
-                  href={selectedCustomerPhoneHref}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-0.5 inline-flex break-all text-xs text-neutral-600 underline decoration-dotted underline-offset-2 hover:text-neutral-900"
-                >
-                  {selectedCustomerPhoneLabel}
-                </a>
-              ) : (
-                <p className="mt-0.5 break-words text-xs text-neutral-600">{selectedCustomerPhoneLabel}</p>
-              )}
+              <p className="mt-0.5 break-words text-xs text-neutral-600">{selectedCustomerPhoneLabel}</p>
               <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-neutral-500">
                 <span
                   className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${orderStatusBadgeClass(selectedOrder.status || '')}`}
                 >
                   {formatDisplayedOrderStatus(selectedOrder.status)}
+                </span>
+                <span
+                  className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${orderPaymentBadgeClass(selectedOrderPaymentStatus)}`}
+                >
+                  {formatDisplayedPaymentStatus(selectedOrderPaymentStatus)}
                 </span>
                 <span>{formatCurrencyBR(selectedOrder.total ?? 0)}</span>
               </div>

@@ -24,8 +24,7 @@ export default function robots(): MetadataRoute.Robots {
           '/producao',
           '/produtos',
           '/saidas',
-          '/caixa',
-          '/whatsapp-flow'
+          '/caixa'
         ]
       }
     ],

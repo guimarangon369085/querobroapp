@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Inject } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Customer as PrismaCustomer, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
@@ -45,7 +45,6 @@ import {
 } from '../../common/external-order-schedule.js';
 import { allocateNextPublicNumber } from '../../common/public-sequence.js';
 import { PaymentsService } from '../payments/payments.service.js';
-import { WhatsAppService } from '../whatsapp/whatsapp.service.js';
 import { DeliveriesService } from '../deliveries/deliveries.service.js';
 import { OrderNotificationsService } from './order-notifications.service.js';
 
@@ -54,17 +53,8 @@ const replaceItemsSchema = z.object({
   items: z.array(OrderItemSchema.pick({ productId: true, quantity: true })).min(1)
 });
 const markPaidSchema = z.object({
+  paid: z.boolean().optional().default(true),
   paidAt: z.string().datetime().optional().nullable()
-});
-
-const whatsappFlowIntakeSchema = OrderIntakeSchema.omit({ source: true }).extend({
-  source: z
-    .object({
-      externalId: z.string().trim().min(1).max(160).optional().nullable(),
-      idempotencyKey: z.string().trim().min(1).max(160).optional().nullable(),
-      originLabel: z.string().trim().min(1).max(160).optional().nullable()
-    })
-    .default({})
 });
 
 const statusTransitions: Record<string, string[]> = {
@@ -214,7 +204,6 @@ export class OrdersService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(PaymentsService) private readonly paymentsService: PaymentsService,
-    @Inject(forwardRef(() => WhatsAppService)) private readonly whatsAppService: WhatsAppService,
     @Inject(DeliveriesService) private readonly deliveriesService: DeliveriesService,
     @Inject(OrderNotificationsService) private readonly orderNotificationsService: OrderNotificationsService
   ) {}
@@ -1368,7 +1357,7 @@ export class OrdersService {
   private parseExternalOrderSubmission(
     payload: unknown,
     params: {
-      defaultChannel: 'GOOGLE_FORM' | 'PUBLIC_FORM' | 'WHATSAPP_FLOW';
+      defaultChannel: 'GOOGLE_FORM' | 'PUBLIC_FORM';
       defaultOriginLabel: string;
     }
   ) {
@@ -1453,7 +1442,7 @@ export class OrdersService {
   private async intakeExternalSubmission(
     data: ExternalOrderSubmissionPayload,
     params: {
-      intakeChannel: 'CUSTOMER_LINK' | 'WHATSAPP_FLOW';
+      intakeChannel: 'CUSTOMER_LINK';
     }
   ) {
     await this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt));
@@ -1497,7 +1486,7 @@ export class OrdersService {
   private async previewExternalSubmission(
     data: ExternalOrderSubmissionPayload,
     params: {
-      intakeChannel: 'CUSTOMER_LINK' | 'WHATSAPP_FLOW';
+      intakeChannel: 'CUSTOMER_LINK';
     }
   ): Promise<ExternalOrderSubmissionPreview> {
     await this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt));
@@ -2033,8 +2022,7 @@ export class OrdersService {
 
   async intake(payload: unknown) {
     const data = OrderIntakeSchema.parse(payload);
-    const isExternalIntakeChannel =
-      data.source.channel === 'CUSTOMER_LINK' || data.source.channel === 'WHATSAPP_FLOW';
+    const isExternalIntakeChannel = data.source.channel === 'CUSTOMER_LINK';
     const quoteCustomer = await this.resolveDeliveryQuoteCustomer(data.customer);
     const pricedOrder = await this.priceOrderItems(this.prisma, data.order.items);
     const scheduledAt = this.parseOptionalDateTime(data.fulfillment.scheduledAt);
@@ -2205,31 +2193,13 @@ export class OrdersService {
     return result;
   }
 
-  async intakeWhatsAppFlow(payload: unknown) {
-    const data = whatsappFlowIntakeSchema.parse(payload);
-    return this.intake({
-      ...data,
-      payment: data.payment ?? {
-        method: 'pix',
-        status: 'PENDENTE',
-        dueAt: data.fulfillment.scheduledAt ?? null
-      },
-      source: {
-        channel: 'WHATSAPP_FLOW',
-        externalId: data.source.externalId ?? null,
-        idempotencyKey: data.source.idempotencyKey ?? data.source.externalId ?? null,
-        originLabel: data.source.originLabel ?? 'whatsapp-flow'
-      }
-    });
-  }
-
   async intakeCustomerForm(payload: unknown) {
     const data = this.parseExternalOrderSubmission(payload, {
       defaultChannel: 'PUBLIC_FORM',
       defaultOriginLabel: 'customer-form'
     });
     return this.intakeExternalSubmission(data, {
-      intakeChannel: data.source.channel === 'WHATSAPP_FLOW' ? 'WHATSAPP_FLOW' : 'CUSTOMER_LINK'
+      intakeChannel: 'CUSTOMER_LINK'
     });
   }
 
@@ -2239,7 +2209,7 @@ export class OrdersService {
       defaultOriginLabel: 'customer-form'
     });
     return this.previewExternalSubmission(data, {
-      intakeChannel: data.source.channel === 'WHATSAPP_FLOW' ? 'WHATSAPP_FLOW' : 'CUSTOMER_LINK'
+      intakeChannel: 'CUSTOMER_LINK'
     });
   }
 
@@ -2265,36 +2235,6 @@ export class OrdersService {
 
   async getPixCharge(orderId: number) {
     return this.paymentsService.getOrderPixCharge(orderId);
-  }
-
-  async sendPixChargeWhatsApp(orderId: number) {
-    const order = await this.getRaw(orderId);
-    const financialOrder = this.withFinancial(order);
-    if (financialOrder.paymentStatus === 'PAGO') {
-      throw new BadRequestException('Pedido ja esta pago. Nao ha PIX para enviar.');
-    }
-
-    const phone = normalizePhone(order.customer?.phone);
-    if (!phone) {
-      throw new BadRequestException('Cliente sem telefone valido para WhatsApp.');
-    }
-
-    const pixCharge = await this.paymentsService.getOrderPixCharge(orderId);
-    if (!pixCharge.payable) {
-      throw new BadRequestException('Cobranca PIX ainda nao esta pronta para envio.');
-    }
-
-    const amount = financialOrder.balanceDue > 0 ? financialOrder.balanceDue : financialOrder.total;
-    const customerName =
-      normalizeTitle(order.customer?.firstName || order.customer?.name || undefined) ?? 'cliente';
-
-    return this.whatsAppService.sendPixCharge({
-      customerName,
-      phone,
-      orderId: order.id,
-      amountLabel: this.formatCurrencyBR(amount),
-      copyPasteCode: pixCharge.copyPasteCode
-    });
   }
 
   async list() {
@@ -2769,6 +2709,33 @@ export class OrdersService {
         throw new BadRequestException('Nao e possivel registrar pagamento para pedido cancelado.');
       }
 
+      if (!data.paid) {
+        const paidPaymentIds = order.payments
+          .filter((payment) => payment.status === 'PAGO' || Boolean(payment.paidAt))
+          .map((payment) => payment.id);
+
+        if (paidPaymentIds.length > 0) {
+          await tx.payment.updateMany({
+            where: {
+              id: {
+                in: paidPaymentIds
+              }
+            },
+            data: {
+              status: 'PENDENTE',
+              paidAt: null
+            }
+          });
+        }
+
+        const updated = await tx.order.findUnique({
+          where: { id: orderId },
+          include: { items: true, customer: true, payments: true }
+        });
+        if (!updated) throw new NotFoundException('Pedido nao encontrado');
+        return this.withFinancial(updated);
+      }
+
       const total = this.toMoney(order.total ?? 0);
       const amountPaid = this.getPaidAmount(order.payments || []);
       const balanceDue = moneyFromMinorUnits(Math.max(moneyToMinorUnits(total) - moneyToMinorUnits(amountPaid), 0));
@@ -2777,27 +2744,36 @@ export class OrdersService {
         return this.withFinancial(order);
       }
 
-      const reusablePendingPayment = order.payments.find(
-        (payment) =>
-          payment.status !== 'PAGO' &&
-          !payment.paidAt &&
-          payment.method.trim().toLowerCase() === 'pix' &&
-          compareMoney(payment.amount, balanceDue) === 0
-      );
+      const pendingPaymentIds = order.payments
+        .filter((payment) => payment.status !== 'PAGO' || !payment.paidAt)
+        .map((payment) => payment.id);
 
-      if (reusablePendingPayment) {
-        await tx.payment.update({
-          where: { id: reusablePendingPayment.id },
+      if (pendingPaymentIds.length > 0) {
+        await tx.payment.updateMany({
+          where: {
+            id: {
+              in: pendingPaymentIds
+            }
+          },
           data: {
             status: 'PAGO',
             paidAt: data.paidAt ? new Date(data.paidAt) : new Date()
           }
         });
-      } else {
+      }
+
+      const paidAfterReuse = this.toMoney(
+        order.payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
+      );
+      const remainingBalance = moneyFromMinorUnits(
+        Math.max(moneyToMinorUnits(total) - moneyToMinorUnits(paidAfterReuse), 0)
+      );
+
+      if (compareMoney(remainingBalance, 0) > 0) {
         await tx.payment.create({
           data: {
             orderId: order.id,
-            amount: balanceDue,
+            amount: remainingBalance,
             method: 'pix',
             status: 'PAGO',
             paidAt: data.paidAt ? new Date(data.paidAt) : new Date()

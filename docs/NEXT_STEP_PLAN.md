@@ -88,12 +88,9 @@ Criterio de pronto:
 
 ## Prioridade 4 (agora)
 
-### Ativacao final do WhatsApp Flow
+### Operacao externa canonica
 
-- Publicar o Flow na Meta e preencher `WHATSAPP_FLOW_ORDER_INTAKE_ID`.
-- Apontar `WHATSAPP_FLOW_API_BASE_URL` para a API publica final, se necessario.
-- Validar o disparo real do convite no webhook e o submit do Flow caindo em `/pedidos`.
-- Persistir a origem do canal no modelo/UI se for necessario distinguir pedido vindo do WhatsApp no operacional.
+- Consolidar `Google Forms` e `/pedido` sobre o mesmo contrato de preview/intake.
 - Manter `PIX` simples no curto prazo: chave/copia e cola entregue ao cliente.
 - Postergar automacao de confirmacao financeira ate existir provedor adequado.
 
@@ -104,10 +101,10 @@ Criterio de pronto:
 
 1. Teste real de `/pedido` e do `Google Forms`, incluindo `Entrega`.
 2. Refino final de `Estoque` e `Pedidos`, com foco agora em performance/agregacao do dashboard e fatiamento de `orders-screen`.
-3. Ativacao final de `WhatsApp Flow` sobre o intake canonico ja pronto.
+3. Consolidacao final do intake externo sem mensageria de terceiros.
 
 ## Riscos de nao fazer
 
 - O deploy publico ja esta no ar; o risco agora e o canal externo parecer pronto sem Apps Script/token realmente configurados de ponta a ponta.
 - Um formulario externo mal configurado pode criar friccao mesmo com o backend pronto.
-- Se a ativacao final do `WhatsApp Flow` divergir do intake canonico ja implementado, o canal vai reintroduzir retrabalho e inconsistencias operacionais.
+- Se algum canal externo divergir do intake canonico ja implementado, isso vai reintroduzir retrabalho e inconsistencias operacionais.
