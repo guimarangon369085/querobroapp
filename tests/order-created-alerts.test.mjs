@@ -71,11 +71,7 @@ function applyAlertEnv(env) {
     'ORDER_ALERT_WEBHOOK_URL',
     'ORDER_ALERT_WEBHOOK_BEARER_TOKEN',
     'ORDER_ALERT_WEBHOOK_TIMEOUT_MS',
-    'ORDER_ALERT_OPERATIONS_URL',
-    'WHATSAPP_CLOUD_API_TOKEN',
-    'WHATSAPP_CLOUD_PHONE_NUMBER_ID',
-    'WHATSAPP_CLOUD_API_VERSION',
-    'WHATSAPP_CLOUD_API_BASE_URL'
+    'ORDER_ALERT_OPERATIONS_URL'
   ];
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
 
@@ -186,17 +182,17 @@ test('order created alert: publica no ntfy uma vez so mesmo com retry idempotent
       status: 'PENDENTE'
     },
     source: {
-      channel: 'WHATSAPP_FLOW',
+      channel: 'CUSTOMER_LINK',
       externalId: `alert-${suffix}`,
       idempotencyKey: `alert-${suffix}`
     }
   };
 
-  const first = await request(apiUrl, '/orders/intake/whatsapp-flow', {
+  const first = await request(apiUrl, '/orders/intake', {
     method: 'POST',
     body: payload
   });
-  const second = await request(apiUrl, '/orders/intake/whatsapp-flow', {
+  const second = await request(apiUrl, '/orders/intake', {
     method: 'POST',
     body: payload
   });
@@ -308,111 +304,4 @@ test('order created alert: falha no ntfy nao bloqueia o pedido', async (t) => {
   assert.ok(response.order.id);
   await waitFor(() => hitCount > 0);
   assert.ok(hitCount > 0);
-});
-
-test('order created alert: nao envia confirmacao automatica ao cliente via WhatsApp', async (t) => {
-  const graphHits = [];
-  const graphApi = http.createServer(async (req, res) => {
-    const chunks = [];
-    for await (const chunk of req) chunks.push(chunk);
-    graphHits.push({
-      method: req.method,
-      url: req.url,
-      headers: req.headers,
-      body: JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
-    });
-    res.setHeader('connection', 'close');
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ messages: [{ id: `wamid.${graphHits.length}` }] }));
-  });
-  const address = await listen(graphApi);
-  const restoreEnv = applyAlertEnv({
-    ORDER_ALERT_NTFY_TOPIC_URL: '',
-    ORDER_ALERT_WEBHOOK_URL: '',
-    ORDER_ALERT_WEBHOOK_TIMEOUT_MS: '1500',
-    WHATSAPP_CLOUD_API_TOKEN: 'test-token',
-    WHATSAPP_CLOUD_PHONE_NUMBER_ID: '123456789',
-    WHATSAPP_CLOUD_API_VERSION: 'v23.0',
-    WHATSAPP_CLOUD_API_BASE_URL: `http://127.0.0.1:${address.port}`
-  });
-
-  const { apiUrl, shutdown } = await ensureApiServer();
-  const created = {
-    orderId: null,
-    customerId: null,
-    productId: null
-  };
-
-  t.after(async () => {
-    if (created.orderId) {
-      try {
-        await request(apiUrl, `/orders/${created.orderId}`, { method: 'DELETE' });
-      } catch {}
-    }
-    if (created.customerId) {
-      try {
-        await request(apiUrl, `/customers/${created.customerId}`, { method: 'DELETE' });
-      } catch {}
-    }
-    if (created.productId) {
-      try {
-        await request(apiUrl, `/inventory-products/${created.productId}`, { method: 'DELETE' });
-      } catch {}
-    }
-    await shutdown();
-    restoreEnv();
-    await closeServer(graphApi);
-  });
-
-  const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-  const scheduledAt = await nextAvailableSchedule(apiUrl, uniqueScheduleIso(suffix));
-  const product = await request(apiUrl, '/inventory-products', {
-    method: 'POST',
-    body: {
-      name: `Sem Confirmacao WhatsApp ${suffix}`,
-      category: 'Teste',
-      unit: 'cx',
-      price: 40,
-      active: true
-    }
-  });
-  created.productId = product.id;
-
-  const payload = {
-    version: 1,
-    intent: 'CONFIRMED',
-    customer: {
-      name: `Cliente Sem Confirmacao ${suffix}`,
-      phone: '11940009584',
-      address: 'Rua Sem Confirmacao, 30'
-    },
-    fulfillment: {
-      mode: 'PICKUP',
-      scheduledAt
-    },
-    order: {
-      items: [{ productId: product.id, quantity: 1 }]
-    },
-    payment: {
-      method: 'pix',
-      status: 'PENDENTE'
-    },
-    source: {
-      channel: 'WHATSAPP_FLOW',
-      externalId: `confirmation-${suffix}`,
-      idempotencyKey: `confirmation-${suffix}`
-    }
-  };
-
-  const createdOrder = await request(apiUrl, '/orders/intake/whatsapp-flow', {
-    method: 'POST',
-    body: payload
-  });
-
-  created.orderId = createdOrder.order.id;
-  created.customerId = createdOrder.intake.customerId;
-
-  await new Promise((resolve) => setTimeout(resolve, 300));
-
-  assert.equal(graphHits.length, 0);
 });

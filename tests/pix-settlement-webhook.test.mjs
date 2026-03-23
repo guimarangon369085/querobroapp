@@ -78,7 +78,7 @@ test('pix settlement webhook baixa pagamento pendente por txid', async (t) => {
   });
   created.customerId = customer.id;
 
-  const intake = await request(apiUrl, '/orders/intake/whatsapp-flow', {
+  const intake = await request(apiUrl, '/orders/intake', {
     method: 'POST',
     body: {
       intent: 'CONFIRMED',
@@ -97,6 +97,7 @@ test('pix settlement webhook baixa pagamento pendente por txid', async (t) => {
         status: 'PENDENTE'
       },
       source: {
+        channel: 'CUSTOMER_LINK',
         externalId: `pix-settlement-${suffix}`
       }
     }

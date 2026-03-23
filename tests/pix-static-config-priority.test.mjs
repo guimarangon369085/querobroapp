@@ -99,7 +99,7 @@ test('pix estatico prioriza o perfil oficial mesmo com PIX_* legado no runtime',
   });
   created.customerId = customer.id;
 
-  const intake = await request(apiUrl, '/orders/intake/whatsapp-flow', {
+  const intake = await request(apiUrl, '/orders/intake', {
     method: 'POST',
     body: {
       intent: 'CONFIRMED',
@@ -118,6 +118,7 @@ test('pix estatico prioriza o perfil oficial mesmo com PIX_* legado no runtime',
         status: 'PENDENTE'
       },
       source: {
+        channel: 'CUSTOMER_LINK',
         externalId: `pix-priority-${suffix}`
       }
     }

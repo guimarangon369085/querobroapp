@@ -42,8 +42,8 @@ async function createOrderProduct(apiUrl, suffix) {
   });
 }
 
-async function createIntakeOrder(apiUrl, productId, suffix, scheduledAt, channel = 'WHATSAPP_FLOW') {
-  return request(apiUrl, channel === 'WHATSAPP_FLOW' ? '/orders/intake/whatsapp-flow' : '/orders/intake', {
+async function createIntakeOrder(apiUrl, productId, suffix, scheduledAt, channel = 'CUSTOMER_LINK') {
+  return request(apiUrl, '/orders/intake', {
     method: 'POST',
     body: {
       version: 1,
@@ -65,8 +65,9 @@ async function createIntakeOrder(apiUrl, productId, suffix, scheduledAt, channel
         status: 'PENDENTE'
       },
       source:
-        channel === 'WHATSAPP_FLOW'
+        channel === 'CUSTOMER_LINK'
           ? {
+              channel: 'CUSTOMER_LINK',
               externalId: `agenda-${suffix}`,
               idempotencyKey: `agenda-${suffix}`
             }
@@ -125,7 +126,7 @@ test('public schedule availability skips occupied slots', async (t) => {
   assert.equal(availability.nextAvailableAt, localScheduleIso(scheduleDate, 8, 15));
 });
 
-test('whatsapp-flow rejects the 16th scheduled order on the same day', async (t) => {
+test('customer-link rejects the 16th scheduled order on the same day', async (t) => {
   const { apiUrl, shutdown } = await ensureApiServer();
   const created = {
     productId: null,
@@ -170,7 +171,7 @@ test('whatsapp-flow rejects the 16th scheduled order on the same day', async (t)
     created.customerIds.push(createdOrder.intake.customerId);
   }
 
-  const body = await requestExpectError(apiUrl, '/orders/intake/whatsapp-flow', 400, {
+  const body = await requestExpectError(apiUrl, '/orders/intake', 400, {
     method: 'POST',
     body: {
       version: 1,
@@ -192,6 +193,7 @@ test('whatsapp-flow rejects the 16th scheduled order on the same day', async (t)
         status: 'PENDENTE'
       },
       source: {
+        channel: 'CUSTOMER_LINK',
         externalId: `agenda-${suffix}-16`,
         idempotencyKey: `agenda-${suffix}-16`
       }

@@ -155,6 +155,14 @@ test('dashboard summary calcula COGS por pedido a partir dos ingredientes da fic
     summaryAfter.business.kpis.costedOrdersInRange - summaryBefore.business.kpis.costedOrdersInRange,
     1
   );
+  assert.equal(
+    summaryAfter.business.cogsAudit.ordersCount - summaryBefore.business.cogsAudit.ordersCount,
+    1
+  );
+  assert.equal(
+    approxEqual(summaryAfter.business.cogsAudit.cogs - summaryBefore.business.cogsAudit.cogs, expectedOrderCogs),
+    true
+  );
 
   const createdOrderEntry = summaryAfter.business.cogsByOrder.find((entry) => entry.orderId === order.id);
   assert.ok(createdOrderEntry, 'pedido criado deveria aparecer no detalhamento de COGS');

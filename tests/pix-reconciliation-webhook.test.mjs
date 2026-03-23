@@ -79,7 +79,7 @@ test('pix reconciliation webhook baixa pedido pendente por nome + valor', async 
   });
   created.customerId = customer.id;
 
-  const intake = await request(apiUrl, '/orders/intake/whatsapp-flow', {
+  const intake = await request(apiUrl, '/orders/intake', {
     method: 'POST',
     body: {
       intent: 'CONFIRMED',
@@ -98,6 +98,7 @@ test('pix reconciliation webhook baixa pedido pendente por nome + valor', async 
         status: 'PENDENTE'
       },
       source: {
+        channel: 'CUSTOMER_LINK',
         externalId: `pix-reconciliation-${suffix}`
       }
     }
@@ -184,7 +185,7 @@ test('pix reconciliation webhook preserva pedido pendente quando o match e ambig
   });
   created.customerId = customer.id;
 
-  const first = await request(apiUrl, '/orders/intake/whatsapp-flow', {
+  const first = await request(apiUrl, '/orders/intake', {
     method: 'POST',
     body: {
       intent: 'CONFIRMED',
@@ -203,13 +204,14 @@ test('pix reconciliation webhook preserva pedido pendente quando o match e ambig
         status: 'PENDENTE'
       },
       source: {
+        channel: 'CUSTOMER_LINK',
         externalId: `pix-reconciliation-ambiguous-a-${suffix}`
       }
     }
   });
   created.orderIds.push(first.order.id);
 
-  const second = await request(apiUrl, '/orders/intake/whatsapp-flow', {
+  const second = await request(apiUrl, '/orders/intake', {
     method: 'POST',
     body: {
       intent: 'CONFIRMED',
@@ -228,6 +230,7 @@ test('pix reconciliation webhook preserva pedido pendente quando o match e ambig
         status: 'PENDENTE'
       },
       source: {
+        channel: 'CUSTOMER_LINK',
         externalId: `pix-reconciliation-ambiguous-b-${suffix}`
       }
     }

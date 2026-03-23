@@ -57,7 +57,7 @@ test('delivery quotes reject external schedules before the minimum window', asyn
   });
 });
 
-test('whatsapp-flow rejects external schedules before the minimum window', async (t) => {
+test('customer-link rejects external schedules before the minimum window', async (t) => {
   const { apiUrl, shutdown } = await ensureApiServer();
   const created = {
     productId: null
@@ -88,7 +88,7 @@ test('whatsapp-flow rejects external schedules before the minimum window', async
   });
   created.productId = product.id;
 
-  const body = await requestExpectError(apiUrl, '/orders/intake/whatsapp-flow', 400, {
+  const body = await requestExpectError(apiUrl, '/orders/intake', 400, {
     method: 'POST',
     body: {
       version: 1,
@@ -96,7 +96,7 @@ test('whatsapp-flow rejects external schedules before the minimum window', async
       customer: {
         name: `Cliente Schedule ${suffix}`,
         phone: '11988887777',
-        address: 'Rua WhatsApp, 10'
+        address: 'Rua Schedule, 10'
       },
       fulfillment: {
         mode: 'DELIVERY',
@@ -110,6 +110,7 @@ test('whatsapp-flow rejects external schedules before the minimum window', async
         status: 'PENDENTE'
       },
       source: {
+        channel: 'CUSTOMER_LINK',
         externalId: `wpp-schedule-${suffix}`
       }
     }
