@@ -82,7 +82,7 @@ export function PublicOrderSuccessPage() {
           <div>
             <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-emerald-700">Pedido recebido</p>
             <h1 className="mt-1.5 text-[1.55rem] font-semibold text-[color:var(--ink-strong)] sm:mt-2 sm:text-3xl">
-              Obrigado pelo pedido! Em breve, enviaremos a confirmação por WhatsApp :)
+              Obrigado pelo pedido! Ja recebemos sua solicitacao.
             </h1>
             <p className="mt-2 text-[0.88rem] leading-6 text-[color:var(--ink-muted)] sm:text-sm">
               Programado para {formatScheduledAt(order.scheduledAt)}.

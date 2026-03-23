@@ -60,7 +60,6 @@ function applyAlertEnv(env) {
     'ORDER_ALERT_NTFY_TOPIC_URL',
     'ORDER_ALERT_NTFY_PRIORITY',
     'ORDER_ALERT_NTFY_TAGS',
-    'ORDER_ALERT_WHATSAPP_TO',
     'ORDER_ALERT_WEBHOOK_URL',
     'ORDER_ALERT_WEBHOOK_BEARER_TOKEN',
     'ORDER_ALERT_WEBHOOK_TIMEOUT_MS',
@@ -68,8 +67,7 @@ function applyAlertEnv(env) {
     'WHATSAPP_CLOUD_API_TOKEN',
     'WHATSAPP_CLOUD_PHONE_NUMBER_ID',
     'WHATSAPP_CLOUD_API_VERSION',
-    'WHATSAPP_CLOUD_API_BASE_URL',
-    'WHATSAPP_ORDER_CONFIRMATION_ENABLED'
+    'WHATSAPP_CLOUD_API_BASE_URL'
   ];
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
 
@@ -112,7 +110,6 @@ test('order created alert: publica no ntfy uma vez so mesmo com retry idempotent
     ORDER_ALERT_NTFY_TOPIC_URL: `http://127.0.0.1:${address.port}/qbapp-orders-topic`,
     ORDER_ALERT_NTFY_PRIORITY: '5',
     ORDER_ALERT_NTFY_TAGS: 'bread,shopping_cart',
-    ORDER_ALERT_WHATSAPP_TO: '',
     ORDER_ALERT_WEBHOOK_URL: '',
     ORDER_ALERT_WEBHOOK_TIMEOUT_MS: '1500',
     ORDER_ALERT_OPERATIONS_URL: 'https://querobroa.com.br/pedidos'
@@ -221,7 +218,6 @@ test('order created alert: falha no ntfy nao bloqueia o pedido', async (t) => {
   const restoreEnv = applyAlertEnv({
     ORDER_ALERT_NTFY_TOPIC_URL: `http://127.0.0.1:${address.port}/qbapp-orders-topic`,
     ORDER_ALERT_NTFY_PRIORITY: '5',
-    ORDER_ALERT_WHATSAPP_TO: '',
     ORDER_ALERT_WEBHOOK_URL: '',
     ORDER_ALERT_WEBHOOK_TIMEOUT_MS: '1500'
   });
@@ -304,7 +300,7 @@ test('order created alert: falha no ntfy nao bloqueia o pedido', async (t) => {
   assert.ok(hitCount > 0);
 });
 
-test('order created alert: envia confirmacao automatica para o cliente via WhatsApp quando Cloud API estiver configurada', async (t) => {
+test('order created alert: nao envia confirmacao automatica ao cliente via WhatsApp', async (t) => {
   const graphHits = [];
   const graphApi = http.createServer(async (req, res) => {
     const chunks = [];
@@ -321,14 +317,12 @@ test('order created alert: envia confirmacao automatica para o cliente via Whats
   const address = await listen(graphApi);
   const restoreEnv = applyAlertEnv({
     ORDER_ALERT_NTFY_TOPIC_URL: '',
-    ORDER_ALERT_WHATSAPP_TO: '',
     ORDER_ALERT_WEBHOOK_URL: '',
     ORDER_ALERT_WEBHOOK_TIMEOUT_MS: '1500',
     WHATSAPP_CLOUD_API_TOKEN: 'test-token',
     WHATSAPP_CLOUD_PHONE_NUMBER_ID: '123456789',
     WHATSAPP_CLOUD_API_VERSION: 'v23.0',
-    WHATSAPP_CLOUD_API_BASE_URL: `http://127.0.0.1:${address.port}`,
-    WHATSAPP_ORDER_CONFIRMATION_ENABLED: 'true'
+    WHATSAPP_CLOUD_API_BASE_URL: `http://127.0.0.1:${address.port}`
   });
 
   const { apiUrl, shutdown } = await ensureApiServer();
@@ -364,7 +358,7 @@ test('order created alert: envia confirmacao automatica para o cliente via Whats
   const product = await request(apiUrl, '/inventory-products', {
     method: 'POST',
     body: {
-      name: `Confirmacao WhatsApp ${suffix}`,
+      name: `Sem Confirmacao WhatsApp ${suffix}`,
       category: 'Teste',
       unit: 'cx',
       price: 40,
@@ -377,9 +371,9 @@ test('order created alert: envia confirmacao automatica para o cliente via Whats
     version: 1,
     intent: 'CONFIRMED',
     customer: {
-      name: `Cliente Confirmacao ${suffix}`,
+      name: `Cliente Sem Confirmacao ${suffix}`,
       phone: '11940009584',
-      address: 'Rua Confirmacao, 30'
+      address: 'Rua Sem Confirmacao, 30'
     },
     fulfillment: {
       mode: 'PICKUP',
@@ -407,18 +401,7 @@ test('order created alert: envia confirmacao automatica para o cliente via Whats
   created.orderId = createdOrder.order.id;
   created.customerId = createdOrder.intake.customerId;
 
-  await waitFor(() => graphHits.length > 0);
   await new Promise((resolve) => setTimeout(resolve, 300));
 
-  assert.equal(graphHits.length, 1);
-  assert.equal(graphHits[0].method, 'POST');
-  assert.equal(graphHits[0].url, '/v23.0/123456789/messages');
-  assert.equal(graphHits[0].headers.authorization, 'Bearer test-token');
-  assert.equal(graphHits[0].body.messaging_product, 'whatsapp');
-  assert.equal(graphHits[0].body.to, '5511940009584');
-  assert.equal(graphHits[0].body.type, 'text');
-  assert.equal(
-    graphHits[0].body.text.body,
-    'Seu pedido foi confirmado ❤️\nVc vai receber um aviso quando suas broinhas sairem para entrega :)'
-  );
+  assert.equal(graphHits.length, 0);
 });

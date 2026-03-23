@@ -27,8 +27,6 @@ type OrdersServiceBridge = {
 type WhatsAppCloudMessageKind =
   | 'SUMMARY'
   | 'PIX_CODE'
-  | 'ORDER_ALERT'
-  | 'ORDER_CONFIRMATION'
   | 'FLOW_INVITE'
   | 'FLOW_FALLBACK';
 
@@ -488,7 +486,7 @@ export class WhatsAppService {
         deliveries.push(
           this.postTextMessage({
             to: message.from,
-            kind: 'ORDER_ALERT',
+            kind: 'SUMMARY',
             body: this.buildInboundOrderReply(message.body)
           }).then((delivery) => ({
             from: message.from,
@@ -851,42 +849,4 @@ export class WhatsAppService {
     });
   }
 
-  async sendOrderAlert(input: { phone: string; body: string }) {
-    const to = this.normalizeRecipientPhone(input.phone);
-    const message = await this.postTextMessage({
-      to,
-      kind: 'ORDER_ALERT',
-      body: input.body.trim()
-    });
-
-    return {
-      provider: 'WHATSAPP_CLOUD_API' as const,
-      to,
-      sentAt: new Date().toISOString(),
-      message
-    };
-  }
-
-  async sendOrderConfirmation(input: {
-    customerName: string;
-    phone: string;
-    orderNumber: number | string;
-    paymentPending: boolean;
-  }) {
-    const to = this.normalizeRecipientPhone(input.phone);
-    const body = 'Seu pedido foi confirmado ❤️\nVc vai receber um aviso quando suas broinhas sairem para entrega :)';
-
-    const message = await this.postTextMessage({
-      to,
-      kind: 'ORDER_CONFIRMATION',
-      body
-    });
-
-    return {
-      provider: 'WHATSAPP_CLOUD_API' as const,
-      to,
-      sentAt: new Date().toISOString(),
-      message
-    };
-  }
 }
