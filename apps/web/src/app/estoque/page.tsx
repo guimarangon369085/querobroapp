@@ -1624,11 +1624,15 @@ function StockPageContent() {
                       <div className="grid gap-3 rounded-2xl border border-white/70 bg-white/70 p-3 md:grid-cols-[120px_minmax(0,1fr)]">
                         <div className="relative aspect-square overflow-hidden rounded-2xl border border-white/80 bg-white/80">
                           {productImagePreviewUrl ? (
+                            <>
+                              {/* Blob previews from local uploads do not work reliably with next/image. */}
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               alt={productForm.name || 'Preview do produto'}
                               className="h-full w-full object-cover"
                               src={resolveBuilderImageSrc(productImagePreviewUrl)}
                             />
+                            </>
                           ) : (
                             <div className="flex h-full items-center justify-center px-3 text-center text-xs text-neutral-500">
                               Sem imagem

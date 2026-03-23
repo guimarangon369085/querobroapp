@@ -10,16 +10,18 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@babel/runtime": "^7.29.2",
     "@querobroapp/shared": "workspace:*",
-    "expo": "^51.0.0",
-    "expo-constants": "~16.0.2",
-    "expo-status-bar": "^2.0.1",
+    "expo": "~55.0.8",
+    "expo-constants": "~55.0.9",
+    "expo-status-bar": "~55.0.4",
     "libphonenumber-js": "^1.12.38",
-    "react": "^18.3.1",
-    "react-native": "^0.74.1"
+    "react": "18.3.1",
+    "react-native": "0.83.2"
   },
   "devDependencies": {
-    "@types/react": "^18.3.3",
-    "typescript": "^5.5.4"
+    "@types/react": "18.3.28",
+    "react-dom": "18.3.1",
+    "typescript": "~5.9.2"
   }
 }

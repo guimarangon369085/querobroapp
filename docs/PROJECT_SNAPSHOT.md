@@ -1,6 +1,6 @@
 # PROJECT_SNAPSHOT
 
-Ultima atualizacao: 2026-03-22
+Ultima atualizacao: 2026-03-23
 
 ## Estado atual
 
@@ -14,6 +14,8 @@ Ultima atualizacao: 2026-03-22
 - Numeracao exibida de `Clientes` e `Pedidos` agora usa `publicNumber` sequencial, preenchido por ordem cronologica e desacoplado do `id` interno do banco.
 - API cobre pedido, pagamento, estoque, BOM, D+1, producao e frete local calculado no backend.
 - O processo de qualidade atual inclui `qa:trust`, `qa:browser-smoke`, `qa:critical-e2e`, drift check e testes raiz.
+- O workspace agora roda com `pnpm audit` zerado, `Next 15.5.14`, `multer 2.1.1` e stack mobile alinhada em `Expo 55`/`React Native 0.83.2`, sem warnings bloqueantes de peer/deprecated no `pnpm install`.
+- O lint do monorepo migrou para `ESLint 9` em flat config e passou a ignorar artefatos temporarios de QA (`.next-qa-*` e `.playwright-cli`), evitando falso negativo apos smoke/E2E.
 - Gate operacional de religamento foi validado em 2026-03-11 com `stop-all -> dev-all`, health da API e execucao de smoke + E2E critico.
 - `Produtos` deixou de existir como superficie operacional; catalogo e ficha tecnica ficam dentro de `Estoque`.
 - Existe agora uma captura publica de pedido em `/pedido`, usando o mesmo intake externo que vai servir para `Google Forms`, pagina propria e futuro `WhatsApp Flow`.
@@ -155,6 +157,9 @@ Ultima atualizacao: 2026-03-22
 
 ## Validacao operacional mais recente
 
+- Data: 2026-03-23
+- Ciclo executado: `pnpm install`, `pnpm audit --json`, `pnpm lint`, `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, `pnpm --filter @querobroapp/mobile typecheck`, `pnpm --filter @querobroapp/mobile build`, `node --test tests/order-created-alerts.test.mjs tests/order-intake-preview.test.mjs tests/customer-dedupe-and-intake.test.mjs`, `pnpm qa:browser-smoke`, `pnpm qa:critical-e2e`
+- Resultado: cadeia de dependencias e toolchain ficaram limpas (`audit=0`, sem warning bloqueante de install), o web/API/mobile seguiram buildando, e os dois gates de navegador passaram apos endurecer o QA critico contra copy acentuada em `/estoque`.
 - Data: 2026-03-22
 - Ciclo executado: `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api exec prisma generate`, `pnpm --filter @querobroapp/api exec prisma generate --schema prisma/schema.prod.prisma`, `pnpm --filter @querobroapp/api typecheck`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, `rg -n "email|activeEmailKey" apps/api/src apps/web/src packages/shared/src tests -g'*.ts' -g'*.tsx' -g'*.mjs'`
 - Resultado: cliente deixou de ter `email` no contrato e no banco ativo; `/clientes` passou a aceitar cadastro interno incompleto exigindo apenas nome, enquanto o fluxo publico preservou as validacoes de preenchimento sem esse campo.
