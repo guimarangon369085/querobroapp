@@ -59,6 +59,7 @@ Ultima atualizacao: 2026-03-23
 - `/dashboard` voltou a existir como rota oculta interna, agora com painel real de analytics first-party do site, vitals e performance financeira/operacional da broa.
 - O estoque ganhou historico de preco por item/familia em unidade real de compra, com baseline dedicada desde o primeiro pedido e painel novo `Preços` dentro de `/estoque`.
 - O COGS do `/dashboard` deixou de usar apenas o custo corrente do insumo e passou a escolher o preco vigente na data de cada pedido, com fallback para a media historica pesquisada quando faltam pontos antigos.
+- O COGS do `/dashboard` agora tambem respeita a semantica real do pedido em broas, nao em caixas: a ficha tecnica oficial publicada foi recalibrada para rendimento de `36 broas`, com sacola a cada `2 caixas`, base historica dos `433` pedidos recalculada e margem bruta consolidada novamente em patamar plausivel.
 - O web passou a instrumentar navegacao, links, funil e web vitals por coleta propria, gravando esses eventos na API para leitura imediata no dashboard.
 - `/dashboard` deixou de depender so de obscuridade: agora abre apenas em host operacional/loopback, usa bridge protegido no web e a API exige token de bridge.
 - `/dashboard` ganhou uma narrativa editorial mais didatica, reorganizando trafego, funil, performance, financeiro, mix e recebiveis em linguagem mais humana sem alterar a base de dados lida pelo painel.
@@ -156,6 +157,9 @@ Ultima atualizacao: 2026-03-23
 
 ## Validacao operacional mais recente
 
+- Data: 2026-03-23
+- Ciclo executado: `pnpm --filter @querobroapp/api build`, `node --test tests/dashboard-cogs-summary.test.mjs tests/order-mass-prep-automation.test.mjs tests/mass-prep-batch-priority.test.mjs`, deploy Railway `passionate-nourishment` (`fc55e5e7-c2d3-46af-b505-5db59296d59e`), recalibracao das BOMs publicadas via `PUT /boms/:id` para os produtos `3,4,5,6,7,297` e leitura autenticada de `dashboard/summary`.
+- Resultado: a receita oficial de `36 broas` entrou de ponta a ponta, `qtyPerUnit` virou a base canonica do COGS, os recheios ficaram unificados em `8g` por broa, e o dashboard publicado caiu de `R$ 42.199,34` para `R$ 7.108,59` de COGS sobre `433` pedidos, sem warnings.
 - Data: 2026-03-23
 - Ciclo executado: `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, `node --test tests/dashboard-cogs-summary.test.mjs`
 - Resultado: historico de preco entrou no estoque e no dashboard; o COGS passou a respeitar a data de cada pedido e o harness de API agora sincroniza o schema temporario antes dos testes.

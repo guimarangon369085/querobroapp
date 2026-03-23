@@ -203,7 +203,7 @@ test(
         unit: 'uni',
         purchasePackSize: 20,
         purchasePackCost: 23.9,
-        adjustQty: 20
+        adjustQty: 30
       }
     ];
 
@@ -334,7 +334,7 @@ test(
         movement.type === 'OUT'
     );
     assert.ok(massReadyConsumptionMovement, 'Consumo de MASSA PRONTA do pedido nao encontrado');
-    assert.ok(Math.abs(Number(massReadyConsumptionMovement.quantity) - 1 / 3) <= 0.0001);
+    assert.ok(Math.abs(Number(massReadyConsumptionMovement.quantity) - 7 / 36) <= 0.0001);
     assert.equal(massReadyConsumptionMovement.orderDisplayNumber, order.publicNumber ?? order.id);
 
     const fillingMovement = orderMovementsAfterCreate.find(
@@ -344,7 +344,7 @@ test(
         movement.type === 'OUT'
     );
     assert.ok(fillingMovement, 'Consumo de recheio (ORDER_FILLING) nao encontrado');
-    assert.equal(Number(fillingMovement.quantity), 15);
+    assert.equal(Number(fillingMovement.quantity), 24);
 
     const plasticBoxMovement = orderMovementsAfterCreate.find(
       (movement) =>

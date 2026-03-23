@@ -11,6 +11,7 @@ Consolidar o lancamento publico do app sobre o mesmo nucleo operacional:
 - captura externa em `/pedido` e `Google Forms`
 - entrega com frete cotado antes do PIX, calculado internamente por raio
 - COGS calculado por pedido com preco historico de insumo, usando baseline pesquisada desde o primeiro pedido quando necessario
+- ficha tecnica oficial de broa recalibrada para `36 broas` por receita, com leitura por broa no dashboard e custo reprocessado sobre toda a base ativa
 
 ## Gate operacional (concluido em 2026-03-11)
 
@@ -82,6 +83,7 @@ Criterio de pronto:
 - Manter a navegacao padronizada com `PEDIDOS` como item principal e labels em caixa alta em todo o menu.
 - Seguir limpando redundancias em `Estoque` agora que `Produtos` saiu da navegação.
 - Publicar o novo bloco `Preços` em `/estoque`, aplicar a baseline historica na base produtiva e confirmar o COGS sobre todos os pedidos ativos da base.
+- Fechado neste lote: o COGS publicado foi recalibrado sobre os `433` pedidos usando a receita oficial de `36 broas`, com `qtyPerUnit` como base canonica, sacola a cada `2 caixas` e margem consolidada novamente em nivel plausivel.
 - Validar estados vazios e mudanca de dia em desktop e mobile width.
 - Fechado neste lote: `/dashboard` e analytics ficaram blindados por bridge/token, e `PICKUP` passou a ser respeitado em `/clientes` e no quick create de `/pedidos`.
 

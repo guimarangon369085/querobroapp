@@ -193,6 +193,88 @@ test('dashboard summary calcula COGS por pedido a partir dos ingredientes da fic
   assert.equal(approxEqual(aggregateIngredientB.amount, expectedIngredientBAmount), true);
 });
 
+test('dashboard summary prioriza qtyPerUnit quando o pedido esta em broas', async (t) => {
+  const { apiUrl, shutdown } = await ensureApiServer();
+  t.after(async () => {
+    await shutdown();
+  });
+
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const ingredient = await request(apiUrl, '/inventory-items', {
+    method: 'POST',
+    body: {
+      name: `INGREDIENTE SEMANTICA DASHBOARD [TESTE_E2E] ${suffix}`,
+      category: 'INGREDIENTE',
+      unit: 'g',
+      purchasePackSize: 1,
+      purchasePackCost: 1
+    }
+  });
+
+  await request(apiUrl, '/inventory-movements', {
+    method: 'POST',
+    body: {
+      itemId: ingredient.id,
+      type: 'ADJUST',
+      quantity: 1000,
+      reason: `DASHBOARD_COGS_UNIT_SEMANTICS_TEST setup ${suffix}`
+    }
+  });
+
+  const product = await request(apiUrl, '/inventory-products', {
+    method: 'POST',
+    body: {
+      name: `Broa Semantica Dashboard [TESTE_E2E] ${suffix}`,
+      category: 'Sabores',
+      unit: 'un',
+      price: 10,
+      active: true
+    }
+  });
+
+  const existingBoms = await request(apiUrl, '/boms');
+  const existingBom = existingBoms.find((entry) => entry.productId === product.id) || null;
+  const bomPayload = {
+    productId: product.id,
+    name: `BOM SEMANTICA DASHBOARD [TESTE_E2E] ${suffix}`,
+    saleUnitLabel: 'Caixa com 7 broas',
+    yieldUnits: 36,
+    items: [{ itemId: ingredient.id, qtyPerSaleUnit: 35, qtyPerUnit: 5 }]
+  };
+  await (existingBom
+    ? request(apiUrl, `/boms/${existingBom.id}`, { method: 'PUT', body: bomPayload })
+    : request(apiUrl, '/boms', { method: 'POST', body: bomPayload }));
+
+  const customer = await request(apiUrl, '/customers', {
+    method: 'POST',
+    body: {
+      name: `Cliente Semantica Dashboard [TESTE_E2E] ${suffix}`,
+      phone: `119${String(Date.now()).slice(-8)}`,
+      address: 'Rua Semantica, 7'
+    }
+  });
+
+  const order = await request(apiUrl, '/orders', {
+    method: 'POST',
+    body: {
+      customerId: customer.id,
+      scheduledAt: new Date(Date.UTC(2032, 0, 16, 14, 0, 0)).toISOString(),
+      items: [{ productId: product.id, quantity: 4 }]
+    }
+  });
+
+  const summary = await request(apiUrl, '/dashboard/summary');
+  const entry = summary.business.cogsByOrder.find((item) => item.orderId === order.id);
+  assert.ok(entry, 'pedido deveria aparecer no dashboard');
+  assert.equal(entry.units, 4);
+  assert.equal(approxEqual(entry.cogs, 20), true);
+
+  const ingredientEntry = entry.ingredients.find((item) => item.ingredientId === ingredient.id);
+  assert.ok(ingredientEntry, 'ingrediente deveria aparecer no detalhamento');
+  assert.equal(approxEqual(ingredientEntry.quantity, 20), true);
+  assert.equal(approxEqual(ingredientEntry.amount, 20), true);
+});
+
 test('dashboard summary respeita historico de preco do ingrediente na data de cada pedido', async (t) => {
   const { apiUrl, shutdown } = await ensureApiServer();
   t.after(async () => {

@@ -42,7 +42,7 @@ test(
         unit: 'ml',
         purchasePackSize: 1000,
         purchasePackCost: 4.19,
-        oneRecipeQty: 240
+        oneRecipeQty: 480
       },
       {
         canonicalName: 'MANTEIGA',
@@ -51,7 +51,7 @@ test(
         unit: 'g',
         purchasePackSize: 500,
         purchasePackCost: 24.9,
-        oneRecipeQty: 150
+        oneRecipeQty: 300
       },
       {
         canonicalName: 'AÇÚCAR',
@@ -60,7 +60,7 @@ test(
         unit: 'g',
         purchasePackSize: 1000,
         purchasePackCost: 5.69,
-        oneRecipeQty: 120
+        oneRecipeQty: 240
       },
       {
         canonicalName: 'FARINHA DE TRIGO',
@@ -69,7 +69,7 @@ test(
         unit: 'g',
         purchasePackSize: 1000,
         purchasePackCost: 6.49,
-        oneRecipeQty: 130
+        oneRecipeQty: 260
       },
       {
         canonicalName: 'FUBÁ DE CANJICA',
@@ -78,7 +78,7 @@ test(
         unit: 'g',
         purchasePackSize: 1000,
         purchasePackCost: 6,
-        oneRecipeQty: 130
+        oneRecipeQty: 260
       },
       {
         canonicalName: 'OVOS',
@@ -87,7 +87,7 @@ test(
         unit: 'uni',
         purchasePackSize: 20,
         purchasePackCost: 23.9,
-        oneRecipeQty: 6
+        oneRecipeQty: 12
       }
     ];
 

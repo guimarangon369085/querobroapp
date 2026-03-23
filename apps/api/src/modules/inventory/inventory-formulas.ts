@@ -1,10 +1,35 @@
 export const MASS_READY_ITEM_NAME = 'MASSA PRONTA';
-export const MASS_READY_BROAS_PER_RECIPE = 21;
-export const MASS_PREP_DEFAULT_BATCH_RECIPES = 2;
 export const ORDER_BOX_UNITS = 7;
 export const ORDER_PAPER_BAG_BOX_CAPACITY = 2;
 export const ORDER_PAPER_MANTEIGA_CM_PER_BOX = 16;
 export const OVEN_CAPACITY_BROAS = 14;
+export const OFFICIAL_BROA_RECIPE_YIELD_UNITS = 36;
+export const OFFICIAL_BROA_RECIPE_MILK_ML = 480;
+export const OFFICIAL_BROA_RECIPE_WATER_ML = 480;
+export const OFFICIAL_BROA_RECIPE_BUTTER_G = 300;
+export const OFFICIAL_BROA_RECIPE_SUGAR_G = 240;
+export const OFFICIAL_BROA_RECIPE_WHEAT_FLOUR_G = 260;
+export const OFFICIAL_BROA_RECIPE_CANJICA_FUBA_G = 260;
+export const OFFICIAL_BROA_RECIPE_EGGS_UNITS = 12;
+export const OFFICIAL_BROA_FILLING_QTY_PER_UNIT = 8;
+export const MASS_READY_BROAS_PER_RECIPE = OFFICIAL_BROA_RECIPE_YIELD_UNITS;
+export const MASS_PREP_DEFAULT_BATCH_RECIPES = 2;
+
+const DEFAULT_PURCHASE_PACKS = {
+  MILK: { size: 1000, cost: 5.49 },
+  BUTTER: { size: 200, cost: 12.79 },
+  SUGAR: { size: 1000, cost: 4.59 },
+  FLOUR: { size: 1000, cost: 6.49 },
+  CANJICA_FUBA: { size: 1000, cost: 11.99 },
+  EGGS: { size: 20, cost: 23.9 },
+  GOIABADA: { size: 300, cost: 5.99 },
+  DOCE_DE_LEITE: { size: 200, cost: 20.99 },
+  QUEIJO_DO_SERRO: { size: 500, cost: 46.95 },
+  REQUEIJAO_DE_CORTE: { size: 240, cost: 30.9 },
+  PAPER_BAG: { size: 10, cost: 17.88 },
+  PLASTIC_BOX: { size: 100, cost: 86.65 },
+  BUTTER_PAPER: { size: 750, cost: 7.87 }
+} as const;
 
 export const OFFICIAL_BROA_FLAVOR_CODES = ['T', 'G', 'D', 'Q', 'R'] as const;
 export type OfficialBroaFlavorCode = (typeof OFFICIAL_BROA_FLAVOR_CODES)[number];
@@ -97,62 +122,62 @@ export const canonicalInventoryItemDefinitions = [
     aliases: ['LEITE'],
     category: 'INGREDIENTE',
     unit: 'ml',
-    qtyPerRecipe: 240,
-    purchasePackSize: 1000,
-    purchasePackCost: 4.19
+    qtyPerRecipe: OFFICIAL_BROA_RECIPE_MILK_ML,
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.MILK.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.MILK.cost
   },
   {
     canonicalName: 'MANTEIGA',
     aliases: ['MANTEIGA', 'MANTEIGA COM SAL'],
     category: 'INGREDIENTE',
     unit: 'g',
-    qtyPerRecipe: 150,
-    purchasePackSize: 500,
-    purchasePackCost: 24.9
+    qtyPerRecipe: OFFICIAL_BROA_RECIPE_BUTTER_G,
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.BUTTER.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.BUTTER.cost
   },
   {
     canonicalName: 'AÇÚCAR',
     aliases: ['AÇÚCAR', 'ACUCAR'],
     category: 'INGREDIENTE',
     unit: 'g',
-    qtyPerRecipe: 120,
-    purchasePackSize: 1000,
-    purchasePackCost: 5.69
+    qtyPerRecipe: OFFICIAL_BROA_RECIPE_SUGAR_G,
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.SUGAR.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.SUGAR.cost
   },
   {
     canonicalName: 'FARINHA DE TRIGO',
     aliases: ['FARINHA DE TRIGO'],
     category: 'INGREDIENTE',
     unit: 'g',
-    qtyPerRecipe: 130,
-    purchasePackSize: 1000,
-    purchasePackCost: 6.49
+    qtyPerRecipe: OFFICIAL_BROA_RECIPE_WHEAT_FLOUR_G,
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.FLOUR.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.FLOUR.cost
   },
   {
     canonicalName: 'FUBÁ DE CANJICA',
     aliases: ['FUBÁ DE CANJICA', 'FUBA DE CANJICA'],
     category: 'INGREDIENTE',
     unit: 'g',
-    qtyPerRecipe: 130,
-    purchasePackSize: 1000,
-    purchasePackCost: 6
+    qtyPerRecipe: OFFICIAL_BROA_RECIPE_CANJICA_FUBA_G,
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.CANJICA_FUBA.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.CANJICA_FUBA.cost
   },
   {
     canonicalName: 'OVOS',
     aliases: ['OVOS'],
     category: 'INGREDIENTE',
     unit: 'uni',
-    qtyPerRecipe: 6,
-    purchasePackSize: 20,
-    purchasePackCost: 23.9
+    qtyPerRecipe: OFFICIAL_BROA_RECIPE_EGGS_UNITS,
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.EGGS.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.EGGS.cost
   },
   {
     canonicalName: 'GOIABADA',
     aliases: ['GOIABADA'],
     category: 'INGREDIENTE',
     unit: 'g',
-    purchasePackSize: 1000,
-    purchasePackCost: 19,
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.GOIABADA.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.GOIABADA.cost,
     qtyPerUnit: 5
   },
   {
@@ -160,8 +185,8 @@ export const canonicalInventoryItemDefinitions = [
     aliases: ['DOCE DE LEITE'],
     category: 'INGREDIENTE',
     unit: 'g',
-    purchasePackSize: 1000,
-    purchasePackCost: 24,
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.DOCE_DE_LEITE.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.DOCE_DE_LEITE.cost,
     qtyPerUnit: 5
   },
   {
@@ -169,8 +194,8 @@ export const canonicalInventoryItemDefinitions = [
     aliases: ['QUEIJO DO SERRO', 'QUEIJO'],
     category: 'INGREDIENTE',
     unit: 'g',
-    purchasePackSize: 1000,
-    purchasePackCost: 35,
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.QUEIJO_DO_SERRO.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.QUEIJO_DO_SERRO.cost,
     qtyPerUnit: 5
   },
   {
@@ -178,8 +203,8 @@ export const canonicalInventoryItemDefinitions = [
     aliases: ['REQUEIJÃO DE CORTE', 'REQUEIJAO DE CORTE'],
     category: 'INGREDIENTE',
     unit: 'g',
-    purchasePackSize: 1000,
-    purchasePackCost: 38,
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.REQUEIJAO_DE_CORTE.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.REQUEIJAO_DE_CORTE.cost,
     qtyPerUnit: 5
   },
   {
@@ -187,24 +212,24 @@ export const canonicalInventoryItemDefinitions = [
     aliases: ['SACOLA'],
     category: 'EMBALAGEM_EXTERNA',
     unit: 'uni',
-    purchasePackSize: 10,
-    purchasePackCost: 17.88
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.PAPER_BAG.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.PAPER_BAG.cost
   },
   {
     canonicalName: 'CAIXA DE PLÁSTICO',
     aliases: ['CAIXA DE PLÁSTICO', 'CAIXA DE PLASTICO'],
     category: 'EMBALAGEM_INTERNA',
     unit: 'uni',
-    purchasePackSize: 100,
-    purchasePackCost: 86.65
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.PLASTIC_BOX.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.PLASTIC_BOX.cost
   },
   {
     canonicalName: 'PAPEL MANTEIGA',
     aliases: ['PAPEL MANTEIGA'],
     category: 'EMBALAGEM_INTERNA',
     unit: 'cm',
-    purchasePackSize: 7000,
-    purchasePackCost: 10.29
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.BUTTER_PAPER.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.BUTTER_PAPER.cost
   },
   {
     canonicalName: MASS_READY_ITEM_NAME,
@@ -222,54 +247,54 @@ export const massPrepRecipeIngredients = [
     aliases: ['LEITE'],
     category: 'INGREDIENTE',
     unit: 'ml',
-    qtyPerRecipe: 240,
-    purchasePackSize: 1000,
-    purchasePackCost: 4.19
+    qtyPerRecipe: OFFICIAL_BROA_RECIPE_MILK_ML,
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.MILK.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.MILK.cost
   },
   {
     canonicalName: 'MANTEIGA',
     aliases: ['MANTEIGA', 'MANTEIGA COM SAL'],
     category: 'INGREDIENTE',
     unit: 'g',
-    qtyPerRecipe: 150,
-    purchasePackSize: 500,
-    purchasePackCost: 24.9
+    qtyPerRecipe: OFFICIAL_BROA_RECIPE_BUTTER_G,
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.BUTTER.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.BUTTER.cost
   },
   {
     canonicalName: 'AÇÚCAR',
     aliases: ['AÇÚCAR', 'ACUCAR'],
     category: 'INGREDIENTE',
     unit: 'g',
-    qtyPerRecipe: 120,
-    purchasePackSize: 1000,
-    purchasePackCost: 5.69
+    qtyPerRecipe: OFFICIAL_BROA_RECIPE_SUGAR_G,
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.SUGAR.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.SUGAR.cost
   },
   {
     canonicalName: 'FARINHA DE TRIGO',
     aliases: ['FARINHA DE TRIGO'],
     category: 'INGREDIENTE',
     unit: 'g',
-    qtyPerRecipe: 130,
-    purchasePackSize: 1000,
-    purchasePackCost: 6.49
+    qtyPerRecipe: OFFICIAL_BROA_RECIPE_WHEAT_FLOUR_G,
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.FLOUR.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.FLOUR.cost
   },
   {
     canonicalName: 'FUBÁ DE CANJICA',
     aliases: ['FUBÁ DE CANJICA', 'FUBA DE CANJICA'],
     category: 'INGREDIENTE',
     unit: 'g',
-    qtyPerRecipe: 130,
-    purchasePackSize: 1000,
-    purchasePackCost: 6
+    qtyPerRecipe: OFFICIAL_BROA_RECIPE_CANJICA_FUBA_G,
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.CANJICA_FUBA.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.CANJICA_FUBA.cost
   },
   {
     canonicalName: 'OVOS',
     aliases: ['OVOS'],
     category: 'INGREDIENTE',
     unit: 'uni',
-    qtyPerRecipe: 6,
-    purchasePackSize: 20,
-    purchasePackCost: 23.9
+    qtyPerRecipe: OFFICIAL_BROA_RECIPE_EGGS_UNITS,
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.EGGS.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.EGGS.cost
   }
 ] as const satisfies readonly InventoryRecipeDefinition[];
 
@@ -279,36 +304,36 @@ export const orderFillingIngredientsByFlavorCode = {
     aliases: ['GOIABADA'],
     category: 'INGREDIENTE',
     unit: 'g',
-    purchasePackSize: 1000,
-    purchasePackCost: 19,
-    qtyPerUnit: 5
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.GOIABADA.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.GOIABADA.cost,
+    qtyPerUnit: OFFICIAL_BROA_FILLING_QTY_PER_UNIT
   },
   D: {
     canonicalName: 'DOCE DE LEITE',
     aliases: ['DOCE DE LEITE'],
     category: 'INGREDIENTE',
     unit: 'g',
-    purchasePackSize: 1000,
-    purchasePackCost: 24,
-    qtyPerUnit: 5
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.DOCE_DE_LEITE.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.DOCE_DE_LEITE.cost,
+    qtyPerUnit: OFFICIAL_BROA_FILLING_QTY_PER_UNIT
   },
   Q: {
     canonicalName: 'QUEIJO DO SERRO',
     aliases: ['QUEIJO DO SERRO', 'QUEIJO'],
     category: 'INGREDIENTE',
     unit: 'g',
-    purchasePackSize: 1000,
-    purchasePackCost: 35,
-    qtyPerUnit: 5
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.QUEIJO_DO_SERRO.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.QUEIJO_DO_SERRO.cost,
+    qtyPerUnit: OFFICIAL_BROA_FILLING_QTY_PER_UNIT
   },
   R: {
     canonicalName: 'REQUEIJÃO DE CORTE',
     aliases: ['REQUEIJÃO DE CORTE', 'REQUEIJAO DE CORTE'],
     category: 'INGREDIENTE',
     unit: 'g',
-    purchasePackSize: 1000,
-    purchasePackCost: 38,
-    qtyPerUnit: 5
+    purchasePackSize: DEFAULT_PURCHASE_PACKS.REQUEIJAO_DE_CORTE.size,
+    purchasePackCost: DEFAULT_PURCHASE_PACKS.REQUEIJAO_DE_CORTE.cost,
+    qtyPerUnit: OFFICIAL_BROA_FILLING_QTY_PER_UNIT
   }
 } as const satisfies Record<string, InventoryAliasDefinition>;
 

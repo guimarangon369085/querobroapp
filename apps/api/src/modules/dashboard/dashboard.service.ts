@@ -554,7 +554,7 @@ function parseSaleUnits(label?: string | null) {
   return parsed;
 }
 
-function perSaleQty(
+function perOrderedUnitQty(
   bom: {
     saleUnitLabel?: string | null;
     yieldUnits?: number | null;
@@ -565,10 +565,10 @@ function perSaleQty(
     qtyPerRecipe?: number | null;
   }
 ) {
-  if (bomItem.qtyPerSaleUnit != null && bomItem.qtyPerSaleUnit > 0) return bomItem.qtyPerSaleUnit;
+  if (bomItem.qtyPerUnit != null && bomItem.qtyPerUnit > 0) return bomItem.qtyPerUnit;
   const unitsPerSale = parseSaleUnits(bom.saleUnitLabel);
-  if (bomItem.qtyPerUnit != null && bomItem.qtyPerUnit > 0) {
-    return bomItem.qtyPerUnit * unitsPerSale;
+  if (bomItem.qtyPerSaleUnit != null && bomItem.qtyPerSaleUnit > 0) {
+    return unitsPerSale > 0 ? bomItem.qtyPerSaleUnit / unitsPerSale : bomItem.qtyPerSaleUnit;
   }
   if (bomItem.qtyPerRecipe != null && bomItem.qtyPerRecipe > 0 && bom.yieldUnits && bom.yieldUnits > 0) {
     return bomItem.qtyPerRecipe / bom.yieldUnits;
@@ -713,8 +713,9 @@ export class DashboardService {
       let hasMissingQty = false;
 
       for (const bomItem of bom.items) {
-        const perSale = perSaleQty(bom, bomItem);
-        if (perSale == null) {
+        // Order item quantities are stored in broas, not in boxes.
+        const perUnit = perOrderedUnitQty(bom, bomItem);
+        if (perUnit == null) {
           hasMissingQty = true;
           continue;
         }
@@ -722,7 +723,7 @@ export class DashboardService {
         const inventoryItem = inventoryItemById.get(bomItem.itemId);
         if (!inventoryItem) continue;
 
-        const ingredientQty = perSale * params.units;
+        const ingredientQty = perUnit * params.units;
         const unitCost = resolveIngredientUnitCost(inventoryItem, params.orderCreatedAt);
         const amount = ingredientQty * unitCost;
         totalAmount += amount;
