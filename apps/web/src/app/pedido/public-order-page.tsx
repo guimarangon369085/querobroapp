@@ -1324,13 +1324,13 @@ export function PublicOrderPage() {
         <section className="public-order-layout">
           <form
             autoComplete="on"
-            className="grid gap-4 rounded-[26px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.88)] p-4 shadow-[0_22px_60px_rgba(70,44,26,0.12)] sm:gap-5 sm:rounded-[32px] sm:p-6 sm:shadow-[0_26px_90px_rgba(70,44,26,0.12)] xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:shadow-none"
+            className="grid gap-4 rounded-[26px] border border-[rgba(126,79,45,0.1)] bg-[rgb(255,252,248)] p-4 shadow-[0_22px_60px_rgba(70,44,26,0.12)] sm:gap-5 sm:rounded-[32px] sm:p-6 sm:shadow-[0_26px_90px_rgba(70,44,26,0.12)] xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:shadow-none"
             onSubmit={onSubmit}
             ref={orderFormRef}
           >
             <div className="public-order-intake-grid">
               <section
-                className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6 xl:h-full xl:p-7"
+                className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white p-4 sm:rounded-[28px] sm:p-6 xl:h-full xl:p-7"
                 data-order-boxes-section
               >
                 <div className="mb-4 flex items-center justify-between gap-4 sm:mb-5">
@@ -1366,7 +1366,7 @@ export function PublicOrderPage() {
                 </div>
               </section>
 
-              <section className="public-order-fulfillment-section rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
+              <section className="public-order-fulfillment-section rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
                 <div className="mb-4 sm:mb-5">
                   <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">
                     Entrega ou retirada
@@ -1400,8 +1400,8 @@ export function PublicOrderPage() {
                         onClick={() => handleFulfillmentModeChange(option.value)}
                         className={`public-order-mode-card rounded-[24px] border px-4 py-4 text-left xl:min-h-[112px] xl:px-5 ${
                           active
-                            ? 'border-[rgba(181,68,57,0.32)] bg-[linear-gradient(160deg,rgba(255,245,241,0.98),rgba(251,232,225,0.94))] shadow-[0_16px_34px_rgba(181,68,57,0.12)]'
-                            : 'border-[rgba(126,79,45,0.08)] bg-[rgba(250,245,239,0.86)] hover:border-[rgba(126,79,45,0.18)] hover:bg-white/88'
+                            ? 'border-[rgba(181,68,57,0.32)] bg-[rgb(255,245,241)] shadow-[0_16px_34px_rgba(181,68,57,0.12)]'
+                            : 'border-[rgba(126,79,45,0.08)] bg-[rgb(250,245,239)] hover:border-[rgba(126,79,45,0.18)] hover:bg-[rgb(255,252,248)]'
                         }`}
                       >
                         <div className="flex items-center justify-between gap-3">
@@ -1416,8 +1416,8 @@ export function PublicOrderPage() {
                           <span
                             className={`grid h-6 w-6 place-items-center rounded-full border text-xs ${
                               active
-                                ? 'border-[rgba(181,68,57,0.3)] bg-[rgba(181,68,57,0.12)] text-[rgb(160,20,26)]'
-                                : 'border-[rgba(126,79,45,0.14)] bg-white/85 text-[color:var(--ink-muted)]'
+                                ? 'border-[rgba(181,68,57,0.3)] bg-[rgb(255,234,228)] text-[rgb(160,20,26)]'
+                                : 'border-[rgba(126,79,45,0.14)] bg-white text-[color:var(--ink-muted)]'
                             }`}
                           >
                             {active ? '✓' : ''}
@@ -1554,7 +1554,7 @@ export function PublicOrderPage() {
                 </div>
 
                 {minimumScheduleLabel ? (
-                  <div className="mt-3 rounded-[18px] border border-[rgba(181,68,57,0.16)] bg-[rgba(255,244,240,0.82)] px-4 py-3 text-sm leading-6 text-[color:var(--ink-muted)]">
+                  <div className="mt-3 rounded-[18px] border border-[rgba(181,68,57,0.16)] bg-[rgb(255,244,240)] px-4 py-3 text-sm leading-6 text-[color:var(--ink-muted)]">
                     <span className="block">
                       Próximo horário: <strong>{minimumScheduleLabel}</strong>.
                     </span>
@@ -1563,7 +1563,7 @@ export function PublicOrderPage() {
               </section>
             </div>
 
-            <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
+            <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
               <div className="mb-4 flex flex-col gap-2 sm:mb-5 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
                 <div>
                   <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Caixas</h2>
@@ -1583,7 +1583,7 @@ export function PublicOrderPage() {
                       >
                       <div className="public-order-box-card__hero">
                         <div className="public-order-box-card__media relative shrink-0">
-                          <div className="relative h-full w-full overflow-hidden rounded-[18px] border border-white/80 bg-white/70 shadow-[0_12px_24px_rgba(74,47,31,0.12)] transition-transform duration-300 group-hover:translate-y-[-2px] sm:rounded-[22px] sm:shadow-[0_14px_28px_rgba(74,47,31,0.12)] xl:rounded-[24px]">
+                          <div className="relative h-full w-full overflow-hidden rounded-[18px] border border-white/80 bg-white shadow-[0_12px_24px_rgba(74,47,31,0.12)] transition-transform duration-300 group-hover:translate-y-[-2px] sm:rounded-[22px] sm:shadow-[0_14px_28px_rgba(74,47,31,0.12)] xl:rounded-[24px]">
                             <OrderCardArtwork
                               alt={entry.label}
                               art={entry.art}
@@ -1608,7 +1608,7 @@ export function PublicOrderPage() {
                         <button
                           type="button"
                           onClick={() => setBoxQuantity(entry.key, Math.max(quantity - 1, 0))}
-                          className="h-12 rounded-[16px] border border-white/85 bg-white/86 text-2xl font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:h-14 sm:rounded-[18px] xl:h-16 xl:text-[2rem]"
+                          className="h-12 rounded-[16px] border border-white/85 bg-white text-2xl font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:h-14 sm:rounded-[18px] xl:h-16 xl:text-[2rem]"
                           aria-label={`Diminuir ${entry.label}`}
                         >
                           −
@@ -1622,7 +1622,7 @@ export function PublicOrderPage() {
                             placeholder="0"
                             aria-label={entry.label}
                           />
-                          <div className="public-order-box-card__pill rounded-[16px] border border-white/80 bg-white/80 sm:rounded-[18px]">
+                          <div className="public-order-box-card__pill rounded-[16px] border border-white/80 bg-white sm:rounded-[18px]">
                             <span className="public-order-box-card__pill-count">{quantity}</span>
                             <span className="public-order-box-card__pill-label">
                               {pluralize(quantity, 'caixa', 'caixas')}
@@ -1632,7 +1632,7 @@ export function PublicOrderPage() {
                         <button
                           type="button"
                           onClick={() => setBoxQuantity(entry.key, quantity + 1)}
-                          className="h-12 rounded-[16px] border border-white/85 bg-white/86 text-2xl font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:h-14 sm:rounded-[18px] xl:h-16 xl:text-[2rem]"
+                          className="h-12 rounded-[16px] border border-white/85 bg-white text-2xl font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:h-14 sm:rounded-[18px] xl:h-16 xl:text-[2rem]"
                           aria-label={`Aumentar ${entry.label}`}
                         >
                           +
@@ -1643,7 +1643,7 @@ export function PublicOrderPage() {
                 })}
               </div>
 
-              <div className="mt-4 rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-[rgba(247,239,230,0.62)] p-4 sm:mt-5 sm:rounded-[26px] sm:p-5 xl:p-6">
+              <div className="mt-4 rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-[rgb(247,239,230)] p-4 sm:mt-5 sm:rounded-[26px] sm:p-5 xl:p-6">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between xl:items-center">
                   <div>
                     <h3 className="text-[1.1rem] font-semibold text-[color:var(--ink-strong)] sm:text-[1.35rem]">
@@ -1669,10 +1669,10 @@ export function PublicOrderPage() {
                         key={box.id}
                         className={`public-order-custom-card rounded-[20px] border p-4 xl:p-5 ${
                           box.isComplete
-                            ? 'border-emerald-200 bg-emerald-50/80'
+                            ? 'border-emerald-200 bg-emerald-50'
                             : box.isActive
-                              ? 'border-amber-200 bg-amber-50/80'
-                              : 'border-white/80 bg-white/80'
+                              ? 'border-amber-200 bg-amber-50'
+                              : 'border-white/80 bg-white'
                         }`}
                       >
                         <div className="public-order-custom-card__header">
@@ -1689,7 +1689,7 @@ export function PublicOrderPage() {
                             </p>
                           </div>
                           <div className="public-order-custom-card__meta">
-                            <span className="rounded-full border border-white/80 bg-white/86 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)] sm:text-xs">
+                            <span className="rounded-full border border-white/80 bg-white px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)] sm:text-xs">
                               {box.totalUnits}/7
                             </span>
                             <button
@@ -1713,7 +1713,7 @@ export function PublicOrderPage() {
                             return (
                               <div
                                 key={`${box.id}-${product.id}`}
-                                className="public-order-custom-row rounded-[16px] border border-white/80 bg-white/82 px-3 py-2.5"
+                                className="public-order-custom-row rounded-[16px] border border-white/80 bg-white px-3 py-2.5"
                               >
                                 <div className="public-order-custom-row__info">
                                   <div className="relative h-10 w-10 shrink-0">
@@ -1764,14 +1764,14 @@ export function PublicOrderPage() {
                     ))}
                   </div>
                 ) : (
-                  <div className="mt-4 rounded-[20px] border border-white/80 bg-white/80 p-3">
+                  <div className="mt-4 rounded-[20px] border border-white/80 bg-white p-3">
                     <PublicOrderSaboresCollage art={saboresCardArt} />
                   </div>
                 )}
               </div>
             </section>
 
-            <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white/78 p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
+            <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
               <div className="mb-4">
                 <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Observacoes</h2>
               </div>
@@ -1791,7 +1791,7 @@ export function PublicOrderPage() {
               </div>
             ) : null}
 
-            <div className="app-form-actions rounded-[20px] border border-[rgba(126,79,45,0.1)] bg-[rgba(255,252,248,0.94)] p-3 shadow-[0_18px_32px_rgba(70,44,26,0.08)] backdrop-blur-[10px] xl:hidden">
+            <div className="app-form-actions rounded-[20px] border border-[rgba(126,79,45,0.1)] bg-[rgb(255,252,248)] p-3 shadow-[0_18px_32px_rgba(70,44,26,0.08)] xl:hidden">
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
                   Total
@@ -1813,32 +1813,32 @@ export function PublicOrderPage() {
           </form>
 
           <aside className="grid gap-4 self-start sm:gap-5 xl:sticky xl:top-6">
-            <section className="order-1 overflow-hidden rounded-[24px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(165deg,rgba(255,252,248,0.96),rgba(243,231,216,0.9))] p-4 shadow-[0_18px_40px_rgba(70,44,26,0.1)] sm:rounded-[30px] sm:p-5 sm:shadow-[0_26px_80px_rgba(70,44,26,0.12)] xl:max-h-[calc(var(--app-vh,1vh)*100-3rem)] xl:overflow-y-auto xl:p-4 2xl:p-5">
+            <section className="order-1 overflow-hidden rounded-[24px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(165deg,#fffcf8,#f3e7d8)] p-4 shadow-[0_18px_40px_rgba(70,44,26,0.1)] sm:rounded-[30px] sm:p-5 sm:shadow-[0_26px_80px_rgba(70,44,26,0.12)] xl:max-h-[calc(var(--app-vh,1vh)*100-3rem)] xl:overflow-y-auto xl:p-4 2xl:p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Pedido</h2>
                 </div>
-                <div className="rounded-full bg-white/80 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)] sm:text-xs">
+                <div className="rounded-full bg-white px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)] sm:text-xs">
                   {form.fulfillmentMode === 'DELIVERY' ? 'Entrega' : 'Retirada'}
                 </div>
               </div>
 
               <div className="mt-4 grid gap-3 sm:mt-5">
-                <div className="grid gap-3 rounded-[20px] bg-white/78 p-4 sm:rounded-[24px]">
+                <div className="grid gap-3 rounded-[20px] bg-white p-4 sm:rounded-[24px]">
                   <div className="grid gap-2 sm:grid-cols-2">
-                    <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white/88 px-3 py-3">
+                    <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white px-3 py-3">
                       <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
                         Caixas
                       </span>
                       <strong className="mt-1 block text-[1.35rem] text-[color:var(--ink-strong)]">{totalBoxes}</strong>
                     </div>
-                    <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white/88 px-3 py-3">
+                    <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white px-3 py-3">
                       <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
                         Broas
                       </span>
                       <strong className="mt-1 block text-[1.35rem] text-[color:var(--ink-strong)]">{totalBroas}</strong>
                     </div>
-                    <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white/88 px-3 py-3">
+                    <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white px-3 py-3">
                       <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
                         Produtos
                       </span>
@@ -1846,7 +1846,7 @@ export function PublicOrderPage() {
                         {formatCurrencyBRL(estimatedTotal)}
                       </strong>
                     </div>
-                    <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white/88 px-3 py-3">
+                    <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white px-3 py-3">
                       <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
                         {form.fulfillmentMode === 'DELIVERY' ? 'Frete' : 'Sem frete'}
                       </span>
@@ -1885,7 +1885,7 @@ export function PublicOrderPage() {
                   </div>
                 ) : null}
 
-                <div className="rounded-[20px] bg-white/78 p-4 sm:rounded-[24px]">
+                <div className="rounded-[20px] bg-white p-4 sm:rounded-[24px]">
                   <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)] sm:text-xs">
                     Data e hora
                   </p>
@@ -1899,7 +1899,7 @@ export function PublicOrderPage() {
                   ) : null}
                 </div>
 
-                <div className="rounded-[20px] bg-white/78 p-4 sm:rounded-[24px]">
+                <div className="rounded-[20px] bg-white p-4 sm:rounded-[24px]">
                   <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)] sm:text-xs">
                     Caixas escolhidas
                   </p>
@@ -1908,7 +1908,7 @@ export function PublicOrderPage() {
                       {selectedBoxes.map((entry) => (
                         <li
                           key={entry.key}
-                          className="rounded-2xl border border-[rgba(126,79,45,0.08)] bg-white/86 px-3 py-2 text-sm text-[color:var(--ink-muted)]"
+                          className="rounded-2xl border border-[rgba(126,79,45,0.08)] bg-white px-3 py-2 text-sm text-[color:var(--ink-muted)]"
                         >
                           <div className="flex items-center justify-between gap-3">
                             <span>{entry.label}</span>
@@ -1927,7 +1927,7 @@ export function PublicOrderPage() {
                   )}
                 </div>
 
-                <div className="rounded-[20px] bg-white/78 p-4 sm:rounded-[24px]">
+                <div className="rounded-[20px] bg-white p-4 sm:rounded-[24px]">
                   <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)] sm:text-xs">
                     Composicao
                   </p>
@@ -1936,7 +1936,7 @@ export function PublicOrderPage() {
                   </p>
                 </div>
 
-                <div className="grid gap-2 rounded-[20px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(160deg,rgba(255,248,241,0.94),rgba(244,231,216,0.88))] p-4 shadow-[0_18px_34px_rgba(70,44,26,0.08)] sm:rounded-[24px]">
+                <div className="grid gap-2 rounded-[20px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(160deg,#fff8f1,#f4e7d8)] p-4 shadow-[0_18px_34px_rgba(70,44,26,0.08)] sm:rounded-[24px]">
                   <button
                     className="app-button app-button-primary w-full"
                     disabled={isSubmitting || isQuotingDelivery}

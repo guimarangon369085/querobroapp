@@ -202,8 +202,7 @@ export const ORDER_BOX_CATALOG = {
     codeLabel: 'T',
     detail: '1 caixa = 7 broas tradicionais',
     art: ORDER_FLAVOR_CARD_ART_BY_CODE.T,
-    accentClassName:
-      'border-[rgba(176,120,66,0.16)] bg-[linear-gradient(165deg,rgba(255,249,241,0.98),rgba(247,232,213,0.9))]',
+    accentClassName: 'border-[rgb(228,202,171)] bg-[linear-gradient(165deg,#fff9f1,#f7e8d5)]',
     units: { T: 7, G: 0, D: 0, Q: 0, R: 0 },
     priceEstimate: 40
   },
@@ -212,8 +211,7 @@ export const ORDER_BOX_CATALOG = {
     codeLabel: 'G',
     detail: '1 caixa = 7 broas de goiabada',
     art: ORDER_FLAVOR_CARD_ART_BY_CODE.G,
-    accentClassName:
-      'border-[rgba(190,84,108,0.18)] bg-[linear-gradient(165deg,rgba(255,246,248,0.98),rgba(249,228,234,0.9))]',
+    accentClassName: 'border-[rgb(233,199,208)] bg-[linear-gradient(165deg,#fff6f8,#f9e4ea)]',
     units: { T: 0, G: 7, D: 0, Q: 0, R: 0 },
     priceEstimate: 50
   },
@@ -222,8 +220,7 @@ export const ORDER_BOX_CATALOG = {
     codeLabel: 'D',
     detail: '1 caixa = 7 broas de doce de leite',
     art: ORDER_FLAVOR_CARD_ART_BY_CODE.D,
-    accentClassName:
-      'border-[rgba(172,116,61,0.16)] bg-[linear-gradient(165deg,rgba(255,248,241,0.98),rgba(247,236,224,0.9))]',
+    accentClassName: 'border-[rgb(224,196,165)] bg-[linear-gradient(165deg,#fff8f1,#f7ece0)]',
     units: { T: 0, G: 0, D: 7, Q: 0, R: 0 },
     priceEstimate: 52
   },
@@ -232,8 +229,7 @@ export const ORDER_BOX_CATALOG = {
     codeLabel: 'Q',
     detail: '1 caixa = 7 broas de queijo do serro',
     art: ORDER_FLAVOR_CARD_ART_BY_CODE.Q,
-    accentClassName:
-      'border-[rgba(110,95,71,0.18)] bg-[linear-gradient(165deg,rgba(251,247,242,0.98),rgba(240,230,218,0.92))]',
+    accentClassName: 'border-[rgb(211,201,188)] bg-[linear-gradient(165deg,#fbf7f2,#f0e6da)]',
     units: { T: 0, G: 0, D: 0, Q: 7, R: 0 },
     priceEstimate: 52
   },
@@ -242,8 +238,7 @@ export const ORDER_BOX_CATALOG = {
     codeLabel: 'R',
     detail: '1 caixa = 7 broas de requeijão de corte',
     art: ORDER_FLAVOR_CARD_ART_BY_CODE.R,
-    accentClassName:
-      'border-[rgba(150,122,83,0.18)] bg-[linear-gradient(165deg,rgba(255,250,242,0.98),rgba(247,238,223,0.92))]',
+    accentClassName: 'border-[rgb(220,207,187)] bg-[linear-gradient(165deg,#fffaf2,#f7eedf)]',
     units: { T: 0, G: 0, D: 0, Q: 0, R: 7 },
     priceEstimate: 52
   },
@@ -252,8 +247,7 @@ export const ORDER_BOX_CATALOG = {
     codeLabel: 'MG',
     detail: '1 caixa = 4 tradicionais + 3 goiabada',
     art: ORDER_MISTA_CARD_ART_BY_CODE.G,
-    accentClassName:
-      'border-[rgba(190,84,108,0.18)] bg-[linear-gradient(165deg,rgba(255,247,243,0.98),rgba(251,232,228,0.92))]',
+    accentClassName: 'border-[rgb(233,199,208)] bg-[linear-gradient(165deg,#fff7f3,#fbe8e4)]',
     units: { T: 4, G: 3, D: 0, Q: 0, R: 0 },
     priceEstimate: 45
   },
@@ -262,8 +256,7 @@ export const ORDER_BOX_CATALOG = {
     codeLabel: 'MD',
     detail: '1 caixa = 4 tradicionais + 3 doce de leite',
     art: ORDER_MISTA_CARD_ART_BY_CODE.D,
-    accentClassName:
-      'border-[rgba(172,116,61,0.16)] bg-[linear-gradient(165deg,rgba(255,248,243,0.98),rgba(247,235,225,0.92))]',
+    accentClassName: 'border-[rgb(224,196,165)] bg-[linear-gradient(165deg,#fff8f3,#f7ebe1)]',
     units: { T: 4, G: 0, D: 3, Q: 0, R: 0 },
     priceEstimate: 47
   },
@@ -272,8 +265,7 @@ export const ORDER_BOX_CATALOG = {
     codeLabel: 'MQ',
     detail: '1 caixa = 4 tradicionais + 3 queijo do serro',
     art: ORDER_MISTA_CARD_ART_BY_CODE.Q,
-    accentClassName:
-      'border-[rgba(110,95,71,0.18)] bg-[linear-gradient(165deg,rgba(252,248,244,0.98),rgba(242,233,223,0.92))]',
+    accentClassName: 'border-[rgb(211,201,188)] bg-[linear-gradient(165deg,#fcf8f4,#f2e9df)]',
     units: { T: 4, G: 0, D: 0, Q: 3, R: 0 },
     priceEstimate: 47
   },
@@ -282,8 +274,7 @@ export const ORDER_BOX_CATALOG = {
     codeLabel: 'MR',
     detail: '1 caixa = 4 tradicionais + 3 requeijão de corte',
     art: ORDER_MISTA_CARD_ART_BY_CODE.R,
-    accentClassName:
-      'border-[rgba(150,122,83,0.18)] bg-[linear-gradient(165deg,rgba(255,250,243,0.98),rgba(245,236,223,0.92))]',
+    accentClassName: 'border-[rgb(220,207,187)] bg-[linear-gradient(165deg,#fffaf3,#f5ecdf)]',
     units: { T: 4, G: 0, D: 0, Q: 0, R: 3 },
     priceEstimate: 47
   }
@@ -546,18 +537,18 @@ function resolveRuntimeOrderMixedBoxPrice(kind: RuntimeOrderFlavorKind) {
 function resolveRuntimeOrderAccentClass(kind: RuntimeOrderFlavorKind, mode: 'SINGLE' | 'MIXED') {
   if (mode === 'MIXED') {
     if (kind === 'GOIABADA') {
-      return 'border-[rgba(190,84,108,0.18)] bg-[linear-gradient(165deg,rgba(255,247,243,0.98),rgba(251,232,228,0.92))]';
+      return 'border-[rgb(233,199,208)] bg-[linear-gradient(165deg,#fff7f3,#fbe8e4)]';
     }
-    return 'border-[rgba(156,121,84,0.16)] bg-[linear-gradient(165deg,rgba(255,248,243,0.98),rgba(245,236,223,0.92))]';
+    return 'border-[rgb(220,207,187)] bg-[linear-gradient(165deg,#fff8f3,#f5ecdf)]';
   }
 
   if (kind === 'TRADITIONAL') {
-    return 'border-[rgba(176,120,66,0.16)] bg-[linear-gradient(165deg,rgba(255,249,241,0.98),rgba(247,232,213,0.9))]';
+    return 'border-[rgb(228,202,171)] bg-[linear-gradient(165deg,#fff9f1,#f7e8d5)]';
   }
   if (kind === 'GOIABADA') {
-    return 'border-[rgba(190,84,108,0.18)] bg-[linear-gradient(165deg,rgba(255,246,248,0.98),rgba(249,228,234,0.9))]';
+    return 'border-[rgb(233,199,208)] bg-[linear-gradient(165deg,#fff6f8,#f9e4ea)]';
   }
-  return 'border-[rgba(150,122,83,0.18)] bg-[linear-gradient(165deg,rgba(255,250,242,0.98),rgba(247,238,223,0.92))]';
+  return 'border-[rgb(220,207,187)] bg-[linear-gradient(165deg,#fffaf2,#f7eedf)]';
 }
 
 function buildRuntimeOrderLegacyBoxCode(product: RuntimeOrderFlavorProduct, mode: 'SINGLE' | 'MIXED'): OrderBoxCode | null {

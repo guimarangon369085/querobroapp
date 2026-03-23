@@ -275,7 +275,7 @@ export function GoogleAddressAutocompleteInput({
   const listboxClassName =
     dropdownVariant === 'plain'
       ? 'absolute left-0 right-0 top-[calc(100%+0.35rem)] z-30 overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-sm'
-      : 'absolute left-0 right-0 top-[calc(100%+0.45rem)] z-30 overflow-hidden rounded-[20px] border border-[color:var(--line-soft)] bg-white/96 shadow-[0_18px_34px_rgba(54,31,20,0.12)] backdrop-blur-sm';
+      : 'absolute left-0 right-0 top-[calc(100%+0.45rem)] z-30 overflow-hidden rounded-[20px] border border-[color:var(--line-soft)] bg-white shadow-[0_18px_34px_rgba(54,31,20,0.12)]';
   const listboxInnerClassName = dropdownVariant === 'plain' ? 'grid divide-y divide-neutral-100' : 'grid gap-1 p-2';
   const optionClassName = (isActive: boolean) =>
     dropdownVariant === 'plain'
@@ -286,8 +286,8 @@ export function GoogleAddressAutocompleteInput({
         }`
       : `flex w-full flex-col rounded-[16px] px-3 py-2.5 text-left transition ${
           isActive
-            ? 'bg-[rgba(181,68,57,0.12)] text-[color:var(--ink-strong)]'
-            : 'bg-transparent text-[color:var(--ink-strong)] hover:bg-[rgba(126,79,45,0.08)]'
+            ? 'bg-[rgb(255,239,234)] text-[color:var(--ink-strong)]'
+            : 'bg-white text-[color:var(--ink-strong)] hover:bg-[rgb(249,243,236)]'
         }`;
   const secondaryTextClassName =
     dropdownVariant === 'plain' ? 'text-xs leading-5 text-neutral-500' : 'text-xs leading-5 text-[color:var(--ink-muted)]';
