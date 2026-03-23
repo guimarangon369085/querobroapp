@@ -2,6 +2,13 @@ import { Inject, Injectable } from '@nestjs/common';
 import { resolveDisplayNumber, roundMoney } from '@querobroapp/shared';
 import { PrismaService } from '../../prisma.service.js';
 import { readBusinessRuntimeProfile } from '../../common/business-profile.js';
+import {
+  OFFICIAL_BROA_FLAVOR_CODES,
+  ORDER_BOX_UNITS,
+  emptyOfficialBroaFlavorCounts,
+  resolveOfficialBroaFlavorCodeFromProductName,
+  type OfficialBroaFlavorCode
+} from '../inventory/inventory-formulas.js';
 
 type LoadedOrder = Awaited<ReturnType<DashboardService['loadOrders']>>[number];
 type LoadedAnalyticsEvent = Awaited<ReturnType<DashboardService['loadAnalyticsEvents']>>[number];
@@ -30,6 +37,13 @@ type LoadedInventoryPriceEntry = {
   purchasePackCost: number;
   effectiveAt: Date;
 };
+type LoadedProduct = {
+  id: number;
+  name: string;
+  category: string | null;
+  active: boolean;
+};
+type OfficialBroaFlavorCounts = Record<OfficialBroaFlavorCode, number>;
 
 type DashboardCogsWarningCode = 'BOM_MISSING' | 'BOM_ITEM_MISSING_QTY';
 
@@ -102,6 +116,11 @@ type DashboardCogsAuditSummary = {
 };
 
 const SAO_PAULO_TIMEZONE = 'America/Sao_Paulo';
+const LEGACY_IMPORTED_ORDER_MARKER = '[IMPORTADO_PLANILHA_LEGADA]';
+const LEGACY_HISTORICAL_BOX_PRODUCT_KEY = 'CAIXA HISTORICA SEM COMPOSICAO';
+const LEGACY_PREMIUM_BROA_FLAVOR_CODES = OFFICIAL_BROA_FLAVOR_CODES.filter(
+  (code): code is Exclude<OfficialBroaFlavorCode, 'T'> => code !== 'T'
+);
 const saoPauloFormatter = new Intl.DateTimeFormat('en-CA', {
   timeZone: SAO_PAULO_TIMEZONE,
   year: 'numeric',
@@ -128,6 +147,328 @@ function round2(value: number) {
 
 function round3(value: number) {
   return Math.round((Number(value) || 0) * 1000) / 1000;
+}
+
+function normalizeLegacyText(value?: string | null) {
+  return (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+}
+
+function isLegacyImportedOrder(value?: string | null) {
+  return String(value || '').includes(LEGACY_IMPORTED_ORDER_MARKER);
+}
+
+function isLegacyHistoricalBoxName(value?: string | null) {
+  return normalizeLegacyText(value).includes(LEGACY_HISTORICAL_BOX_PRODUCT_KEY);
+}
+
+function cloneFlavorCounts(
+  source?: Partial<Record<OfficialBroaFlavorCode, number>> | null
+): OfficialBroaFlavorCounts {
+  const counts = emptyOfficialBroaFlavorCounts();
+  for (const code of OFFICIAL_BROA_FLAVOR_CODES) {
+    counts[code] = Math.max(Math.floor(Number(source?.[code] || 0)), 0);
+  }
+  return counts;
+}
+
+function sumFlavorCounts(source?: Partial<Record<OfficialBroaFlavorCode, number>> | null) {
+  return OFFICIAL_BROA_FLAVOR_CODES.reduce(
+    (sum, code) => sum + Math.max(Math.floor(Number(source?.[code] || 0)), 0),
+    0
+  );
+}
+
+function addFlavorCounts(
+  target: OfficialBroaFlavorCounts,
+  source?: Partial<Record<OfficialBroaFlavorCode, number>> | null
+) {
+  for (const code of OFFICIAL_BROA_FLAVOR_CODES) {
+    target[code] += Math.max(Math.floor(Number(source?.[code] || 0)), 0);
+  }
+}
+
+function buildExactFlavorBoxCounts(code: OfficialBroaFlavorCode) {
+  const counts = emptyOfficialBroaFlavorCounts();
+  counts[code] = ORDER_BOX_UNITS;
+  return counts;
+}
+
+function buildExactMixedFlavorBoxCounts(code: Exclude<OfficialBroaFlavorCode, 'T'>) {
+  const counts = emptyOfficialBroaFlavorCounts();
+  counts.T = 4;
+  counts[code] = 3;
+  return counts;
+}
+
+function allocateWeightedFlavorCounts(params: {
+  weights?: Partial<Record<OfficialBroaFlavorCode, number>> | null;
+  totalUnits: number;
+  availableCodes?: OfficialBroaFlavorCode[];
+}) {
+  const totalUnits = Math.max(Math.floor(Number(params.totalUnits || 0)), 0);
+  const availableCodes =
+    params.availableCodes && params.availableCodes.length > 0
+      ? params.availableCodes
+      : [...OFFICIAL_BROA_FLAVOR_CODES];
+  const counts = emptyOfficialBroaFlavorCounts();
+  if (totalUnits <= 0 || availableCodes.length <= 0) {
+    return counts;
+  }
+
+  const weightedCodes = availableCodes.filter((code) => Number(params.weights?.[code] || 0) > 0);
+  const candidateCodes = weightedCodes.length > 0 ? weightedCodes : availableCodes;
+  const totalWeight = candidateCodes.reduce((sum, code) => sum + Number(params.weights?.[code] || 0), 0);
+  const useEqualShare = totalWeight <= 0;
+  const rawEntries = candidateCodes.map((code, index) => {
+    const raw = useEqualShare
+      ? totalUnits / candidateCodes.length
+      : (totalUnits * Number(params.weights?.[code] || 0)) / totalWeight;
+    const floor = Math.floor(raw);
+    counts[code] = floor;
+    return {
+      code,
+      index,
+      remainder: raw - floor
+    };
+  });
+
+  let allocated = sumFlavorCounts(counts);
+  let remaining = Math.max(totalUnits - allocated, 0);
+  rawEntries.sort(
+    (left, right) => right.remainder - left.remainder || left.index - right.index
+  );
+
+  while (remaining > 0 && rawEntries.length > 0) {
+    for (const entry of rawEntries) {
+      if (remaining <= 0) break;
+      counts[entry.code] += 1;
+      remaining -= 1;
+    }
+  }
+
+  return counts;
+}
+
+function replaceLegacyFlavorNamesWithCodes(value: string) {
+  return value
+    .replace(/REQUEIJAO DE CORTE/g, 'R')
+    .replace(/REQUEIJAO/g, 'R')
+    .replace(/QUEIJO DO SERRO/g, 'Q')
+    .replace(/QUEIJO/g, 'Q')
+    .replace(/DOCE DE LEITE/g, 'D')
+    .replace(/GOIABADA/g, 'G')
+    .replace(/TRADICIONAL/g, 'T');
+}
+
+function parseLegacyBoxSegment(params: {
+  rawSegment: string;
+  genericProxyWeights: OfficialBroaFlavorCounts;
+  premiumProxyWeights: OfficialBroaFlavorCounts;
+  availableCodes: OfficialBroaFlavorCode[];
+}) {
+  const normalizedSegment = normalizeLegacyText(params.rawSegment);
+  if (!normalizedSegment) return emptyOfficialBroaFlavorCounts();
+
+  if (normalizedSegment === 'SABORES' || normalizedSegment === 'M') {
+    return allocateWeightedFlavorCounts({
+      weights: params.genericProxyWeights,
+      totalUnits: ORDER_BOX_UNITS,
+      availableCodes: params.availableCodes
+    });
+  }
+
+  if (normalizedSegment === '2 CADA' || normalizedSegment === '2 DE CADA') {
+    const premiumAvailableCodes = params.availableCodes.filter((code) => code !== 'T');
+    return allocateWeightedFlavorCounts({
+      weights: params.premiumProxyWeights,
+      totalUnits: ORDER_BOX_UNITS,
+      availableCodes: premiumAvailableCodes
+    });
+  }
+
+  if (/^[TGDQR]$/.test(normalizedSegment)) {
+    return buildExactFlavorBoxCounts(normalizedSegment as OfficialBroaFlavorCode);
+  }
+
+  const exactMixedMatch = normalizedSegment.match(/^M([GDQR])$/);
+  if (exactMixedMatch) {
+    return buildExactMixedFlavorBoxCounts(exactMixedMatch[1] as Exclude<OfficialBroaFlavorCode, 'T'>);
+  }
+
+  const mixedWithModifierMatch = normalizedSegment.match(/^M([GDQR])(?:\s*[-+]\s*(.+))$/);
+  if (mixedWithModifierMatch) {
+    const primaryCode = mixedWithModifierMatch[1] as Exclude<OfficialBroaFlavorCode, 'T'>;
+    const counts = buildExactMixedFlavorBoxCounts(primaryCode);
+    const modifierText = replaceLegacyFlavorNamesWithCodes(mixedWithModifierMatch[2] || '');
+    const replacementCodes = [
+      ...modifierText.matchAll(/\b(\d+)\s*([TGDQR])\b/g),
+      ...modifierText.matchAll(/\b([TGDQR])\s*x\s*(\d+)\b/g),
+      ...modifierText.matchAll(/\b(\d+)([TGDQR])\b/g)
+    ].flatMap((match) => {
+      if (match.length < 3) return [];
+      const left = match[1] || '';
+      const right = match[2] || '';
+      const quantity = /^\d+$/.test(left) ? Number(left) : Number(right);
+      const code = (/^[TGDQR]$/.test(left) ? left : right) as OfficialBroaFlavorCode;
+      if (!quantity || !code) return [];
+      return Array.from({ length: quantity }, () => code);
+    });
+
+    if (replacementCodes.length === 0) {
+      const compactTail = modifierText.replace(/[^TGDQR]/g, '');
+      for (const code of compactTail) {
+        replacementCodes.push(code as OfficialBroaFlavorCode);
+      }
+    }
+
+    for (const code of replacementCodes) {
+      const donorCode =
+        counts[primaryCode] > 0
+          ? primaryCode
+          : counts.T > 0
+            ? 'T'
+            : OFFICIAL_BROA_FLAVOR_CODES.find((candidate) => counts[candidate] > 0) || null;
+      if (!donorCode) continue;
+      counts[donorCode] = Math.max(counts[donorCode] - 1, 0);
+      counts[code] += 1;
+    }
+
+    return counts;
+  }
+
+  const explicitCounts = emptyOfficialBroaFlavorCounts();
+  const explicitWeights = emptyOfficialBroaFlavorCounts();
+  const mentionOrder = replaceLegacyFlavorNamesWithCodes(normalizedSegment)
+    .match(/[TGDQR]/g)
+    ?.map((entry) => entry as OfficialBroaFlavorCode)
+    .filter((code, index, values) => values.indexOf(code) === index) || [];
+  let codeText = replaceLegacyFlavorNamesWithCodes(normalizedSegment)
+    .replace(/\bCOLOCAR\b/g, ' ')
+    .replace(/\bEXTRAS?\b/g, ' ');
+
+  const consumeExplicitMatch = (quantity: number, code: string) => {
+    if (!Number.isFinite(quantity) || quantity <= 0 || !/^[TGDQR]$/.test(code)) return;
+    const flavorCode = code as OfficialBroaFlavorCode;
+    explicitCounts[flavorCode] += quantity;
+    explicitWeights[flavorCode] += quantity;
+  };
+
+  codeText = codeText.replace(/\b(\d+)\s*([TGDQR])\b/g, (_match, rawQty, rawCode) => {
+    consumeExplicitMatch(Number(rawQty), rawCode);
+    return ' ';
+  });
+  codeText = codeText.replace(/\b([TGDQR])\s*x\s*(\d+)\b/g, (_match, rawCode, rawQty) => {
+    consumeExplicitMatch(Number(rawQty), rawCode);
+    return ' ';
+  });
+  codeText = codeText.replace(/\b(\d+)([TGDQR])\b/g, (_match, rawQty, rawCode) => {
+    consumeExplicitMatch(Number(rawQty), rawCode);
+    return ' ';
+  });
+
+  const compactCodes = codeText.replace(/[^TGDQR]/g, '');
+  if (compactCodes.length >= 2 && compactCodes.length <= 3 && /^[TGDQR]+$/.test(compactCodes)) {
+    for (const rawCode of compactCodes) {
+      const flavorCode = rawCode as OfficialBroaFlavorCode;
+      explicitCounts[flavorCode] += 1;
+      explicitWeights[flavorCode] += 1;
+    }
+  } else {
+    for (const match of codeText.matchAll(/\b([TGDQR])\b/g)) {
+      const flavorCode = match[1] as OfficialBroaFlavorCode;
+      explicitCounts[flavorCode] += 1;
+      explicitWeights[flavorCode] += 1;
+    }
+  }
+
+  const baseUnits = sumFlavorCounts(explicitCounts);
+  const orderedExplicitCodes = mentionOrder.filter((code) => Number(explicitWeights[code] || 0) > 0);
+  if (baseUnits >= ORDER_BOX_UNITS) {
+    return allocateWeightedFlavorCounts({
+      weights: explicitCounts,
+      totalUnits: ORDER_BOX_UNITS,
+      availableCodes: orderedExplicitCodes.length > 0 ? orderedExplicitCodes : params.availableCodes
+    });
+  }
+
+  const allocationSource = sumFlavorCounts(explicitWeights) > 0 ? explicitWeights : params.genericProxyWeights;
+  const weightedAvailableCodes = params.availableCodes.filter((code) => Number(allocationSource[code] || 0) > 0);
+  const allocationCodes =
+    orderedExplicitCodes.length > 0
+      ? orderedExplicitCodes
+      : weightedAvailableCodes;
+  addFlavorCounts(
+    explicitCounts,
+    allocateWeightedFlavorCounts({
+      weights: allocationSource,
+      totalUnits: ORDER_BOX_UNITS - baseUnits,
+      availableCodes: allocationCodes.length > 0 ? allocationCodes : params.availableCodes
+    })
+  );
+  return explicitCounts;
+}
+
+function buildLegacyHistoricalFlavorCounts(params: {
+  notes?: string | null;
+  placeholderBoxCount: number;
+  actualFlavorCounts: OfficialBroaFlavorCounts;
+  genericProxyWeights: OfficialBroaFlavorCounts;
+  premiumProxyWeights: OfficialBroaFlavorCounts;
+  availableCodes: OfficialBroaFlavorCode[];
+}) {
+  const targetUnits = Math.max(Math.floor(params.placeholderBoxCount || 0), 0) * ORDER_BOX_UNITS;
+  if (targetUnits <= 0) return emptyOfficialBroaFlavorCounts();
+
+  const noteText = String(params.notes || '');
+  const boxesMatch = noteText.match(/caixas=([^\n]+)/i);
+  const parsedFlavorCounts = emptyOfficialBroaFlavorCounts();
+
+  if (boxesMatch?.[1]) {
+    for (const rawSegment of boxesMatch[1].split(/\s*\|\s*/)) {
+      addFlavorCounts(
+        parsedFlavorCounts,
+        parseLegacyBoxSegment({
+          rawSegment,
+          genericProxyWeights: params.genericProxyWeights,
+          premiumProxyWeights: params.premiumProxyWeights,
+          availableCodes: params.availableCodes
+        })
+      );
+    }
+  }
+
+  const unresolvedFlavorCounts = emptyOfficialBroaFlavorCounts();
+  for (const code of OFFICIAL_BROA_FLAVOR_CODES) {
+    unresolvedFlavorCounts[code] = Math.max(
+      parsedFlavorCounts[code] - Math.max(Math.floor(params.actualFlavorCounts[code] || 0), 0),
+      0
+    );
+  }
+
+  const unresolvedUnits = sumFlavorCounts(unresolvedFlavorCounts);
+  if (unresolvedUnits === targetUnits) {
+    return unresolvedFlavorCounts;
+  }
+
+  if (unresolvedUnits > 0) {
+    return allocateWeightedFlavorCounts({
+      weights: unresolvedFlavorCounts,
+      totalUnits: targetUnits,
+      availableCodes: params.availableCodes
+    });
+  }
+
+  return allocateWeightedFlavorCounts({
+    weights:
+      sumFlavorCounts(parsedFlavorCounts) > 0 ? parsedFlavorCounts : params.genericProxyWeights,
+    totalUnits: targetUnits,
+    availableCodes: params.availableCodes
+  });
 }
 
 function readSaoPauloParts(reference: Date): ZonedDateParts {
@@ -315,8 +656,9 @@ export class DashboardService {
     boms: LoadedBom[];
     inventoryItems: LoadedInventoryItem[];
     priceEntries: LoadedInventoryPriceEntry[];
+    products: LoadedProduct[];
   }) {
-    const { rangeOrders, boms, inventoryItems, priceEntries } = params;
+    const { rangeOrders, boms, inventoryItems, priceEntries, products } = params;
     const latestBomByProductId = new Map<number, LoadedBom>();
     for (const bom of boms) {
       if (!latestBomByProductId.has(bom.productId)) {
@@ -331,6 +673,145 @@ export class DashboardService {
       current.push(entry);
       priceEntriesByItemId.set(entry.itemId, current);
     }
+
+    const resolveIngredientUnitCost = (inventoryItem: LoadedInventoryItem, orderCreatedAt: Date) => {
+      const itemPriceEntries = priceEntriesByItemId.get(inventoryItem.id) || [];
+      const applicablePriceEntry =
+        [...itemPriceEntries]
+          .reverse()
+          .find((entry) => entry.effectiveAt.getTime() <= orderCreatedAt.getTime()) || null;
+      const averageHistoricalUnitCost =
+        itemPriceEntries.length > 0
+          ? itemPriceEntries.reduce(
+              (sum, entry) => sum + unitCostFromPack(entry.purchasePackCost, entry.purchasePackSize),
+              0
+            ) / itemPriceEntries.length
+          : 0;
+      return applicablePriceEntry
+        ? unitCostFromPack(applicablePriceEntry.purchasePackCost, applicablePriceEntry.purchasePackSize)
+        : averageHistoricalUnitCost > 0
+          ? averageHistoricalUnitCost
+          : unitCostFromPack(inventoryItem.purchasePackCost, inventoryItem.purchasePackSize);
+    };
+
+    const accumulateProductUnitsCost = (params: {
+      productId: number;
+      units: number;
+      orderCreatedAt: Date;
+      ingredientMap: Map<number, DashboardOrderIngredientCost>;
+    }) => {
+      const bom = latestBomByProductId.get(params.productId);
+      if (!bom) {
+        return {
+          cogs: 0,
+          hasBom: false,
+          hasMissingQty: false
+        };
+      }
+
+      let totalAmount = 0;
+      let hasMissingQty = false;
+
+      for (const bomItem of bom.items) {
+        const perSale = perSaleQty(bom, bomItem);
+        if (perSale == null) {
+          hasMissingQty = true;
+          continue;
+        }
+
+        const inventoryItem = inventoryItemById.get(bomItem.itemId);
+        if (!inventoryItem) continue;
+
+        const ingredientQty = perSale * params.units;
+        const unitCost = resolveIngredientUnitCost(inventoryItem, params.orderCreatedAt);
+        const amount = ingredientQty * unitCost;
+        totalAmount += amount;
+
+        const ingredientEntry = params.ingredientMap.get(inventoryItem.id) || {
+          ingredientId: inventoryItem.id,
+          ingredientName: inventoryItem.name,
+          unit: inventoryItem.unit,
+          quantity: 0,
+          unitCost: round3(unitCost),
+          amount: 0
+        };
+        ingredientEntry.quantity = round3(ingredientEntry.quantity + ingredientQty);
+        ingredientEntry.amount = round2(ingredientEntry.amount + amount);
+        params.ingredientMap.set(inventoryItem.id, ingredientEntry);
+      }
+
+      return {
+        cogs: round2(totalAmount),
+        hasBom: true,
+        hasMissingQty
+      };
+    };
+
+    const officialFlavorProductCandidates = products
+      .map((product) => ({
+        product,
+        flavorCode: resolveOfficialBroaFlavorCodeFromProductName(product.name),
+        hasBom: latestBomByProductId.has(product.id)
+      }))
+      .filter(
+        (
+          entry
+        ): entry is {
+          product: LoadedProduct;
+          flavorCode: OfficialBroaFlavorCode;
+          hasBom: boolean;
+        } => Boolean(entry.flavorCode)
+      )
+      .sort((left, right) => {
+        const activeDelta = Number(right.product.active !== false) - Number(left.product.active !== false);
+        if (activeDelta !== 0) return activeDelta;
+        const categoryDelta =
+          Number(normalizeLegacyText(right.product.category) === 'SABORES') -
+          Number(normalizeLegacyText(left.product.category) === 'SABORES');
+        if (categoryDelta !== 0) return categoryDelta;
+        const bomDelta = Number(right.hasBom) - Number(left.hasBom);
+        if (bomDelta !== 0) return bomDelta;
+        return left.product.id - right.product.id;
+      });
+
+    const officialFlavorProductByCode = new Map<
+      OfficialBroaFlavorCode,
+      {
+        productId: number;
+        productName: string;
+      }
+    >();
+    for (const candidate of officialFlavorProductCandidates) {
+      if (!candidate.hasBom || officialFlavorProductByCode.has(candidate.flavorCode)) continue;
+      officialFlavorProductByCode.set(candidate.flavorCode, {
+        productId: candidate.product.id,
+        productName: candidate.product.name
+      });
+    }
+    const availableOfficialFlavorCodes = OFFICIAL_BROA_FLAVOR_CODES.filter((code) =>
+      officialFlavorProductByCode.has(code)
+    );
+
+    const genericLegacyProxyWeights = emptyOfficialBroaFlavorCounts();
+    for (const code of availableOfficialFlavorCodes) {
+      genericLegacyProxyWeights[code] = 1;
+    }
+    for (const order of rangeOrders) {
+      for (const item of order.items) {
+        if (isLegacyImportedOrder(order.notes) && isLegacyHistoricalBoxName(item.product?.name)) {
+          continue;
+        }
+        const flavorCode = resolveOfficialBroaFlavorCodeFromProductName(item.product?.name);
+        if (!flavorCode || !officialFlavorProductByCode.has(flavorCode)) continue;
+        genericLegacyProxyWeights[flavorCode] += Math.max(Math.floor(item.quantity || 0), 0);
+      }
+    }
+    const premiumLegacyProxyWeights = emptyOfficialBroaFlavorCounts();
+    for (const code of LEGACY_PREMIUM_BROA_FLAVOR_CODES) {
+      premiumLegacyProxyWeights[code] =
+        genericLegacyProxyWeights[code] > 0 ? genericLegacyProxyWeights[code] : 1;
+    }
+
     const ingredientTotals = new Map<number, DashboardIngredientCogsEntry>();
     const orderEntries: DashboardOrderCogsEntry[] = [];
     const warnings: DashboardCogsWarning[] = [];
@@ -366,13 +847,40 @@ export class DashboardService {
       };
 
       let totalUnits = 0;
+      const legacyImportedOrder = isLegacyImportedOrder(order.notes);
+      const actualFlavorCounts = emptyOfficialBroaFlavorCounts();
+      let legacyPlaceholderBoxCount = 0;
+
+      for (const item of order.items) {
+        const quantity = Math.max(item.quantity || 0, 0);
+        if (quantity <= 0) continue;
+        if (legacyImportedOrder && isLegacyHistoricalBoxName(item.product?.name)) {
+          legacyPlaceholderBoxCount += quantity;
+          continue;
+        }
+        const flavorCode = resolveOfficialBroaFlavorCodeFromProductName(item.product?.name);
+        if (!flavorCode || !officialFlavorProductByCode.has(flavorCode)) continue;
+        actualFlavorCounts[flavorCode] += quantity;
+      }
+
+      const legacyHistoricalFlavorCounts =
+        legacyImportedOrder && legacyPlaceholderBoxCount > 0
+          ? buildLegacyHistoricalFlavorCounts({
+              notes: order.notes,
+              placeholderBoxCount: legacyPlaceholderBoxCount,
+              actualFlavorCounts,
+              genericProxyWeights: genericLegacyProxyWeights,
+              premiumProxyWeights: premiumLegacyProxyWeights,
+              availableCodes: availableOfficialFlavorCodes
+            })
+          : emptyOfficialBroaFlavorCounts();
+      const legacyHistoricalUnits = sumFlavorCounts(legacyHistoricalFlavorCounts);
+      let legacyHistoricalCostApplied = false;
 
       for (const item of order.items) {
         const quantity = Math.max(item.quantity || 0, 0);
         const productName = item.product?.name || `Produto #${item.productId}`;
         const revenue = round2(item.total || (item.unitPrice || 0) * quantity);
-        totalUnits += quantity;
-
         const productEntry = productMap.get(item.productId) || {
           productId: item.productId,
           productName,
@@ -383,8 +891,59 @@ export class DashboardService {
         productEntry.quantity += quantity;
         productEntry.revenue = round2(productEntry.revenue + revenue);
 
-        const bom = latestBomByProductId.get(item.productId);
-        if (!bom) {
+        const legacyHistoricalItem = legacyImportedOrder && isLegacyHistoricalBoxName(item.product?.name);
+        if (legacyHistoricalItem) {
+          if (!legacyHistoricalCostApplied) {
+            totalUnits += legacyHistoricalUnits;
+            let legacyItemCogs = 0;
+
+            for (const code of availableOfficialFlavorCodes) {
+              const units = Math.max(Math.floor(legacyHistoricalFlavorCounts[code] || 0), 0);
+              if (units <= 0) continue;
+              const officialProduct = officialFlavorProductByCode.get(code);
+              if (!officialProduct) continue;
+
+              const costResult = accumulateProductUnitsCost({
+                productId: officialProduct.productId,
+                units,
+                orderCreatedAt: order.createdAt,
+                ingredientMap
+              });
+              if (!costResult.hasBom) {
+                pushWarning(
+                  'BOM_MISSING',
+                  officialProduct.productId,
+                  officialProduct.productName,
+                  'Produto sem ficha técnica ativa no COGS.'
+                );
+                continue;
+              }
+              if (costResult.hasMissingQty) {
+                pushWarning(
+                  'BOM_ITEM_MISSING_QTY',
+                  officialProduct.productId,
+                  officialProduct.productName,
+                  'Ficha técnica com ingrediente sem quantidade suficiente para o COGS.'
+                );
+              }
+              legacyItemCogs = round2(legacyItemCogs + costResult.cogs);
+            }
+
+            productEntry.cogs = round2(productEntry.cogs + legacyItemCogs);
+            legacyHistoricalCostApplied = true;
+          }
+          productMap.set(item.productId, productEntry);
+          continue;
+        }
+
+        totalUnits += quantity;
+        const costResult = accumulateProductUnitsCost({
+          productId: item.productId,
+          units: quantity,
+          orderCreatedAt: order.createdAt,
+          ingredientMap
+        });
+        if (!costResult.hasBom) {
           pushWarning(
             'BOM_MISSING',
             item.productId,
@@ -395,54 +954,7 @@ export class DashboardService {
           continue;
         }
 
-        let itemCogs = 0;
-        let hasMissingQty = false;
-
-        for (const bomItem of bom.items) {
-          const perSale = perSaleQty(bom, bomItem);
-          if (perSale == null) {
-            hasMissingQty = true;
-            continue;
-          }
-
-          const inventoryItem = inventoryItemById.get(bomItem.itemId);
-          if (!inventoryItem) continue;
-
-          const ingredientQty = perSale * quantity;
-          const itemPriceEntries = priceEntriesByItemId.get(inventoryItem.id) || [];
-          const applicablePriceEntry =
-            [...itemPriceEntries]
-              .reverse()
-              .find((entry) => entry.effectiveAt.getTime() <= order.createdAt.getTime()) || null;
-          const averageHistoricalUnitCost =
-            itemPriceEntries.length > 0
-              ? itemPriceEntries.reduce(
-                  (sum, entry) => sum + unitCostFromPack(entry.purchasePackCost, entry.purchasePackSize),
-                  0
-                ) / itemPriceEntries.length
-              : 0;
-          const unitCost = applicablePriceEntry
-            ? unitCostFromPack(applicablePriceEntry.purchasePackCost, applicablePriceEntry.purchasePackSize)
-            : averageHistoricalUnitCost > 0
-              ? averageHistoricalUnitCost
-              : unitCostFromPack(inventoryItem.purchasePackCost, inventoryItem.purchasePackSize);
-          const amount = ingredientQty * unitCost;
-          itemCogs += amount;
-
-          const ingredientEntry = ingredientMap.get(inventoryItem.id) || {
-            ingredientId: inventoryItem.id,
-            ingredientName: inventoryItem.name,
-            unit: inventoryItem.unit,
-            quantity: 0,
-            unitCost: round3(unitCost),
-            amount: 0
-          };
-          ingredientEntry.quantity = round3(ingredientEntry.quantity + ingredientQty);
-          ingredientEntry.amount = round2(ingredientEntry.amount + amount);
-          ingredientMap.set(inventoryItem.id, ingredientEntry);
-        }
-
-        if (hasMissingQty) {
+        if (costResult.hasMissingQty) {
           pushWarning(
             'BOM_ITEM_MISSING_QTY',
             item.productId,
@@ -451,7 +963,7 @@ export class DashboardService {
           );
         }
 
-        productEntry.cogs = round2(productEntry.cogs + itemCogs);
+        productEntry.cogs = round2(productEntry.cogs + costResult.cogs);
         productMap.set(item.productId, productEntry);
       }
 
@@ -546,7 +1058,7 @@ export class DashboardService {
   }
 
   async getSummary() {
-    const [events, orders, customers, boms, inventoryItems, priceEntries] = await Promise.all([
+    const [events, orders, customers, boms, inventoryItems, priceEntries, products] = await Promise.all([
       this.loadAnalyticsEvents(),
       this.loadOrders(),
       this.prisma.customer.findMany({
@@ -562,6 +1074,15 @@ export class DashboardService {
       }),
       this.prisma.inventoryPriceEntry.findMany({
         orderBy: [{ effectiveAt: 'asc' }, { id: 'asc' }]
+      }),
+      this.prisma.product.findMany({
+        select: {
+          id: true,
+          name: true,
+          category: true,
+          active: true
+        },
+        orderBy: { id: 'asc' }
       })
     ]);
 
@@ -571,7 +1092,8 @@ export class DashboardService {
       customers,
       boms,
       inventoryItems,
-      priceEntries
+      priceEntries,
+      products
     });
 
     return {
@@ -809,14 +1331,16 @@ export class DashboardService {
     boms: LoadedBom[];
     inventoryItems: LoadedInventoryItem[];
     priceEntries: LoadedInventoryPriceEntry[];
+    products: LoadedProduct[];
   }) {
-    const { orders, customers, boms, inventoryItems, priceEntries } = params;
+    const { orders, customers, boms, inventoryItems, priceEntries, products } = params;
     const activeOrders = orders.filter((order) => order.status !== 'CANCELADO');
     const totalCogsBreakdown = this.buildOrderCogsBreakdown({
       rangeOrders: activeOrders,
       boms,
       inventoryItems,
-      priceEntries
+      priceEntries,
+      products
     });
     const orderCogsByOrderId = new Map(totalCogsBreakdown.orders.map((entry) => [entry.orderId, entry.cogs]));
 

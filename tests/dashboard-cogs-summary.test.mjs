@@ -301,3 +301,147 @@ test('dashboard summary respeita historico de preco do ingrediente na data de ca
   assert.equal(approxEqual(ingredientEntry.purchasePackCost, 20), true);
   assert.equal(ingredientEntry.priceEntries.length >= 2, true);
 });
+
+test('dashboard summary reconstitui caixas historicas importadas sem warnings de BOM', async (t) => {
+  const { apiUrl, shutdown } = await ensureApiServer();
+  t.after(async () => {
+    await shutdown();
+  });
+
+  const summaryBefore = await request(apiUrl, '/dashboard/summary');
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const flavorCosts = {
+    T: 1,
+    G: 2,
+    D: 3,
+    Q: 4,
+    R: 5
+  };
+
+  const ingredientsByCode = {};
+  for (const [code, packCost] of Object.entries(flavorCosts)) {
+    const ingredient = await request(apiUrl, '/inventory-items', {
+      method: 'POST',
+      body: {
+        name: `INGREDIENTE LEGADO ${code} [TESTE_E2E] ${suffix}`,
+        category: 'INGREDIENTE',
+        unit: 'g',
+        purchasePackSize: 1,
+        purchasePackCost: packCost
+      }
+    });
+    ingredientsByCode[code] = ingredient;
+    await request(apiUrl, '/inventory-movements', {
+      method: 'POST',
+      body: {
+        itemId: ingredient.id,
+        type: 'ADJUST',
+        quantity: 500,
+        reason: `DASHBOARD_COGS_LEGACY_TEST setup ${suffix} ${code}`
+      }
+    });
+  }
+
+  const products = await request(apiUrl, '/inventory-products');
+  const officialProductsByCode = {
+    T: products.find((entry) => /tradicional/i.test(entry.name)),
+    G: products.find((entry) => /goiabada/i.test(entry.name)),
+    D: products.find((entry) => /doce/i.test(entry.name)),
+    Q: products.find((entry) => /queijo/i.test(entry.name) && /requeij/i.test(entry.name) === false),
+    R: products.find((entry) => /requeij/i.test(entry.name))
+  };
+
+  const existingBoms = await request(apiUrl, '/boms');
+  for (const code of Object.keys(officialProductsByCode)) {
+    const product = officialProductsByCode[code];
+    assert.ok(product, `produto oficial ${code} deveria existir`);
+    const existingBom = existingBoms.find((entry) => entry.productId === product.id) || null;
+    const bomPayload = {
+      productId: product.id,
+      name: `BOM LEGADO ${code} [TESTE_E2E] ${suffix}`,
+      saleUnitLabel: 'Unidade',
+      yieldUnits: 1,
+      items: [{ itemId: ingredientsByCode[code].id, qtyPerSaleUnit: 1 }]
+    };
+    await (existingBom
+      ? request(apiUrl, `/boms/${existingBom.id}`, { method: 'PUT', body: bomPayload })
+      : request(apiUrl, '/boms', { method: 'POST', body: bomPayload }));
+  }
+
+  const historicalProduct = await request(apiUrl, '/inventory-products', {
+    method: 'POST',
+    body: {
+      name: 'Caixa historica sem composicao',
+      category: 'Historico',
+      unit: 'cx',
+      price: 52,
+      active: true
+    }
+  });
+  const refreshedBoms = await request(apiUrl, '/boms');
+  const historicalBom = refreshedBoms.find((entry) => entry.productId === historicalProduct.id) || null;
+  if (historicalBom) {
+    await request(apiUrl, `/boms/${historicalBom.id}`, { method: 'DELETE' });
+  }
+
+  const customer = await request(apiUrl, '/customers', {
+    method: 'POST',
+    body: {
+      name: `Cliente Legado Dashboard [TESTE_E2E] ${suffix}`,
+      phone: `119${String(Date.now()).slice(-8)}`,
+      address: 'Rua Legado, 52'
+    }
+  });
+
+  const genericLegacyOrder = await request(apiUrl, '/orders', {
+    method: 'POST',
+    body: {
+      customerId: customer.id,
+      scheduledAt: new Date(Date.UTC(2032, 0, 13, 14, 0, 0)).toISOString(),
+      notes: `[IMPORTADO_PLANILHA_LEGADA] key=${suffix}|generico origem=TESTE caixas=Sabores`,
+      items: [{ productId: historicalProduct.id, quantity: 1 }]
+    }
+  });
+
+  const specificLegacyOrder = await request(apiUrl, '/orders', {
+    method: 'POST',
+    body: {
+      customerId: customer.id,
+      scheduledAt: new Date(Date.UTC(2032, 0, 14, 14, 0, 0)).toISOString(),
+      notes: `[IMPORTADO_PLANILHA_LEGADA] key=${suffix}|especifico origem=TESTE caixas=R + D`,
+      items: [{ productId: historicalProduct.id, quantity: 1 }]
+    }
+  });
+
+  const summaryAfter = await request(apiUrl, '/dashboard/summary');
+  assert.equal(
+    summaryAfter.business.cogsAudit.warningsCount <= summaryBefore.business.cogsAudit.warningsCount,
+    true
+  );
+
+  const genericLegacyEntry = summaryAfter.business.cogsByOrder.find((entry) => entry.orderId === genericLegacyOrder.id);
+  assert.ok(genericLegacyEntry, 'pedido legado generico deveria aparecer no dashboard');
+  assert.equal(genericLegacyEntry.units, 7);
+  assert.equal(genericLegacyEntry.warnings.length, 0);
+  assert.equal(genericLegacyEntry.cogs > 0, true);
+
+  const specificLegacyEntry = summaryAfter.business.cogsByOrder.find((entry) => entry.orderId === specificLegacyOrder.id);
+  assert.ok(specificLegacyEntry, 'pedido legado especifico deveria aparecer no dashboard');
+  assert.equal(specificLegacyEntry.units, 7);
+  assert.equal(specificLegacyEntry.warnings.length, 0);
+  assert.equal(approxEqual(specificLegacyEntry.cogs, 29), true);
+
+  const requeijaoEntry = specificLegacyEntry.ingredients.find(
+    (entry) => entry.ingredientId === ingredientsByCode.R.id
+  );
+  assert.ok(requeijaoEntry, 'requeijao deveria entrar na composicao historica');
+  assert.equal(approxEqual(requeijaoEntry.quantity, 4), true);
+  assert.equal(approxEqual(requeijaoEntry.amount, 20), true);
+
+  const doceEntry = specificLegacyEntry.ingredients.find(
+    (entry) => entry.ingredientId === ingredientsByCode.D.id
+  );
+  assert.ok(doceEntry, 'doce de leite deveria entrar na composicao historica');
+  assert.equal(approxEqual(doceEntry.quantity, 3), true);
+  assert.equal(approxEqual(doceEntry.amount, 9), true);
+});
