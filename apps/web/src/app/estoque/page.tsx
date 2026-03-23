@@ -14,6 +14,7 @@ import type {
   Bom,
   BomItem as CatalogBomItem,
   InventoryItem,
+  InventoryPriceBoardResponse,
   InventoryMovement,
   InventoryMassSummary,
   InventoryOverviewItem,
@@ -161,6 +162,22 @@ type PurchaseCostRefreshResponse = {
   results: PurchaseCostRefreshResult[];
 };
 
+type PriceBaselineResearchResponse = {
+  appliedAt: string;
+  firstOrderAt: string;
+  results: Array<{
+    canonicalName: string;
+    sourceName: string;
+    sourceUrl: string;
+    livePrice: number;
+    historicalAveragePrice: number;
+    sourcePackSize: number;
+    status: 'UPDATED' | 'SKIPPED';
+    message: string;
+    updatedItemIds: number[];
+  }>;
+};
+
 type StockBoardCard = {
   item: InventoryOverviewItem;
   balance: number;
@@ -265,6 +282,7 @@ function StockPageContent() {
   const technicalCatalogDetailsRef = useRef<HTMLDetailsElement | null>(null);
   const productCatalogDetailsRef = useRef<HTMLDetailsElement | null>(null);
   const bomCatalogDetailsRef = useRef<HTMLDetailsElement | null>(null);
+  const inventoryPricesDetailsRef = useRef<HTMLDetailsElement | null>(null);
   const inventoryItemsDetailsRef = useRef<HTMLDetailsElement | null>(null);
   const stockCardPendingActionIdsRef = useRef<Set<number>>(new Set());
 
@@ -310,6 +328,12 @@ function StockPageContent() {
   const [isRefreshingPurchaseCosts, setIsRefreshingPurchaseCosts] = useState(false);
   const [purchaseCostRefreshResponse, setPurchaseCostRefreshResponse] =
     useState<PurchaseCostRefreshResponse | null>(null);
+  const [priceBoard, setPriceBoard] = useState<InventoryPriceBoardResponse | null>(null);
+  const [priceInputsByItemId, setPriceInputsByItemId] = useState<Record<number, string>>({});
+  const [savingPriceItemId, setSavingPriceItemId] = useState<number | null>(null);
+  const [isApplyingPriceBaseline, setIsApplyingPriceBaseline] = useState(false);
+  const [priceBaselineResponse, setPriceBaselineResponse] =
+    useState<PriceBaselineResearchResponse | null>(null);
   const { isOperationMode } = useSurfaceMode('estoque', { defaultMode: 'operation' });
   const { confirm, notifyError, notifyInfo, notifySuccess, notifyUndo } = useFeedback();
 
@@ -330,14 +354,24 @@ function StockPageContent() {
     };
 
     try {
-      const [overviewData, movementsData] = await Promise.all([
+      const [overviewData, movementsData, priceBoardData] = await Promise.all([
         fetchWithRetry<InventoryOverviewResponse>('/inventory-overview'),
-        fetchWithRetry<InventoryMovement[]>('/inventory-movements')
+        fetchWithRetry<InventoryMovement[]>('/inventory-movements'),
+        fetchWithRetry<InventoryPriceBoardResponse>('/inventory-price-board')
       ]);
 
       setItems(overviewData.items || []);
       setMassSummary(overviewData.mass || EMPTY_MASS_SUMMARY);
       setMovements(movementsData);
+      setPriceBoard(priceBoardData);
+      setPriceInputsByItemId(
+        Object.fromEntries(
+          (priceBoardData.items || []).map((entry) => [
+            entry.itemId,
+            formatMoneyInputBR(entry.purchasePackCost) || '0,00'
+          ])
+        )
+      );
 
       try {
         const [productsData, bomsData] = await Promise.all([
@@ -394,6 +428,9 @@ function StockPageContent() {
 
     if (focus === 'packaging' || focus === 'balance') {
       if (technicalCatalogDetailsRef.current) technicalCatalogDetailsRef.current.open = true;
+      if (focus === 'packaging' && inventoryPricesDetailsRef.current) {
+        inventoryPricesDetailsRef.current.open = true;
+      }
       if (inventoryItemsDetailsRef.current) inventoryItemsDetailsRef.current.open = true;
       scrollToLayoutSlot(focus, {
         focus: true,
@@ -655,6 +692,46 @@ function StockPageContent() {
       notifyError(err instanceof Error ? err.message : 'Nao foi possivel atualizar os precos online.');
     } finally {
       setIsRefreshingPurchaseCosts(false);
+    }
+  };
+
+  const applyPriceResearchBaseline = async () => {
+    if (isApplyingPriceBaseline) return;
+    setIsApplyingPriceBaseline(true);
+    try {
+      const result = await apiFetch<PriceBaselineResearchResponse>('/inventory-items/research-price-baseline', {
+        method: 'POST'
+      });
+      setPriceBaselineResponse(result);
+      await load();
+      notifySuccess(`Baseline historica aplicada desde ${new Date(result.firstOrderAt).toLocaleDateString('pt-BR')}.`);
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel aplicar a baseline de precos.');
+    } finally {
+      setIsApplyingPriceBaseline(false);
+    }
+  };
+
+  const savePurchasePrice = async (itemId: number) => {
+    if (savingPriceItemId) return;
+    const raw = priceInputsByItemId[itemId] ?? '';
+    const parsed = parseRequiredNumber(raw, 'Preco do pacote');
+    if (parsed === null) return;
+
+    setSavingPriceItemId(itemId);
+    try {
+      await apiFetch(`/inventory-items/${itemId}/purchase-price`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          purchasePackCost: parsed
+        })
+      });
+      await load();
+      notifySuccess('Preco de compra atualizado e refletido no COGS.');
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Nao foi possivel salvar o preco.');
+    } finally {
+      setSavingPriceItemId(null);
     }
   };
 
@@ -1513,6 +1590,20 @@ function StockPageContent() {
                     >
                       Novo ingrediente
                     </button>
+                    <button
+                      type="button"
+                      className="app-button app-button-ghost"
+                      onClick={() => {
+                        if (technicalCatalogDetailsRef.current) technicalCatalogDetailsRef.current.open = true;
+                        if (inventoryPricesDetailsRef.current) inventoryPricesDetailsRef.current.open = true;
+                        scrollToLayoutSlot('prices', {
+                          focus: true,
+                          focusSelector: 'summary, button, input, select, textarea'
+                        });
+                      }}
+                    >
+                      Preços
+                    </button>
                     {inactiveProducts.length > 0 ? (
                       <button
                         type="button"
@@ -1809,13 +1900,158 @@ function StockPageContent() {
                   </details>
                 ) : null}
 
+                <details ref={inventoryPricesDetailsRef} className="app-details" open>
+                  <summary>Preços</summary>
+                  <div className="mt-2 grid gap-3">
+                    <div className="grid gap-3 rounded-2xl border border-white/70 bg-white/75 p-3">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="grid gap-1">
+                          <h4 className="text-base font-semibold text-neutral-900">Pesquisa e atualização de preços</h4>
+                          <p className="text-sm text-neutral-600">
+                            Esta visão sempre trabalha na unidade real de compra de cada item. O baseline histórico parte do
+                            primeiro pedido; quando não há histórico amplo, o backend usa a média das amostras encontradas.
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            className="app-button app-button-ghost"
+                            onClick={applyPriceResearchBaseline}
+                            disabled={isApplyingPriceBaseline}
+                          >
+                            {isApplyingPriceBaseline ? 'Aplicando...' : 'Aplicar baseline histórica'}
+                          </button>
+                          <button
+                            type="button"
+                            className="app-button app-button-ghost"
+                            onClick={refreshPurchaseCosts}
+                            disabled={isRefreshingPurchaseCosts}
+                          >
+                            {isRefreshingPurchaseCosts ? 'Atualizando...' : 'Atualizar preços online'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {priceBaselineResponse ? (
+                        <div className="rounded-2xl border border-white/70 bg-white/70 px-3 py-3 text-sm text-neutral-700">
+                          <p>
+                            Baseline aplicada desde{' '}
+                            {new Date(priceBaselineResponse.firstOrderAt).toLocaleDateString('pt-BR')} para{' '}
+                            {priceBaselineResponse.results.filter((entry) => entry.status === 'UPDATED').length} familia(s).
+                          </p>
+                        </div>
+                      ) : null}
+
+                      {purchaseCostRefreshResponse ? (
+                        <div className="rounded-2xl border border-white/70 bg-white/70 px-3 py-3 text-sm text-neutral-700">
+                          <p>
+                            {purchaseCostRefreshResponse.totals.updatedSourceCount} online •{' '}
+                            {purchaseCostRefreshResponse.totals.fallbackSourceCount} fallback •{' '}
+                            {purchaseCostRefreshResponse.totals.updatedItemCount} item(ns) atualizado(s)
+                          </p>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <BuilderLayoutItemSlot id="prices">
+                      <div className="grid gap-3">
+                        {(priceBoard?.items || []).map((entry) => (
+                          <details key={entry.itemId} className="app-details">
+                            <summary>{entry.name}</summary>
+                            <div className="mt-2 grid gap-3 rounded-2xl border border-white/70 bg-white/75 p-3">
+                              <div className="grid gap-1">
+                                <p className="text-sm font-medium text-neutral-800">
+                                  Unidade de compra: {formatQty(entry.purchasePackSize)} {entry.unit}
+                                </p>
+                                <p className="text-sm text-neutral-600">
+                                  Custo unitário atual: {formatCurrencyBR(entry.unitCost)} por {entry.unit}
+                                </p>
+                                {entry.sourceUrl ? (
+                                  <a
+                                    href={entry.sourceUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-sm text-neutral-600 underline decoration-dotted underline-offset-2 hover:text-neutral-900"
+                                  >
+                                    Fonte: {entry.sourceName || 'link cadastrado'}
+                                  </a>
+                                ) : null}
+                              </div>
+
+                              <div className="grid gap-3 md:grid-cols-[minmax(0,220px)_auto] md:items-end">
+                                <label className="grid gap-1 text-sm text-neutral-700">
+                                  <span>Preço do pacote</span>
+                                  <input
+                                    className="app-input"
+                                    inputMode="decimal"
+                                    value={priceInputsByItemId[entry.itemId] ?? ''}
+                                    onChange={(event) =>
+                                      setPriceInputsByItemId((current) => ({
+                                        ...current,
+                                        [entry.itemId]: event.target.value
+                                      }))
+                                    }
+                                    onBlur={() =>
+                                      setPriceInputsByItemId((current) => ({
+                                        ...current,
+                                        [entry.itemId]:
+                                          formatMoneyInputBR(current[entry.itemId] || '0') || '0,00'
+                                      }))
+                                    }
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  className="app-button app-button-primary"
+                                  onClick={() => void savePurchasePrice(entry.itemId)}
+                                  disabled={savingPriceItemId === entry.itemId}
+                                >
+                                  {savingPriceItemId === entry.itemId ? 'Salvando...' : 'Salvar preço'}
+                                </button>
+                              </div>
+
+                              <div className="grid gap-2 rounded-2xl border border-white/70 bg-white/70 px-3 py-3 text-sm text-neutral-600">
+                                <p>
+                                  Baseline desde o primeiro pedido:{' '}
+                                  {entry.baselinePackCost != null ? formatCurrencyBR(entry.baselinePackCost) : 'nao aplicada'}
+                                  {entry.baselineEffectiveAt
+                                    ? ` • ${new Date(entry.baselineEffectiveAt).toLocaleDateString('pt-BR')}`
+                                    : ''}
+                                </p>
+                                {entry.priceEntries.length ? (
+                                  <div className="grid gap-1 text-xs text-neutral-600">
+                                    {entry.priceEntries
+                                      .slice()
+                                      .reverse()
+                                      .slice(0, 4)
+                                      .map((priceEntry) => (
+                                        <p key={priceEntry.id}>
+                                          {new Date(priceEntry.effectiveAt).toLocaleDateString('pt-BR')} •{' '}
+                                          {formatCurrencyBR(priceEntry.purchasePackCost)} / {formatQty(priceEntry.purchasePackSize)}{' '}
+                                          {entry.unit}
+                                          {priceEntry.sourceName ? ` • ${priceEntry.sourceName}` : ''}
+                                        </p>
+                                      ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-neutral-500">Sem histórico gravado ainda.</p>
+                                )}
+                              </div>
+                            </div>
+                          </details>
+                        ))}
+                      </div>
+                    </BuilderLayoutItemSlot>
+                  </div>
+                </details>
+
                 {showIngredientEditor || !isOperationMode ? (
                   <details
                     ref={inventoryItemsDetailsRef}
                     className="app-details"
                     open={showIngredientEditor || !isOperationMode}
                   >
-                    <summary>Insumos e custos de compra</summary>
+                    <summary>Cadastro de insumos</summary>
                     <div className="mt-2 grid gap-3">
                       <BuilderLayoutItemSlot id="packaging">
                         <div className="grid gap-3">
@@ -1959,49 +2195,9 @@ function StockPageContent() {
                             </div>
                           </form>
 
-                          <div className="grid gap-3 rounded-2xl border border-white/70 bg-white/75 p-3">
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div className="grid gap-1">
-                                <h4 className="text-base font-semibold text-neutral-900">
-                                  Atualizacao online de custos
-                                </h4>
-                                <p className="text-sm text-neutral-600">
-                                  Use o botao para atualizar pelos links da planilha. Para ajustes manuais, edite o item no formulario acima.
-                                </p>
-                              </div>
-                              <button
-                                type="button"
-                                className="app-button app-button-ghost"
-                                onClick={refreshPurchaseCosts}
-                                disabled={isRefreshingPurchaseCosts}
-                              >
-                                {isRefreshingPurchaseCosts ? 'Atualizando...' : 'Atualizar precos online'}
-                              </button>
-                            </div>
-                            {purchaseCostRefreshResponse ? (
-                              <div className="rounded-2xl border border-white/70 bg-white/70 px-3 py-3 text-sm text-neutral-700">
-                                <p>
-                                  {purchaseCostRefreshResponse.totals.updatedSourceCount} online •{' '}
-                                  {purchaseCostRefreshResponse.totals.fallbackSourceCount} manual •{' '}
-                                  {purchaseCostRefreshResponse.totals.updatedItemCount} item(ns) atualizado(s)
-                                </p>
-                                {purchaseCostRefreshResponse.results.some((entry) => entry.status !== 'UPDATED') ? (
-                                  <div className="mt-2 grid gap-1 text-xs text-neutral-600">
-                                    {purchaseCostRefreshResponse.results
-                                      .filter((entry) => entry.status !== 'UPDATED')
-                                      .map((entry) => (
-                                        <p key={`${entry.canonicalName}-${entry.status}`}>
-                                          {entry.canonicalName}: {entry.status === 'FALLBACK' ? 'valor manual' : 'sem item'}.
-                                        </p>
-                                      ))}
-                                  </div>
-                                ) : null}
-                              </div>
-                            ) : null}
-                            <div className="rounded-2xl border border-white/70 bg-white/70 px-3 py-3 text-sm text-neutral-600">
-                              Selecione um item no formulario acima ou toque em um card abaixo para editar nome,
-                              unidade, pacote e custo manual.
-                            </div>
+                          <div className="rounded-2xl border border-white/70 bg-white/75 px-3 py-3 text-sm text-neutral-600">
+                            Selecione um item no formulario acima ou toque em um card abaixo para editar nome,
+                            unidade e unidade de compra. Os preços agora ficam no bloco dedicado de Preços.
                           </div>
                         </div>
                       </BuilderLayoutItemSlot>

@@ -57,6 +57,8 @@ Ultima atualizacao: 2026-03-23
 - `/pedido` e `/pedidos` agora redirecionam o pos-criacao para `/pedidofinalizado`, com card final isolado, retorno contextual (`Fazer novo pedido` ou `Voltar para pedidos`) e preservacao apenas dos dados cadastrais do cliente no caso publico.
 - `/pedidofinalizado` agora roda sem shell operacional, sem menu lateral e sem topbar, isolado como rota publica de conclusao.
 - `/dashboard` voltou a existir como rota oculta interna, agora com painel real de analytics first-party do site, vitals e performance financeira/operacional da broa.
+- O estoque ganhou historico de preco por item/familia em unidade real de compra, com baseline dedicada desde o primeiro pedido e painel novo `Preços` dentro de `/estoque`.
+- O COGS do `/dashboard` deixou de usar apenas o custo corrente do insumo e passou a escolher o preco vigente na data de cada pedido, com fallback para a media historica pesquisada quando faltam pontos antigos.
 - O web passou a instrumentar navegacao, links, funil e web vitals por coleta propria, gravando esses eventos na API para leitura imediata no dashboard.
 - `/dashboard` deixou de depender so de obscuridade: agora abre apenas em host operacional/loopback, usa bridge protegido no web e a API exige token de bridge.
 - `/dashboard` ganhou uma narrativa editorial mais didatica, reorganizando trafego, funil, performance, financeiro, mix e recebiveis em linguagem mais humana sem alterar a base de dados lida pelo painel.
@@ -129,6 +131,7 @@ Ultima atualizacao: 2026-03-23
 - Preview do intake externo: `/api/google-form/preview`, `/api/customer-form/preview`, `orders/intake/google-form/preview` e `orders/intake/customer-form/preview`
 - Analytics first-party: `analytics/events` na API + proxy interno do web em `/api/analytics/track`
 - Dashboard: `dashboard/summary` para trafego, vitals, financeiro, mix de produtos e recebiveis
+- Historico de preco: `inventory-price-board`, `inventory-items/:id/purchase-price`, `inventory-items/research-price-baseline` e gravacao em `InventoryPriceEntry`
 - Suporte interno: `runtime-config` (read-only) e redirects legados controlados no web
 
 ## Qualidade tecnica
@@ -153,6 +156,9 @@ Ultima atualizacao: 2026-03-23
 
 ## Validacao operacional mais recente
 
+- Data: 2026-03-23
+- Ciclo executado: `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, `node --test tests/dashboard-cogs-summary.test.mjs`
+- Resultado: historico de preco entrou no estoque e no dashboard; o COGS passou a respeitar a data de cada pedido e o harness de API agora sincroniza o schema temporario antes dos testes.
 - Data: 2026-03-23
 - Ciclo executado: `pnpm install`, `pnpm audit --json`, `pnpm lint`, `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, `pnpm --filter @querobroapp/mobile typecheck`, `pnpm --filter @querobroapp/mobile build`, `node --test tests/order-created-alerts.test.mjs tests/order-intake-preview.test.mjs tests/customer-dedupe-and-intake.test.mjs`, `pnpm qa:browser-smoke`, `pnpm qa:critical-e2e`
 - Resultado: cadeia de dependencias e toolchain ficaram limpas (`audit=0`, sem warning bloqueante de install), o web/API/mobile seguiram buildando, e os dois gates de navegador passaram apos endurecer o QA critico contra copy acentuada em `/estoque`.

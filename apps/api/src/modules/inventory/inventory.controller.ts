@@ -66,6 +66,11 @@ export class InventoryController {
     return this.service.overview();
   }
 
+  @Get('inventory-price-board')
+  listPriceBoard() {
+    return this.service.listPriceBoard();
+  }
+
   @Post('inventory-items')
   createItem(@Body() body: unknown) {
     return this.service.createItem(body);
@@ -76,9 +81,19 @@ export class InventoryController {
     return this.service.updateItem(parseWithSchema(idSchema, id), body);
   }
 
+  @Put('inventory-items/:id/purchase-price')
+  updatePurchasePrice(@Param('id') id: string, @Body() body: unknown) {
+    return this.service.updatePurchasePrice(parseWithSchema(idSchema, id), body);
+  }
+
   @Post('inventory-items/refresh-purchase-costs')
   refreshPurchaseCosts() {
     return this.service.refreshPurchaseCosts();
+  }
+
+  @Post('inventory-items/research-price-baseline')
+  applyResearchPriceBaseline() {
+    return this.service.applyResearchPriceBaseline();
   }
 
   @Post('inventory-items/:id/effective-balance')

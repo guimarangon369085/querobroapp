@@ -24,6 +24,12 @@ type LoadedInventoryItem = {
   purchasePackSize: number;
   purchasePackCost: number;
 };
+type LoadedInventoryPriceEntry = {
+  itemId: number;
+  purchasePackSize: number;
+  purchasePackCost: number;
+  effectiveAt: Date;
+};
 
 type DashboardCogsWarningCode = 'BOM_MISSING' | 'BOM_ITEM_MISSING_QTY';
 
@@ -229,6 +235,11 @@ function perSaleQty(
   return null;
 }
 
+function unitCostFromPack(purchasePackCost: number, purchasePackSize: number) {
+  if (!Number.isFinite(purchasePackCost) || !Number.isFinite(purchasePackSize) || purchasePackSize <= 0) return 0;
+  return purchasePackCost / purchasePackSize;
+}
+
 function formatSourceLabel(event: LoadedAnalyticsEvent) {
   if (event.source) {
     const medium = event.medium ? ` / ${event.medium}` : '';
@@ -303,8 +314,9 @@ export class DashboardService {
     rangeOrders: LoadedOrder[];
     boms: LoadedBom[];
     inventoryItems: LoadedInventoryItem[];
+    priceEntries: LoadedInventoryPriceEntry[];
   }) {
-    const { rangeOrders, boms, inventoryItems } = params;
+    const { rangeOrders, boms, inventoryItems, priceEntries } = params;
     const latestBomByProductId = new Map<number, LoadedBom>();
     for (const bom of boms) {
       if (!latestBomByProductId.has(bom.productId)) {
@@ -313,6 +325,12 @@ export class DashboardService {
     }
 
     const inventoryItemById = new Map(inventoryItems.map((item) => [item.id, item]));
+    const priceEntriesByItemId = new Map<number, LoadedInventoryPriceEntry[]>();
+    for (const entry of priceEntries) {
+      const current = priceEntriesByItemId.get(entry.itemId) || [];
+      current.push(entry);
+      priceEntriesByItemId.set(entry.itemId, current);
+    }
     const ingredientTotals = new Map<number, DashboardIngredientCogsEntry>();
     const orderEntries: DashboardOrderCogsEntry[] = [];
     const warnings: DashboardCogsWarning[] = [];
@@ -391,10 +409,23 @@ export class DashboardService {
           if (!inventoryItem) continue;
 
           const ingredientQty = perSale * quantity;
-          const unitCost =
-            inventoryItem.purchasePackSize > 0
-              ? inventoryItem.purchasePackCost / inventoryItem.purchasePackSize
+          const itemPriceEntries = priceEntriesByItemId.get(inventoryItem.id) || [];
+          const applicablePriceEntry =
+            [...itemPriceEntries]
+              .reverse()
+              .find((entry) => entry.effectiveAt.getTime() <= order.createdAt.getTime()) || null;
+          const averageHistoricalUnitCost =
+            itemPriceEntries.length > 0
+              ? itemPriceEntries.reduce(
+                  (sum, entry) => sum + unitCostFromPack(entry.purchasePackCost, entry.purchasePackSize),
+                  0
+                ) / itemPriceEntries.length
               : 0;
+          const unitCost = applicablePriceEntry
+            ? unitCostFromPack(applicablePriceEntry.purchasePackCost, applicablePriceEntry.purchasePackSize)
+            : averageHistoricalUnitCost > 0
+              ? averageHistoricalUnitCost
+              : unitCostFromPack(inventoryItem.purchasePackCost, inventoryItem.purchasePackSize);
           const amount = ingredientQty * unitCost;
           itemCogs += amount;
 
@@ -515,7 +546,7 @@ export class DashboardService {
   }
 
   async getSummary() {
-    const [events, orders, customers, boms, inventoryItems] = await Promise.all([
+    const [events, orders, customers, boms, inventoryItems, priceEntries] = await Promise.all([
       this.loadAnalyticsEvents(),
       this.loadOrders(),
       this.prisma.customer.findMany({
@@ -528,6 +559,9 @@ export class DashboardService {
       }),
       this.prisma.inventoryItem.findMany({
         orderBy: { id: 'asc' }
+      }),
+      this.prisma.inventoryPriceEntry.findMany({
+        orderBy: [{ effectiveAt: 'asc' }, { id: 'asc' }]
       })
     ]);
 
@@ -536,7 +570,8 @@ export class DashboardService {
       orders,
       customers,
       boms,
-      inventoryItems
+      inventoryItems,
+      priceEntries
     });
 
     return {
@@ -773,13 +808,15 @@ export class DashboardService {
     }>;
     boms: LoadedBom[];
     inventoryItems: LoadedInventoryItem[];
+    priceEntries: LoadedInventoryPriceEntry[];
   }) {
-    const { orders, customers, boms, inventoryItems } = params;
+    const { orders, customers, boms, inventoryItems, priceEntries } = params;
     const activeOrders = orders.filter((order) => order.status !== 'CANCELADO');
     const totalCogsBreakdown = this.buildOrderCogsBreakdown({
       rangeOrders: activeOrders,
       boms,
-      inventoryItems
+      inventoryItems,
+      priceEntries
     });
     const orderCogsByOrderId = new Map(totalCogsBreakdown.orders.map((entry) => [entry.orderId, entry.cogs]));
 

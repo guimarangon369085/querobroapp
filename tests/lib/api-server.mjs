@@ -179,6 +179,21 @@ function prepareTestDatabase(port) {
   };
 }
 
+function syncTestDatabaseSchema(databaseUrl) {
+  runCommand(
+    'pnpm',
+    ['--filter', '@querobroapp/api', 'exec', 'prisma', 'db', 'push', '--skip-generate'],
+    {
+      cwd: ROOT_DIR,
+      env: {
+        ...process.env,
+        NODE_ENV: 'development',
+        DATABASE_URL: databaseUrl
+      }
+    }
+  );
+}
+
 async function shutdownChild(child) {
   if (!child || child.exitCode != null) return;
 
@@ -232,6 +247,7 @@ async function ensureApiServer() {
     }
 
     const testDatabase = prepareTestDatabase(port);
+    syncTestDatabaseSchema(testDatabase.databaseUrl);
     const apiLog = fs.openSync(path.join(OUTPUT_DIR, `api-${port}.log`), 'w');
     const child = spawn('node', ['--env-file=.env', 'dist/main.js'], {
       cwd: API_APP_DIR,

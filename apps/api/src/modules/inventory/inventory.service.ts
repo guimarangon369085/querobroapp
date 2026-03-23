@@ -1,4 +1,5 @@
 import { Injectable, Inject, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
 import { InventoryCategoryEnum, resolveDisplayNumber, StockMovementTypeEnum } from '@querobroapp/shared';
 import { parseLocaleNumber } from '../../common/normalize.js';
@@ -53,6 +54,14 @@ const inventoryItemUpdateSchema = inventoryItemCreateSchema
   .refine((value) => Object.keys(value).length > 0, {
     message: 'Informe ao menos um campo para atualizar.'
   });
+
+const inventoryPriceUpdateSchema = z.object({
+  purchasePackCost: nonNegativeNumberInputSchema,
+  effectiveAt: z.string().datetime().optional().nullable(),
+  sourceName: z.string().trim().min(1).max(120).optional().nullable(),
+  sourceUrl: z.string().trim().min(1).max(512).optional().nullable(),
+  note: z.string().trim().min(1).max(240).optional().nullable()
+});
 
 const inventoryMovementCreateSchema = z.object({
   itemId: z.coerce.number().int().positive(),
@@ -123,6 +132,51 @@ type PrepareMassReadyResponse = {
   }>;
 };
 
+type InventoryPriceEntryRecord = {
+  id: number;
+  itemId: number;
+  purchasePackSize: number;
+  purchasePackCost: number;
+  sourceName: string | null;
+  sourceUrl: string | null;
+  note: string | null;
+  effectiveAt: Date;
+  createdAt: Date;
+};
+
+type InventoryPriceBoardItem = {
+  itemId: number;
+  name: string;
+  category: string;
+  unit: string;
+  purchasePackSize: number;
+  purchasePackCost: number;
+  rawItemIds: number[];
+  unitCost: number;
+  sourceName: string | null;
+  sourceUrl: string | null;
+  sourcePackSize: number | null;
+  livePrice: number | null;
+  liveStatus: 'LIVE' | 'FALLBACK' | 'MANUAL' | null;
+  liveMessage: string | null;
+  firstOrderAt: string | null;
+  baselinePackCost: number | null;
+  baselineEffectiveAt: string | null;
+  priceEntries: Array<{
+    id: number;
+    itemId: number;
+    purchasePackSize: number;
+    purchasePackCost: number;
+    sourceName: string | null;
+    sourceUrl: string | null;
+    note: string | null;
+    effectiveAt: string;
+    createdAt: string;
+  }>;
+};
+
+type PriceHistoryClient = PrismaService | Prisma.TransactionClient;
+
 @Injectable()
 export class InventoryService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
@@ -173,6 +227,210 @@ export class InventoryService {
   private normalizeInventoryItemName(name: string) {
     const normalized = name.trim();
     return resolveInventoryDefinition(normalized)?.canonicalName || normalized;
+  }
+
+  private toUnitCost(purchasePackCost: number, purchasePackSize: number) {
+    if (!Number.isFinite(purchasePackCost) || !Number.isFinite(purchasePackSize) || purchasePackSize <= 0) return 0;
+    return purchasePackCost / purchasePackSize;
+  }
+
+  private buildHistoricalPriceSamples(
+    fallbackPrice: number,
+    livePrice: number,
+    extraSamples: number[] = []
+  ) {
+    const samples = new Set<number>();
+    const push = (value: number | null | undefined) => {
+      if (!Number.isFinite(value) || Number(value) <= 0) return;
+      samples.add(this.roundMoney(Number(value)));
+    };
+
+    push(fallbackPrice);
+    push(livePrice);
+    for (const sample of extraSamples) push(sample);
+
+    return [...samples.values()];
+  }
+
+  private averageHistoricalPrice(samples: number[]) {
+    if (samples.length === 0) return 0;
+    return this.roundMoney(samples.reduce((sum, value) => sum + value, 0) / samples.length);
+  }
+
+  private async firstOrderCreatedAt() {
+    const firstOrder = await this.prisma.order.findFirst({
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { createdAt: true }
+    });
+    return firstOrder?.createdAt || null;
+  }
+
+  private resolveInventoryFamilyItems(items: InventoryItemLookupEntry[], targetItem: InventoryItemLookupEntry) {
+    const familyDefinition = resolveInventoryDefinition(targetItem.name);
+    const familyItemIds = familyDefinition
+      ? resolveInventoryFamilyItemIds(items, familyDefinition)
+      : items
+          .filter((item) => resolveInventoryFamilyKey(item.name) === resolveInventoryFamilyKey(targetItem.name))
+          .map((item) => item.id);
+    const familyItems = items.filter((item) => familyItemIds.includes(item.id));
+    const representative =
+      pickInventoryFamilyRepresentative(
+        familyItems,
+        familyDefinition?.canonicalName || targetItem.name
+      ) || targetItem;
+
+    return {
+      familyDefinition,
+      familyItems,
+      representative
+    };
+  }
+
+  private async createPriceEntryIfChanged(
+    client: PriceHistoryClient,
+    params: {
+      itemId: number;
+      purchasePackSize: number;
+      purchasePackCost: number;
+      effectiveAt: Date;
+      sourceName?: string | null;
+      sourceUrl?: string | null;
+      note?: string | null;
+    }
+  ) {
+    const previous = await client.inventoryPriceEntry.findFirst({
+      where: { itemId: params.itemId },
+      orderBy: [{ effectiveAt: 'desc' }, { id: 'desc' }]
+    });
+
+    if (
+      previous &&
+      Math.abs((previous.purchasePackCost || 0) - params.purchasePackCost) < 0.01 &&
+      Math.abs((previous.purchasePackSize || 0) - params.purchasePackSize) < 0.0001 &&
+      previous.effectiveAt.getTime() === params.effectiveAt.getTime() &&
+      (previous.sourceName || null) === (params.sourceName || null) &&
+      (previous.sourceUrl || null) === (params.sourceUrl || null) &&
+      (previous.note || null) === (params.note || null)
+    ) {
+      return previous;
+    }
+
+    return client.inventoryPriceEntry.create({
+      data: {
+        itemId: params.itemId,
+        purchasePackSize: params.purchasePackSize,
+        purchasePackCost: params.purchasePackCost,
+        sourceName: params.sourceName || null,
+        sourceUrl: params.sourceUrl || null,
+        note: params.note || null,
+        effectiveAt: params.effectiveAt
+      }
+    });
+  }
+
+  private async listPriceEntriesByItemId() {
+    const entries = await this.prisma.inventoryPriceEntry.findMany({
+      orderBy: [{ effectiveAt: 'asc' }, { id: 'asc' }]
+    });
+
+    const entriesByItemId = new Map<number, InventoryPriceEntryRecord[]>();
+    for (const entry of entries) {
+      const current = entriesByItemId.get(entry.itemId) || [];
+      current.push(entry);
+      entriesByItemId.set(entry.itemId, current);
+    }
+    return entriesByItemId;
+  }
+
+  private buildInventoryPriceBoardPayload(params: {
+    items: InventoryItemLookupEntry[];
+    entriesByItemId: Map<number, InventoryPriceEntryRecord[]>;
+    firstOrderAt: Date | null;
+  }) {
+    const { items, entriesByItemId, firstOrderAt } = params;
+    const groupedByFamily = new Map<string, InventoryItemLookupEntry[]>();
+
+    for (const item of items) {
+      const familyKey = resolveInventoryFamilyKey(item.name);
+      const current = groupedByFamily.get(familyKey) || [];
+      current.push(item);
+      groupedByFamily.set(familyKey, current);
+    }
+
+    const rawBoardItems = Array.from(groupedByFamily.values())
+      .map((familyItems) => {
+        const definition = resolveInventoryDefinition(familyItems[0]?.name || null);
+        const representative =
+          pickInventoryFamilyRepresentative(
+            familyItems,
+            definition?.canonicalName || familyItems[0]?.name || ''
+          ) || familyItems[0];
+        if (!representative) return null;
+
+        const priceEntries = familyItems
+          .flatMap((item) => entriesByItemId.get(item.id) || [])
+          .sort(
+            (left, right) =>
+              left.effectiveAt.getTime() - right.effectiveAt.getTime() ||
+              left.id - right.id
+          );
+        const latestEntry = priceEntries[priceEntries.length - 1] || null;
+        const baselineEntry =
+          (firstOrderAt
+            ? [...priceEntries]
+                .reverse()
+                .find((entry) => entry.effectiveAt.getTime() <= firstOrderAt.getTime()) || priceEntries[0]
+            : priceEntries[0]) || null;
+        const sourceDefinition = definition
+          ? INVENTORY_PRICE_SOURCE_DEFINITIONS.find(
+              (entry) => resolveInventoryFamilyKey(entry.canonicalName) === resolveInventoryFamilyKey(definition.canonicalName)
+            )
+          : null;
+
+        const liveStatus: InventoryPriceBoardItem['liveStatus'] = sourceDefinition ? 'MANUAL' : null;
+        const boardItem: InventoryPriceBoardItem = {
+          itemId: representative.id,
+          name: definition?.canonicalName || representative.name,
+          category: definition?.category || representative.category,
+          unit: definition?.unit || representative.unit,
+          purchasePackSize: representative.purchasePackSize,
+          purchasePackCost: representative.purchasePackCost,
+          rawItemIds: familyItems.map((item) => item.id).sort((left, right) => left - right),
+          unitCost: this.roundMoney(this.toUnitCost(representative.purchasePackCost, representative.purchasePackSize)),
+          sourceName: latestEntry?.sourceName || sourceDefinition?.sourceName || null,
+          sourceUrl: latestEntry?.sourceUrl || sourceDefinition?.url || null,
+          sourcePackSize: sourceDefinition?.sourcePackSize || latestEntry?.purchasePackSize || representative.purchasePackSize,
+          livePrice: sourceDefinition?.fallbackPrice || null,
+          liveStatus,
+          liveMessage: sourceDefinition ? 'Referencia cadastrada para consulta online e baseline.' : null,
+          firstOrderAt: firstOrderAt?.toISOString() || null,
+          baselinePackCost: baselineEntry?.purchasePackCost || null,
+          baselineEffectiveAt: baselineEntry?.effectiveAt.toISOString() || null,
+          priceEntries: priceEntries.map((entry) => ({
+            id: entry.id,
+            itemId: entry.itemId,
+            purchasePackSize: entry.purchasePackSize,
+            purchasePackCost: entry.purchasePackCost,
+            sourceName: entry.sourceName || null,
+            sourceUrl: entry.sourceUrl || null,
+            note: entry.note || null,
+            effectiveAt: entry.effectiveAt.toISOString(),
+            createdAt: entry.createdAt.toISOString()
+          }))
+        };
+
+        return boardItem;
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+
+    const boardItems: InventoryPriceBoardItem[] = rawBoardItems
+      .sort((left, right) => left.name.localeCompare(right.name, 'pt-BR'));
+
+    return {
+      generatedAt: new Date().toISOString(),
+      firstOrderAt: firstOrderAt?.toISOString() || null,
+      items: boardItems
+    };
   }
 
   private async ensureCanonicalInventoryItemUniqueness(params: {
@@ -372,6 +630,20 @@ export class InventoryService {
     return this.prisma.inventoryItem.findMany({ orderBy: { id: 'asc' } });
   }
 
+  async listPriceBoard() {
+    const [items, entriesByItemId, firstOrderAt] = await Promise.all([
+      this.prisma.inventoryItem.findMany({ orderBy: { id: 'asc' } }),
+      this.listPriceEntriesByItemId(),
+      this.firstOrderCreatedAt()
+    ]);
+
+    return this.buildInventoryPriceBoardPayload({
+      items,
+      entriesByItemId,
+      firstOrderAt
+    });
+  }
+
   async overview() {
     const [items, movements] = await Promise.all([
       this.prisma.inventoryItem.findMany({ orderBy: { id: 'asc' } }),
@@ -384,20 +656,30 @@ export class InventoryService {
     return this.buildInventoryOverviewPayload(items, movements);
   }
 
-  createItem(payload: unknown) {
+  async createItem(payload: unknown) {
     const data = parseWithSchema(inventoryItemCreateSchema, payload);
-    return this.ensureCanonicalInventoryItemUniqueness({
+    const canonicalName = await this.ensureCanonicalInventoryItemUniqueness({
       name: data.name,
       category: data.category,
       unit: data.unit
-    }).then((canonicalName) =>
-      this.prisma.inventoryItem.create({
+    });
+
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.inventoryItem.create({
         data: {
           ...data,
           name: canonicalName
         }
-      })
-    );
+      });
+      await this.createPriceEntryIfChanged(tx, {
+        itemId: created.id,
+        purchasePackSize: created.purchasePackSize,
+        purchasePackCost: this.roundMoney(created.purchasePackCost || 0),
+        effectiveAt: created.createdAt,
+        note: 'Cadastro inicial do item.'
+      });
+      return created;
+    });
   }
 
   async updateItem(id: number, payload: unknown) {
@@ -415,12 +697,28 @@ export class InventoryService {
       unit: nextUnit
     });
 
-    return this.prisma.inventoryItem.update({
-      where: { id },
-      data: {
-        ...data,
-        ...(data.name !== undefined ? { name: canonicalName } : {})
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.inventoryItem.update({
+        where: { id },
+        data: {
+          ...data,
+          ...(data.name !== undefined ? { name: canonicalName } : {})
+        }
+      });
+
+      const priceTouched =
+        data.purchasePackCost !== undefined || data.purchasePackSize !== undefined;
+      if (priceTouched) {
+        await this.createPriceEntryIfChanged(tx, {
+          itemId: updated.id,
+          purchasePackSize: updated.purchasePackSize,
+          purchasePackCost: this.roundMoney(updated.purchasePackCost || 0),
+          effectiveAt: new Date(),
+          note: 'Ajuste manual em Estoque.'
+        });
       }
+
+      return updated;
     });
   }
 
@@ -492,6 +790,15 @@ export class InventoryService {
             data: { purchasePackCost: nextCost }
           });
         }
+        await this.createPriceEntryIfChanged(this.prisma, {
+          itemId: item.id,
+          purchasePackSize: item.purchasePackSize,
+          purchasePackCost: nextCost,
+          effectiveAt: new Date(),
+          sourceName: fetched.sourceName,
+          sourceUrl: fetched.sourceUrl,
+          note: fetched.status === 'LIVE' ? 'Atualizacao online do estoque.' : fetched.message
+        });
 
         updatedItems.push({
           id: item.id,
@@ -528,6 +835,170 @@ export class InventoryService {
         skippedSourceCount,
         updatedItemCount
       },
+      results
+    };
+  }
+
+  async updatePurchasePrice(id: number, payload: unknown) {
+    const data = parseWithSchema(inventoryPriceUpdateSchema, payload ?? {});
+
+    return this.prisma.$transaction(async (tx) => {
+      const items = await tx.inventoryItem.findMany({ orderBy: { id: 'asc' } });
+      const targetItem = items.find((item) => item.id === id);
+      if (!targetItem) throw new NotFoundException('Item nao encontrado');
+
+      const { familyItems, representative } = this.resolveInventoryFamilyItems(items, targetItem);
+      const referencePackSize = representative.purchasePackSize;
+      if (!referencePackSize || referencePackSize <= 0) {
+        throw new BadRequestException('Item sem unidade de compra valida para atualizar preco.');
+      }
+
+      const nextUnitCost = data.purchasePackCost / referencePackSize;
+      const effectiveAt = data.effectiveAt ? new Date(data.effectiveAt) : new Date();
+
+      const updatedItems = [];
+      for (const item of familyItems) {
+        const nextCost = this.roundMoney(nextUnitCost * item.purchasePackSize);
+        const updated = await tx.inventoryItem.update({
+          where: { id: item.id },
+          data: { purchasePackCost: nextCost }
+        });
+        await this.createPriceEntryIfChanged(tx, {
+          itemId: item.id,
+          purchasePackSize: updated.purchasePackSize,
+          purchasePackCost: nextCost,
+          effectiveAt,
+          sourceName: data.sourceName || 'Manual',
+          sourceUrl: data.sourceUrl || null,
+          note: data.note || 'Ajuste manual no bloco de Precos.'
+        });
+        updatedItems.push(updated);
+      }
+
+      return {
+        ok: true,
+        itemId: representative.id,
+        rawItemIds: updatedItems.map((item) => item.id),
+        purchasePackSize: referencePackSize,
+        purchasePackCost: this.roundMoney(data.purchasePackCost),
+        effectiveAt: effectiveAt.toISOString()
+      };
+    });
+  }
+
+  async applyResearchPriceBaseline() {
+    const firstOrderAt = await this.firstOrderCreatedAt();
+    if (!firstOrderAt) {
+      throw new BadRequestException('Ainda nao existe pedido para definir a base historica de precos.');
+    }
+
+    const items = await this.prisma.inventoryItem.findMany({ orderBy: { id: 'asc' } });
+    const results: Array<{
+      canonicalName: string;
+      sourceName: string;
+      sourceUrl: string;
+      livePrice: number;
+      historicalAveragePrice: number;
+      sourcePackSize: number;
+      status: 'UPDATED' | 'SKIPPED';
+      message: string;
+      updatedItemIds: number[];
+    }> = [];
+
+    for (const definition of INVENTORY_PRICE_SOURCE_DEFINITIONS) {
+      const familyKey = resolveInventoryFamilyKey(definition.canonicalName);
+      const matchingItems = items.filter((item) => resolveInventoryFamilyKey(item.name) === familyKey);
+      if (matchingItems.length === 0) {
+        results.push({
+          canonicalName: definition.canonicalName,
+          sourceName: definition.sourceName,
+          sourceUrl: definition.url,
+          livePrice: definition.fallbackPrice,
+          historicalAveragePrice: definition.fallbackPrice,
+          sourcePackSize: definition.sourcePackSize,
+          status: 'SKIPPED',
+          message: 'Nenhum item correspondente foi encontrado no estoque.',
+          updatedItemIds: []
+        });
+        continue;
+      }
+
+      const fetched = await fetchInventorySourcePrice(definition);
+      const historicalSamples = this.buildHistoricalPriceSamples(
+        definition.fallbackPrice,
+        fetched.price,
+        definition.historicalSamplePrices || []
+      );
+      const historicalAveragePrice = this.averageHistoricalPrice(historicalSamples) || fetched.price;
+
+      await this.prisma.$transaction(async (tx) => {
+        for (const item of matchingItems) {
+          const baselinePackCost = this.roundMoney(
+            this.toUnitCost(historicalAveragePrice, definition.sourcePackSize) * item.purchasePackSize
+          );
+          const currentPackCost = this.roundMoney(
+            this.toUnitCost(fetched.price, definition.sourcePackSize) * item.purchasePackSize
+          );
+
+          const existingEntries = await tx.inventoryPriceEntry.findMany({
+            where: { itemId: item.id },
+            orderBy: [{ effectiveAt: 'asc' }, { id: 'asc' }]
+          });
+          const hasBaselineEntry = existingEntries.some(
+            (entry) => entry.effectiveAt.getTime() <= firstOrderAt.getTime()
+          );
+
+          if (!hasBaselineEntry) {
+            await this.createPriceEntryIfChanged(tx, {
+              itemId: item.id,
+              purchasePackSize: item.purchasePackSize,
+              purchasePackCost: baselinePackCost,
+              effectiveAt: firstOrderAt,
+              sourceName: definition.sourceName,
+              sourceUrl: definition.url,
+              note: `Baseline media aplicada desde o primeiro pedido (${historicalSamples.length} amostra(s)).`
+            });
+          }
+
+          await tx.inventoryItem.update({
+            where: { id: item.id },
+            data: { purchasePackCost: currentPackCost }
+          });
+
+          await this.createPriceEntryIfChanged(tx, {
+            itemId: item.id,
+            purchasePackSize: item.purchasePackSize,
+            purchasePackCost: currentPackCost,
+            effectiveAt: new Date(),
+            sourceName: fetched.sourceName,
+            sourceUrl: fetched.sourceUrl,
+            note:
+              fetched.status === 'LIVE'
+                ? 'Preco atual pesquisado online.'
+                : `Preco atual aplicado via fallback. ${fetched.message}`
+          });
+        }
+      });
+
+      results.push({
+        canonicalName: definition.canonicalName,
+        sourceName: fetched.sourceName,
+        sourceUrl: fetched.sourceUrl,
+        livePrice: this.roundMoney(fetched.price),
+        historicalAveragePrice: this.roundMoney(historicalAveragePrice),
+        sourcePackSize: definition.sourcePackSize,
+        status: 'UPDATED',
+        message:
+          fetched.status === 'LIVE'
+            ? `Baseline medio + preco atual aplicados a partir de ${historicalSamples.length} amostra(s).`
+            : `Fonte online indisponivel; baseline e preco atual ficaram no fallback/medio. ${fetched.message}`,
+        updatedItemIds: matchingItems.map((item) => item.id)
+      });
+    }
+
+    return {
+      appliedAt: new Date().toISOString(),
+      firstOrderAt: firstOrderAt.toISOString(),
       results
     };
   }

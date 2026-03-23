@@ -119,9 +119,26 @@ model InventoryItem {
   createdAt        DateTime            @default(now())
   movements        InventoryMovement[]
   bomItems         BomItem[]
+  priceEntries     InventoryPriceEntry[]
 
   @@index([name])
   @@index([category])
+}
+
+model InventoryPriceEntry {
+  id               Int           @id @default(autoincrement())
+  itemId           Int
+  purchasePackSize Float
+  purchasePackCost Float
+  sourceName       String?
+  sourceUrl        String?
+  note             String?
+  effectiveAt      DateTime
+  createdAt        DateTime      @default(now())
+  item             InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId, effectiveAt])
+  @@index([effectiveAt])
 }
 
 model InventoryMovement {

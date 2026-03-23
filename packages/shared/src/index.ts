@@ -464,6 +464,18 @@ export const InventoryItemSchema = z.object({
   createdAt: z.string().optional().nullable()
 });
 
+export const InventoryPriceEntrySchema = z.object({
+  id: z.number().int().positive().optional(),
+  itemId: z.number().int().positive(),
+  purchasePackSize: z.number().positive(),
+  purchasePackCost: z.number().nonnegative(),
+  sourceName: z.string().optional().nullable(),
+  sourceUrl: z.string().optional().nullable(),
+  note: z.string().optional().nullable(),
+  effectiveAt: z.string(),
+  createdAt: z.string().optional().nullable()
+});
+
 export const InventoryMovementSchema = z.object({
   id: z.number().int().positive().optional(),
   itemId: z.number().int().positive(),
@@ -499,6 +511,33 @@ export const InventoryOverviewResponseSchema = z.object({
   items: z.array(InventoryOverviewItemSchema),
   mass: InventoryMassSummarySchema,
   generatedAt: z.string()
+});
+
+export const InventoryPriceBoardItemSchema = z.object({
+  itemId: z.number().int().positive(),
+  name: z.string().min(1),
+  category: InventoryCategoryEnum,
+  unit: z.string().min(1),
+  purchasePackSize: z.number().positive(),
+  purchasePackCost: z.number().nonnegative(),
+  rawItemIds: z.array(z.number().int().positive()).default([]),
+  unitCost: z.number().nonnegative(),
+  sourceName: z.string().optional().nullable(),
+  sourceUrl: z.string().optional().nullable(),
+  sourcePackSize: z.number().positive().optional().nullable(),
+  livePrice: z.number().nonnegative().optional().nullable(),
+  liveStatus: z.enum(['LIVE', 'FALLBACK', 'MANUAL']).optional().nullable(),
+  liveMessage: z.string().optional().nullable(),
+  firstOrderAt: z.string().optional().nullable(),
+  baselinePackCost: z.number().nonnegative().optional().nullable(),
+  baselineEffectiveAt: z.string().optional().nullable(),
+  priceEntries: z.array(InventoryPriceEntrySchema).default([])
+});
+
+export const InventoryPriceBoardResponseSchema = z.object({
+  generatedAt: z.string(),
+  firstOrderAt: z.string().nullable(),
+  items: z.array(InventoryPriceBoardItemSchema)
 });
 
 export const BomSchema = z.object({
@@ -727,10 +766,13 @@ export type OrderIntake = z.infer<typeof OrderIntakeSchema>;
 export type OrderIntakeMeta = z.infer<typeof OrderIntakeMetaSchema>;
 export type InventoryCategory = z.infer<typeof InventoryCategoryEnum>;
 export type InventoryItem = z.infer<typeof InventoryItemSchema>;
+export type InventoryPriceEntry = z.infer<typeof InventoryPriceEntrySchema>;
 export type InventoryMovement = z.infer<typeof InventoryMovementSchema>;
 export type InventoryOverviewItem = z.infer<typeof InventoryOverviewItemSchema>;
 export type InventoryMassSummary = z.infer<typeof InventoryMassSummarySchema>;
 export type InventoryOverviewResponse = z.infer<typeof InventoryOverviewResponseSchema>;
+export type InventoryPriceBoardItem = z.infer<typeof InventoryPriceBoardItemSchema>;
+export type InventoryPriceBoardResponse = z.infer<typeof InventoryPriceBoardResponseSchema>;
 export type Bom = z.infer<typeof BomSchema>;
 export type BomItem = z.infer<typeof BomItemSchema>;
 export type ProductionRequirementBreakdown = z.infer<typeof ProductionRequirementBreakdownSchema>;

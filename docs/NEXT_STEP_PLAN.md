@@ -1,6 +1,6 @@
 # NEXT_STEP_PLAN
 
-Ultima atualizacao: 2026-03-21
+Ultima atualizacao: 2026-03-23
 
 ## Objetivo da fase atual
 
@@ -10,6 +10,7 @@ Consolidar o lancamento publico do app sobre o mesmo nucleo operacional:
 - operacao interna em `Pedidos`
 - captura externa em `/pedido` e `Google Forms`
 - entrega com frete cotado antes do PIX, calculado internamente por raio
+- COGS calculado por pedido com preco historico de insumo, usando baseline pesquisada desde o primeiro pedido quando necessario
 
 ## Gate operacional (concluido em 2026-03-11)
 
@@ -80,6 +81,7 @@ Criterio de pronto:
 - Manter o intake externo/publico sem abortar transacao no Postgres ao reservar `publicNumber` para cliente/pedido.
 - Manter a navegacao padronizada com `PEDIDOS` como item principal e labels em caixa alta em todo o menu.
 - Seguir limpando redundancias em `Estoque` agora que `Produtos` saiu da navegação.
+- Publicar o novo bloco `Preços` em `/estoque`, aplicar a baseline historica na base produtiva e confirmar o COGS sobre todos os pedidos ativos da base.
 - Validar estados vazios e mudanca de dia em desktop e mobile width.
 - Fechado neste lote: `/dashboard` e analytics ficaram blindados por bridge/token, e `PICKUP` passou a ser respeitado em `/clientes` e no quick create de `/pedidos`.
 

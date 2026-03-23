@@ -192,3 +192,112 @@ test('dashboard summary calcula COGS por pedido a partir dos ingredientes da fic
   assert.ok(aggregateIngredientB, 'ingrediente B deveria aparecer no agregado');
   assert.equal(approxEqual(aggregateIngredientB.amount, expectedIngredientBAmount), true);
 });
+
+test('dashboard summary respeita historico de preco do ingrediente na data de cada pedido', async (t) => {
+  const { apiUrl, shutdown } = await ensureApiServer();
+  t.after(async () => {
+    await shutdown();
+  });
+
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const ingredient = await request(apiUrl, '/inventory-items', {
+    method: 'POST',
+    body: {
+      name: `INGREDIENTE HISTORICO COGS [TESTE_E2E] ${suffix}`,
+      category: 'INGREDIENTE',
+      unit: 'g',
+      purchasePackSize: 100,
+      purchasePackCost: 10
+    }
+  });
+
+  await request(apiUrl, '/inventory-movements', {
+    method: 'POST',
+    body: {
+      itemId: ingredient.id,
+      type: 'ADJUST',
+      quantity: 1000,
+      reason: `DASHBOARD_COGS_PRICE_HISTORY_TEST setup ${suffix}`
+    }
+  });
+
+  const product = await request(apiUrl, '/inventory-products', {
+    method: 'POST',
+    body: {
+      name: `Produto Historico COGS [TESTE_E2E] ${suffix}`,
+      category: 'Sabores',
+      unit: 'un',
+      price: 15,
+      active: true
+    }
+  });
+
+  const existingBoms = await request(apiUrl, '/boms');
+  const existingBom = existingBoms.find((entry) => entry.productId === product.id) || null;
+  const bomPayload = {
+    productId: product.id,
+    name: `BOM HISTORICO COGS [TESTE_E2E] ${suffix}`,
+    saleUnitLabel: 'Unidade',
+    yieldUnits: 1,
+    items: [{ itemId: ingredient.id, qtyPerSaleUnit: 10 }]
+  };
+
+  await (existingBom
+    ? request(apiUrl, `/boms/${existingBom.id}`, { method: 'PUT', body: bomPayload })
+    : request(apiUrl, '/boms', { method: 'POST', body: bomPayload }));
+
+  const customer = await request(apiUrl, '/customers', {
+    method: 'POST',
+    body: {
+      name: `Cliente Historico COGS [TESTE_E2E] ${suffix}`,
+      phone: `119${String(Date.now()).slice(-8)}`,
+      address: 'Rua Historico, 20'
+    }
+  });
+
+  const firstOrder = await request(apiUrl, '/orders', {
+    method: 'POST',
+    body: {
+      customerId: customer.id,
+      scheduledAt: new Date(Date.UTC(2032, 0, 11, 14, 0, 0)).toISOString(),
+      items: [{ productId: product.id, quantity: 1 }]
+    }
+  });
+
+  const priceChangeEffectiveAt = new Date().toISOString();
+  await request(apiUrl, `/inventory-items/${ingredient.id}/purchase-price`, {
+    method: 'PUT',
+    body: {
+      purchasePackCost: 20,
+      effectiveAt: priceChangeEffectiveAt,
+      sourceName: 'Teste',
+      note: 'Virada de custo para validar historico.'
+    }
+  });
+  await new Promise((resolve) => setTimeout(resolve, 1_200));
+
+  const secondOrder = await request(apiUrl, '/orders', {
+    method: 'POST',
+    body: {
+      customerId: customer.id,
+      scheduledAt: new Date(Date.UTC(2032, 0, 12, 14, 0, 0)).toISOString(),
+      items: [{ productId: product.id, quantity: 1 }]
+    }
+  });
+
+  const summary = await request(apiUrl, '/dashboard/summary');
+  const firstOrderEntry = summary.business.cogsByOrder.find((entry) => entry.orderId === firstOrder.id);
+  const secondOrderEntry = summary.business.cogsByOrder.find((entry) => entry.orderId === secondOrder.id);
+
+  assert.ok(firstOrderEntry, 'primeiro pedido deveria aparecer no COGS');
+  assert.ok(secondOrderEntry, 'segundo pedido deveria aparecer no COGS');
+  assert.equal(approxEqual(firstOrderEntry.cogs, 1), true);
+  assert.equal(approxEqual(secondOrderEntry.cogs, 2), true);
+
+  const priceBoard = await request(apiUrl, '/inventory-price-board');
+  const ingredientEntry = priceBoard.items.find((entry) => entry.rawItemIds.includes(ingredient.id));
+  assert.ok(ingredientEntry, 'ingrediente deveria aparecer no bloco de precos');
+  assert.equal(ingredientEntry.purchasePackSize, 100);
+  assert.equal(approxEqual(ingredientEntry.purchasePackCost, 20), true);
+  assert.equal(ingredientEntry.priceEntries.length >= 2, true);
+});
