@@ -6,7 +6,6 @@ import { formatCurrencyBR } from '@/lib/format';
 
 type DashboardSummary = {
   asOf: string;
-  rangeDays: number;
   identity: {
     brandName: string;
     legalName: string;
@@ -205,8 +204,6 @@ type DashboardSummary = {
     }>;
   };
 };
-
-const RANGE_OPTIONS = [7, 30, 90] as const;
 
 type DashboardTone = 'amber' | 'sky' | 'mint' | 'rose' | 'ink';
 
@@ -455,7 +452,6 @@ function DailyBars({
 }
 
 export default function DashboardScreen() {
-  const [rangeDays, setRangeDays] = useState<(typeof RANGE_OPTIONS)[number]>(30);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -472,7 +468,7 @@ export default function DashboardScreen() {
       }
 
       try {
-        const response = await fetch(`/api/dashboard-summary?days=${rangeDays}`, {
+        const response = await fetch('/api/dashboard-summary', {
           cache: 'no-store'
         });
         const raw = await response.text();
@@ -508,7 +504,7 @@ export default function DashboardScreen() {
         setRefreshing(false);
       }
     },
-    [notifyError, rangeDays]
+    [notifyError]
   );
 
   useEffect(() => {
@@ -572,25 +568,11 @@ export default function DashboardScreen() {
         <div className="flex flex-wrap gap-2 text-sm">
           <span className="rounded-full border border-white/70 bg-white/78 px-3 py-1.5 text-neutral-700">{asOfLabel}</span>
           <span className="rounded-full border border-white/70 bg-white/78 px-3 py-1.5 text-neutral-700">
-            {summary ? summary.traffic.windowLabel : `${rangeDays} dias`}
+            {summary ? summary.traffic.windowLabel : 'Base inteira'}
           </span>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {RANGE_OPTIONS.map((option) => (
-            <button
-              key={option}
-              type="button"
-              className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
-                rangeDays === option
-                  ? 'border-[rgba(126,79,45,0.24)] bg-[rgba(78,53,35,0.92)] text-white shadow-[0_12px_24px_rgba(57,39,24,0.18)]'
-                  : 'border-white/70 bg-white/72 text-neutral-700 hover:bg-white'
-              }`}
-              onClick={() => setRangeDays(option)}
-            >
-              {option} dias
-            </button>
-          ))}
           <button
             type="button"
             className="rounded-full border border-white/70 bg-white/80 px-4 py-2 text-sm font-semibold text-[color:var(--ink-strong)] shadow-[0_12px_24px_rgba(57,39,24,0.08)] transition hover:bg-white"
@@ -678,7 +660,7 @@ export default function DashboardScreen() {
                     label="COGS"
                     value={formatCurrencyBR(summary.business.kpis.estimatedCogsInRange)}
                     tone="rose"
-                    meta={`${formatNumber(summary.business.kpis.costedOrdersInRange)} pedidos no período${
+                    meta={`${formatNumber(summary.business.kpis.costedOrdersInRange)} pedidos auditados na base${
                       summary.business.kpis.cogsWarningsInRange
                         ? ` · ${formatNumber(summary.business.kpis.cogsWarningsInRange)} alerta(s)`
                         : ''
@@ -714,8 +696,7 @@ export default function DashboardScreen() {
             >
               <div className="grid gap-3">
                 <p className="text-sm leading-6 text-neutral-600">
-                  Auditoria completa do custo dos ingredientes consumidos em todos os pedidos ativos da base,
-                  independente do filtro do topo.
+                  Auditoria completa do custo dos ingredientes consumidos em todos os pedidos ativos da base.
                 </p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <CogsAuditStat

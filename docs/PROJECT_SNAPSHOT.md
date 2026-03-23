@@ -114,6 +114,7 @@ Ultima atualizacao: 2026-03-23
 - `/calendario`: redirect permanente para `/pedidos`.
 - `/dashboard`: pagina oculta interna com trafego, navegacao, vitals, funil e financeiro completo, agora em linguagem editorial mais guiada.
 - `/dashboard`: agora acessivel pelo proprio app em host publico, com link direto no menu e leitura via bridge same-origin do web.
+- `/dashboard`: deixou de ter seletor de periodo; o painel agora consolida trafego, financeiro, COGS e detalhamentos sobre a base inteira ativa.
 - Rotas antigas (`/`, `/hoje`, `/jornada`, `/inicio`, `/resumo`, `/base`, `/producao`, `/saidas`, `/caixa`) convergem para `Pedidos`.
 - `/builder`: redirect para `/pedidos`; o runtime interno segue exposto por `GET /runtime-config`.
 

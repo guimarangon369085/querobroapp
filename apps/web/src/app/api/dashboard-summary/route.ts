@@ -17,8 +17,6 @@ export async function GET(request: Request) {
     String(process.env.DASHBOARD_BRIDGE_TOKEN || '').trim() ||
     String(process.env.ORDER_FORM_BRIDGE_TOKEN || '').trim();
 
-  const requestUrl = new URL(request.url);
-  const days = requestUrl.searchParams.get('days') || '30';
   const headers: Record<string, string> = {};
   if (bridgeToken) {
     headers.Authorization = `Bearer ${bridgeToken}`;
@@ -26,7 +24,7 @@ export async function GET(request: Request) {
 
   try {
     const response = await fetch(
-      `${resolveServerBridgeApiBaseUrl(request, process.env.ORDER_FORM_API_URL)}/dashboard/summary?days=${encodeURIComponent(days)}`,
+      `${resolveServerBridgeApiBaseUrl(request, process.env.ORDER_FORM_API_URL)}/dashboard/summary`,
       {
         method: 'GET',
         headers,

@@ -165,34 +165,6 @@ function toDayKey(value: Date) {
   }).format(value);
 }
 
-function startOfToday(reference = new Date()) {
-  const zonedReference = readSaoPauloParts(reference);
-  return saoPauloDateTimeToUtc({
-    year: zonedReference.year,
-    month: zonedReference.month,
-    day: zonedReference.day,
-    hour: 0,
-    minute: 0,
-    second: 0
-  });
-}
-
-function createRangeStart(days: number, reference = new Date()) {
-  const zonedReference = readSaoPauloParts(reference);
-  const targetAnchor = new Date(
-    Date.UTC(zonedReference.year, zonedReference.month - 1, zonedReference.day - (days - 1), 12, 0, 0, 0)
-  );
-  const targetDay = readSaoPauloParts(targetAnchor);
-  return saoPauloDateTimeToUtc({
-    year: targetDay.year,
-    month: targetDay.month,
-    day: targetDay.day,
-    hour: 0,
-    minute: 0,
-    second: 0
-  });
-}
-
 function isPublicPath(path?: string | null) {
   return path === '/' || Boolean(path && path.startsWith('/pedido'));
 }
@@ -521,13 +493,8 @@ export class DashboardService {
     };
   }
 
-  private loadAnalyticsEvents(rangeStart: Date) {
+  private loadAnalyticsEvents() {
     return this.prisma.siteAnalyticsEvent.findMany({
-      where: {
-        createdAt: {
-          gte: rangeStart
-        }
-      },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
     });
   }
@@ -547,11 +514,9 @@ export class DashboardService {
     });
   }
 
-  async getSummary(days: number) {
-    const rangeStart = createRangeStart(days);
-    const todayStart = startOfToday();
+  async getSummary() {
     const [events, orders, customers, boms, inventoryItems] = await Promise.all([
-      this.loadAnalyticsEvents(rangeStart),
+      this.loadAnalyticsEvents(),
       this.loadOrders(),
       this.prisma.customer.findMany({
         where: { deletedAt: null },
@@ -566,20 +531,16 @@ export class DashboardService {
       })
     ]);
 
-    const traffic = this.buildTrafficSummary(events, days);
+    const traffic = this.buildTrafficSummary(events);
     const business = this.buildBusinessSummary({
       orders,
       customers,
       boms,
-      inventoryItems,
-      rangeStart,
-      todayStart,
-      rangeDays: days
+      inventoryItems
     });
 
     return {
       asOf: new Date().toISOString(),
-      rangeDays: days,
       identity: this.buildIdentitySummary(),
       integrations: this.buildIntegrationRails(),
       traffic,
@@ -587,7 +548,7 @@ export class DashboardService {
     };
   }
 
-  private buildTrafficSummary(events: LoadedAnalyticsEvent[], days: number) {
+  private buildTrafficSummary(events: LoadedAnalyticsEvent[]) {
     const pageViews = events.filter((event) => event.eventType === 'PAGE_VIEW');
     const linkClicks = events.filter((event) => event.eventType === 'LINK_CLICK');
     const webVitals = events.filter((event) => event.eventType === 'WEB_VITAL' && typeof event.metricValue === 'number');
@@ -756,7 +717,7 @@ export class DashboardService {
     );
 
     return {
-      windowLabel: `${days} dias`,
+      windowLabel: 'Base inteira',
       totals: {
         sessions: sessions.size,
         publicSessions: publicSessions.size,
@@ -812,25 +773,15 @@ export class DashboardService {
     }>;
     boms: LoadedBom[];
     inventoryItems: LoadedInventoryItem[];
-    rangeStart: Date;
-    todayStart: Date;
-    rangeDays: number;
   }) {
-    const { orders, customers, boms, inventoryItems, rangeStart, todayStart, rangeDays } = params;
+    const { orders, customers, boms, inventoryItems } = params;
     const activeOrders = orders.filter((order) => order.status !== 'CANCELADO');
-    const rangeOrders = activeOrders.filter((order) => order.createdAt >= rangeStart);
-    const todayOrders = activeOrders.filter((order) => order.createdAt >= todayStart);
-    const rangeCogsBreakdown = this.buildOrderCogsBreakdown({
-      rangeOrders,
-      boms,
-      inventoryItems
-    });
-    const auditCogsBreakdown = this.buildOrderCogsBreakdown({
+    const totalCogsBreakdown = this.buildOrderCogsBreakdown({
       rangeOrders: activeOrders,
       boms,
       inventoryItems
     });
-    const orderCogsByOrderId = new Map(rangeCogsBreakdown.orders.map((entry) => [entry.orderId, entry.cogs]));
+    const orderCogsByOrderId = new Map(totalCogsBreakdown.orders.map((entry) => [entry.orderId, entry.cogs]));
 
     const customerOrderCount = new Map<number, number>();
     for (const order of activeOrders) {
@@ -841,7 +792,7 @@ export class DashboardService {
     const fulfillmentMix = new Map<string, number>();
     const quoteMix = new Map<string, number>();
 
-    let paidRevenueInRange = 0;
+    let paidRevenueTotal = 0;
     const paidRevenueByDay = new Map<string, number>();
     const pendingReceivables = [];
 
@@ -877,28 +828,24 @@ export class DashboardService {
 
       for (const payment of order.payments) {
         const isPaid = payment.status === 'PAGO' || Boolean(payment.paidAt);
-        if (!isPaid || !payment.paidAt || payment.paidAt < rangeStart) continue;
-        paidRevenueInRange += payment.amount || 0;
+        if (!isPaid || !payment.paidAt) continue;
+        paidRevenueTotal += payment.amount || 0;
         const dayKey = toDayKey(payment.paidAt);
         paidRevenueByDay.set(dayKey, round2((paidRevenueByDay.get(dayKey) || 0) + (payment.amount || 0)));
       }
     }
 
-    const rangeOrderCost = round2(sumBy(rangeCogsBreakdown.orders, (order) => order.cogs));
-    const auditOrderCost = round2(sumBy(auditCogsBreakdown.orders, (order) => order.cogs));
-
-    const grossRevenueAllTime = sumBy(activeOrders, (order) => order.total || 0);
-    const grossRevenueInRange = sumBy(rangeOrders, (order) => order.total || 0);
-    const grossRevenueToday = sumBy(todayOrders, (order) => order.total || 0);
-    const productNetRevenueInRange = sumBy(
-      rangeOrders,
+    const totalOrderCost = round2(sumBy(totalCogsBreakdown.orders, (order) => order.cogs));
+    const grossRevenueTotal = sumBy(activeOrders, (order) => order.total || 0);
+    const productNetRevenueTotal = sumBy(
+      activeOrders,
       (order) => Math.max(round2(order.subtotal || 0) - round2(order.discount || 0), 0)
     );
-    const deliveryRevenueInRange = sumBy(rangeOrders, (order) => order.deliveryFee || 0);
-    const discountInRange = sumBy(rangeOrders, (order) => order.discount || 0);
+    const deliveryRevenueTotal = sumBy(activeOrders, (order) => order.deliveryFee || 0);
+    const discountTotal = sumBy(activeOrders, (order) => order.discount || 0);
     const outstandingBalance = sumBy(pendingReceivables, (entry) => entry.amount);
-    const grossProfitInRange = round2(productNetRevenueInRange - rangeOrderCost);
-    const contributionAfterFreightInRange = round2(grossRevenueInRange - rangeOrderCost);
+    const grossProfitTotal = round2(productNetRevenueTotal - totalOrderCost);
+    const contributionAfterFreightTotal = round2(grossRevenueTotal - totalOrderCost);
 
     const dailySeriesMap = new Map<
       string,
@@ -911,7 +858,7 @@ export class DashboardService {
       }
     >();
 
-    for (const order of rangeOrders) {
+    for (const order of activeOrders) {
       const dayKey = toDayKey(order.createdAt);
       const current = dailySeriesMap.get(dayKey) || {
         orders: 0,
@@ -956,7 +903,7 @@ export class DashboardService {
       number,
       { productId: number; productName: string; units: number; revenue: number; cogs: number }
     >();
-    for (const order of rangeCogsBreakdown.orders) {
+    for (const order of totalCogsBreakdown.orders) {
       for (const product of order.products) {
         const current = productMix.get(product.productId) || {
           productId: product.productId,
@@ -981,50 +928,46 @@ export class DashboardService {
       .sort((left, right) => right.revenue - left.revenue)
       .slice(0, 8);
 
-    const newCustomersInRange = customers.filter((customer) => customer.createdAt >= rangeStart).length;
-    const returningCustomersInRange = customers.filter((customer) => {
-      if (customer.createdAt >= rangeStart) return false;
-      return (customerOrderCount.get(customer.id) || 0) >= 2;
-    }).length;
-    const auditRevenue = round2(sumBy(auditCogsBreakdown.orders, (entry) => entry.revenue));
+    const repeatCustomersTotal = customers.filter((customer) => (customerOrderCount.get(customer.id) || 0) >= 2).length;
+    const auditRevenue = round2(sumBy(totalCogsBreakdown.orders, (entry) => entry.revenue));
     const cogsAudit: DashboardCogsAuditSummary = {
       windowLabel: 'Base inteira',
-      ordersCount: auditCogsBreakdown.orders.length,
-      ingredientsCount: auditCogsBreakdown.ingredients.length,
-      warningsCount: auditCogsBreakdown.warnings.length,
+      ordersCount: totalCogsBreakdown.orders.length,
+      ingredientsCount: totalCogsBreakdown.ingredients.length,
+      warningsCount: totalCogsBreakdown.warnings.length,
       revenue: auditRevenue,
-      cogs: auditOrderCost,
-      grossProfit: round2(auditRevenue - auditOrderCost)
+      cogs: totalOrderCost,
+      grossProfit: round2(auditRevenue - totalOrderCost)
     };
 
     return {
-      windowLabel: `${rangeDays} dias`,
+      windowLabel: 'Base inteira',
       kpis: {
         totalCustomers: customers.length,
-        ordersToday: todayOrders.length,
-        ordersInRange: rangeOrders.length,
+        ordersToday: activeOrders.length,
+        ordersInRange: activeOrders.length,
         ordersAllTime: activeOrders.length,
-        grossRevenueToday: round2(grossRevenueToday),
-        grossRevenueInRange: round2(grossRevenueInRange),
-        grossRevenueAllTime: round2(grossRevenueAllTime),
-        paidRevenueInRange: round2(paidRevenueInRange),
+        grossRevenueToday: round2(grossRevenueTotal),
+        grossRevenueInRange: round2(grossRevenueTotal),
+        grossRevenueAllTime: round2(grossRevenueTotal),
+        paidRevenueInRange: round2(paidRevenueTotal),
         outstandingBalance: round2(outstandingBalance),
-        avgTicketInRange: round2(grossRevenueInRange / Math.max(rangeOrders.length, 1)),
-        discountsInRange: round2(discountInRange),
-        deliveryRevenueInRange: round2(deliveryRevenueInRange),
-        productNetRevenueInRange: round2(productNetRevenueInRange),
-        estimatedCogsInRange: round2(rangeOrderCost),
-        costedOrdersInRange: rangeCogsBreakdown.orders.length,
-        cogsWarningsInRange: rangeCogsBreakdown.warnings.length,
-        grossProfitInRange: round2(grossProfitInRange),
-        grossMarginPctInRange: toPercent(grossProfitInRange, productNetRevenueInRange),
-        contributionAfterFreightInRange: round2(contributionAfterFreightInRange)
+        avgTicketInRange: round2(grossRevenueTotal / Math.max(activeOrders.length, 1)),
+        discountsInRange: round2(discountTotal),
+        deliveryRevenueInRange: round2(deliveryRevenueTotal),
+        productNetRevenueInRange: round2(productNetRevenueTotal),
+        estimatedCogsInRange: round2(totalOrderCost),
+        costedOrdersInRange: totalCogsBreakdown.orders.length,
+        cogsWarningsInRange: totalCogsBreakdown.warnings.length,
+        grossProfitInRange: round2(grossProfitTotal),
+        grossMarginPctInRange: toPercent(grossProfitTotal, productNetRevenueTotal),
+        contributionAfterFreightInRange: round2(contributionAfterFreightTotal)
       },
       cogsAudit,
       customerMetrics: {
-        newCustomersInRange,
-        returningCustomersInRange,
-        repeatRatePct: toPercent(returningCustomersInRange, customers.length)
+        newCustomersInRange: customers.length,
+        returningCustomersInRange: repeatCustomersTotal,
+        repeatRatePct: toPercent(repeatCustomersTotal, customers.length)
       },
       statusMix: [...statusMix.entries()]
         .map(([label, value]) => ({ label, value }))
@@ -1036,9 +979,9 @@ export class DashboardService {
         .map(([label, value]) => ({ label, value }))
         .sort((left, right) => right.value - left.value),
       dailySeries,
-      cogsByIngredient: auditCogsBreakdown.ingredients,
-      cogsByOrder: auditCogsBreakdown.orders,
-      cogsWarnings: auditCogsBreakdown.warnings,
+      cogsByIngredient: totalCogsBreakdown.ingredients,
+      cogsByOrder: totalCogsBreakdown.orders,
+      cogsWarnings: totalCogsBreakdown.warnings,
       topProducts,
       recentReceivables: pendingReceivables
         .sort((left, right) => right.amount - left.amount)

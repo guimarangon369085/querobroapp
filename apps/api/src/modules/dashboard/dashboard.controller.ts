@@ -1,11 +1,7 @@
-import { Controller, Get, Headers, Inject, Query, UnauthorizedException } from '@nestjs/common';
-import { z } from 'zod';
-import { parseWithSchema } from '../../common/validation.js';
+import { Controller, Get, Headers, Inject, UnauthorizedException } from '@nestjs/common';
 import { Public } from '../../security/public.decorator.js';
 import { getSecurityRuntimeConfig } from '../../security/security-config.js';
 import { DashboardService } from './dashboard.service.js';
-
-const daysSchema = z.coerce.number().int().min(1).max(365).default(30);
 
 function extractBearerToken(authHeader?: string | null) {
   const value = String(authHeader || '').trim();
@@ -39,12 +35,10 @@ export class DashboardController {
   @Public()
   @Get('summary')
   summary(
-    @Query('days') days?: string,
     @Headers('authorization') authorization?: string,
     @Headers('x-dashboard-token') dashboardToken?: string
   ) {
     this.assertDashboardAccess(authorization, dashboardToken);
-    const rangeDays = parseWithSchema(daysSchema, days ?? 30);
-    return this.service.getSummary(rangeDays);
+    return this.service.getSummary();
   }
 }
