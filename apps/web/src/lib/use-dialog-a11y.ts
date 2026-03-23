@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, type RefObject } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 
 const FOCUSABLE_SELECTOR = [
   'a[href]',
@@ -27,6 +27,13 @@ type UseDialogA11yOptions = {
 };
 
 export function useDialogA11y({ isOpen, dialogRef, onClose, initialFocusRef }: UseDialogA11yOptions) {
+  // Keep the latest close handler without re-running the open/cleanup cycle on every render.
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
   useEffect(() => {
     if (!isOpen) return;
 
@@ -58,7 +65,7 @@ export function useDialogA11y({ isOpen, dialogRef, onClose, initialFocusRef }: U
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
@@ -99,5 +106,5 @@ export function useDialogA11y({ isOpen, dialogRef, onClose, initialFocusRef }: U
         previousActiveElement.focus();
       }
     };
-  }, [dialogRef, initialFocusRef, isOpen, onClose]);
+  }, [dialogRef, initialFocusRef, isOpen]);
 }

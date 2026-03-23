@@ -221,6 +221,7 @@ function CustomersPageContent() {
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const addressInputRef = useRef<HTMLInputElement | null>(null);
   const modalAddressInputRef = useRef<HTMLInputElement | null>(null);
+  const customerModalNameInputRef = useRef<HTMLInputElement | null>(null);
   const customerDialogRef = useRef<HTMLDivElement | null>(null);
   const customerAutofillRef = useRef(createCustomerAutofillState());
   const openCustomerModalRef = useRef<((customer: CustomerRecord) => Promise<void>) | null>(null);
@@ -654,6 +655,19 @@ function CustomersPageContent() {
     dialogRef: customerDialogRef,
     onClose: closeCustomerModal
   });
+
+  useEffect(() => {
+    if (!isCustomerModalOpen || !isCustomerInfoEditing) return;
+
+    const frameId = window.requestAnimationFrame(() => {
+      customerModalNameInputRef.current?.focus();
+      customerModalNameInputRef.current?.select();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [isCustomerInfoEditing, isCustomerModalOpen]);
 
   const startRepeatOrder = (order: CustomerOrderPreview) => {
     const nextMinimumInput = defaultRepeatOrderDateTimeInput();
@@ -1280,6 +1294,7 @@ function CustomersPageContent() {
                     <div className="grid gap-3 md:grid-cols-2">
                       <FormField label="Nome completo" error={error}>
                         <input
+                          ref={customerModalNameInputRef}
                           className="app-input"
                           placeholder="Nome completo"
                           value={form.name || ''}
