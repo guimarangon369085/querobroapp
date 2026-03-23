@@ -5,6 +5,85 @@ import { readBusinessRuntimeProfile } from '../../common/business-profile.js';
 
 type LoadedOrder = Awaited<ReturnType<DashboardService['loadOrders']>>[number];
 type LoadedAnalyticsEvent = Awaited<ReturnType<DashboardService['loadAnalyticsEvents']>>[number];
+type LoadedBom = {
+  id: number;
+  productId: number;
+  saleUnitLabel: string | null;
+  yieldUnits: number | null;
+  items: Array<{
+    itemId: number;
+    qtyPerRecipe: number | null;
+    qtyPerSaleUnit: number | null;
+    qtyPerUnit: number | null;
+  }>;
+};
+type LoadedInventoryItem = {
+  id: number;
+  name: string;
+  unit: string;
+  purchasePackSize: number;
+  purchasePackCost: number;
+};
+
+type DashboardCogsWarningCode = 'BOM_MISSING' | 'BOM_ITEM_MISSING_QTY';
+
+type DashboardCogsWarning = {
+  code: DashboardCogsWarningCode;
+  orderId: number;
+  orderDisplayNumber: number;
+  productId: number;
+  productName: string;
+  message: string;
+};
+
+type DashboardOrderIngredientCost = {
+  ingredientId: number;
+  ingredientName: string;
+  unit: string;
+  quantity: number;
+  unitCost: number;
+  amount: number;
+};
+
+type DashboardOrderProductCost = {
+  productId: number;
+  productName: string;
+  quantity: number;
+  revenue: number;
+  cogs: number;
+};
+
+type DashboardOrderCogsEntry = {
+  orderId: number;
+  orderDisplayNumber: number;
+  customerName: string;
+  createdAt: string;
+  scheduledAt: string | null;
+  status: string;
+  itemsCount: number;
+  units: number;
+  revenue: number;
+  cogs: number;
+  grossProfit: number;
+  products: DashboardOrderProductCost[];
+  ingredients: DashboardOrderIngredientCost[];
+  warnings: Array<{
+    code: DashboardCogsWarningCode;
+    productId: number;
+    productName: string;
+    message: string;
+  }>;
+};
+
+type DashboardIngredientCogsEntry = {
+  ingredientId: number;
+  ingredientName: string;
+  unit: string;
+  quantity: number;
+  unitCost: number;
+  amount: number;
+  orderCount: number;
+};
 
 const SAO_PAULO_TIMEZONE = 'America/Sao_Paulo';
 const saoPauloFormatter = new Intl.DateTimeFormat('en-CA', {
@@ -29,6 +108,10 @@ type ZonedDateParts = {
 
 function round2(value: number) {
   return roundMoney(value);
+}
+
+function round3(value: number) {
+  return Math.round((Number(value) || 0) * 1000) / 1000;
 }
 
 function readSaoPauloParts(reference: Date): ZonedDateParts {
@@ -264,6 +347,200 @@ export class DashboardService {
       readyCount: rails.filter((item) => item.status === 'READY').length,
       pendingCount: rails.filter((item) => item.status === 'PENDING').length,
       items: rails
+    };
+  }
+
+  private buildOrderCogsBreakdown(params: {
+    rangeOrders: LoadedOrder[];
+    boms: LoadedBom[];
+    inventoryItems: LoadedInventoryItem[];
+  }) {
+    const { rangeOrders, boms, inventoryItems } = params;
+    const latestBomByProductId = new Map<number, LoadedBom>();
+    for (const bom of boms) {
+      if (!latestBomByProductId.has(bom.productId)) {
+        latestBomByProductId.set(bom.productId, bom);
+      }
+    }
+
+    const inventoryItemById = new Map(inventoryItems.map((item) => [item.id, item]));
+    const ingredientTotals = new Map<number, DashboardIngredientCogsEntry>();
+    const orderEntries: DashboardOrderCogsEntry[] = [];
+    const warnings: DashboardCogsWarning[] = [];
+
+    for (const order of rangeOrders) {
+      const ingredientMap = new Map<number, DashboardOrderIngredientCost>();
+      const productMap = new Map<number, DashboardOrderProductCost>();
+      const orderWarnings: DashboardOrderCogsEntry['warnings'] = [];
+      const warningKeys = new Set<string>();
+      const orderDisplayNumber = resolveDisplayNumber(order) ?? order.id;
+      const customerName =
+        order.customer?.name ||
+        `Cliente #${resolveDisplayNumber(order.customer) ?? order.customerId}`;
+
+      const pushWarning = (
+        code: DashboardCogsWarningCode,
+        productId: number,
+        productName: string,
+        message: string
+      ) => {
+        const key = `${code}:${productId}`;
+        if (warningKeys.has(key)) return;
+        warningKeys.add(key);
+        orderWarnings.push({ code, productId, productName, message });
+        warnings.push({
+          code,
+          orderId: order.id,
+          orderDisplayNumber,
+          productId,
+          productName,
+          message
+        });
+      };
+
+      let totalUnits = 0;
+
+      for (const item of order.items) {
+        const quantity = Math.max(item.quantity || 0, 0);
+        const productName = item.product?.name || `Produto #${item.productId}`;
+        const revenue = round2(item.total || (item.unitPrice || 0) * quantity);
+        totalUnits += quantity;
+
+        const productEntry = productMap.get(item.productId) || {
+          productId: item.productId,
+          productName,
+          quantity: 0,
+          revenue: 0,
+          cogs: 0
+        };
+        productEntry.quantity += quantity;
+        productEntry.revenue = round2(productEntry.revenue + revenue);
+
+        const bom = latestBomByProductId.get(item.productId);
+        if (!bom) {
+          pushWarning(
+            'BOM_MISSING',
+            item.productId,
+            productName,
+            'Produto sem ficha técnica ativa no COGS.'
+          );
+          productMap.set(item.productId, productEntry);
+          continue;
+        }
+
+        let itemCogs = 0;
+        let hasMissingQty = false;
+
+        for (const bomItem of bom.items) {
+          const perSale = perSaleQty(bom, bomItem);
+          if (perSale == null) {
+            hasMissingQty = true;
+            continue;
+          }
+
+          const inventoryItem = inventoryItemById.get(bomItem.itemId);
+          if (!inventoryItem) continue;
+
+          const ingredientQty = perSale * quantity;
+          const unitCost =
+            inventoryItem.purchasePackSize > 0
+              ? inventoryItem.purchasePackCost / inventoryItem.purchasePackSize
+              : 0;
+          const amount = ingredientQty * unitCost;
+          itemCogs += amount;
+
+          const ingredientEntry = ingredientMap.get(inventoryItem.id) || {
+            ingredientId: inventoryItem.id,
+            ingredientName: inventoryItem.name,
+            unit: inventoryItem.unit,
+            quantity: 0,
+            unitCost: round3(unitCost),
+            amount: 0
+          };
+          ingredientEntry.quantity = round3(ingredientEntry.quantity + ingredientQty);
+          ingredientEntry.amount = round2(ingredientEntry.amount + amount);
+          ingredientMap.set(inventoryItem.id, ingredientEntry);
+        }
+
+        if (hasMissingQty) {
+          pushWarning(
+            'BOM_ITEM_MISSING_QTY',
+            item.productId,
+            productName,
+            'Ficha técnica com ingrediente sem quantidade suficiente para o COGS.'
+          );
+        }
+
+        productEntry.cogs = round2(productEntry.cogs + itemCogs);
+        productMap.set(item.productId, productEntry);
+      }
+
+      const orderIngredients = [...ingredientMap.values()]
+        .map((entry) => ({
+          ...entry,
+          quantity: round3(entry.quantity),
+          unitCost: round3(entry.unitCost),
+          amount: round2(entry.amount)
+        }))
+        .sort((left, right) => right.amount - left.amount || left.ingredientName.localeCompare(right.ingredientName, 'pt-BR'));
+
+      for (const ingredient of orderIngredients) {
+        const aggregate = ingredientTotals.get(ingredient.ingredientId) || {
+          ingredientId: ingredient.ingredientId,
+          ingredientName: ingredient.ingredientName,
+          unit: ingredient.unit,
+          quantity: 0,
+          unitCost: ingredient.unitCost,
+          amount: 0,
+          orderCount: 0
+        };
+        aggregate.quantity = round3(aggregate.quantity + ingredient.quantity);
+        aggregate.amount = round2(aggregate.amount + ingredient.amount);
+        aggregate.orderCount += 1;
+        ingredientTotals.set(ingredient.ingredientId, aggregate);
+      }
+
+      const orderRevenue = Math.max(round2(order.subtotal || 0) - round2(order.discount || 0), 0);
+      const orderCogs = round2(sumBy(orderIngredients, (entry) => entry.amount));
+      orderEntries.push({
+        orderId: order.id,
+        orderDisplayNumber,
+        customerName,
+        createdAt: order.createdAt.toISOString(),
+        scheduledAt: order.scheduledAt?.toISOString() || null,
+        status: order.status,
+        itemsCount: order.items.length,
+        units: totalUnits,
+        revenue: round2(orderRevenue),
+        cogs: orderCogs,
+        grossProfit: round2(orderRevenue - orderCogs),
+        products: [...productMap.values()]
+          .map((entry) => ({
+            ...entry,
+            cogs: round2(entry.cogs),
+            revenue: round2(entry.revenue)
+          }))
+          .sort((left, right) => right.cogs - left.cogs || right.revenue - left.revenue),
+        ingredients: orderIngredients,
+        warnings: orderWarnings
+      });
+    }
+
+    return {
+      orders: orderEntries.sort(
+        (left, right) =>
+          new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime() ||
+          right.orderId - left.orderId
+      ),
+      ingredients: [...ingredientTotals.values()]
+        .map((entry) => ({
+          ...entry,
+          quantity: round3(entry.quantity),
+          unitCost: round3(entry.unitCost),
+          amount: round2(entry.amount)
+        }))
+        .sort((left, right) => right.amount - left.amount || left.ingredientName.localeCompare(right.ingredientName, 'pt-BR')),
+      warnings
     };
   }
 
@@ -556,23 +833,8 @@ export class DashboardService {
       createdAt: Date;
       deletedAt: Date | null;
     }>;
-    boms: Array<{
-      id: number;
-      productId: number;
-      saleUnitLabel: string | null;
-      yieldUnits: number | null;
-      items: Array<{
-        itemId: number;
-        qtyPerRecipe: number | null;
-        qtyPerSaleUnit: number | null;
-        qtyPerUnit: number | null;
-      }>;
-    }>;
-    inventoryItems: Array<{
-      id: number;
-      purchasePackSize: number;
-      purchasePackCost: number;
-    }>;
+    boms: LoadedBom[];
+    inventoryItems: LoadedInventoryItem[];
     rangeStart: Date;
     todayStart: Date;
     rangeDays: number;
@@ -581,25 +843,12 @@ export class DashboardService {
     const activeOrders = orders.filter((order) => order.status !== 'CANCELADO');
     const rangeOrders = activeOrders.filter((order) => order.createdAt >= rangeStart);
     const todayOrders = activeOrders.filter((order) => order.createdAt >= todayStart);
-
-    const unitCostByInventoryItem = new Map<number, number>();
-    for (const item of inventoryItems) {
-      const packSize = item.purchasePackSize || 0;
-      const packCost = item.purchasePackCost || 0;
-      unitCostByInventoryItem.set(item.id, packSize > 0 ? packCost / packSize : 0);
-    }
-
-    const bomCostByProductId = new Map<number, number>();
-    for (const bom of boms) {
-      if (bomCostByProductId.has(bom.productId)) continue;
-      let cost = 0;
-      for (const item of bom.items) {
-        const perSale = perSaleQty(bom, item);
-        if (perSale == null) continue;
-        cost += perSale * (unitCostByInventoryItem.get(item.itemId) || 0);
-      }
-      bomCostByProductId.set(bom.productId, round2(cost));
-    }
+    const cogsBreakdown = this.buildOrderCogsBreakdown({
+      rangeOrders,
+      boms,
+      inventoryItems
+    });
+    const orderCogsByOrderId = new Map(cogsBreakdown.orders.map((entry) => [entry.orderId, entry.cogs]));
 
     const customerOrderCount = new Map<number, number>();
     for (const order of activeOrders) {
@@ -609,12 +858,7 @@ export class DashboardService {
     const statusMix = new Map<string, number>();
     const fulfillmentMix = new Map<string, number>();
     const quoteMix = new Map<string, number>();
-    const productMix = new Map<
-      number,
-      { productId: number; productName: string; units: number; revenue: number; cogs: number }
-    >();
 
-    const rangeOrderIds = new Set(rangeOrders.map((order) => order.id));
     let paidRevenueInRange = 0;
     const paidRevenueByDay = new Map<string, number>();
     const pendingReceivables = [];
@@ -656,29 +900,9 @@ export class DashboardService {
         const dayKey = toDayKey(payment.paidAt);
         paidRevenueByDay.set(dayKey, round2((paidRevenueByDay.get(dayKey) || 0) + (payment.amount || 0)));
       }
-
-      if (!rangeOrderIds.has(order.id)) continue;
-      for (const item of order.items) {
-        const revenue = round2(item.total || (item.unitPrice || 0) * (item.quantity || 0));
-        const unitCost = bomCostByProductId.get(item.productId) || 0;
-        const cogs = round2(unitCost * (item.quantity || 0));
-        const existing = productMix.get(item.productId) || {
-          productId: item.productId,
-          productName: item.product?.name || `Produto #${item.productId}`,
-          units: 0,
-          revenue: 0,
-          cogs: 0
-        };
-        existing.units += item.quantity || 0;
-        existing.revenue = round2(existing.revenue + revenue);
-        existing.cogs = round2(existing.cogs + cogs);
-        productMix.set(item.productId, existing);
-      }
     }
 
-    const rangeOrderCost = sumBy(rangeOrders, (order) =>
-      sumBy(order.items, (item) => round2((bomCostByProductId.get(item.productId) || 0) * (item.quantity || 0)))
-    );
+    const rangeOrderCost = round2(sumBy(cogsBreakdown.orders, (order) => order.cogs));
 
     const grossRevenueAllTime = sumBy(activeOrders, (order) => order.total || 0);
     const grossRevenueInRange = sumBy(rangeOrders, (order) => order.total || 0);
@@ -713,10 +937,7 @@ export class DashboardService {
         cogs: 0,
         grossProfit: 0
       };
-      const orderCost = sumBy(
-        order.items,
-        (item) => round2((bomCostByProductId.get(item.productId) || 0) * (item.quantity || 0))
-      );
+      const orderCost = round2(orderCogsByOrderId.get(order.id) || 0);
       const orderNetRevenue = Math.max(round2(order.subtotal || 0) - round2(order.discount || 0), 0);
       current.orders += 1;
       current.grossRevenue = round2(current.grossRevenue + (order.total || 0));
@@ -747,6 +968,26 @@ export class DashboardService {
         grossProfit: stats.grossProfit
       }))
       .sort((left, right) => left.date.localeCompare(right.date, 'pt-BR'));
+
+    const productMix = new Map<
+      number,
+      { productId: number; productName: string; units: number; revenue: number; cogs: number }
+    >();
+    for (const order of cogsBreakdown.orders) {
+      for (const product of order.products) {
+        const current = productMix.get(product.productId) || {
+          productId: product.productId,
+          productName: product.productName,
+          units: 0,
+          revenue: 0,
+          cogs: 0
+        };
+        current.units += product.quantity;
+        current.revenue = round2(current.revenue + product.revenue);
+        current.cogs = round2(current.cogs + product.cogs);
+        productMix.set(product.productId, current);
+      }
+    }
 
     const topProducts = [...productMix.values()]
       .map((entry) => ({
@@ -780,6 +1021,8 @@ export class DashboardService {
         deliveryRevenueInRange: round2(deliveryRevenueInRange),
         productNetRevenueInRange: round2(productNetRevenueInRange),
         estimatedCogsInRange: round2(rangeOrderCost),
+        costedOrdersInRange: cogsBreakdown.orders.length,
+        cogsWarningsInRange: cogsBreakdown.warnings.length,
         grossProfitInRange: round2(grossProfitInRange),
         grossMarginPctInRange: toPercent(grossProfitInRange, productNetRevenueInRange),
         contributionAfterFreightInRange: round2(contributionAfterFreightInRange)
@@ -799,6 +1042,9 @@ export class DashboardService {
         .map(([label, value]) => ({ label, value }))
         .sort((left, right) => right.value - left.value),
       dailySeries,
+      cogsByIngredient: cogsBreakdown.ingredients,
+      cogsByOrder: cogsBreakdown.orders,
+      cogsWarnings: cogsBreakdown.warnings,
       topProducts,
       recentReceivables: pendingReceivables
         .sort((left, right) => right.amount - left.amount)

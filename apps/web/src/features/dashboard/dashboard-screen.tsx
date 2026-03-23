@@ -105,6 +105,8 @@ type DashboardSummary = {
       deliveryRevenueInRange: number;
       productNetRevenueInRange: number;
       estimatedCogsInRange: number;
+      costedOrdersInRange: number;
+      cogsWarningsInRange: number;
       grossProfitInRange: number;
       grossMarginPctInRange: number;
       contributionAfterFreightInRange: number;
@@ -124,6 +126,57 @@ type DashboardSummary = {
       paidRevenue: number;
       cogs: number;
       grossProfit: number;
+    }>;
+    cogsByIngredient: Array<{
+      ingredientId: number;
+      ingredientName: string;
+      unit: string;
+      quantity: number;
+      unitCost: number;
+      amount: number;
+      orderCount: number;
+    }>;
+    cogsByOrder: Array<{
+      orderId: number;
+      orderDisplayNumber: number;
+      customerName: string;
+      createdAt: string;
+      scheduledAt: string | null;
+      status: string;
+      itemsCount: number;
+      units: number;
+      revenue: number;
+      cogs: number;
+      grossProfit: number;
+      products: Array<{
+        productId: number;
+        productName: string;
+        quantity: number;
+        revenue: number;
+        cogs: number;
+      }>;
+      ingredients: Array<{
+        ingredientId: number;
+        ingredientName: string;
+        unit: string;
+        quantity: number;
+        unitCost: number;
+        amount: number;
+      }>;
+      warnings: Array<{
+        code: 'BOM_MISSING' | 'BOM_ITEM_MISSING_QTY';
+        productId: number;
+        productName: string;
+        message: string;
+      }>;
+    }>;
+    cogsWarnings: Array<{
+      code: 'BOM_MISSING' | 'BOM_ITEM_MISSING_QTY';
+      orderId: number;
+      orderDisplayNumber: number;
+      productId: number;
+      productName: string;
+      message: string;
     }>;
     topProducts: Array<{
       productId: number;
@@ -198,6 +251,18 @@ function formatShortDateLabel(value: string) {
   const parsed = new Date(`${value}T12:00:00`);
   if (Number.isNaN(parsed.getTime())) return value.slice(5);
   return parsed.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+}
+
+function formatDateTimeLabel(value: string | null) {
+  if (!value) return 'Sem data';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
 }
 
 function MetricCard({
@@ -571,11 +636,32 @@ export default function DashboardScreen() {
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                   <MetricCard label="Produto líquido" value={formatCurrencyBR(summary.business.kpis.productNetRevenueInRange)} tone="ink" />
                   <MetricCard label="Frete" value={formatCurrencyBR(summary.business.kpis.deliveryRevenueInRange)} tone="amber" />
-                  <MetricCard label="COGS" value={formatCurrencyBR(summary.business.kpis.estimatedCogsInRange)} tone="rose" />
+                  <MetricCard
+                    label="COGS"
+                    value={formatCurrencyBR(summary.business.kpis.estimatedCogsInRange)}
+                    tone="rose"
+                    meta={`${formatNumber(summary.business.kpis.costedOrdersInRange)} pedidos no cálculo${
+                      summary.business.kpis.cogsWarningsInRange
+                        ? ` · ${formatNumber(summary.business.kpis.cogsWarningsInRange)} alerta(s)`
+                        : ''
+                    }`}
+                  />
                   <MetricCard label="Lucro bruto" value={formatCurrencyBR(summary.business.kpis.grossProfitInRange)} tone="mint" />
                   <MetricCard label="Pós-frete" value={formatCurrencyBR(summary.business.kpis.contributionAfterFreightInRange)} tone="sky" />
                   <MetricCard label="Descontos" value={formatCurrencyBR(summary.business.kpis.discountsInRange)} tone="ink" />
                 </div>
+                {summary.business.cogsWarnings.length ? (
+                  <div className="rounded-[24px] border border-[rgba(162,81,66,0.18)] bg-[rgba(255,244,240,0.96)] p-4 text-sm text-[color:var(--ink-strong)]">
+                    <p className="font-semibold">Alertas de COGS</p>
+                    <div className="mt-2 grid gap-2">
+                      {summary.business.cogsWarnings.slice(0, 6).map((warning) => (
+                        <p key={`${warning.orderId}-${warning.code}-${warning.productId}`} className="text-neutral-700">
+                          #{warning.orderDisplayNumber} · {warning.productName} · {warning.message}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="grid gap-2">
                     <p className="text-sm font-semibold text-[color:var(--ink-strong)]">Receita</p>
@@ -587,6 +673,104 @@ export default function DashboardScreen() {
                   </div>
                 </div>
               </div>
+            </SectionPanel>
+          </section>
+
+          <section className="grid gap-4 xl:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
+            <SectionPanel title="Ingredientes no COGS" tone="ink">
+              {summary.business.cogsByIngredient.length ? (
+                <div className="grid gap-3">
+                  {summary.business.cogsByIngredient.map((entry) => (
+                    <div
+                      key={entry.ingredientId}
+                      className="rounded-[24px] border border-white/80 bg-white/82 p-4 shadow-[0_10px_24px_rgba(57,39,24,0.06)]"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <strong className="text-[color:var(--ink-strong)]">{entry.ingredientName}</strong>
+                        <span className="rounded-full border border-white/70 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-strong)]">
+                          {formatNumber(entry.orderCount)} pedido(s)
+                        </span>
+                      </div>
+                      <div className="mt-3 grid gap-2 text-sm text-neutral-600 sm:grid-cols-3">
+                        <span>
+                          {formatDecimal(entry.quantity, 3)} {entry.unit}
+                        </span>
+                        <span>R$ {formatDecimal(entry.unitCost, 4)} / {entry.unit}</span>
+                        <span>{formatCurrencyBR(entry.amount)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <CompactEmpty message="Sem consumo de ingrediente no período." />
+              )}
+            </SectionPanel>
+
+            <SectionPanel title="COGS por pedido" tone="rose">
+              {summary.business.cogsByOrder.length ? (
+                <div className="grid gap-3">
+                  {summary.business.cogsByOrder.map((entry) => (
+                    <div
+                      key={entry.orderId}
+                      className="rounded-[24px] border border-white/80 bg-white/82 p-4 shadow-[0_10px_24px_rgba(57,39,24,0.06)]"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <strong className="text-[color:var(--ink-strong)]">#{entry.orderDisplayNumber} · {entry.customerName}</strong>
+                        <span className="rounded-full border border-white/70 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-strong)]">
+                          {entry.status}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm text-neutral-600">
+                        Criado em {formatDateTimeLabel(entry.createdAt)}
+                        {entry.scheduledAt ? ` · Agendado para ${formatDateTimeLabel(entry.scheduledAt)}` : ''}
+                      </p>
+                      <div className="mt-3 grid gap-2 text-sm text-neutral-600 sm:grid-cols-5">
+                        <span>{formatNumber(entry.itemsCount)} item(ns)</span>
+                        <span>{formatNumber(entry.units)} un</span>
+                        <span>{formatCurrencyBR(entry.revenue)}</span>
+                        <span>{formatCurrencyBR(entry.cogs)}</span>
+                        <span>{formatCurrencyBR(entry.grossProfit)}</span>
+                      </div>
+                      <div className="mt-3 grid gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">Produtos</p>
+                        <div className="grid gap-2 text-sm text-neutral-600">
+                          {entry.products.map((product) => (
+                            <div key={`${entry.orderId}-${product.productId}`} className="flex flex-wrap items-center justify-between gap-2">
+                              <span>{product.productName} · {formatNumber(product.quantity)} un</span>
+                              <span>{formatCurrencyBR(product.cogs)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="mt-3 grid gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">Ingredientes</p>
+                        <div className="grid gap-2 text-sm text-neutral-600">
+                          {entry.ingredients.map((ingredient) => (
+                            <div
+                              key={`${entry.orderId}-${ingredient.ingredientId}`}
+                              className="flex flex-wrap items-center justify-between gap-2"
+                            >
+                              <span>
+                                {ingredient.ingredientName} · {formatDecimal(ingredient.quantity, 3)} {ingredient.unit}
+                              </span>
+                              <span>{formatCurrencyBR(ingredient.amount)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      {entry.warnings.length ? (
+                        <div className="mt-3 grid gap-2 rounded-[18px] border border-[rgba(162,81,66,0.18)] bg-[rgba(255,244,240,0.9)] p-3 text-sm text-[color:var(--ink-strong)]">
+                          {entry.warnings.map((warning) => (
+                            <p key={`${entry.orderId}-${warning.code}-${warning.productId}`}>{warning.productName} · {warning.message}</p>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <CompactEmpty message="Sem pedidos no período selecionado." />
+              )}
             </SectionPanel>
           </section>
 
