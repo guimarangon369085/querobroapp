@@ -2,20 +2,80 @@
   "name": "querobroapp",
   "private": true,
   "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20 <25",
+    "pnpm": ">=9 <10"
+  },
   "scripts": {
     "predev": "pnpm --filter @querobroapp/shared build",
     "dev": "turbo run dev --parallel",
     "build": "turbo run build",
+    "build:ci": "pnpm --filter '!@querobroapp/mobile' build",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
+    "check:prisma-drift": "node scripts/check-prisma-schema-drift.mjs",
+    "security:secrets": "node scripts/security-secrets-guard.mjs --full",
+    "security:secrets:staged": "node scripts/security-secrets-guard.mjs --staged",
+    "security:policy:diff": "node scripts/security-secret-policy-gate.mjs",
+    "security:hooks:install": "bash scripts/install-git-hooks.sh",
+    "security:host:audit": "bash scripts/security-host-audit.sh",
+    "security:host:apply": "bash scripts/security-host-apply.sh",
+    "security:github:audit": "node scripts/security-github-hardening.mjs --audit",
+    "security:github:apply": "node scripts/security-github-hardening.mjs --apply",
+    "security:vault": "node scripts/secrets-vault.mjs",
+    "session:docs:guard": "bash scripts/check-session-docs.sh",
+    "session:handoff:auto": "bash scripts/save-handoff-auto.sh",
+    "brand:sync": "bash scripts/sync-brand-assets.sh",
+    "cleanup:test-data": "node scripts/cleanup-test-data.mjs",
+    "qa:browser-smoke": "bash scripts/qa-browser-smoke.sh",
+    "qa:critical-e2e": "node scripts/qa-critical-e2e.mjs",
+    "qa:trust": "node scripts/qa-trust.mjs",
     "qa:smoke": "node scripts/qa-smoke.mjs",
-    "test": "pnpm -r --if-present test"
+    "validate:public-deploy": "node scripts/validate-public-deploy.mjs",
+    "validate:delivery-quote": "node scripts/validate-delivery-quote.mjs",
+    "bank:pix:bridge": "node scripts/nubank-pix-bridge.mjs",
+    "bank:pix:bridge:once": "node scripts/nubank-pix-bridge.mjs --once",
+    "bank:pix:bridge:install": "node scripts/install-nubank-pix-bridge-launch-agent.mjs",
+    "whatsapp:web:bridge": "node scripts/whatsapp-web-bridge.mjs",
+    "whatsapp:web:bridge:once": "node scripts/whatsapp-web-bridge.mjs --once",
+    "whatsapp:web:bridge:install": "node scripts/install-whatsapp-web-bridge-launch-agent.mjs",
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs && pnpm -r --if-present test"
   },
   "devDependencies": {
-    "@typescript-eslint/eslint-plugin": "^8.35.0",
-    "@typescript-eslint/parser": "^8.35.0",
-    "eslint": "^8.57.0",
+    "@types/react": "18.3.28",
+    "@types/react-dom": "18.3.7",
+    "@typescript-eslint/eslint-plugin": "^8.57.1",
+    "@typescript-eslint/parser": "^8.57.1",
+    "eslint": "^9.39.4",
     "prettier": "^3.4.2",
     "turbo": "^2.3.3"
+  },
+  "pnpm": {
+    "peerDependencyRules": {
+      "allowedVersions": {
+        "@types/react": "18.3.28 || ^19.1.1",
+        "react": "18.3.1 || ^19.2.0"
+      }
+    },
+    "overrides": {
+      "@types/react": "18.3.28",
+      "@react-native-community/cli": "20.1.2",
+      "@react-native/codegen": "0.84.1",
+      "ajv": "6.14.0",
+      "chromium-edge-launcher": "0.3.0",
+      "fast-xml-parser": "5.5.8",
+      "file-type": "21.3.4",
+      "flatted": "3.4.2",
+      "glob": "13.0.6",
+      "lodash": "^4.17.23",
+      "js-yaml": "^4.1.1",
+      "minimatch@^3.0.0": "3.1.4",
+      "multer": "2.1.1",
+      "qs": "^6.14.2",
+      "send@0.18.0": "0.19.0",
+      "sudo-prompt": "npm:@expo/sudo-prompt@9.3.2",
+      "test-exclude": "8.0.0",
+      "tar": "7.5.12"
+    }
   }
 }

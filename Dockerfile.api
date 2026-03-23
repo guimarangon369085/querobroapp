@@ -1,0 +1,50 @@
+FROM node:20-bookworm-slim AS base
+
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/* \
+  && corepack enable
+
+WORKDIR /app
+
+FROM base AS deps
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY packages/shared/package.json packages/shared/package.json
+
+RUN pnpm install --frozen-lockfile
+
+FROM deps AS build
+
+COPY . .
+
+ENV DATABASE_URL=postgresql://placeholder:placeholder@localhost:5432/querobroapp?schema=public
+
+RUN pnpm --filter @querobroapp/shared build
+RUN pnpm --filter @querobroapp/api exec prisma generate --schema prisma/schema.prod.prisma
+RUN pnpm --filter @querobroapp/api build
+
+FROM base AS runtime
+
+ENV NODE_ENV=production
+ENV PORT=3001
+ENV HOST=0.0.0.0
+ENV BUILDER_STORAGE_DIR=/data/builder
+
+WORKDIR /app
+
+COPY --from=deps /app/node_modules /app/node_modules
+COPY --from=deps /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/turbo.json /app/
+COPY --from=build /app/apps/api /app/apps/api
+COPY --from=build /app/packages/shared /app/packages/shared
+COPY --from=build /app/scripts /app/scripts
+
+RUN chmod +x /app/scripts/railway-api-entrypoint.sh
+
+EXPOSE 3001
+
+CMD ["/app/scripts/railway-api-entrypoint.sh"]

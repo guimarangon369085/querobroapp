@@ -154,7 +154,7 @@ Leia primeiro:
 - docs/MEMORY_VAULT.md
 - docs/querobroapp-context.md
 - docs/NEXT_STEP_PLAN.md
-- docs/HANDOFF_LOG.md
+- ultimas 80 linhas de docs/HANDOFF_LOG.md
 
 Objetivo da sessao:
 [descreva em 1 linha]

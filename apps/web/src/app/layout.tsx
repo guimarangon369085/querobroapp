@@ -1,44 +1,59 @@
 import './globals.css';
-import type { ReactNode } from 'react';
-import { Nav } from '@/components/nav';
-import { Topbar } from '@/components/topbar';
+import type { Metadata } from 'next';
+import { Suspense, type ReactNode } from 'react';
 import { BuilderRuntimeTheme } from '@/components/builder-runtime-theme';
 import { FeedbackProvider } from '@/components/feedback-provider';
-import { Manrope, Cormorant_Garamond } from 'next/font/google';
+import { RuntimeRecovery } from '@/components/runtime-recovery';
+import { RenderStabilityGuard } from '@/components/render-stability-guard';
+import { ViewportMetricsSync } from '@/components/viewport-metrics-sync';
+import { AppFrame } from '@/components/app-frame';
+import { AnalyticsTracker } from '@/components/analytics-tracker';
+import { getPublicAppOrigin } from '@/lib/public-site-config';
 
-const bodyFont = Manrope({ subsets: ['latin'], variable: '--font-body', display: 'swap' });
-const displayFont = Cormorant_Garamond({
-  subsets: ['latin'],
-  variable: '--font-display',
-  display: 'swap',
-  weight: ['400', '500', '600', '700'],
-});
+const metadataBase = getPublicAppOrigin({ allowLocalFallback: process.env.NODE_ENV !== 'production' });
 
-export const metadata = {
-  title: 'QUEROBROApp',
-  description: 'Dashboard web do QUEROBROApp',
+export const metadata: Metadata = {
+  metadataBase: metadataBase ? new URL(metadataBase) : undefined,
+  title: 'QUEROBROAPP',
+  description: 'Operacao diaria da Broa com pedidos, clientes e estoque.',
+  applicationName: 'QUEROBROAPP',
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'QUEROBROA'
+  },
+  icons: {
+    icon: [
+      { url: '/querobroa-brand/icons/querobroa-icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/querobroa-brand/icons/querobroa-icon-512.png', sizes: '512x512', type: 'image/png' }
+    ],
+    shortcut: '/querobroa-brand/icons/querobroa-icon-192.png',
+    apple: '/querobroa-brand/icons/apple-touch-icon.png'
+  },
+  openGraph: {
+    siteName: 'QUEROBROAPP',
+    locale: 'pt_BR',
+    type: 'website'
+  },
+  twitter: {
+    card: 'summary_large_image'
+  }
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="pt-BR">
-      <body className={`${bodyFont.variable} ${displayFont.variable}`}>
+      <body>
+        <ViewportMetricsSync />
+        <RenderStabilityGuard />
+        <RuntimeRecovery />
         <BuilderRuntimeTheme />
+        <Suspense fallback={null}>
+          <AnalyticsTracker />
+        </Suspense>
         <FeedbackProvider>
-          <div className="app-shell">
-            <aside className="app-sidebar">
-              <div className="app-brand">
-                <p className="app-brand__eyebrow">ERP artesanal</p>
-                <h1 className="app-brand__name">QUEROBROApp</h1>
-                <p className="app-brand__tag">Operacao simples, clara e eficiente.</p>
-              </div>
-              <Nav />
-            </aside>
-            <div className="app-main">
-              <Topbar />
-              <main className="app-content">{children}</main>
-            </div>
-          </div>
+          <AppFrame>{children}</AppFrame>
         </FeedbackProvider>
       </body>
     </html>

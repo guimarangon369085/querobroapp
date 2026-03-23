@@ -1,5 +1,28 @@
 import { z } from 'zod';
 
+export * from './lib/money.js';
+export * from './lib/external-order-schedule.js';
+export * from './lib/business-profile.js';
+
+type DisplayNumberSubject = {
+  id?: number | null;
+  publicNumber?: number | null;
+};
+
+export function resolveDisplayNumber(subject: DisplayNumberSubject | null | undefined) {
+  const publicNumber = subject?.publicNumber;
+  if (typeof publicNumber === 'number' && Number.isInteger(publicNumber) && publicNumber > 0) {
+    return publicNumber;
+  }
+
+  const id = subject?.id;
+  if (typeof id === 'number' && Number.isInteger(id) && id > 0) {
+    return id;
+  }
+
+  return null;
+}
+
 export const OrderStatusEnum = z.enum([
   'ABERTO',
   'CONFIRMADO',
@@ -11,18 +34,51 @@ export const OrderStatusEnum = z.enum([
 
 export const PaymentStatusEnum = z.enum(['PENDENTE', 'PAGO', 'CANCELADO']);
 export const OrderPaymentStatusEnum = z.enum(['PENDENTE', 'PARCIAL', 'PAGO']);
+export const PixChargeProviderEnum = z.enum(['STATIC_PIX', 'LOCAL_DEV']);
+export const OrderFulfillmentModeEnum = z.enum(['DELIVERY', 'PICKUP']);
+export const DeliveryProviderEnum = z.enum(['NONE', 'LOCAL']);
+export const DeliveryFeeSourceEnum = z.enum(['NONE', 'MANUAL_FALLBACK']);
+export const DeliveryQuoteStatusEnum = z.enum(['NOT_REQUIRED', 'PENDING', 'QUOTED', 'FALLBACK', 'EXPIRED', 'FAILED']);
+export const DeliveryJobStatusEnum = z.enum([
+  'NOT_REQUESTED',
+  'PENDING_REQUIREMENTS',
+  'REQUESTED',
+  'OUT_FOR_DELIVERY',
+  'DELIVERED',
+  'FAILED',
+  'CANCELED'
+]);
 
 export const StockMovementTypeEnum = z.enum(['IN', 'OUT', 'ADJUST']);
 export const InventoryCategoryEnum = z.enum(['INGREDIENTE', 'EMBALAGEM_INTERNA', 'EMBALAGEM_EXTERNA']);
-export const OutboxChannelEnum = z.enum(['whatsapp']);
-export const OutboxStatusEnum = z.enum(['PENDING', 'SENT', 'FAILED']);
+
+export const PixChargeSchema = z.object({
+  provider: PixChargeProviderEnum,
+  providerRef: z.string().min(1),
+  txid: z.string().min(1),
+  copyPasteCode: z.string().min(1),
+  expiresAt: z.string().optional().nullable(),
+  payable: z.boolean().default(false)
+});
+
+export const WhatsAppDispatchMessageSchema = z.object({
+  kind: z.enum(['SUMMARY', 'PIX_CODE']),
+  messageId: z.string().min(1)
+});
+
+export const WhatsAppPixDispatchSchema = z.object({
+  provider: z.literal('WHATSAPP_CLOUD_API'),
+  to: z.string().min(1),
+  sentAt: z.string(),
+  messages: z.array(WhatsAppDispatchMessageSchema).min(1)
+});
 
 export const CustomerSchema = z.object({
   id: z.number().int().positive().optional(),
+  publicNumber: z.number().int().positive().optional().nullable(),
   name: z.string().min(1),
   firstName: z.string().optional().nullable(),
   lastName: z.string().optional().nullable(),
-  email: z.string().email().optional().nullable(),
   phone: z.string().optional().nullable(),
   address: z.string().optional().nullable(),
   addressLine1: z.string().optional().nullable(),
@@ -36,6 +92,7 @@ export const CustomerSchema = z.object({
   lat: z.number().optional().nullable(),
   lng: z.number().optional().nullable(),
   deliveryNotes: z.string().optional().nullable(),
+  deletedAt: z.string().optional().nullable(),
   createdAt: z.string().optional().nullable()
 });
 
@@ -45,6 +102,7 @@ export const ProductSchema = z.object({
   category: z.string().optional().nullable(),
   unit: z.string().optional().nullable(),
   price: z.number().nonnegative(),
+  imageUrl: z.string().min(1).max(2048).optional().nullable(),
   active: z.boolean().default(true),
   createdAt: z.string().optional().nullable()
 });
@@ -60,15 +118,23 @@ export const OrderItemSchema = z.object({
 
 export const OrderSchema = z.object({
   id: z.number().int().positive().optional(),
+  publicNumber: z.number().int().positive().optional().nullable(),
   customerId: z.number().int().positive(),
   status: OrderStatusEnum.default('ABERTO'),
+  fulfillmentMode: OrderFulfillmentModeEnum.default('DELIVERY'),
   subtotal: z.number().nonnegative().optional(),
+  deliveryFee: z.number().nonnegative().optional(),
+  deliveryProvider: DeliveryProviderEnum.optional(),
+  deliveryFeeSource: DeliveryFeeSourceEnum.optional(),
+  deliveryQuoteStatus: DeliveryQuoteStatusEnum.optional(),
+  deliveryQuoteExpiresAt: z.string().optional().nullable(),
   discount: z.number().nonnegative().optional(),
   total: z.number().nonnegative().optional(),
   amountPaid: z.number().nonnegative().optional(),
   balanceDue: z.number().nonnegative().optional(),
   paymentStatus: OrderPaymentStatusEnum.optional(),
   notes: z.string().optional().nullable(),
+  scheduledAt: z.string().optional().nullable(),
   createdAt: z.string().optional().nullable(),
   items: z.array(OrderItemSchema).optional()
 });
@@ -77,21 +143,328 @@ export const PaymentSchema = z.object({
   id: z.number().int().positive().optional(),
   orderId: z.number().int().positive(),
   amount: z.number().nonnegative(),
-  method: z.string().min(1),
+  method: z.literal('pix').default('pix'),
   status: PaymentStatusEnum.default('PENDENTE'),
   paidAt: z.string().optional().nullable(),
   dueDate: z.string().optional().nullable(),
-  providerRef: z.string().optional().nullable()
+  providerRef: z.string().optional().nullable(),
+  pixCharge: PixChargeSchema.optional().nullable()
 });
 
-export const StockMovementSchema = z.object({
-  id: z.number().int().positive().optional(),
+export const PixSettlementWebhookSchema = z
+  .object({
+    version: z.literal(1).default(1),
+    paymentId: z.number().int().positive().optional().nullable(),
+    orderId: z.number().int().positive().optional().nullable(),
+    txid: z.string().trim().min(1).max(80).optional().nullable(),
+    providerRef: z.string().trim().min(1).max(160).optional().nullable(),
+    amount: z.number().positive().optional().nullable(),
+    paidAt: z.string().datetime({ offset: true }).optional().nullable(),
+    source: z.string().trim().min(1).max(80).default('webhook'),
+    metadata: z.record(z.unknown()).optional()
+  })
+  .refine((value) => Boolean(value.paymentId || value.providerRef || value.txid), {
+    message: 'Informe paymentId, providerRef ou txid.'
+  });
+
+export const PixReconciliationWebhookSchema = z.object({
+  version: z.literal(1).default(1),
+  payerName: z.string().trim().min(1).max(160),
+  amount: z.number().positive(),
+  paidAt: z.string().datetime({ offset: true }).optional().nullable(),
+  source: z.string().trim().min(1).max(80).default('bank-bridge'),
+  sourceTransactionId: z.string().trim().min(1).max(160).optional().nullable(),
+  metadata: z.record(z.unknown()).optional()
+});
+
+export const OrderIntakeChannelEnum = z.enum([
+  'INTERNAL_DASHBOARD',
+  'ADMIN_REPEAT',
+  'CUSTOMER_LINK',
+  'WHATSAPP_FLOW'
+]);
+
+export const OrderIntakeIntentEnum = z.enum(['DRAFT', 'CONFIRMED', 'PAID']);
+export const OrderIntakeStageEnum = z.enum(['DRAFT', 'CONFIRMED', 'PIX_PENDING', 'PAID', 'SCHEDULED']);
+export const PixChargeStatusEnum = z.enum(['PENDENTE', 'PAGO']);
+
+export const OrderIntakeCustomerRefSchema = z.union([
+  z.object({
+    customerId: z.number().int().positive()
+  }),
+  z.object({
+    name: z.string().min(1),
+    phone: z.string().optional().nullable(),
+    address: z.string().optional().nullable(),
+    placeId: z.string().optional().nullable(),
+    lat: z.number().optional().nullable(),
+    lng: z.number().optional().nullable(),
+    deliveryNotes: z.string().optional().nullable()
+  })
+]);
+
+export const OrderIntakeItemSchema = OrderItemSchema.pick({
+  productId: true,
+  quantity: true
+});
+
+export const OrderIntakePaymentSchema = z.object({
+  method: z.literal('pix').default('pix'),
+  status: PixChargeStatusEnum.default('PENDENTE'),
+  dueAt: z.string().datetime().optional().nullable(),
+  paidAt: z.string().datetime().optional().nullable(),
+  providerRef: z.string().trim().min(1).max(160).optional().nullable()
+});
+
+export const OrderIntakeSourceSchema = z.object({
+  channel: OrderIntakeChannelEnum.default('INTERNAL_DASHBOARD'),
+  externalId: z.string().trim().min(1).max(160).optional().nullable(),
+  idempotencyKey: z.string().trim().min(1).max(160).optional().nullable(),
+  originLabel: z.string().trim().min(1).max(160).optional().nullable()
+});
+
+export const DeliveryQuoteSelectionSchema = z.object({
+  quoteToken: z.string().trim().min(1).max(512).optional().nullable(),
+  fee: z.number().nonnegative().optional().nullable(),
+  provider: DeliveryProviderEnum.optional().nullable(),
+  source: DeliveryFeeSourceEnum.optional().nullable(),
+  status: DeliveryQuoteStatusEnum.optional().nullable(),
+  expiresAt: z.string().datetime().optional().nullable()
+});
+
+export const OrderIntakeSchema = z.object({
+  version: z.literal(1).default(1),
+  intent: OrderIntakeIntentEnum.default('CONFIRMED'),
+  customer: OrderIntakeCustomerRefSchema,
+  fulfillment: z
+    .object({
+      mode: OrderFulfillmentModeEnum.default('DELIVERY'),
+      scheduledAt: z.string().datetime().optional().nullable()
+    })
+    .default({}),
+  delivery: DeliveryQuoteSelectionSchema.optional(),
+  order: z.object({
+    items: z.array(OrderIntakeItemSchema).min(1),
+    discount: z.number().nonnegative().default(0),
+    notes: z.string().optional().nullable()
+  }),
+  payment: OrderIntakePaymentSchema.optional(),
+  source: OrderIntakeSourceSchema.default({})
+});
+
+export const OrderIntakeMetaSchema = z.object({
+  version: z.literal(1),
+  channel: OrderIntakeChannelEnum,
+  intent: OrderIntakeIntentEnum,
+  stage: OrderIntakeStageEnum,
+  fulfillmentMode: OrderFulfillmentModeEnum,
+  paymentMethod: z.literal('pix'),
+  pixStatus: PixChargeStatusEnum,
+  paymentId: z.number().int().positive().nullable(),
+  dueAt: z.string().nullable(),
+  paidAt: z.string().nullable(),
+  providerRef: z.string().nullable(),
+  deliveryFee: z.number().nonnegative(),
+  deliveryProvider: DeliveryProviderEnum,
+  deliveryFeeSource: DeliveryFeeSourceEnum,
+  deliveryQuoteStatus: DeliveryQuoteStatusEnum,
+  deliveryQuoteExpiresAt: z.string().nullable(),
+  pixCharge: PixChargeSchema.nullable(),
+  orderId: z.number().int().positive(),
+  customerId: z.number().int().positive()
+});
+
+export const ExternalOrderScheduleAvailabilityReasonEnum = z.enum([
+  'AVAILABLE',
+  'BEFORE_MINIMUM',
+  'SLOT_TAKEN',
+  'DAY_FULL'
+]);
+
+export const ExternalOrderScheduleAvailabilitySchema = z.object({
+  minimumAllowedAt: z.string().datetime(),
+  nextAvailableAt: z.string().datetime(),
+  requestedAt: z.string().datetime().nullable(),
+  requestedAvailable: z.boolean(),
+  reason: ExternalOrderScheduleAvailabilityReasonEnum,
+  dailyLimit: z.number().int().positive(),
+  slotMinutes: z.number().int().positive(),
+  dayOrderCount: z.number().int().nonnegative(),
+  slotTaken: z.boolean()
+});
+
+export const ExternalOrderSubmissionChannelEnum = z.enum(['GOOGLE_FORM', 'PUBLIC_FORM', 'WHATSAPP_FLOW']);
+
+export const ExternalOrderFlavorCountsSchema = z
+  .object({
+    T: z.coerce.number().int().nonnegative().default(0),
+    G: z.coerce.number().int().nonnegative().default(0),
+    D: z.coerce.number().int().nonnegative().default(0),
+    Q: z.coerce.number().int().nonnegative().default(0),
+    R: z.coerce.number().int().nonnegative().default(0)
+  })
+  .default({});
+
+export const ExternalOrderSubmissionItemSchema = z.object({
   productId: z.number().int().positive(),
-  type: StockMovementTypeEnum,
-  quantity: z.number().int(),
-  reason: z.string().optional().nullable(),
+  quantity: z.coerce.number().int().nonnegative().default(0)
+});
+
+export const ExternalOrderSubmissionSchema = z
+  .object({
+    version: z.literal(1).default(1),
+    customer: z.object({
+      name: z.string().min(1),
+      phone: z.string().optional().nullable(),
+      address: z.string().optional().nullable(),
+      placeId: z.string().optional().nullable(),
+      lat: z.number().optional().nullable(),
+      lng: z.number().optional().nullable(),
+      deliveryNotes: z.string().optional().nullable()
+    }),
+    fulfillment: z.object({
+      mode: OrderFulfillmentModeEnum.default('DELIVERY'),
+      scheduledAt: z.string().datetime()
+    }),
+    delivery: DeliveryQuoteSelectionSchema.optional(),
+    flavors: ExternalOrderFlavorCountsSchema,
+    items: z.array(ExternalOrderSubmissionItemSchema).default([]),
+    notes: z.string().optional().nullable(),
+    source: z
+      .object({
+        channel: ExternalOrderSubmissionChannelEnum.default('GOOGLE_FORM'),
+        externalId: z.string().trim().min(1).max(160).optional().nullable(),
+        idempotencyKey: z.string().trim().min(1).max(160).optional().nullable(),
+        originLabel: z.string().trim().min(1).max(160).optional().nullable()
+      })
+      .default({})
+  })
+  .superRefine((value, ctx) => {
+    const flavorTotal =
+      (value.flavors.T || 0) +
+      (value.flavors.G || 0) +
+      (value.flavors.D || 0) +
+      (value.flavors.Q || 0) +
+      (value.flavors.R || 0);
+    const itemTotal = (value.items || []).reduce(
+      (sum, item) => sum + Math.max(Math.floor(item.quantity || 0), 0),
+      0
+    );
+    if (flavorTotal <= 0 && itemTotal <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Informe ao menos 1 broa.',
+        path: ['items']
+      });
+    }
+  });
+
+export const DeliveryQuoteDraftSchema = z.object({
+  mode: OrderFulfillmentModeEnum.default('DELIVERY'),
+  scheduledAt: z.string().datetime(),
+  customer: z.object({
+    name: z.string().min(1).optional().nullable(),
+    phone: z.string().optional().nullable(),
+    address: z.string().optional().nullable(),
+    placeId: z.string().optional().nullable(),
+    lat: z.number().optional().nullable(),
+    lng: z.number().optional().nullable(),
+    deliveryNotes: z.string().optional().nullable()
+  }),
+  manifest: z.object({
+    items: z
+      .array(
+        z.object({
+          name: z.string().min(1),
+          quantity: z.number().nonnegative()
+        })
+      )
+      .default([]),
+    subtotal: z.number().nonnegative().default(0),
+    totalUnits: z.number().int().nonnegative().default(0)
+  })
+});
+
+export const DeliveryQuoteResponseSchema = z.object({
+  provider: DeliveryProviderEnum,
+  fee: z.number().nonnegative(),
+  currencyCode: z.string().trim().min(3).max(8).default('BRL'),
+  source: DeliveryFeeSourceEnum,
+  status: DeliveryQuoteStatusEnum,
+  quoteToken: z.string().trim().min(1).max(512).optional().nullable(),
+  providerQuoteId: z.string().trim().min(1).max(160).optional().nullable(),
+  expiresAt: z.string().nullable(),
+  fallbackReason: z.string().nullable(),
+  breakdownLabel: z.string().trim().min(1).max(160).optional().nullable()
+});
+
+export const ExternalOrderSubmissionPreviewItemSchema = z.object({
+  productId: z.number().int().positive(),
+  name: z.string().min(1),
+  quantity: z.number().int().positive(),
+  unitPrice: z.number().nonnegative(),
+  total: z.number().nonnegative()
+});
+
+export const ExternalOrderSubmissionPreviewSchema = z.object({
+  version: z.literal(1),
+  channel: OrderIntakeChannelEnum,
+  expectedStage: OrderIntakeStageEnum,
+  fulfillmentMode: OrderFulfillmentModeEnum,
+  scheduledAt: z.string().datetime(),
+  customer: z.object({
+    name: z.string().min(1),
+    phone: z.string().nullable(),
+    address: z.string().nullable(),
+    placeId: z.string().nullable(),
+    lat: z.number().nullable(),
+    lng: z.number().nullable(),
+    deliveryNotes: z.string().nullable()
+  }),
+  order: z.object({
+    items: z.array(ExternalOrderSubmissionPreviewItemSchema).min(1),
+    totalUnits: z.number().int().nonnegative(),
+    subtotal: z.number().nonnegative(),
+    discount: z.number().nonnegative(),
+    deliveryFee: z.number().nonnegative(),
+    total: z.number().nonnegative(),
+    notes: z.string().nullable()
+  }),
+  delivery: DeliveryQuoteResponseSchema,
+  payment: z.object({
+    method: z.literal('pix'),
+    status: PixChargeStatusEnum,
+    payable: z.boolean(),
+    dueAt: z.string().datetime().nullable()
+  }),
+  source: z.object({
+    channel: ExternalOrderSubmissionChannelEnum,
+    externalId: z.string().nullable(),
+    idempotencyKey: z.string().nullable(),
+    originLabel: z.string().nullable()
+  })
+});
+
+export const DeliveryQuoteViewSchema = DeliveryQuoteResponseSchema.extend({
+  id: z.number().int().positive().optional(),
   orderId: z.number().int().positive().optional().nullable(),
+  providerQuoteId: z.string().trim().min(1).max(160).optional().nullable(),
+  requestHash: z.string().trim().min(1).max(160).optional().nullable(),
   createdAt: z.string().optional().nullable()
+});
+
+export const DeliveryJobSchema = z.object({
+  id: z.number().int().positive().optional(),
+  orderId: z.number().int().positive(),
+  provider: DeliveryProviderEnum,
+  status: DeliveryJobStatusEnum,
+  providerDeliveryId: z.string().trim().min(1).max(160).optional().nullable(),
+  providerTrackingUrl: z.string().trim().max(512).optional().nullable(),
+  pickupEta: z.string().optional().nullable(),
+  dropoffEta: z.string().optional().nullable(),
+  lastError: z.string().optional().nullable(),
+  createdAt: z.string().optional().nullable(),
+  updatedAt: z.string().optional().nullable()
 });
 
 export const InventoryItemSchema = z.object({
@@ -108,6 +481,7 @@ export const InventoryMovementSchema = z.object({
   id: z.number().int().positive().optional(),
   itemId: z.number().int().positive(),
   orderId: z.number().int().positive().optional().nullable(),
+  orderDisplayNumber: z.number().int().positive().optional().nullable(),
   type: StockMovementTypeEnum,
   quantity: z.number().nonnegative(),
   reason: z.string().optional().nullable(),
@@ -115,6 +489,29 @@ export const InventoryMovementSchema = z.object({
   sourceLabel: z.string().min(1).max(140).optional().nullable(),
   unitCost: z.number().nonnegative().optional().nullable(),
   createdAt: z.string().optional().nullable()
+});
+
+export const InventoryOverviewItemSchema = InventoryItemSchema.extend({
+  balance: z.number(),
+  rawItemIds: z.array(z.number().int().positive()).default([])
+});
+
+export const InventoryMassSummarySchema = z.object({
+  itemId: z.number().int().positive().nullable(),
+  name: z.string(),
+  recipesAvailable: z.number(),
+  broasAvailable: z.number(),
+  recipesPossibleFromIngredients: z.number().nonnegative(),
+  broasPossibleFromIngredients: z.number().nonnegative(),
+  totalPotentialRecipes: z.number(),
+  totalPotentialBroas: z.number(),
+  limitingIngredientName: z.string().nullable()
+});
+
+export const InventoryOverviewResponseSchema = z.object({
+  items: z.array(InventoryOverviewItemSchema),
+  mass: InventoryMassSummarySchema,
+  generatedAt: z.string()
 });
 
 export const BomSchema = z.object({
@@ -132,18 +529,6 @@ export const BomItemSchema = z.object({
   qtyPerRecipe: z.number().nonnegative().optional().nullable(),
   qtyPerSaleUnit: z.number().nonnegative().optional().nullable(),
   qtyPerUnit: z.number().nonnegative().optional().nullable()
-});
-
-export const OutboxMessageSchema = z.object({
-  id: z.number().int().positive().optional(),
-  messageId: z.string().min(1),
-  channel: OutboxChannelEnum.default('whatsapp'),
-  to: z.string().min(1),
-  template: z.string().min(1),
-  payload: z.unknown(),
-  status: OutboxStatusEnum.default('PENDING'),
-  createdAt: z.string().optional().nullable(),
-  sentAt: z.string().optional().nullable()
 });
 
 export const ProductionRequirementBreakdownSchema = z.object({
@@ -167,6 +552,7 @@ export const ProductionRequirementRowSchema = z.object({
 export const ProductionRequirementWarningSchema = z.object({
   type: z.enum(['BOM_MISSING', 'BOM_ITEM_MISSING_QTY']),
   orderId: z.number().int().positive(),
+  orderPublicNumber: z.number().int().positive().optional().nullable(),
   productId: z.number().int().positive(),
   productName: z.string(),
   message: z.string()
@@ -179,23 +565,7 @@ export const ProductionRequirementsResponseSchema = z.object({
   warnings: z.array(ProductionRequirementWarningSchema)
 });
 
-export const ReceiptOfficialItemEnum = z.enum([
-  'FARINHA DE TRIGO',
-  'FUBÁ DE CANJICA',
-  'AÇÚCAR',
-  'MANTEIGA',
-  'LEITE',
-  'OVOS',
-  'GOIABADA',
-  'DOCE DE LEITE',
-  'QUEIJO DO SERRO',
-  'REQUEIJÃO DE CORTE',
-  'SACOLA',
-  'CAIXA DE PLÁSTICO',
-  'PAPEL MANTEIGA'
-]);
-
-export const BuilderReceiptQuantityModeEnum = z.enum(['PURCHASE_PACK', 'BASE_UNIT']);
+export * from './lib/phone.js';
 
 const HexColorSchema = z.string().regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
 
@@ -259,360 +629,8 @@ export const BuilderHomeSchema = z.object({
     ])
 });
 
-export const BuilderReceiptStockRuleSchema = z.object({
-  officialItem: ReceiptOfficialItemEnum,
-  inventoryItemName: z.string().min(1).max(120),
-  enabled: z.boolean().default(true),
-  quantityMultiplier: z.number().positive().max(100).default(1),
-  quantityMode: BuilderReceiptQuantityModeEnum.default('PURCHASE_PACK'),
-  purchasePackCostMultiplier: z.number().positive().max(100).default(1),
-  applyPriceToInventoryCost: z.boolean().default(true),
-  sourceLabel: z.string().trim().max(120).default('')
-});
-
-export const BuilderSupplierPriceSourceSchema = z.object({
-  id: z.string().min(1).max(64),
-  officialItem: ReceiptOfficialItemEnum,
-  inventoryItemName: z.string().min(1).max(120),
-  supplierName: z.string().trim().min(1).max(120),
-  url: z.string().url().max(500),
-  priceXPath: z.string().trim().max(400).default(''),
-  enabled: z.boolean().default(true),
-  fallbackPrice: z.number().positive().optional().nullable(),
-  applyToInventoryCost: z.boolean().default(true)
-});
-
-export const BuilderIntegrationsSchema = z.object({
-  shortcutsEnabled: z.boolean().default(true),
-  shortcutsWebhookUrl: z.string().max(300).default(''),
-  shortcutsNotes: z.string().max(500).default(''),
-  receiptsPrompt: z.string().max(3000).default(''),
-  receiptsSeparator: z.string().min(1).max(4).default(';'),
-  receiptsAutoIngestEnabled: z.boolean().default(true),
-  supplierPricesEnabled: z.boolean().default(true),
-  receiptStockRules: z.array(BuilderReceiptStockRuleSchema).max(30).default([
-    {
-      officialItem: 'FARINHA DE TRIGO',
-      inventoryItemName: 'FARINHA DE TRIGO',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'FUBÁ DE CANJICA',
-      inventoryItemName: 'FUBÁ DE CANJICA',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'AÇÚCAR',
-      inventoryItemName: 'AÇÚCAR',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'MANTEIGA',
-      inventoryItemName: 'MANTEIGA',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'LEITE',
-      inventoryItemName: 'LEITE',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'OVOS',
-      inventoryItemName: 'OVOS',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'GOIABADA',
-      inventoryItemName: 'GOIABADA',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'DOCE DE LEITE',
-      inventoryItemName: 'DOCE DE LEITE',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'QUEIJO DO SERRO',
-      inventoryItemName: 'QUEIJO DO SERRO',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'REQUEIJÃO DE CORTE',
-      inventoryItemName: 'REQUEIJÃO DE CORTE',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'SACOLA',
-      inventoryItemName: 'SACOLA',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'CAIXA DE PLÁSTICO',
-      inventoryItemName: 'CAIXA DE PLÁSTICO',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    },
-    {
-      officialItem: 'PAPEL MANTEIGA',
-      inventoryItemName: 'PAPEL MANTEIGA',
-      enabled: true,
-      quantityMultiplier: 1,
-      quantityMode: 'PURCHASE_PACK',
-      purchasePackCostMultiplier: 1,
-      applyPriceToInventoryCost: true,
-      sourceLabel: 'Cupom fornecedor'
-    }
-  ]),
-  supplierPriceSources: z.array(BuilderSupplierPriceSourceSchema).max(40).default([
-    {
-      id: 'src-trigo-pao',
-      officialItem: 'FARINHA DE TRIGO',
-      inventoryItemName: 'FARINHA DE TRIGO',
-      supplierName: 'Pao de Acucar',
-      url: 'https://www.paodeacucar.com/produto/23692/farinha-de-trigo-tipo-1-tradicional-qualita-pacote-1kg',
-      priceXPath:
-        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p',
-      enabled: true,
-      fallbackPrice: 6.49,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-canjica-superab',
-      officialItem: 'FUBÁ DE CANJICA',
-      inventoryItemName: 'FUBÁ DE CANJICA',
-      supplierName: 'SuperAB',
-      url: 'https://superabconline.com.br/p/d/2593871/fuba-canjica-rocinha-1kg',
-      priceXPath:
-        '/html/body/app-root/app-layout/app-layout-default/div/app-detalhes-produto-page/div/app-detalhes-produto/div/app-detalhes-produto-pagina-desktop-default/div/div/div[2]/div[3]/div[1]',
-      enabled: true,
-      fallbackPrice: 6,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-acucar-pao',
-      officialItem: 'AÇÚCAR',
-      inventoryItemName: 'AÇÚCAR',
-      supplierName: 'Pao de Acucar',
-      url: 'https://www.paodeacucar.com/produto/74215/acucar-refinado-uniao-pacote-1kg',
-      priceXPath:
-        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p',
-      enabled: true,
-      fallbackPrice: 5.69,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-manteiga-pao',
-      officialItem: 'MANTEIGA',
-      inventoryItemName: 'MANTEIGA',
-      supplierName: 'Pao de Acucar',
-      url: 'https://www.paodeacucar.com/produto/53023/manteiga-com-sal-batavo-200g',
-      priceXPath:
-        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p',
-      enabled: true,
-      fallbackPrice: 12.79,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-leite-pao',
-      officialItem: 'LEITE',
-      inventoryItemName: 'LEITE',
-      supplierName: 'Pao de Acucar',
-      url: 'https://www.paodeacucar.com/produto/164887/leite-uht-integral-qualita-caixa-com-tampa-1l',
-      priceXPath:
-        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p[1]',
-      enabled: true,
-      fallbackPrice: 4.19,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-ovos-pao',
-      officialItem: 'OVOS',
-      inventoryItemName: 'OVOS',
-      supplierName: 'Pao de Acucar',
-      url: 'https://www.paodeacucar.com/produto/1636359/ovos-vermelhos-qualita-livre-de-gaiola-bandeja-20-unidades',
-      priceXPath:
-        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p[1]',
-      enabled: true,
-      fallbackPrice: 23.9,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-goiabada-pao',
-      officialItem: 'GOIABADA',
-      inventoryItemName: 'GOIABADA',
-      supplierName: 'Pao de Acucar',
-      url: 'https://www.paodeacucar.com/produto/93418/goiabada-corte-qualita-pacote-300g',
-      priceXPath:
-        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p',
-      enabled: true,
-      fallbackPrice: 5.99,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-doce-pao',
-      officialItem: 'DOCE DE LEITE',
-      inventoryItemName: 'DOCE DE LEITE',
-      supplierName: 'Pao de Acucar',
-      url: 'https://www.paodeacucar.com/produto/354500/doce-de-leite-tradicional-portao-do-cambui-pacote-200g',
-      priceXPath:
-        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p',
-      enabled: true,
-      fallbackPrice: 20.99,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-queijo-pao',
-      officialItem: 'QUEIJO DO SERRO',
-      inventoryItemName: 'QUEIJO DO SERRO',
-      supplierName: 'Pao de Acucar',
-      url: 'https://www.paodeacucar.com/produto/443109/queijo-minas-meia-cura-do-serro-500g',
-      priceXPath:
-        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div/p',
-      enabled: true,
-      fallbackPrice: 46.95,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-requeijao-trela',
-      officialItem: 'REQUEIJÃO DE CORTE',
-      inventoryItemName: 'REQUEIJÃO DE CORTE',
-      supplierName: 'Trela',
-      url: 'https://trela.com.br/produto/requeijao-com-raspas-de-queijo-240g-5844',
-      priceXPath: '/html/body/div[1]/main/div/div[3]/div[1]/p',
-      enabled: true,
-      fallbackPrice: 30.9,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-sacola-fornecedor',
-      officialItem: 'SACOLA',
-      inventoryItemName: 'SACOLA',
-      supplierName: 'Fornecedor.net',
-      url: 'https://www.fornecedornet.com.br/papel-e-papelao/papel/sacolas-de-papel/sacola-kraft-natural-23-5x17x28cm-pacote-com-10-unidades',
-      priceXPath: '/html/body/div[2]/div[2]/div/div[4]/div[2]/ul[2]/li[1]/h2/span',
-      enabled: true,
-      fallbackPrice: 17.88,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-caixa-fornecedor',
-      officialItem: 'CAIXA DE PLÁSTICO',
-      inventoryItemName: 'CAIXA DE PLÁSTICO',
-      supplierName: 'Fornecedor.net',
-      url: 'https://www.fornecedornet.com.br/ga-20-rocambole-alto-galvanotek-caixa-100-unidades',
-      priceXPath: '/html/body/div[2]/div[2]/div/div[4]/div[2]/ul[2]/li[1]/h2/span',
-      enabled: true,
-      fallbackPrice: 86.65,
-      applyToInventoryCost: true
-    },
-    {
-      id: 'src-papel-pao',
-      officialItem: 'PAPEL MANTEIGA',
-      inventoryItemName: 'PAPEL MANTEIGA',
-      supplierName: 'Pao de Acucar',
-      url: 'https://www.paodeacucar.com/produto/108699/papel-manteiga-qualita-30cm-x-7,5m',
-      priceXPath:
-        '/html/body/div[1]/div[2]/div/main/div[2]/div/div[2]/div[2]/div[2]/div/div/div/div[1]/div/div/div[1]/p[1]',
-      enabled: true,
-      fallbackPrice: 10.29,
-      applyToInventoryCost: true
-    }
-  ]),
-  salePrices: z
-    .object({
-      completa: z
-        .object({
-          T: z.number().nonnegative().default(40),
-          G: z.number().nonnegative().default(50),
-          Q: z.number().nonnegative().default(52),
-          R: z.number().nonnegative().default(52),
-          D: z.number().nonnegative().default(52)
-        })
-        .default({}),
-      mista: z
-        .object({
-          T: z.number().nonnegative().default(0),
-          G: z.number().nonnegative().default(45),
-          Q: z.number().nonnegative().default(47),
-          R: z.number().nonnegative().default(47),
-          D: z.number().nonnegative().default(47)
-        })
-        .default({}),
-      sabores: z
-        .object({
-          T: z.number().nonnegative().default(52),
-          G: z.number().nonnegative().default(52),
-          Q: z.number().nonnegative().default(52),
-          R: z.number().nonnegative().default(52),
-          D: z.number().nonnegative().default(52)
-        })
-        .default({})
-    })
-    .default({})
-});
-
 export const BuilderLayoutPageKeyEnum = z.enum([
   'dashboard',
-  'produtos',
   'clientes',
   'pedidos',
   'estoque'
@@ -638,45 +656,35 @@ export const BuilderLayoutsSchema = z.object({
     { id: 'error', label: 'Avisos e erros', kind: 'slot', visible: true, order: 1 },
     { id: 'kpis', label: 'Cards de KPI', kind: 'slot', visible: true, order: 2 }
   ]),
-  produtos: BuilderPageLayoutSchema.default([
-    { id: 'header', label: 'Cabecalho da pagina', kind: 'slot', visible: true, order: 0 },
-    { id: 'note', label: 'Painel de convencao', kind: 'slot', visible: false, order: 1 },
-    { id: 'load_error', label: 'Aviso de carga', kind: 'slot', visible: true, order: 2 },
-    { id: 'kpis_filters', label: 'KPI e filtros', kind: 'slot', visible: true, order: 3 },
-    { id: 'form', label: 'Formulario do produto', kind: 'slot', visible: true, order: 4 },
-    { id: 'list', label: 'Lista de produtos', kind: 'slot', visible: true, order: 5 }
-  ]),
   clientes: BuilderPageLayoutSchema.default([
     { id: 'header', label: 'Cabecalho da pagina', kind: 'slot', visible: true, order: 0 },
-    { id: 'kpis_search', label: 'KPI e busca', kind: 'slot', visible: true, order: 1 },
-    { id: 'form', label: 'Formulario de cliente', kind: 'slot', visible: true, order: 2 },
+    { id: 'form', label: 'Formulario de cliente', kind: 'slot', visible: true, order: 1 },
+    { id: 'kpis_search', label: 'KPI e busca', kind: 'slot', visible: true, order: 2 },
     { id: 'list', label: 'Lista de clientes', kind: 'slot', visible: true, order: 3 }
   ]),
   pedidos: BuilderPageLayoutSchema.default([
     { id: 'header', label: 'Cabecalho da pagina', kind: 'slot', visible: true, order: 0 },
     { id: 'load_error', label: 'Aviso de carga', kind: 'slot', visible: true, order: 1 },
     { id: 'kpis', label: 'KPIs de pedidos', kind: 'slot', visible: true, order: 2 },
-    { id: 'new_order', label: 'Criacao de pedido', kind: 'slot', visible: true, order: 3 },
-    { id: 'list', label: 'Lista de pedidos', kind: 'slot', visible: true, order: 4 },
+    { id: 'list', label: 'Lista de pedidos', kind: 'slot', visible: true, order: 3 },
+    { id: 'new_order', label: 'Criacao de pedido', kind: 'slot', visible: true, order: 4 },
     { id: 'detail', label: 'Detalhe do pedido', kind: 'slot', visible: true, order: 5 }
   ]),
   estoque: BuilderPageLayoutSchema.default([
     { id: 'header', label: 'Cabecalho da pagina', kind: 'slot', visible: true, order: 0 },
-    { id: 'kpis', label: 'KPIs de estoque', kind: 'slot', visible: true, order: 1 },
-    { id: 'capacity', label: 'Capacidade por produto', kind: 'slot', visible: true, order: 2 },
-    { id: 'd1', label: 'Quadro D+1', kind: 'slot', visible: true, order: 3 },
-    { id: 'movement', label: 'Nova movimentacao', kind: 'slot', visible: true, order: 4 },
-    { id: 'bom', label: 'Fichas tecnicas (BOM)', kind: 'slot', visible: true, order: 5 },
-    { id: 'packaging', label: 'Custo de embalagem', kind: 'slot', visible: true, order: 6 },
-    { id: 'balance', label: 'Saldo por item', kind: 'slot', visible: true, order: 7 },
-    { id: 'movements', label: 'Historico de movimentacoes', kind: 'slot', visible: true, order: 8 }
+    { id: 'kpis', label: 'Resumo do dia', kind: 'slot', visible: true, order: 1 },
+    { id: 'movement', label: 'Ajuste rapido de saldos', kind: 'slot', visible: true, order: 2 },
+    { id: 'movements', label: 'Auditoria', kind: 'slot', visible: true, order: 3 },
+    { id: 'bom', label: 'Catalogo tecnico', kind: 'slot', visible: true, order: 4 },
+    { id: 'packaging', label: 'Itens e insumos', kind: 'slot', visible: true, order: 5 },
+    { id: 'balance', label: 'Saldos detalhados', kind: 'slot', visible: true, order: 6 },
+    { id: 'ops', label: 'Atalhos operacionais', kind: 'slot', visible: false, order: 7 }
   ])
 });
 
 export const BuilderLayoutsPatchSchema = z
   .object({
     dashboard: BuilderPageLayoutSchema.optional(),
-    produtos: BuilderPageLayoutSchema.optional(),
     clientes: BuilderPageLayoutSchema.optional(),
     pedidos: BuilderPageLayoutSchema.optional(),
     estoque: BuilderPageLayoutSchema.optional()
@@ -689,7 +697,6 @@ export const BuilderConfigSchema = z.object({
   theme: BuilderThemeSchema.default({}),
   forms: BuilderFormsSchema.default({}),
   home: BuilderHomeSchema.default({}),
-  integrations: BuilderIntegrationsSchema.default({}),
   layouts: BuilderLayoutsSchema.default({})
 });
 
@@ -698,45 +705,57 @@ export const BuilderConfigPatchSchema = z
     theme: BuilderThemeSchema.partial().optional(),
     forms: BuilderFormsSchema.partial().optional(),
     home: BuilderHomeSchema.partial().optional(),
-    integrations: BuilderIntegrationsSchema.partial().optional(),
     layouts: BuilderLayoutsPatchSchema.optional()
   })
   .strict();
 
-export const BuilderBlockKeyEnum = z.enum(['theme', 'forms', 'home', 'integrations', 'layout']);
+export const BuilderBlockKeyEnum = z.enum(['theme', 'forms', 'home', 'layout']);
 
 export type OrderStatus = z.infer<typeof OrderStatusEnum>;
 export type PaymentStatus = z.infer<typeof PaymentStatusEnum>;
 export type OrderPaymentStatus = z.infer<typeof OrderPaymentStatusEnum>;
+export type PixChargeProvider = z.infer<typeof PixChargeProviderEnum>;
+export type PixCharge = z.infer<typeof PixChargeSchema>;
 export type StockMovementType = z.infer<typeof StockMovementTypeEnum>;
-export type OutboxChannel = z.infer<typeof OutboxChannelEnum>;
-export type OutboxStatus = z.infer<typeof OutboxStatusEnum>;
+export type OrderIntakeChannel = z.infer<typeof OrderIntakeChannelEnum>;
+export type OrderIntakeIntent = z.infer<typeof OrderIntakeIntentEnum>;
+export type OrderIntakeStage = z.infer<typeof OrderIntakeStageEnum>;
+export type OrderFulfillmentMode = z.infer<typeof OrderFulfillmentModeEnum>;
+export type PixChargeStatus = z.infer<typeof PixChargeStatusEnum>;
+export type WhatsAppDispatchMessage = z.infer<typeof WhatsAppDispatchMessageSchema>;
+export type WhatsAppPixDispatch = z.infer<typeof WhatsAppPixDispatchSchema>;
+export type ExternalOrderSubmissionChannel = z.infer<typeof ExternalOrderSubmissionChannelEnum>;
+export type ExternalOrderFlavorCounts = z.infer<typeof ExternalOrderFlavorCountsSchema>;
+export type ExternalOrderSubmission = z.infer<typeof ExternalOrderSubmissionSchema>;
 
 export type Customer = z.infer<typeof CustomerSchema>;
 export type Product = z.infer<typeof ProductSchema>;
 export type OrderItem = z.infer<typeof OrderItemSchema>;
 export type Order = z.infer<typeof OrderSchema>;
 export type Payment = z.infer<typeof PaymentSchema>;
-export type StockMovement = z.infer<typeof StockMovementSchema>;
+export type PixSettlementWebhook = z.infer<typeof PixSettlementWebhookSchema>;
+export type OrderIntakeCustomerRef = z.infer<typeof OrderIntakeCustomerRefSchema>;
+export type OrderIntakeItem = z.infer<typeof OrderIntakeItemSchema>;
+export type OrderIntakePayment = z.infer<typeof OrderIntakePaymentSchema>;
+export type OrderIntakeSource = z.infer<typeof OrderIntakeSourceSchema>;
+export type OrderIntake = z.infer<typeof OrderIntakeSchema>;
+export type OrderIntakeMeta = z.infer<typeof OrderIntakeMetaSchema>;
 export type InventoryCategory = z.infer<typeof InventoryCategoryEnum>;
 export type InventoryItem = z.infer<typeof InventoryItemSchema>;
 export type InventoryMovement = z.infer<typeof InventoryMovementSchema>;
+export type InventoryOverviewItem = z.infer<typeof InventoryOverviewItemSchema>;
+export type InventoryMassSummary = z.infer<typeof InventoryMassSummarySchema>;
+export type InventoryOverviewResponse = z.infer<typeof InventoryOverviewResponseSchema>;
 export type Bom = z.infer<typeof BomSchema>;
 export type BomItem = z.infer<typeof BomItemSchema>;
-export type OutboxMessage = z.infer<typeof OutboxMessageSchema>;
 export type ProductionRequirementBreakdown = z.infer<typeof ProductionRequirementBreakdownSchema>;
 export type ProductionRequirementRow = z.infer<typeof ProductionRequirementRowSchema>;
 export type ProductionRequirementWarning = z.infer<typeof ProductionRequirementWarningSchema>;
 export type ProductionRequirementsResponse = z.infer<typeof ProductionRequirementsResponseSchema>;
-export type ReceiptOfficialItem = z.infer<typeof ReceiptOfficialItemEnum>;
 export type BuilderTheme = z.infer<typeof BuilderThemeSchema>;
 export type BuilderForms = z.infer<typeof BuilderFormsSchema>;
 export type BuilderHomeImage = z.infer<typeof BuilderHomeImageSchema>;
 export type BuilderHome = z.infer<typeof BuilderHomeSchema>;
-export type BuilderReceiptQuantityMode = z.infer<typeof BuilderReceiptQuantityModeEnum>;
-export type BuilderReceiptStockRule = z.infer<typeof BuilderReceiptStockRuleSchema>;
-export type BuilderSupplierPriceSource = z.infer<typeof BuilderSupplierPriceSourceSchema>;
-export type BuilderIntegrations = z.infer<typeof BuilderIntegrationsSchema>;
 export type BuilderLayoutPageKey = z.infer<typeof BuilderLayoutPageKeyEnum>;
 export type BuilderLayoutItem = z.infer<typeof BuilderLayoutItemSchema>;
 export type BuilderLayouts = z.infer<typeof BuilderLayoutsSchema>;

@@ -1,49 +1,67 @@
-/* eslint-disable @next/next/no-img-element */
-import Link from 'next/link';
-import { fetchBuilderConfigServer, resolveBuilderImageSrc } from '@/lib/builder';
+import type { Metadata } from 'next';
+import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
+import { ImmersiveHomeHero } from '@/components/home/immersive-home-hero';
+import { buildPublicAppUrl, isOpsHost } from '@/lib/public-site-config';
 
-const links = [
-  { href: '/dashboard', title: 'Dashboard', desc: 'KPIs e leitura de performance em tempo real.' },
-  { href: '/produtos', title: 'Produtos', desc: 'Catalogo, custo, margem e status comercial.' },
-  { href: '/clientes', title: 'Clientes', desc: 'Base ativa, recorrencia e relacionamento.' },
-  { href: '/pedidos', title: 'Pedidos', desc: 'Fluxo operacional com pagamentos e entregas.' },
-  { href: '/estoque', title: 'Estoque', desc: 'Inventario, ficha tecnica e consumo por receita.' },
-  { href: '/builder', title: 'Builder', desc: 'Edicao modular por blocos, sem codigo.' },
-];
+const pageTitle = 'QUEROBROA';
+const pageDescription = 'Sua vida + broa :) 🙂';
+const homeSocialImagePath = '/querobroa-brand/home-immersive/scene-05.jpg';
+
+export function generateMetadata(): Metadata {
+  const canonicalUrl = buildPublicAppUrl('/', {
+    allowLocalFallback: process.env.NODE_ENV !== 'production'
+  });
+  const socialImageUrl = buildPublicAppUrl(homeSocialImagePath, {
+    allowLocalFallback: process.env.NODE_ENV !== 'production'
+  });
+
+  return {
+    title: pageTitle,
+    description: pageDescription,
+    alternates: canonicalUrl
+      ? {
+          canonical: canonicalUrl
+        }
+      : undefined,
+    robots: {
+      index: true,
+      follow: true
+    },
+    openGraph: {
+      title: pageTitle,
+      description: pageDescription,
+      url: canonicalUrl || undefined,
+      siteName: 'QUEROBROA',
+      locale: 'pt_BR',
+      type: 'website',
+      images: socialImageUrl
+        ? [
+            {
+              url: socialImageUrl,
+              width: 1466,
+              height: 2200,
+              alt: 'Broas QUEROBROA em composicao editorial'
+            }
+          ]
+        : undefined
+    },
+    twitter: {
+      card: socialImageUrl ? 'summary_large_image' : 'summary',
+      title: pageTitle,
+      description: pageDescription,
+      images: socialImageUrl ? [socialImageUrl] : undefined
+    }
+  };
+}
 
 export default async function HomePage() {
-  const builderConfig = await fetchBuilderConfigServer();
-  const hero = builderConfig.home;
-  const gallery = hero.gallery.length ? hero.gallery : [];
+  const requestHeaders = await headers();
+  const hostname = requestHeaders.get('x-forwarded-host') || requestHeaders.get('host');
 
-  return (
-    <section className="grid gap-6">
-      <div className="app-hero app-panel">
-        <span className="app-hero__kicker">{hero.kicker}</span>
-        <h2 className="text-4xl font-semibold">{hero.title}</h2>
-        <p className="max-w-3xl text-[0.98rem] text-neutral-700">{hero.description}</p>
-      </div>
+  if (isOpsHost(hostname)) {
+    redirect('/pedidos');
+  }
 
-      <div className="app-gallery">
-        {gallery.map((item, index) => (
-          <div key={item.id} className="app-gallery__item">
-            <img
-              src={resolveBuilderImageSrc(item.src)}
-              alt={item.alt}
-              loading={index === 0 ? 'eager' : 'lazy'}
-            />
-          </div>
-        ))}
-      </div>
-
-      <div className="app-feature-grid md:grid-cols-2">
-        {links.map((link) => (
-          <Link key={link.href} href={link.href} className="app-feature-card">
-            <h3 className="app-feature-card__title">{link.title}</h3>
-            <p className="app-feature-card__desc">{link.desc}</p>
-          </Link>
-        ))}
-      </div>
-    </section>
-  );
+  return <ImmersiveHomeHero />;
 }

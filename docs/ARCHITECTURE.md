@@ -1,113 +1,82 @@
 # ARCHITECTURE
 
-## TOC
-- [1. Componentes](#1-componentes)
-- [2. Fluxo De Dados](#2-fluxo-de-dados)
-- [3. Fluxos Criticos](#3-fluxos-criticos)
-- [4. Pontos De Depuracao Rapida](#4-pontos-de-depuracao-rapida)
-
-## 1. Componentes
+## Visao simples
 
 ```text
-+--------------------+          +---------------------+
-| apps/web (Next.js) |<-------->| apps/api (NestJS)   |
-| App Router ERP     |  HTTP    | Controllers/Services |
-+--------------------+          +----------+----------+
-            ^                              |
-            |                              | Prisma Client
-            |                              v
-+----------------------+          +---------------------+
-| apps/mobile (Expo)   |--------->| SQLite dev /        |
-| Mobile ERP basico    |   HTTP   | Postgres prod       |
-+----------------------+          +---------------------+
+Web (Next.js)  ----\
+                  ---> API (NestJS) ---> Prisma ---> SQLite dev / Postgres prod
+Mobile (Expo) ---/
 
-+-----------------------+
-| packages/shared (Zod) |
-| Contratos de dominio  |
-+-----------+-----------+
-            |
-            +--> consumido por web/api/mobile
+Runtime config (read-only JSON) ---> API
+Shared contracts (Zod) ---------> Web + API + Mobile
 ```
 
-Referencias:
-- API composition: [`apps/api/src/app.module.ts`](../apps/api/src/app.module.ts)
-- Web shell: [`apps/web/src/app/layout.tsx`](../apps/web/src/app/layout.tsx)
-- Shared contracts: [`packages/shared/src/index.ts`](../packages/shared/src/index.ts)
+## Camadas
 
-## 2. Fluxo De Dados
+- Interface: `apps/web` e `apps/mobile`.
+- Regras de negocio: `apps/api/src/modules`.
+- Contratos de entrada e saida: `packages/shared/src/index.ts`.
+- Persistencia: `apps/api/prisma/schema.prisma` e `apps/api/prisma/schema.prod.prisma`.
+- Runtime config legada, em leitura: `GET /runtime-config` (com alias legado `GET /builder/config`).
 
-```text
-[Web/Mobile Form]
-      |
-      v
-[apiFetch (web/mobile)]
-      |
-      v
-[Nest Controller] --> [Zod parse] --> [Service]
-                                      |
-                                      v
-                                   [Prisma]
-                                      |
-                                      v
-                                    [DB]
-                                      |
-                                      v
-                            [JSON response -> UI]
-```
+## Modulos principais da API
 
-Clientes HTTP:
-- Web: [`apps/web/src/lib/api.ts`](../apps/web/src/lib/api.ts)
-- Mobile: [`apps/mobile/src/lib/api.ts`](../apps/mobile/src/lib/api.ts)
+- Base: `products`, `customers`
+- Operacao: `orders`, `payments`, `deliveries`, `production`
+- Estoque: `inventory`, `stock`, `bom`
+- Suporte interno: `runtime-config` (read-only)
 
-## 3. Fluxos Criticos
+Arquivo de composicao:
 
-### 3.1 Criar pedido com consumo de estoque
+- `apps/api/src/app.module.ts`
 
-```text
-POST /orders
-  -> OrdersService.create
-     -> valida cliente + itens
-     -> calcula subtotal/discount/total
-     -> cria Order + OrderItem
-     -> applyInventoryMovements(direction=OUT)
-         -> consulta BOM por produto
-         -> gera InventoryMovement por item de insumo
-```
+## Fluxos principais
 
-Referencia:
-- [`apps/api/src/modules/orders/orders.service.ts`](../apps/api/src/modules/orders/orders.service.ts)
+### 1) Pedido, entrega e financeiro
 
-### 3.2 Cancelar pedido com estorno de estoque
+1. Web cria pedido com cliente + itens.
+2. API calcula subtotal, desconto e total.
+3. API aplica consumo de estoque por BOM e movimenta producao quando o fluxo avanca.
+4. Entrega move o pedido pelo caminho certo.
+5. Pagamentos atualizam `amountPaid`, `balanceDue` e `paymentStatus`.
 
-```text
-PATCH /orders/:id/status (CANCELADO)
-  -> valida transicao ABERTO/CONFIRMADO/EM_PREPARACAO/PRONTO -> CANCELADO
-  -> applyInventoryMovements(direction=IN)
-  -> atualiza status do pedido
-```
+### 2) Agenda operacional em Pedidos
 
-### 3.3 Estoque detalhado no web
+1. Web abre direto em `/pedidos`.
+2. A agenda `Dia`, `Semana` e `Mes` vive na mesma tela.
+3. Clique em qualquer dia sempre abre a visao `Dia`, inclusive vazio.
+4. A visao `Dia` e compacta e cobre `08:00` a `22:59`.
 
-```text
-GET /inventory-items
-GET /inventory-movements
-GET /boms
-  -> pagina /estoque calcula:
-     saldo por item
-     custo por caixa (BOM)
-     capacidade estimada
-```
+### 3) D+1 e estoque
 
-Referencia:
-- [`apps/web/src/app/estoque/page.tsx`](../apps/web/src/app/estoque/page.tsx)
+1. API le pedidos e BOM.
+2. Calcula necessidade por insumo para a data alvo.
+3. Compara necessidade com saldo de inventario.
+4. Web mostra faltas e compras no quadro D+1.
 
-## 4. Pontos De Depuracao Rapida
+### 4) Integracoes externas
 
-- Health API: [`apps/api/src/app.controller.ts`](../apps/api/src/app.controller.ts)
-- Bootstrap/env/Swagger: [`apps/api/src/main.ts`](../apps/api/src/main.ts)
-- Logs dev scripts: `/tmp/querobroapp-api.log`, `/tmp/querobroapp-web.log`
-- Smoke script: [`scripts/qa-smoke.mjs`](../scripts/qa-smoke.mjs)
+1. Nao ha integracoes externas ativas na base operacional atual.
+2. O fluxo validado hoje e 100% interno.
+3. Qualquer reintegracao futura deve ser redesenhada do zero.
 
-Risco estrutural atual:
-- drift entre schema dev/prod e lock de migracoes em sqlite.
-- referencias: [`apps/api/prisma/schema.prisma`](../apps/api/prisma/schema.prisma), [`apps/api/prisma/schema.prod.prisma`](../apps/api/prisma/schema.prod.prisma), [`apps/api/prisma/migrations/migration_lock.toml`](../apps/api/prisma/migrations/migration_lock.toml)
+## Decisoes tecnicas importantes
+
+- Em dev, banco padrao e SQLite.
+- Em producao, usar Postgres com `schema.prod.prisma`.
+- Auth em producao e obrigatoria por padrao.
+- Throttling e `helmet` ja estao ativos na API.
+- Loopback local (`localhost`, `127.0.0.1`, `::1`) e tratado como origem valida para o fluxo de QA local.
+
+## Qualidade e operacao
+
+- `pnpm qa:trust` e o gate base.
+- `pnpm qa:browser-smoke` valida as 4 telas principais em navegador real.
+- `pnpm qa:critical-e2e` valida a jornada critica ponta a ponta.
+- `./scripts/dev-all.sh` e o caminho preferido para subir API + Web localmente.
+
+## Riscos atuais
+
+- Drift entre schema dev e prod ainda exige monitoramento continuo.
+- Cobertura de testes de negocio ainda nao cobre todo edge case.
+- Integracoes externas removidas reduzem ambiguidade de ambiente, mas exigem disciplina para nao presumir contratos legados em docs, env ou testes.

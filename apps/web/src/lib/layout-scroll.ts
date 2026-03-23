@@ -11,13 +11,53 @@ type ScrollToSlotOptions = {
   focusSelector?: string;
   delayMs?: number;
   maxAttempts?: number;
+  throttleMs?: number;
 };
+
+const lastScrollAt = new Map<string, number>();
 
 function findSlotElement(slotId: string) {
   return (
     document.querySelector<HTMLElement>(`[data-layout-slot-id="${slotId}"]`) ||
     document.getElementById(`slot-${slotId}`)
   );
+}
+
+function resolveTopOverlayOffset() {
+  const overlays = Array.from(
+    document.querySelectorAll<HTMLElement>('.app-topbar, [data-scroll-overlay="top"]')
+  );
+
+  return overlays.reduce((maxOffset, element) => {
+    const style = window.getComputedStyle(element);
+    if (style.display === 'none' || style.visibility === 'hidden') {
+      return maxOffset;
+    }
+
+    const rect = element.getBoundingClientRect();
+    if (rect.height <= 0 || rect.bottom <= 0) {
+      return maxOffset;
+    }
+
+    return Math.max(maxOffset, rect.height + Math.max(rect.top, 0));
+  }, 12);
+}
+
+function replaceCurrentUrlSearchParams(keys: string[]) {
+  if (typeof window === 'undefined' || keys.length === 0) return;
+
+  const url = new URL(window.location.href);
+  let changed = false;
+  for (const key of keys) {
+    if (!key) continue;
+    if (!url.searchParams.has(key)) continue;
+    url.searchParams.delete(key);
+    changed = true;
+  }
+  if (!changed) return;
+
+  const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+  window.history.replaceState(window.history.state, '', nextUrl);
 }
 
 export function scrollToLayoutSlot(slotId: string, options: ScrollToSlotOptions = {}) {
@@ -29,8 +69,14 @@ export function scrollToLayoutSlot(slotId: string, options: ScrollToSlotOptions 
     focus = false,
     focusSelector = 'input, select, textarea, button, a[href], [tabindex]:not([tabindex="-1"])',
     delayMs = 0,
-    maxAttempts = 6
+    maxAttempts = 6,
+    throttleMs = 800
   } = options;
+
+  const now = Date.now();
+  const last = lastScrollAt.get(slotId) ?? 0;
+  if (now - last < throttleMs) return;
+  lastScrollAt.set(slotId, now);
 
   let attempts = 0;
   const run = () => {
@@ -43,7 +89,12 @@ export function scrollToLayoutSlot(slotId: string, options: ScrollToSlotOptions 
       return;
     }
 
-    target.scrollIntoView({ behavior, block });
+    const overlayOffset = block === 'start' ? resolveTopOverlayOffset() : 12;
+    const targetTop = target.getBoundingClientRect().top + window.scrollY - overlayOffset - 12;
+    window.scrollTo({
+      top: Math.max(targetTop, 0),
+      behavior
+    });
     if (focus) {
       window.setTimeout(() => {
         const focusTarget = target.querySelector<HTMLElement>(focusSelector);
@@ -64,10 +115,11 @@ export function consumeFocusQueryParam(searchParams: SearchParamsLike, key = 'fo
   const value = (searchParams.get(key) || '').trim();
   if (!value || typeof window === 'undefined') return '';
 
-  const url = new URL(window.location.href);
-  url.searchParams.delete(key);
-  const nextUrl = `${url.pathname}${url.search}${url.hash}`;
-  window.history.replaceState(window.history.state, '', nextUrl);
+  replaceCurrentUrlSearchParams([key]);
 
   return value;
+}
+
+export function clearQueryParams(keys: string[]) {
+  replaceCurrentUrlSearchParams(keys);
 }

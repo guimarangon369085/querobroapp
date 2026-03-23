@@ -1,56 +1,31 @@
-# BOOTSTRAP PROMPTS
+# BOOTSTRAP_PROMPTS
 
-Copie e cole um destes prompts ao iniciar nova sessao.
+## Fonte Unica
 
-## 1) ChatGPT Online/Mobile
+O launcher [abrir-codex.command](/Users/gui/querobroapp/scripts/abrir-codex.command) nao carrega mais prompt inline. Ele le exatamente um destes templates versionados:
 
-```txt
-Quero continuar o projeto querobroapp sem depender de memoria anterior.
-Leia primeiro estes arquivos do repositorio:
-- docs/MEMORY_VAULT.md
-- docs/querobroapp-context.md
-- docs/NEXT_STEP_PLAN.md
-- docs/HANDOFF_LOG.md
+- Antes de abrir o Codex, ele atualiza automaticamente o snapshot factual em `$HOME/.querobroapp/codex-auto-session-snapshot.md` usando [refresh-codex-context.sh](/Users/gui/querobroapp/scripts/refresh-codex-context.sh).
+- `quick`: [codex-bootstrap-quick.txt](/Users/gui/querobroapp/docs/prompts/codex-bootstrap-quick.txt)
+- `reboot` e `qa`: [codex-bootstrap-reboot.txt](/Users/gui/querobroapp/docs/prompts/codex-bootstrap-reboot.txt)
+- `ux`: [codex-bootstrap-ux.txt](/Users/gui/querobroapp/docs/prompts/codex-bootstrap-ux.txt)
 
-Depois:
-1) resuma o estado atual em 10 linhas,
-2) confirme riscos/pendencias,
-3) execute este objetivo: [descreva em 1 linha].
+## Uso
 
-No final, gere um handoff no formato de docs/HANDOFF_TEMPLATE.md.
-```
+O default continua sendo o bootstrap rapido:
 
-## 2) Codex Terminal
+- `./scripts/abrir-codex.command`
+- `./scripts/abrir-codex.command quick`
+- `./scripts/abrir-codex.command reboot`
+- `./scripts/abrir-codex.command qa`
+- `./scripts/abrir-codex.command ux`
 
-```txt
-Antes de alterar qualquer arquivo:
-- leia docs/MEMORY_VAULT.md
-- leia docs/querobroapp-context.md
-- leia docs/HANDOFF_LOG.md
+## Regras De Desenho
 
-Objetivo da sessao:
-[descreva em 1 linha]
-
-Regras:
-- manter alteracoes objetivas,
-- validar comandos principais,
-- finalizar com nova entrada no docs/HANDOFF_LOG.md.
-```
-
-## 3) Codex Cloud/Online
-
-```txt
-Continuar querobroapp com base em contexto versionado no repo.
-Arquivos obrigatorios:
-- docs/MEMORY_VAULT.md
-- docs/querobroapp-context.md
-- docs/NEXT_STEP_PLAN.md
-- docs/HANDOFF_LOG.md
-
-Meta:
-[descreva em 1 linha]
-
-Entregavel:
-- diff aplicavel localmente
-- resumo tecnico + riscos + proximo passo
-```
+- `quick` e o modo padrao e nao faz perguntas iniciais.
+- `quick` sempre le primeiro o snapshot factual autoatualizado em `$HOME/.querobroapp/codex-auto-session-snapshot.md`.
+- Sem objetivo explicito, `quick` sincroniza contexto, entrega um resumo curto e fica aguardando silenciosamente a proxima instrucao.
+- `quick` assume por padrao que a proxima mensagem tratara de ajustes no app, UX, bugs ou refinamentos operacionais.
+- `reboot` e `qa` existem para o trilho pesado de religar ambiente, subir stack e validar manualmente.
+- `ux` existe para uma sessao focada em simplificacao de interface sem puxar o runbook de reboot por padrao.
+- O snapshot autoatualizado e a fonte factual principal para branch, worktree, commits recentes, servicos locais e frescor dos docs.
+- Mudou o comportamento de um modo: atualizar primeiro o template `.txt` correspondente, e so depois esta pagina se a orientacao de uso tambem mudou.

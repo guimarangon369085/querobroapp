@@ -67,7 +67,6 @@ export function normalizeLayoutItems(
 export function normalizeLayouts(config: BuilderConfig, fallback: BuilderConfig): BuilderLayouts {
   return {
     dashboard: normalizeLayoutItems(config.layouts.dashboard, fallback.layouts.dashboard),
-    produtos: normalizeLayoutItems(config.layouts.produtos, fallback.layouts.produtos),
     clientes: normalizeLayoutItems(config.layouts.clientes, fallback.layouts.clientes),
     pedidos: normalizeLayoutItems(config.layouts.pedidos, fallback.layouts.pedidos),
     estoque: normalizeLayoutItems(config.layouts.estoque, fallback.layouts.estoque),

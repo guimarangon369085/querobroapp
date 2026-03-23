@@ -1,135 +1,47 @@
-# MEMORY VAULT - QUEROBROAPP
+# MEMORY_VAULT
 
-Ultima atualizacao: 2026-02-11 23:07:49 -03
-Escopo: continuidade entre Codex Terminal/Cloud e ChatGPT Online/Mobile
+Ultima atualizacao: 2026-03-03
 
-## 1) Realidade de memoria entre plataformas
+## Para que serve
 
-- ChatGPT Online e ChatGPT Mobile compartilham historico da mesma conta.
-- Codex Terminal nao herda automaticamente todo historico do ChatGPT.
-- Eu (agente) nao tenho acesso direto ao historico completo da sua conta por conta propria.
-- Solucao adotada: contexto persistente em arquivos locais versionaveis no repo.
+Manter continuidade entre sessoes sem depender de memoria de chat.
 
-## 2) Estado local confirmado nesta sessao
+## Fonte de verdade
 
-- Usuario/sistema: `<usuario_local>` em macOS.
-- Repo principal: `$HOME/querobroapp`.
-- Branch atual: `main`.
-- Remoto principal: `origin https://github.com/<owner>/querobroapp.git`.
-- Login Codex CLI: `Logged in using ChatGPT`.
-- `OPENAI_API_KEY` em shell: ausente no momento.
+1. Codigo no repositorio.
+2. `README.md` para runbook de reboot, subida local e QA.
+3. `docs/querobroapp-context.md`.
+4. `docs/PROJECT_SNAPSHOT.md`.
+5. `docs/NEXT_STEP_PLAN.md`.
+6. `docs/TEST_RESET_PROTOCOL.md` para limpeza e reboot de teste.
+7. `docs/HANDOFF_LOG.md` apenas como trilha historica, nunca como snapshot atual isolado.
+8. `docs/BOOTSTRAP_PROMPTS.md` e `docs/prompts/*.txt` para o comportamento real do launcher.
+9. `$HOME/.querobroapp/codex-auto-session-snapshot.md` como snapshot factual autoatualizado da sessao atual.
 
-## 3) Atalho de abertura do Codex
+## Contexto tecnico estavel
 
-- Arquivo: `$HOME/Desktop/Abrir Codex.command`
-- Conteudo:
-  - `#!/bin/zsh`
-  - `cd $HOME`
-  - `exec $HOME/.npm-global/bin/codex`
-- Status: executavel e com icone customizado aplicado no arquivo.
+- Repo principal: `$HOME/querobroapp`
+- Stack: NestJS + Next.js + Expo + Prisma
+- Fluxo principal: Produtos -> Clientes -> Pedidos -> Estoque
+- Entrada operacional do web: `http://127.0.0.1:3000/pedidos`
 
-## 4) Copias detectadas do projeto (para evitar confusao)
+## Regras de continuidade
 
-- `$HOME/querobroapp` (principal em uso)
-- `$HOME/Documents/GitHub/querobroapp`
-- `$HOME/Downloads/querobroapp`
-- `$HOME/Downloads/q_new2/querobroapp`
+1. O launcher padrao `./scripts/abrir-codex.command` atualiza primeiro `$HOME/.querobroapp/codex-auto-session-snapshot.md` com fatos do repo e do ambiente local.
+2. Depois disso, o modo `quick` usa esse snapshot factual junto de `docs/PROJECT_SNAPSHOT.md`, `docs/NEXT_STEP_PLAN.md` e ultimas 80 linhas do handoff.
+3. Use `./scripts/abrir-codex.command reboot` (ou `qa`) quando a sessao envolver reboot, subida local ou QA; nesse modo, `README.md` e `docs/TEST_RESET_PROTOCOL.md` entram no bootstrap.
+4. Use `./scripts/abrir-codex.command ux` quando o foco for simplificacao de interface com minimo de cliques.
+5. `docs/MEMORY_VAULT.md` e `docs/querobroapp-context.md` entram quando houver ambiguidade real, mudanca estrutural ou necessidade de continuidade mais profunda.
+6. O modo `quick` nao faz perguntas iniciais; sem objetivo explicito, ele so sincroniza contexto, entrega resumo curto e fica aguardando silenciosamente a proxima instrucao.
+7. O modo `quick` assume por padrao que a sessao seguira com ajustes no app, UX, bugs ou refinamentos no fluxo operacional.
+8. Toda sessao termina com handoff novo.
+9. Se comportamento mudar, atualizar contexto, snapshot e plano no mesmo ciclo.
+10. Se o fluxo de reboot, teste ou QA mudar, atualizar `README.md`, `docs/TEST_RESET_PROTOCOL.md`, `docs/BOOTSTRAP_PROMPTS.md`, o template `.txt` correspondente e o script de snapshot no mesmo ciclo.
 
-## 5) Fontes de verdade do contexto
+## Riscos que devem ficar visiveis
 
-Leitura obrigatoria no inicio de qualquer nova sessao:
-
-1. `docs/querobroapp-context.md`
-2. `docs/PROJECT_SNAPSHOT.md`
-3. `docs/NEXT_STEP_PLAN.md`
-4. `docs/HANDOFF_LOG.md`
-
-Apoio adicional:
-
-- `docs/HANDOFF_TEMPLATE.md`
-- `docs/DELIVERY_BACKLOG.md`
-- `docs/ARCHITECTURE.md`
-- `docs/MVP_FINANCEIRO_E_D+1.md`
-- `docs/REPO_SCRAPE_REPORT.md`
-
-## 6) Mapa tecnico rapido
-
-- API: `apps/api` (NestJS + Prisma)
-- Web: `apps/web` (Next.js App Router)
-- Mobile: `apps/mobile` (Expo)
-- Contratos: `packages/shared`
-- UI compartilhada: `packages/ui`
-
-Fluxo MVP atual:
-
-1. Cadastro de produtos/sabores.
-2. Criacao e gestao de pedidos/itens/status.
-3. Pagamentos (parcial/quitacao).
-4. Estoque/BOM e quadro de producao D+1.
-
-## 7) Prioridades correntes consolidadas
-
-1. Consolidar `Pedido + Itens + Calculo + Estados`.
-2. Fechar regras de `Financeiro` (saldo/parcial/quitacao).
-3. Evoluir `D+1` operacional com base em pedidos + BOM.
-4. Manter docs e codigo sincronizados no `main`.
-
-## 8) Riscos e pontos de atencao
-
-- Possivel divergencia entre schema Prisma dev e prod.
-- Worktree pode estar suja durante iteracao local.
-- Nao apagar/reverter alteracoes nao revisadas.
-
-## 9) Procedimento de retomada sem historico
-
-Use exatamente esta sequencia:
-
-1. `cd $HOME/querobroapp`
-2. `git branch --show-current && git status --short`
-3. Ler `docs/querobroapp-context.md`
-4. Ler `docs/NEXT_STEP_PLAN.md`
-5. Ler ultima entrada de `docs/HANDOFF_LOG.md`
-6. Definir objetivo da sessao em 1 linha
-7. Executar trabalho
-8. Encerrar com nova entrada no `docs/HANDOFF_LOG.md`
-
-Encerramento recomendado:
-
-- Rodar `./scripts/save-handoff.sh` (ou o atalho Desktop `Salvar Handoff.command`) antes de fechar a sessao.
-
-## 10) Prompt de bootstrap (curto)
-
-```txt
-Projeto: querobroapp.
-Nao presuma memoria de conversa anterior.
-Leia primeiro:
-- docs/MEMORY_VAULT.md
-- docs/querobroapp-context.md
-- docs/NEXT_STEP_PLAN.md
-- docs/HANDOFF_LOG.md
-
-Depois continue com este objetivo:
-[objetivo em 1 linha]
-
-Antes de encerrar:
-- atualizar HANDOFF_LOG com resumo tecnico e proximo passo.
-```
-
-## 11) Linha do tempo desta sessao (resumo)
-
-1. Criado atalho de desktop `Abrir Codex.command`.
-2. Validado que Codex CLI estava logado com ChatGPT.
-3. Validado que `OPENAI_API_KEY` nao estava configurada.
-4. Criados docs de continuidade:
-   - `docs/querobroapp-context.md`
-   - `docs/HANDOFF_TEMPLATE.md`
-   - `docs/HANDOFF_LOG.md`
-5. Atualizado `README.md` com secao de continuidade.
-6. Aplicado icone customizado ao atalho do Codex no Desktop.
-7. Criado `scripts/save-handoff.sh` para registrar handoff automaticamente.
-
-## 12) Politica operacional de memoria
-
-- Cada sessao deve gerar handoff.
-- Contexto tecnico deve ficar em arquivos do repo (nao apenas no chat).
-- O repo deve permanecer como memoria duravel e auditavel.
+- Drift entre schema dev e prod.
+- Cobertura de testes de dominio ainda parcial, apesar do gate atual estar bem mais forte.
+- Worktree pode conter mudancas em andamento.
+- Integracoes externas foram removidas da base atual; nao presumir contratos, rotas ou variaveis legadas.
+- Branding atual do shell web usa `broa-mark.svg` na metadata e mark vetorial na sidebar; se trocar o logo, alinhar metadata e sidebar.

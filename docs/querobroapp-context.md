@@ -1,79 +1,57 @@
-# QUEROBROAPP CONTEXTO VIVO
+# QUEROBROAPP_CONTEXT
 
-Ultima atualizacao: 2026-02-12
-Fonte de verdade: este arquivo + codigo no repositorio
+Ultima atualizacao: 2026-03-04
 
-## Objetivo
+## Missao do produto
 
-Manter continuidade entre:
-- Codex Terminal
-- Codex Online/Cloud
-- ChatGPT Online
-- ChatGPT Mobile
+Facilitar a operacao diaria da broa com interface simples, agenda centrada em `Pedidos` e backend robusto.
 
-Sem depender de historico automatico entre produtos.
+## Estado atual
 
-## Estado atual (resumo rapido)
+- Web operacional com navegacao fixa em `Pedidos`, `Clientes`, `Produtos`, `Estoque`.
+- `Pedidos` e a tela-base do app e concentra `Dia`, `Semana` e `Mes`.
+- A visao de `Dia` abre por padrao e cobre `08:00` a `21:59` em grade compacta, com criacao de pedido no painel e lista completa de pedidos abaixo do calendario; cards de `Semana`/`Mes` abrem `Dia` na mesma data.
+- CTAs contextuais por tela: `Pedidos` usa acao `Criar` no painel, `Clientes/Produtos` usam acao inline/sticky e `Estoque` usa botao flutuante `Nova movimentacao`.
+- `/calendario` existe apenas como alias legado com redirect permanente para `/pedidos`.
+- O fluxo local continua funcional de ponta a ponta: pedido manual -> confirmacao -> fila de producao -> baixa real de estoque -> entrega local -> pagamento.
+- Integracoes externas foram removidas da estrutura atual para que a operacao principal evolua sem dependencias de terceiros.
+- O runtime de configuracao segue vivo por `GET /runtime-config`; `/builder` e apenas legado redirecionado.
+- O processo de QA agora tem `qa:trust`, `qa:browser-smoke` e `qa:critical-e2e`.
+- Os builds temporarios de QA do web agora usam dist dirs isolados, para reduzir o risco de contaminar o `.next` do `next dev`.
+- O workflow principal de CI no GitHub agora tambem usa `qa:trust` (com lint) e `check:prisma-drift`, reduzindo divergencia entre validacao local e remota.
+- Branding do shell web segue como QUEROBROAPP; a aba usa `broa-mark.svg` via metadata e a sidebar usa o mark vetorial interno.
 
-- Repo principal: `$HOME/querobroapp`
-- Branch de referencia: `main`
-- Stack: NestJS (API) + Next.js (Web) + Expo (Mobile) + Prisma
-- Documentacao tecnica base:
-  - `docs/PROJECT_SNAPSHOT.md`
-  - `docs/NEXT_STEP_PLAN.md`
-  - `docs/DELIVERY_BACKLOG.md`
-  - `docs/ARCHITECTURE.md`
+## Prioridades vigentes
 
-## Decisoes em vigor
+1. Validar o app manualmente apos reboot sem ambiguidades de ambiente.
+2. Simplificar mais a tela de `Estoque`, mantendo a jornada `planejar -> comprar -> produzir -> conferir`.
+3. Continuar endurecendo testes de dominio e de navegador para reduzir regressao silenciosa.
+4. Manter docs de estado, snapshot, reboot e handoff sincronizados no mesmo ciclo.
 
-- Repositorio git e a fonte canonica de codigo.
-- Este arquivo e a fonte canonica de contexto de conversa.
-- Toda sessao deve terminar com handoff preenchido (usar `docs/HANDOFF_TEMPLATE.md`).
-- Nao confiar em memoria de conversa entre canais; sempre reenviar contexto minimo.
+## Como religar rapido apos reboot
 
-## Prioridades correntes
+1. Rodar `./scripts/stop-all.sh`.
+2. Rodar `./scripts/dev-all.sh`.
+3. Se quiser validar do zero, rodar `pnpm cleanup:test-data` com API/Web ativos.
+4. Manter a janela aberta e abrir `http://127.0.0.1:3000/pedidos`.
+5. Validar `http://127.0.0.1:3001/health`.
+6. Se o browser ja estava aberto, fazer hard refresh.
 
-1. Consolidar fluxo `Pedido + Itens + Calculo + Estados`.
-2. Fechar regras de `Financeiro` (saldo, parcial, quitacao).
-3. Evoluir `D+1` operacional com base em pedidos + BOM.
-4. Manter docs e codigo sincronizados no `main`.
+## Como retomar uma sessao de trabalho
 
-## Bloqueios/atencao
+1. Para retomar no modo padrao, rode `./scripts/abrir-codex.command`.
+2. Para reboot, subida local ou QA, rode `./scripts/abrir-codex.command reboot` (ou `qa`).
+3. Para foco em UX, rode `./scripts/abrir-codex.command ux`.
+4. Antes de abrir o Codex, o launcher gera `$HOME/.querobroapp/codex-auto-session-snapshot.md` com branch, worktree, commits recentes, servicos locais e frescor dos docs.
+5. No modo padrao, o Codex deve ler esse snapshot primeiro, responder com um resumo curto e ficar aguardando em silencio a proxima instrucao.
+6. Assuma por padrao que a conversa seguinte tratara de ajustes no app, UX, bugs ou refinamentos operacionais.
+7. Se retomar manualmente, leia o snapshot autoatualizado, depois `docs/PROJECT_SNAPSHOT.md`, `docs/NEXT_STEP_PLAN.md` e as ultimas 80 linhas de `docs/HANDOFF_LOG.md`.
+8. Leia `README.md` e `docs/TEST_RESET_PROTOCOL.md` so em reboot, subida local, QA ou teste manual.
+9. Leia `docs/MEMORY_VAULT.md` quando houver ambiguidade real, necessidade de continuidade mais profunda ou mudanca estrutural.
+10. Nao presumir integracoes externas: o codigo atual nao depende de conectores de terceiros para o fluxo principal.
 
-- Pode haver divergencia entre schema Prisma dev e prod.
-- Worktree local pode ficar suja durante iteracoes; nao apagar mudancas sem validacao.
+## Integracoes externas
 
-## Prompt curto de retomada (ChatGPT Online/Mobile)
-
-Use este prompt ao abrir conversa em outro canal:
-
-```txt
-Projeto: querobroapp.
-Leia e use como contexto principal:
-- docs/querobroapp-context.md
-- docs/PROJECT_SNAPSHOT.md
-- docs/NEXT_STEP_PLAN.md
-
-Objetivo desta sessao: [descreva em 1 linha].
-Estado atual: [branch/commit ou mudancas locais].
-Entregavel esperado: [resultado concreto].
-```
-
-## Prompt curto de retomada (Codex Terminal/Cloud)
-
-```txt
-Antes de qualquer mudanca, leia:
-- docs/querobroapp-context.md
-- docs/HANDOFF_TEMPLATE.md
-- docs/NEXT_STEP_PLAN.md
-
-Depois continue a partir deste objetivo:
-[descreva em 1 linha]
-```
-
-## Checklist de encerramento de sessao
-
-- Atualizei este arquivo se houve mudanca de prioridade/decisao.
-- Registrei handoff com contexto minimo (template padrao).
-- Informei branch e arquivos alterados.
-- Listei proximo passo objetivo para a proxima sessao.
+- Integracoes antigas de terceiros e conectores de fornecedores foram removidos do codigo ativo.
+- A entrega atual usa apenas o fluxo local interno exposto por `deliveries`.
+- Quando a operacao principal estiver 100% estabilizada, qualquer reintegracao deve ser redesenhada do zero, sem reaproveitar contratos antigos por inercia.

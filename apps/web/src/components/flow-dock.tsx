@@ -1,0 +1,77 @@
+'use client';
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useOperationFlow } from '@/hooks/use-operation-flow';
+import { isActivePath, primaryNavItems } from '@/lib/navigation-model';
+import { formatCurrencyBR } from '@/lib/format';
+
+export function FlowDock() {
+  const pathname = usePathname();
+  const { flow, error } = useOperationFlow({ refreshIntervalMs: 30000 });
+  const activeIndex = primaryNavItems.findIndex((item) => isActivePath(pathname, item.href));
+
+  return (
+    <section className="flow-dock" aria-label="Fluxo principal">
+      <div className="flow-dock__head">
+        <p className="flow-dock__eyebrow">Fluxo</p>
+      </div>
+
+      <div className="flow-dock__main">
+        <p className="flow-dock__title">4 telas do dia.</p>
+        <div
+          className="flow-dock__progress"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={flow.progressPercent}
+        >
+          <span className="flow-dock__progress-fill" style={{ width: `${flow.progressPercent}%` }} />
+        </div>
+      </div>
+
+      <div className="flow-dock__stepline">
+        {primaryNavItems.map((item, index) => {
+          const active = isActivePath(pathname, item.href);
+          const stepState = active
+            ? 'flow-dock__stepchip--current'
+            : activeIndex >= 0 && index < activeIndex
+              ? 'flow-dock__stepchip--done'
+              : 'flow-dock__stepchip--locked';
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`flow-dock__stepchip ${stepState}`}
+              aria-label={`${index + 1}. ${item.label}`}
+            >
+              <span>{index + 1}</span>
+              <small>{item.label.slice(0, 1)}</small>
+            </Link>
+          );
+        })}
+      </div>
+
+      <div className="flow-dock__meta">
+        <span>{flow.metrics.openOrders} em aberto</span>
+        <span>{flow.metrics.deliveredOrders} entregues</span>
+        <span>{flow.metrics.customers} clientes</span>
+        <span>{flow.metrics.products} produtos</span>
+      </div>
+
+      <div className="flow-dock__actions">
+        <Link href="/pedidos" className="app-primary">
+          PEDIDOS
+        </Link>
+        <span>{formatCurrencyBR(flow.metrics.pendingValue)} PIX pendente</span>
+      </div>
+
+      {error ? (
+        <details className="flow-dock__error">
+          <summary>Falha</summary>
+          <p>{error}</p>
+        </details>
+      ) : null}
+    </section>
+  );
+}

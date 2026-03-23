@@ -1,258 +1,168 @@
-# QUEROBROApp
+# QUEROBROAPP
 
-Aplicativo para gestão da **produção e venda de broas**, sincronizado com TypeScript.
+QUEROBROAPP e um ERP operacional para a rotina diaria da broa.
+O principio atual do produto e simples: `Pedidos` concentra a agenda do dia; o backend segura a complexidade.
 
+## Estado atual verificado
 
-Monorepo com Turborepo + pnpm:
+- Web operacional com 4 telas reais: `Pedidos`, `Clientes`, `Produtos`, `Estoque`.
+- `Pedidos` e a entrada principal e concentra as visoes `Dia`, `Semana` e `Mes`.
+- `/calendario` existe apenas como redirect legado para `/pedidos`.
+- `Builder` nao faz mais parte da operacao: `/builder` redireciona para `/pedidos`.
+- Todas as integracoes externas foram removidas da base atual; a operacao validada hoje e 100% interna.
+- O processo de QA hoje ja tem gate unico, smoke de navegador e E2E critico.
 
-- `apps/api`: NestJS + Prisma (SQLite em dev, Postgres em prod)
-- `apps/web`: Next.js + Tailwind + shadcn/ui
-- `apps/mobile`: Expo React Native
-- `packages/shared`: schemas e types com zod
-- `packages/ui`: componentes compartilhados para web
+## Fluxo principal do produto
 
-## Instalação e uso
+1. `Produtos`: cadastre o que voce vende e mantenha a ficha tecnica.
+2. `Clientes`: salve contato e endereco.
+3. `Pedidos`: crie, acompanhe, produza, entregue e receba.
+4. `Estoque`: confira saldo, D+1, compras e consumo real.
 
-1. Clone o repositório:
+## Reiniciar a maquina e voltar a testar
 
-```bash
-git clone https://github.com/guimarangon369085/querobroapp.git
-cd querobroapp
-```
-
-2. Instale dependências:
-
-```bash
-pnpm install
-```
-
-3. Inicie o app:
+### Primeira vez nesta maquina
 
 ```bash
-pnpm dev
-```
-
-## Tecnologias usadas
-
-- TypeScript
-- Node.js
-- NestJS
-- Next.js
-- Expo React Native
-- Prisma
-- Turborepo
-- pnpm
-
-## Fluxo operacional (MVP)
-
-1. Cadastre **produtos/sabores** em `/produtos`.
-2. Crie pedido em `/pedidos` com cliente + itens.
-3. Abra o detalhe do pedido, ajuste status e registre pagamento.
-4. Use o botão **Marcar pedido como pago** para quitar o saldo restante.
-
-Convenção de domínio adotada:
-- `sabor/variedade` é representado como `Product` no catálogo (categoria `Sabores`, ex.: `T/G/S/R/D`).
-
-## Ficha técnica (BOM)
-
-- Ao criar um produto pela API (`POST /products`), a API cria automaticamente uma ficha técnica (BOM) vazia.
-- Endpoint para consultar/criar (backfill) a BOM padrão: `GET /products/:id/bom`.
-- No Web, a lista de produtos tem ação **Ficha técnica** que abre `/estoque?bomProductId=<id>` e pré-seleciona a BOM.
-
-Links rápidos:
-- `http://127.0.0.1:3000/produtos`
-- `http://127.0.0.1:3000/estoque?bomProductId=<id>`
-
-## Mobile (pagamentos)
-
-O app mobile (`apps/mobile`) permite:
-- ver detalhe do pedido (totais + itens + financeiro),
-- registrar pagamento parcial,
-- marcar pedido como pago (cria pagamento restante via API),
-- navegar do pedido para o cliente (abre a aba Clientes com edição).
-
-## Builder modular (modo LEGO)
-
-A pagina `http://127.0.0.1:3000/builder` permite editar o app em blocos, sem codar:
-
-- **Tema visual**: cores e fontes
-- **Inputs e selecao**: raio, padding, borda e acento de checkbox/radio
-- **Home/Landing**: textos e galeria com upload/remocao de imagens
-- **Integracoes/automacao**: dados operacionais do fluxo com Atalhos e regras editaveis de entrada automatica no estoque por cupom
-- **Blocos arrastaveis**: ordem e visibilidade das secoes em Dashboard/Produtos/Clientes/Pedidos/Estoque
-
-As mudancas aplicam preview imediato e podem ser salvas por bloco ou em lote.
-
-Detalhe tecnico:
-- configuracao persistida em `data/builder/config.json` (ignorado no git)
-- uploads da home em `data/builder/uploads/home`
-- API publica arquivos em `/uploads/builder/home/<arquivo>`
-
-## Onde mexer
-
-- Dados (Prisma): `apps/api/prisma/schema.prisma`, `apps/api/prisma/seed.ts`
-- Backend (Nest):
-  - Produtos: `apps/api/src/modules/products`
-  - Pedidos/itens/status: `apps/api/src/modules/orders`
-  - Pagamentos: `apps/api/src/modules/payments`
-  - Estoque/BOM/D+1: `apps/api/src/modules/inventory`, `apps/api/src/modules/bom`, `apps/api/src/modules/production`
-- UI (Next):
-  - Produtos/sabores: `apps/web/src/app/produtos/page.tsx`
-  - Pedidos e pagamentos: `apps/web/src/app/pedidos/page.tsx`
-  - Estoque e quadro D+1: `apps/web/src/app/estoque/page.tsx`
-
-## Continuidade entre ChatGPT/Codex
-
-Para manter contexto entre ChatGPT Online/Mobile e Codex Terminal/Cloud:
-
-- contexto vivo: `docs/querobroapp-context.md`
-- handoff de sessão: `docs/HANDOFF_TEMPLATE.md`
-- histórico de handoffs: `docs/HANDOFF_LOG.md`
-- memória consolidada: `docs/MEMORY_VAULT.md`
-- fluxo simples entre IAs: `docs/AI_WORKFLOW.md`
-- prompts prontos: `docs/BOOTSTRAP_PROMPTS.md`
-- releitura rápida no terminal: `scripts/relearn-context.sh`
-- salvar handoff automaticamente: `scripts/save-handoff.sh`
-- checklist de demo/go-no-go Sprint B: `docs/DEMO_CHECKLIST_GABI.md`
-- integração iOS de cupom fiscal: `docs/IOS_SHORTCUT_CUPOM.md`
-- setup rápido do Atalhos (IP/URL): `scripts/shortcut-receipts-setup.sh`
-- teste local com imagem de cupom: `scripts/test-receipt-image.sh`
-  - o script inclui automaticamente `idempotency-key` nos endpoints de ingestao
-  - se `APP_AUTH_ENABLED=true` e `APP_AUTH_TOKEN` existir no `.env`, envia `x-app-token`
-- abrir PR da branch atual: `scripts/open-pr-url.sh`
-- instalar atalhos de abrir/encerrar app no Desktop: `scripts/install-desktop-launchers.sh`
-
-Regra prática: cada sessão termina com handoff preenchido e próximo passo objetivo.
-
-Uso rápido:
-
-```bash
-# modo interativo (recomendado)
-./scripts/save-handoff.sh
-
-# modo não interativo (exemplo)
-HANDOFF_OBJETIVO="Encerramento da sessão" \
-HANDOFF_RESULTADO="Handoff registrado" \
-HANDOFF_PENDENTE="Nenhum" \
-HANDOFF_DECISOES="Manter fluxo de handoff" \
-HANDOFF_BLOQUEIOS="Nenhum" \
-HANDOFF_PROXIMO_PASSO="Retomar do próximo item" \
-./scripts/save-handoff.sh
-```
-
-Atalho Desktop (sem terminal manual):
-
-```bash
-./scripts/install-desktop-launchers.sh
-```
-
-Depois, use no Desktop:
-- `@QUEROBROAPP.app` (ou `@QUEROBROAPP.command`) para iniciar.
-- `Parar QUEROBROAPP.app` (ou `Parar QUEROBROAPP.command`) para encerrar.
-
-## Requisitos
-
-- Node.js 20+
-- pnpm 9+
-- Docker (opcional, apenas para Postgres local)
-
-## Setup local (SQLite)
-
-1. Instale dependências:
-
-```bash
-pnpm install
-```
-
-2. Copie os envs:
-
-```bash
+pnpm install --frozen-lockfile
 cp .env.example .env
 cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.example apps/web/.env
 cp apps/mobile/.env.example apps/mobile/.env
-```
-
-3. Gere o client do Prisma, rode migração e seed:
-
-```bash
 pnpm --filter @querobroapp/api prisma:generate:dev
 pnpm --filter @querobroapp/api prisma:migrate:dev
 pnpm --filter @querobroapp/api prisma:seed
 ```
 
-O seed é idempotente e cria dados de exemplo:
-- produtos e sabores de broa,
-- clientes,
-- pedidos com cenários `PENDENTE`, `PARCIAL` e `PAGO`.
-
-4. Rode tudo:
+### Reboot operacional padrao
 
 ```bash
-pnpm dev
+./scripts/stop-all.sh
+./scripts/dev-all.sh
 ```
 
-## Setup local (Postgres)
+Notas:
 
-1. Suba o Postgres:
+- `./scripts/dev-all.sh` sobe API + Web, limpa cache dev do web, roda migrate dev e abre `http://127.0.0.1:3000/pedidos`.
+- Mantenha essa janela aberta. Fechar a janela encerra API e Web.
+- Se quiser partir de estado limpo para validacao manual, rode com API/Web ativos (em outro terminal):
 
 ```bash
-docker compose up -d
+pnpm cleanup:test-data
 ```
 
-2. Ajuste `DATABASE_URL_PROD` em `apps/api/.env` e rode:
+- Atalho para reboot + limpeza executavel em um comando: `./scripts/refresh-and-start.command`.
+
+### Alternativa em 2 terminais
+
+Terminal 1:
 
 ```bash
-pnpm --filter @querobroapp/api prisma:generate:prod
-pnpm --filter @querobroapp/api prisma:migrate:prod
+pnpm --filter @querobroapp/api dev
 ```
 
-## Scripts
+Terminal 2:
 
-- `pnpm dev`: roda tudo em paralelo
-- `pnpm build`: build de todos os pacotes
-- `pnpm lint`: lint de todos os pacotes
-- `pnpm typecheck`: typecheck de todos os pacotes
-- `pnpm test`: roda os testes existentes nos workspaces
+```bash
+pnpm --filter @querobroapp/web dev
+```
 
-## URLs
+Observacao:
 
-- API Nest: `http://localhost:3001/health`
-- Swagger: `http://localhost:3001/docs`
-- Web: `http://localhost:3000`
-- Expo: `http://localhost:8081` (default)
+- `pnpm dev` na raiz usa `turbo` e sobe mais coisa do que o necessario para validar o web. Para teste manual do produto, prefira `./scripts/dev-all.sh`.
 
-## API (resumo)
+## URLs locais
 
-- `GET /products`, `POST /products`, `GET /products/:id`, `PUT /products/:id`, `DELETE /products/:id`
-- `GET /customers`, `POST /customers`, `GET /customers/:id`, `PUT /customers/:id`, `DELETE /customers/:id`
-- `GET /orders`, `POST /orders`, `GET /orders/:id`, `PUT /orders/:id`, `DELETE /orders/:id`
-- `POST /orders/:id/items`, `DELETE /orders/:id/items/:itemId`, `PATCH /orders/:id/status`
-- `PATCH /orders/:id/mark-paid`
-- `GET /products/:id/bom`
-- `GET /payments`, `POST /payments`, `PATCH /payments/:id/mark-paid`
-- `GET /stock-movements`, `POST /stock-movements`
-- `POST /receipts/parse` (extracao de cupom fiscal para linhas com separador configuravel no Builder)
-- `POST /receipts/ingest` (extracao + lancamento automatico no estoque, conforme regras do Builder)
-- `POST /receipts/ingest-notification` (extracao + ingestao, resposta text/plain para notificacao no Atalhos)
-- `POST /receipts/parse-clipboard` (retorna apenas texto pronto para colar no Numbers)
-  - requer `OPENAI_API_KEY` na API
-  - opcional: `RECEIPTS_API_TOKEN` + header `x-receipts-token`
-  - recomendado: `idempotency-key` no `POST /receipts/ingest` para evitar duplicidade em retry
-  - auth global (quando ativo): `x-app-token` ou `Authorization: Bearer <token>`
-  - no Atalhos, em `Codificar em Base64`, use `Quebras de Linha: Nenhuma`
-  - conferencia no web: `Estoque > Movimentacoes > Entradas automaticas por cupom`
-- `GET /builder/config`
-- `PUT /builder/config`
-- `PATCH /builder/config/:block` (`theme`, `forms`, `home`, `integrations`, `layout`)
-- `POST /builder/home-images` (multipart `file` + `alt`)
-- `DELETE /builder/home-images/:id`
+- Web: `http://127.0.0.1:3000/pedidos`
+- API health: `http://127.0.0.1:3001/health`
+- Runtime config (read-only): `http://127.0.0.1:3001/runtime-config`
+- Alias legado de runtime config: `http://127.0.0.1:3001/builder/config`
 
-## Observações
+## Checklist manual apos reboot
 
-- Em desenvolvimento, o Prisma usa SQLite (`DATABASE_URL=file:./dev.db`).
-- Em produção, use `DATABASE_URL_PROD` com Postgres e os scripts `prisma:*:prod`.
-- Auth API:
-  - `APP_AUTH_ENABLED=false` em dev por padrao.
-  - para ativar, configure `APP_AUTH_TOKEN` (admin) ou `APP_AUTH_TOKENS` (`role:token` separado por virgula).
-  - papeis disponiveis: `admin`, `operator`, `viewer` (viewer = leitura).
+1. Abra `http://127.0.0.1:3000/pedidos`.
+2. Confirme que a tela abre em `Dia`.
+3. Clique em um card qualquer no calendario de `Semana` ou `Mes` e confirme que ele abre a visao `Dia`, mesmo vazio.
+4. Crie ou edite um produto em `Produtos`.
+5. Crie ou edite um cliente em `Clientes`.
+6. Volte a `Pedidos`, crie um pedido e avance o status.
+7. Registre um pagamento.
+8. Abra `Estoque` e confira saldo e quadro D+1.
+
+Se o navegador estava aberto antes do reboot, faca um hard refresh. Isso evita bundle antigo do `next dev` em memoria.
+
+## QA automatizado
+
+Baseline:
+
+```bash
+pnpm qa:trust
+```
+
+Gate forte completo:
+
+```bash
+QA_TRUST_INCLUDE_LINT=1 \
+QA_TRUST_INCLUDE_SMOKE=1 \
+QA_TRUST_INCLUDE_BROWSER=1 \
+QA_TRUST_INCLUDE_CRITICAL_E2E=1 \
+pnpm qa:trust
+```
+
+Comandos avulsos:
+
+```bash
+pnpm qa:smoke
+pnpm qa:browser-smoke
+pnpm qa:critical-e2e
+pnpm check:prisma-drift
+```
+
+O gate `qa:trust` hoje valida:
+
+1. `session:docs:guard`
+2. `git diff --check`
+3. `typecheck`
+4. `test`
+5. `build:ci`
+
+E, por flag, adiciona `lint`, `qa:smoke`, `qa:browser-smoke` e `qa:critical-e2e`.
+
+Nota importante:
+
+- `qa:browser-smoke` e `qa:critical-e2e` agora usam dist dirs temporarios isolados do Next. Isso reduz o risco de corromper o `.next` do `next dev` enquanto o ambiente local estiver aberto.
+- O CI principal do GitHub agora roda `pnpm check:prisma-drift` + `QA_TRUST_INCLUDE_LINT=1 pnpm qa:trust`, para alinhar o gate remoto ao processo local.
+- Os fluxos `qa:browser-smoke` e `qa:critical-e2e` usam o wrapper Playwright em `$HOME/.codex/skills/playwright/scripts/playwright_cli.sh`; valide esse prerequisito em uma maquina nova antes do gate completo.
+
+## Integracoes externas
+
+- O backend atual ja sustenta intake externo canonico (`/orders/intake/customer-form`, `google-form` e `whatsapp-flow`), envio opcional pela WhatsApp Cloud API e alerta operacional por webhook/ntfy.
+- Agora tambem existe `POST /whatsapp/webhook`, `POST /payments/pix-settlements/webhook` para baixa PIX por identificador interno e `POST /payments/pix-reconciliations/webhook` para conciliacao segura por nome + valor vinda de bridge externa.
+- O trilho bancario foi preparado de forma provider-neutral: a conta oficial hoje e Nubank, mas a integracao de liquidacao entra pelo webhook do ERP para permitir automacao futura via Nubank/Open Finance/bridge externo sem trocar o contrato interno.
+- O repo agora inclui `scripts/nubank-pix-bridge.mjs`, que usa a aba autenticada do Nubank PJ no Chrome para ler PIX de entrada visiveis e delegar o matching seguro ao backend.
+
+## Scripts principais
+
+```bash
+./scripts/dev-all.sh
+./scripts/stop-all.sh
+./scripts/preflight-local.sh
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm qa:trust
+pnpm qa:browser-smoke
+pnpm qa:critical-e2e
+pnpm bank:pix:bridge:once
+pnpm bank:pix:bridge
+pnpm bank:pix:bridge:install
+```
+
+## Fontes de verdade
+
+- Estado tecnico: `docs/PROJECT_SNAPSHOT.md`
+- Contexto atual: `docs/querobroapp-context.md`
+- Plano atual: `docs/NEXT_STEP_PLAN.md`
+- Reboot e limpeza: `docs/TEST_RESET_PROTOCOL.md`
+- Continuidade entre sessoes: `docs/MEMORY_VAULT.md`
+- Historico cronologico: `docs/HANDOFF_LOG.md`

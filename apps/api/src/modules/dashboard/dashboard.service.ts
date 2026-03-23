@@ -1,0 +1,808 @@
+import { Inject, Injectable } from '@nestjs/common';
+import { resolveDisplayNumber, roundMoney } from '@querobroapp/shared';
+import { PrismaService } from '../../prisma.service.js';
+import { readBusinessRuntimeProfile } from '../../common/business-profile.js';
+
+type LoadedOrder = Awaited<ReturnType<DashboardService['loadOrders']>>[number];
+type LoadedAnalyticsEvent = Awaited<ReturnType<DashboardService['loadAnalyticsEvents']>>[number];
+
+const SAO_PAULO_TIMEZONE = 'America/Sao_Paulo';
+const saoPauloFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: SAO_PAULO_TIMEZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23'
+});
+
+type ZonedDateParts = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+};
+
+function round2(value: number) {
+  return roundMoney(value);
+}
+
+function readSaoPauloParts(reference: Date): ZonedDateParts {
+  const rawParts = saoPauloFormatter.formatToParts(reference);
+  const map = Object.fromEntries(rawParts.map((entry) => [entry.type, entry.value]));
+  return {
+    year: Number(map.year),
+    month: Number(map.month),
+    day: Number(map.day),
+    hour: Number(map.hour),
+    minute: Number(map.minute),
+    second: Number(map.second)
+  };
+}
+
+function resolveSaoPauloOffsetMilliseconds(reference: Date) {
+  const zoned = readSaoPauloParts(reference);
+  const zonedAsUtc = Date.UTC(zoned.year, zoned.month - 1, zoned.day, zoned.hour, zoned.minute, zoned.second, 0);
+  return zonedAsUtc - reference.getTime();
+}
+
+function saoPauloDateTimeToUtc(
+  parts: Pick<ZonedDateParts, 'year' | 'month' | 'day' | 'hour' | 'minute'> & { second?: number }
+) {
+  const utcGuess = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second ?? 0, 0);
+  const firstOffset = resolveSaoPauloOffsetMilliseconds(new Date(utcGuess));
+  let adjusted = utcGuess - firstOffset;
+  const secondOffset = resolveSaoPauloOffsetMilliseconds(new Date(adjusted));
+  if (secondOffset !== firstOffset) {
+    adjusted = utcGuess - secondOffset;
+  }
+  return new Date(adjusted);
+}
+
+function toDayKey(value: Date) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: SAO_PAULO_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(value);
+}
+
+function startOfToday(reference = new Date()) {
+  const zonedReference = readSaoPauloParts(reference);
+  return saoPauloDateTimeToUtc({
+    year: zonedReference.year,
+    month: zonedReference.month,
+    day: zonedReference.day,
+    hour: 0,
+    minute: 0,
+    second: 0
+  });
+}
+
+function createRangeStart(days: number, reference = new Date()) {
+  const zonedReference = readSaoPauloParts(reference);
+  const targetAnchor = new Date(
+    Date.UTC(zonedReference.year, zonedReference.month - 1, zonedReference.day - (days - 1), 12, 0, 0, 0)
+  );
+  const targetDay = readSaoPauloParts(targetAnchor);
+  return saoPauloDateTimeToUtc({
+    year: targetDay.year,
+    month: targetDay.month,
+    day: targetDay.day,
+    hour: 0,
+    minute: 0,
+    second: 0
+  });
+}
+
+function isPublicPath(path?: string | null) {
+  return path === '/' || Boolean(path && path.startsWith('/pedido'));
+}
+
+function toPercent(numerator: number, denominator: number) {
+  if (!denominator || !Number.isFinite(denominator)) return 0;
+  return round2((numerator / denominator) * 100);
+}
+
+function percentile(values: number[], percentileValue: number) {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  const rawIndex = (percentileValue / 100) * (sorted.length - 1);
+  const lower = Math.floor(rawIndex);
+  const upper = Math.ceil(rawIndex);
+  if (lower === upper) return round2(sorted[lower] || 0);
+  const ratio = rawIndex - lower;
+  return round2((sorted[lower] || 0) + ((sorted[upper] || 0) - (sorted[lower] || 0)) * ratio);
+}
+
+function median(values: number[]) {
+  return percentile(values, 50);
+}
+
+function sumBy<T>(items: T[], iteratee: (item: T) => number) {
+  return items.reduce((sum, item) => sum + iteratee(item), 0);
+}
+
+function pushMapValue(map: Map<string, number[]>, key: string, value: number) {
+  const current = map.get(key) || [];
+  current.push(value);
+  map.set(key, current);
+}
+
+function parseSaleUnits(label?: string | null) {
+  if (!label) return 1;
+  const match = label.match(/(\d+)/);
+  const parsed = match ? Number(match[1]) : 1;
+  if (!Number.isFinite(parsed) || parsed <= 0) return 1;
+  return parsed;
+}
+
+function perSaleQty(
+  bom: {
+    saleUnitLabel?: string | null;
+    yieldUnits?: number | null;
+  },
+  bomItem: {
+    qtyPerSaleUnit?: number | null;
+    qtyPerUnit?: number | null;
+    qtyPerRecipe?: number | null;
+  }
+) {
+  if (bomItem.qtyPerSaleUnit != null && bomItem.qtyPerSaleUnit > 0) return bomItem.qtyPerSaleUnit;
+  const unitsPerSale = parseSaleUnits(bom.saleUnitLabel);
+  if (bomItem.qtyPerUnit != null && bomItem.qtyPerUnit > 0) {
+    return bomItem.qtyPerUnit * unitsPerSale;
+  }
+  if (bomItem.qtyPerRecipe != null && bomItem.qtyPerRecipe > 0 && bom.yieldUnits && bom.yieldUnits > 0) {
+    return bomItem.qtyPerRecipe / bom.yieldUnits;
+  }
+  return null;
+}
+
+function formatSourceLabel(event: LoadedAnalyticsEvent) {
+  if (event.source) {
+    const medium = event.medium ? ` / ${event.medium}` : '';
+    return `${event.source}${medium}`;
+  }
+  if (event.referrerHost) return event.referrerHost;
+  return 'Direto';
+}
+
+type IntegrationStatus = 'READY' | 'PENDING';
+
+type IntegrationRail = {
+  id: string;
+  label: string;
+  status: IntegrationStatus;
+  detail: string;
+  nextStep: string;
+};
+
+@Injectable()
+export class DashboardService {
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  private hasEnv(name: string) {
+    return Boolean(String(process.env[name] || '').trim());
+  }
+
+  private buildIdentitySummary() {
+    const profile = readBusinessRuntimeProfile();
+    return {
+      brandName: profile.brandName,
+      legalName: profile.legalName,
+      cnpj: profile.cnpj,
+      cnpjDisplay: profile.cnpjDisplay,
+      officialPhoneDisplay: profile.officialPhoneDisplay,
+      pixKey: profile.pixKey,
+      pickupAddressDisplay: profile.pickupAddressDisplay,
+      bank: profile.bank
+    };
+  }
+
+  private buildIntegrationRails() {
+    const autoReplyEnabled = String(process.env.WHATSAPP_AUTO_REPLY_ENABLED || 'false').trim().toLowerCase() === 'true';
+    const rails: IntegrationRail[] = [
+      {
+        id: 'whatsapp_cloud',
+        label: 'WhatsApp Cloud',
+        status: this.hasEnv('WHATSAPP_CLOUD_API_TOKEN') && this.hasEnv('WHATSAPP_CLOUD_PHONE_NUMBER_ID') ? 'READY' : 'PENDING',
+        detail:
+          this.hasEnv('WHATSAPP_CLOUD_API_TOKEN') && this.hasEnv('WHATSAPP_CLOUD_PHONE_NUMBER_ID')
+            ? 'Envio de mensagens pela Cloud API liberado.'
+            : 'Faltam token e/ou phone number ID para disparo real.',
+        nextStep: 'Preencher WHATSAPP_CLOUD_API_TOKEN e WHATSAPP_CLOUD_PHONE_NUMBER_ID.'
+      },
+      {
+        id: 'whatsapp_webhook',
+        label: 'Webhook inbound',
+        status: this.hasEnv('WHATSAPP_WEBHOOK_VERIFY_TOKEN') ? 'READY' : 'PENDING',
+        detail: this.hasEnv('WHATSAPP_WEBHOOK_VERIFY_TOKEN')
+          ? autoReplyEnabled
+            ? 'Handshake do webhook pronto e resposta automatica habilitada.'
+            : 'Handshake do webhook pronto; auto reply ainda desligado.'
+          : 'Endpoint pronto no app, mas ainda sem verify token para conectar na Meta.',
+        nextStep: autoReplyEnabled
+          ? 'Apontar a URL publica /whatsapp/webhook no app da Meta.'
+          : 'Definir WHATSAPP_WEBHOOK_VERIFY_TOKEN e WHATSAPP_AUTO_REPLY_ENABLED=true.'
+      },
+      {
+        id: 'whatsapp_flow',
+        label: 'Flow de pedidos',
+        status: this.hasEnv('WHATSAPP_FLOW_ORDER_INTAKE_ID') ? 'READY' : 'PENDING',
+        detail: this.hasEnv('WHATSAPP_FLOW_ORDER_INTAKE_ID')
+          ? 'Flow oficial configurado para rollout sem trocar o contrato do pedido.'
+          : 'Fallback atual responde com link oficial do /pedido.',
+        nextStep: 'Publicar o Flow e preencher WHATSAPP_FLOW_ORDER_INTAKE_ID.'
+      },
+      {
+        id: 'pix_settlement_bridge',
+        label: 'Baixa PIX em tempo real',
+        status: this.hasEnv('BANK_SYNC_WEBHOOK_TOKEN') ? 'READY' : 'PENDING',
+        detail: this.hasEnv('BANK_SYNC_WEBHOOK_TOKEN')
+          ? 'Webhook canônico de liquidacao PIX armado no backend.'
+          : 'Bridge pronta no codigo, aguardando token para aceitar eventos bancarios.',
+        nextStep: 'Definir BANK_SYNC_WEBHOOK_TOKEN e ligar a fonte de eventos.'
+      },
+      {
+        id: 'nubank_rail',
+        label: 'Trilho Nubank',
+        status: this.hasEnv('BANK_SYNC_WEBHOOK_TOKEN') ? 'READY' : 'PENDING',
+        detail: this.hasEnv('BANK_SYNC_WEBHOOK_TOKEN')
+          ? 'Conta oficial mapeada; o ERP ja consegue receber eventos de liquidacao via bridge.'
+          : 'Conta oficial mapeada, mas ainda sem emissor conectado para realtime.',
+        nextStep: 'Conectar uma automacao Nubank/Open Finance ao endpoint /payments/pix-settlements/webhook.'
+      }
+    ];
+
+    return {
+      readyCount: rails.filter((item) => item.status === 'READY').length,
+      pendingCount: rails.filter((item) => item.status === 'PENDING').length,
+      items: rails
+    };
+  }
+
+  private loadAnalyticsEvents(rangeStart: Date) {
+    return this.prisma.siteAnalyticsEvent.findMany({
+      where: {
+        createdAt: {
+          gte: rangeStart
+        }
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
+    });
+  }
+
+  private loadOrders() {
+    return this.prisma.order.findMany({
+      include: {
+        customer: true,
+        payments: true,
+        items: {
+          include: {
+            product: true
+          }
+        }
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
+    });
+  }
+
+  async getSummary(days: number) {
+    const rangeStart = createRangeStart(days);
+    const todayStart = startOfToday();
+    const [events, orders, customers, boms, inventoryItems] = await Promise.all([
+      this.loadAnalyticsEvents(rangeStart),
+      this.loadOrders(),
+      this.prisma.customer.findMany({
+        where: { deletedAt: null },
+        orderBy: { createdAt: 'asc' }
+      }),
+      this.prisma.bom.findMany({
+        include: { items: true },
+        orderBy: { id: 'desc' }
+      }),
+      this.prisma.inventoryItem.findMany({
+        orderBy: { id: 'asc' }
+      })
+    ]);
+
+    const traffic = this.buildTrafficSummary(events, days);
+    const business = this.buildBusinessSummary({
+      orders,
+      customers,
+      boms,
+      inventoryItems,
+      rangeStart,
+      todayStart,
+      rangeDays: days
+    });
+
+    return {
+      asOf: new Date().toISOString(),
+      rangeDays: days,
+      identity: this.buildIdentitySummary(),
+      integrations: this.buildIntegrationRails(),
+      traffic,
+      business
+    };
+  }
+
+  private buildTrafficSummary(events: LoadedAnalyticsEvent[], days: number) {
+    const pageViews = events.filter((event) => event.eventType === 'PAGE_VIEW');
+    const linkClicks = events.filter((event) => event.eventType === 'LINK_CLICK');
+    const webVitals = events.filter((event) => event.eventType === 'WEB_VITAL' && typeof event.metricValue === 'number');
+    const funnelEvents = events.filter((event) => event.eventType === 'FUNNEL');
+
+    const firstPageViewBySession = new Map<string, LoadedAnalyticsEvent>();
+    const pageViewsBySession = new Map<string, LoadedAnalyticsEvent[]>();
+    for (const event of pageViews) {
+      if (!firstPageViewBySession.has(event.sessionId)) {
+        firstPageViewBySession.set(event.sessionId, event);
+      }
+      const current = pageViewsBySession.get(event.sessionId) || [];
+      current.push(event);
+      pageViewsBySession.set(event.sessionId, current);
+    }
+
+    const sessions = new Set(pageViews.map((event) => event.sessionId));
+    const publicSessions = new Set(
+      pageViews.filter((event) => isPublicPath(event.path)).map((event) => event.sessionId)
+    );
+    const internalSessions = new Set(
+      pageViews.filter((event) => !isPublicPath(event.path)).map((event) => event.sessionId)
+    );
+
+    const pathStats = new Map<string, { views: number; sessions: Set<string> }>();
+    for (const event of pageViews) {
+      const path = event.path || '(sem rota)';
+      const current = pathStats.get(path) || { views: 0, sessions: new Set<string>() };
+      current.views += 1;
+      current.sessions.add(event.sessionId);
+      pathStats.set(path, current);
+    }
+
+    const topPaths = [...pathStats.entries()]
+      .map(([path, stats]) => ({
+        path,
+        views: stats.views,
+        sessions: stats.sessions.size,
+        surface: isPublicPath(path) ? 'public' : 'internal'
+      }))
+      .sort((left, right) => right.views - left.views)
+      .slice(0, 10);
+
+    const sourceCounts = new Map<string, number>();
+    const deviceCounts = new Map<string, number>();
+    const browserCounts = new Map<string, number>();
+    const osCounts = new Map<string, number>();
+    const referrerCounts = new Map<string, number>();
+    const bounceSessions = new Set<string>();
+
+    for (const [sessionId, firstView] of firstPageViewBySession.entries()) {
+      const pageCount = pageViewsBySession.get(sessionId)?.length || 0;
+      if (pageCount <= 1) {
+        bounceSessions.add(sessionId);
+      }
+      const sourceLabel = formatSourceLabel(firstView);
+      sourceCounts.set(sourceLabel, (sourceCounts.get(sourceLabel) || 0) + 1);
+      const device = firstView.deviceType || 'Desconhecido';
+      const browser = firstView.browser || 'Desconhecido';
+      const os = firstView.os || 'Desconhecido';
+      const referrer = firstView.referrerHost || 'Direto';
+      deviceCounts.set(device, (deviceCounts.get(device) || 0) + 1);
+      browserCounts.set(browser, (browserCounts.get(browser) || 0) + 1);
+      osCounts.set(os, (osCounts.get(os) || 0) + 1);
+      referrerCounts.set(referrer, (referrerCounts.get(referrer) || 0) + 1);
+    }
+
+    const topLinks = [...linkClicks.reduce((map, event) => {
+      const key = `${event.href || '(sem href)'}__${event.label || ''}`;
+      map.set(key, {
+        href: event.href || '(sem href)',
+        label: event.label || 'Sem rótulo',
+        clicks: (map.get(key)?.clicks || 0) + 1
+      });
+      return map;
+    }, new Map<string, { href: string; label: string; clicks: number }>()).values()]
+      .sort((left, right) => right.clicks - left.clicks)
+      .slice(0, 10);
+
+    const vitalStats = new Map<string, number[]>();
+    const slowPathStats = new Map<string, number[]>();
+    for (const event of webVitals) {
+      const metricName = event.metricName || 'DESCONHECIDO';
+      pushMapValue(vitalStats, metricName, event.metricValue || 0);
+      if (event.path && ['LCP', 'FCP', 'TTFB', 'INP'].includes(metricName)) {
+        pushMapValue(slowPathStats, `${event.path}__${metricName}`, event.metricValue || 0);
+      }
+    }
+
+    const vitalBenchmarks = [...vitalStats.entries()]
+      .map(([name, values]) => ({
+        name,
+        unit: name === 'CLS' ? 'score' : 'ms',
+        median: median(values),
+        p75: percentile(values, 75),
+        sampleSize: values.length
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name, 'pt-BR'));
+
+    const slowPages = [...slowPathStats.entries()]
+      .map(([compoundKey, values]) => {
+        const [path, metricName] = compoundKey.split('__');
+        return {
+          path,
+          metricName,
+          median: median(values),
+          p75: percentile(values, 75),
+          sampleSize: values.length
+        };
+      })
+      .sort((left, right) => right.p75 - left.p75)
+      .slice(0, 8);
+
+    const dailyMap = new Map<
+      string,
+      {
+        pageViews: number;
+        publicPageViews: number;
+        internalPageViews: number;
+        sessions: Set<string>;
+      }
+    >();
+    for (const event of pageViews) {
+      const dateKey = toDayKey(event.createdAt);
+      const current = dailyMap.get(dateKey) || {
+        pageViews: 0,
+        publicPageViews: 0,
+        internalPageViews: 0,
+        sessions: new Set<string>()
+      };
+      current.pageViews += 1;
+      if (isPublicPath(event.path)) {
+        current.publicPageViews += 1;
+      } else {
+        current.internalPageViews += 1;
+      }
+      current.sessions.add(event.sessionId);
+      dailyMap.set(dateKey, current);
+    }
+
+    const dailySeries = [...dailyMap.entries()]
+      .map(([date, stats]) => ({
+        date,
+        pageViews: stats.pageViews,
+        publicPageViews: stats.publicPageViews,
+        internalPageViews: stats.internalPageViews,
+        sessions: stats.sessions.size
+      }))
+      .sort((left, right) => left.date.localeCompare(right.date, 'pt-BR'));
+
+    const homeSessions = new Set(
+      pageViews.filter((event) => event.path === '/').map((event) => event.sessionId)
+    );
+    const orderSessions = new Set(
+      pageViews.filter((event) => event.path?.startsWith('/pedido')).map((event) => event.sessionId)
+    );
+    const quoteSuccessSessions = new Set(
+      funnelEvents
+        .filter((event) => event.label === 'public_order_quote_success')
+        .map((event) => event.sessionId)
+    );
+    const submittedSessions = new Set(
+      funnelEvents
+        .filter((event) => event.label === 'public_order_submitted')
+        .map((event) => event.sessionId)
+    );
+
+    return {
+      windowLabel: `${days} dias`,
+      totals: {
+        sessions: sessions.size,
+        publicSessions: publicSessions.size,
+        internalSessions: internalSessions.size,
+        pageViews: pageViews.length,
+        publicPageViews: pageViews.filter((event) => isPublicPath(event.path)).length,
+        internalPageViews: pageViews.filter((event) => !isPublicPath(event.path)).length,
+        avgPagesPerSession: round2(pageViews.length / Math.max(sessions.size, 1)),
+        bounceRatePct: toPercent(bounceSessions.size, sessions.size)
+      },
+      topPaths,
+      topSources: [...sourceCounts.entries()]
+        .map(([label, sessionsCount]) => ({ label, sessions: sessionsCount }))
+        .sort((left, right) => right.sessions - left.sessions)
+        .slice(0, 8),
+      topReferrers: [...referrerCounts.entries()]
+        .map(([label, sessionsCount]) => ({ label, sessions: sessionsCount }))
+        .sort((left, right) => right.sessions - left.sessions)
+        .slice(0, 8),
+      topLinks,
+      deviceMix: [...deviceCounts.entries()]
+        .map(([label, sessionsCount]) => ({ label, sessions: sessionsCount }))
+        .sort((left, right) => right.sessions - left.sessions),
+      browserMix: [...browserCounts.entries()]
+        .map(([label, sessionsCount]) => ({ label, sessions: sessionsCount }))
+        .sort((left, right) => right.sessions - left.sessions)
+        .slice(0, 8),
+      osMix: [...osCounts.entries()]
+        .map(([label, sessionsCount]) => ({ label, sessions: sessionsCount }))
+        .sort((left, right) => right.sessions - left.sessions)
+        .slice(0, 8),
+      vitalBenchmarks,
+      slowPages,
+      dailySeries,
+      funnel: {
+        homeSessions: homeSessions.size,
+        orderSessions: orderSessions.size,
+        quoteSuccessSessions: quoteSuccessSessions.size,
+        submittedSessions: submittedSessions.size,
+        orderPageConversionPct: toPercent(submittedSessions.size, orderSessions.size),
+        quoteToSubmitPct: toPercent(submittedSessions.size, quoteSuccessSessions.size)
+      }
+    };
+  }
+
+  private buildBusinessSummary(params: {
+    orders: LoadedOrder[];
+    customers: Array<{
+      id: number;
+      name: string;
+      createdAt: Date;
+      deletedAt: Date | null;
+    }>;
+    boms: Array<{
+      id: number;
+      productId: number;
+      saleUnitLabel: string | null;
+      yieldUnits: number | null;
+      items: Array<{
+        itemId: number;
+        qtyPerRecipe: number | null;
+        qtyPerSaleUnit: number | null;
+        qtyPerUnit: number | null;
+      }>;
+    }>;
+    inventoryItems: Array<{
+      id: number;
+      purchasePackSize: number;
+      purchasePackCost: number;
+    }>;
+    rangeStart: Date;
+    todayStart: Date;
+    rangeDays: number;
+  }) {
+    const { orders, customers, boms, inventoryItems, rangeStart, todayStart, rangeDays } = params;
+    const activeOrders = orders.filter((order) => order.status !== 'CANCELADO');
+    const rangeOrders = activeOrders.filter((order) => order.createdAt >= rangeStart);
+    const todayOrders = activeOrders.filter((order) => order.createdAt >= todayStart);
+
+    const unitCostByInventoryItem = new Map<number, number>();
+    for (const item of inventoryItems) {
+      const packSize = item.purchasePackSize || 0;
+      const packCost = item.purchasePackCost || 0;
+      unitCostByInventoryItem.set(item.id, packSize > 0 ? packCost / packSize : 0);
+    }
+
+    const bomCostByProductId = new Map<number, number>();
+    for (const bom of boms) {
+      if (bomCostByProductId.has(bom.productId)) continue;
+      let cost = 0;
+      for (const item of bom.items) {
+        const perSale = perSaleQty(bom, item);
+        if (perSale == null) continue;
+        cost += perSale * (unitCostByInventoryItem.get(item.itemId) || 0);
+      }
+      bomCostByProductId.set(bom.productId, round2(cost));
+    }
+
+    const customerOrderCount = new Map<number, number>();
+    for (const order of activeOrders) {
+      customerOrderCount.set(order.customerId, (customerOrderCount.get(order.customerId) || 0) + 1);
+    }
+
+    const statusMix = new Map<string, number>();
+    const fulfillmentMix = new Map<string, number>();
+    const quoteMix = new Map<string, number>();
+    const productMix = new Map<
+      number,
+      { productId: number; productName: string; units: number; revenue: number; cogs: number }
+    >();
+
+    const rangeOrderIds = new Set(rangeOrders.map((order) => order.id));
+    let paidRevenueInRange = 0;
+    const paidRevenueByDay = new Map<string, number>();
+    const pendingReceivables = [];
+
+    for (const order of activeOrders) {
+      statusMix.set(order.status, (statusMix.get(order.status) || 0) + 1);
+      fulfillmentMix.set(order.fulfillmentMode, (fulfillmentMix.get(order.fulfillmentMode) || 0) + 1);
+      if (order.fulfillmentMode === 'DELIVERY') {
+        const label = order.deliveryQuoteStatus || 'NOT_REQUIRED';
+        quoteMix.set(label, (quoteMix.get(label) || 0) + 1);
+      }
+
+      const paidAmount = sumBy(
+        order.payments.filter((payment) => payment.status === 'PAGO' || Boolean(payment.paidAt)),
+        (payment) => payment.amount || 0
+      );
+      const balanceDue = Math.max(round2(order.total || 0) - round2(paidAmount), 0);
+
+      if (balanceDue > 0.009) {
+        pendingReceivables.push({
+          orderId: resolveDisplayNumber(order) ?? order.id,
+          customerName:
+            order.customer?.name ||
+            `Cliente #${resolveDisplayNumber(order.customer) ?? order.customerId}`,
+          amount: round2(balanceDue),
+          status: order.status,
+          dueDate:
+            order.payments
+              .map((payment) => payment.dueDate)
+              .filter((value): value is Date => Boolean(value))
+              .sort((left, right) => left.getTime() - right.getTime())[0]?.toISOString() || null
+        });
+      }
+
+      for (const payment of order.payments) {
+        const isPaid = payment.status === 'PAGO' || Boolean(payment.paidAt);
+        if (!isPaid || !payment.paidAt || payment.paidAt < rangeStart) continue;
+        paidRevenueInRange += payment.amount || 0;
+        const dayKey = toDayKey(payment.paidAt);
+        paidRevenueByDay.set(dayKey, round2((paidRevenueByDay.get(dayKey) || 0) + (payment.amount || 0)));
+      }
+
+      if (!rangeOrderIds.has(order.id)) continue;
+      for (const item of order.items) {
+        const revenue = round2(item.total || (item.unitPrice || 0) * (item.quantity || 0));
+        const unitCost = bomCostByProductId.get(item.productId) || 0;
+        const cogs = round2(unitCost * (item.quantity || 0));
+        const existing = productMix.get(item.productId) || {
+          productId: item.productId,
+          productName: item.product?.name || `Produto #${item.productId}`,
+          units: 0,
+          revenue: 0,
+          cogs: 0
+        };
+        existing.units += item.quantity || 0;
+        existing.revenue = round2(existing.revenue + revenue);
+        existing.cogs = round2(existing.cogs + cogs);
+        productMix.set(item.productId, existing);
+      }
+    }
+
+    const rangeOrderCost = sumBy(rangeOrders, (order) =>
+      sumBy(order.items, (item) => round2((bomCostByProductId.get(item.productId) || 0) * (item.quantity || 0)))
+    );
+
+    const grossRevenueAllTime = sumBy(activeOrders, (order) => order.total || 0);
+    const grossRevenueInRange = sumBy(rangeOrders, (order) => order.total || 0);
+    const grossRevenueToday = sumBy(todayOrders, (order) => order.total || 0);
+    const productNetRevenueInRange = sumBy(
+      rangeOrders,
+      (order) => Math.max(round2(order.subtotal || 0) - round2(order.discount || 0), 0)
+    );
+    const deliveryRevenueInRange = sumBy(rangeOrders, (order) => order.deliveryFee || 0);
+    const discountInRange = sumBy(rangeOrders, (order) => order.discount || 0);
+    const outstandingBalance = sumBy(pendingReceivables, (entry) => entry.amount);
+    const grossProfitInRange = round2(productNetRevenueInRange - rangeOrderCost);
+    const contributionAfterFreightInRange = round2(grossRevenueInRange - rangeOrderCost);
+
+    const dailySeriesMap = new Map<
+      string,
+      {
+        orders: number;
+        grossRevenue: number;
+        paidRevenue: number;
+        cogs: number;
+        grossProfit: number;
+      }
+    >();
+
+    for (const order of rangeOrders) {
+      const dayKey = toDayKey(order.createdAt);
+      const current = dailySeriesMap.get(dayKey) || {
+        orders: 0,
+        grossRevenue: 0,
+        paidRevenue: 0,
+        cogs: 0,
+        grossProfit: 0
+      };
+      const orderCost = sumBy(
+        order.items,
+        (item) => round2((bomCostByProductId.get(item.productId) || 0) * (item.quantity || 0))
+      );
+      const orderNetRevenue = Math.max(round2(order.subtotal || 0) - round2(order.discount || 0), 0);
+      current.orders += 1;
+      current.grossRevenue = round2(current.grossRevenue + (order.total || 0));
+      current.cogs = round2(current.cogs + orderCost);
+      current.grossProfit = round2(current.grossProfit + (orderNetRevenue - orderCost));
+      dailySeriesMap.set(dayKey, current);
+    }
+
+    for (const [dayKey, paidRevenue] of paidRevenueByDay.entries()) {
+      const current = dailySeriesMap.get(dayKey) || {
+        orders: 0,
+        grossRevenue: 0,
+        paidRevenue: 0,
+        cogs: 0,
+        grossProfit: 0
+      };
+      current.paidRevenue = round2(current.paidRevenue + paidRevenue);
+      dailySeriesMap.set(dayKey, current);
+    }
+
+    const dailySeries = [...dailySeriesMap.entries()]
+      .map(([date, stats]) => ({
+        date,
+        orders: stats.orders,
+        grossRevenue: stats.grossRevenue,
+        paidRevenue: stats.paidRevenue,
+        cogs: stats.cogs,
+        grossProfit: stats.grossProfit
+      }))
+      .sort((left, right) => left.date.localeCompare(right.date, 'pt-BR'));
+
+    const topProducts = [...productMix.values()]
+      .map((entry) => ({
+        ...entry,
+        profit: round2(entry.revenue - entry.cogs),
+        marginPct: toPercent(entry.revenue - entry.cogs, entry.revenue)
+      }))
+      .sort((left, right) => right.revenue - left.revenue)
+      .slice(0, 8);
+
+    const newCustomersInRange = customers.filter((customer) => customer.createdAt >= rangeStart).length;
+    const returningCustomersInRange = customers.filter((customer) => {
+      if (customer.createdAt >= rangeStart) return false;
+      return (customerOrderCount.get(customer.id) || 0) >= 2;
+    }).length;
+
+    return {
+      windowLabel: `${rangeDays} dias`,
+      kpis: {
+        totalCustomers: customers.length,
+        ordersToday: todayOrders.length,
+        ordersInRange: rangeOrders.length,
+        ordersAllTime: activeOrders.length,
+        grossRevenueToday: round2(grossRevenueToday),
+        grossRevenueInRange: round2(grossRevenueInRange),
+        grossRevenueAllTime: round2(grossRevenueAllTime),
+        paidRevenueInRange: round2(paidRevenueInRange),
+        outstandingBalance: round2(outstandingBalance),
+        avgTicketInRange: round2(grossRevenueInRange / Math.max(rangeOrders.length, 1)),
+        discountsInRange: round2(discountInRange),
+        deliveryRevenueInRange: round2(deliveryRevenueInRange),
+        productNetRevenueInRange: round2(productNetRevenueInRange),
+        estimatedCogsInRange: round2(rangeOrderCost),
+        grossProfitInRange: round2(grossProfitInRange),
+        grossMarginPctInRange: toPercent(grossProfitInRange, productNetRevenueInRange),
+        contributionAfterFreightInRange: round2(contributionAfterFreightInRange)
+      },
+      customerMetrics: {
+        newCustomersInRange,
+        returningCustomersInRange,
+        repeatRatePct: toPercent(returningCustomersInRange, customers.length)
+      },
+      statusMix: [...statusMix.entries()]
+        .map(([label, value]) => ({ label, value }))
+        .sort((left, right) => right.value - left.value),
+      fulfillmentMix: [...fulfillmentMix.entries()]
+        .map(([label, value]) => ({ label, value }))
+        .sort((left, right) => right.value - left.value),
+      quoteMix: [...quoteMix.entries()]
+        .map(([label, value]) => ({ label, value }))
+        .sort((left, right) => right.value - left.value),
+      dailySeries,
+      topProducts,
+      recentReceivables: pendingReceivables
+        .sort((left, right) => right.amount - left.amount)
+        .slice(0, 10)
+    };
+  }
+}

@@ -1,9 +1,7 @@
-const onlyDigits = (value: string) => value.replace(/\D/g, '');
+import { normalizePhoneNumber, roundMoney } from '@querobroapp/shared';
 
 export function normalizePhone(value?: string | null) {
-  if (!value) return null;
-  const digits = onlyDigits(value).slice(0, 11);
-  return digits.length ? digits : null;
+  return normalizePhoneNumber(value);
 }
 
 export function normalizeText(value?: string | null) {
@@ -20,8 +18,7 @@ export function normalizeTitle(value?: string | null) {
 }
 
 export function normalizeMoney(value: number) {
-  if (!Number.isFinite(value)) return 0;
-  return Math.round(value * 100) / 100;
+  return roundMoney(value);
 }
 
 export function parseLocaleNumber(value: string | number | null | undefined) {

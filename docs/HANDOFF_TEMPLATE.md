@@ -1,49 +1,37 @@
-# HANDOFF TEMPLATE
+# HANDOFF_TEMPLATE
 
-Preencha este modelo ao terminar uma sessao e cole no proximo canal.
+Use este modelo no fim de cada sessao.
+
+Regras:
+
+- `docs/HANDOFF_LOG.md` e historico, nao snapshot atual.
+- Se comportamento mudou, atualizar tambem `docs/querobroapp-context.md`, `docs/PROJECT_SNAPSHOT.md` e/ou `docs/NEXT_STEP_PLAN.md` no mesmo ciclo.
+- Se mudou reboot, subida local, QA ou fluxo de teste, atualizar tambem `README.md` e `docs/TEST_RESET_PROTOCOL.md` no mesmo ciclo.
+- Registre apenas fatos verificados: nao inventar testes, comandos ou estados.
+- Preferir `pnpm qa:trust` como validacao padrao antes de encerrar a sessao; se rodar um subset, justificar.
+- Se mexer em fluxo operacional critico, considerar registrar tambem se rodou `qa:browser-smoke` e `qa:critical-e2e`.
 
 ## 1) Metadados
 
 - Data/hora:
-- Canal origem:
-- Canal destino:
-- Repo path:
 - Branch:
-- Commit base (opcional):
+- Objetivo da sessao:
 
-## 2) Objetivo da sessao encerrada
+## 2) O que foi entregue
 
-- Objetivo:
-- Resultado entregue:
-- O que ficou pendente:
-
-## 3) Mudancas tecnicas
-
+- Resultado principal:
 - Arquivos alterados:
-- Comportamento novo:
-- Riscos/regressoes:
-
-## 4) Validacao
-
-- Comandos executados:
+- Comandos de validacao executados:
 - Testes que passaram:
 - Testes nao executados (e motivo):
 
-## 5) Contexto para retomada
+## 3) Estado tecnico
 
-- Decisoes importantes:
+- O que esta estavel:
+- Riscos ou pendencias abertas:
 - Suposicoes feitas:
-- Bloqueios:
-- Proximo passo recomendado (1 acao objetiva):
+- Comandos atuais de reboot/teste (se houve mudanca):
 
-## 6) Prompt pronto para proximo canal
+## 4) Proximo passo
 
-```txt
-Continuar o projeto querobroapp com base neste handoff.
-Leia primeiro:
-- docs/querobroapp-context.md
-- docs/NEXT_STEP_PLAN.md
-
-Resumo da ultima sessao:
-[cole aqui as secoes 2 a 5 preenchidas]
-```
+- Proxima acao objetiva (1 linha):

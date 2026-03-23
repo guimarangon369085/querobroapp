@@ -1,45 +1,42 @@
-# Contribuindo com o Quero Bro App
+# Contribuindo no QUEROBROAPP
 
-Obrigado por considerar contribuir com o projeto 🎉
+## Objetivo
 
-## Como abrir uma issue
+Manter mudancas pequenas, claras e testaveis.
 
-1. Verifique se já existe uma issue parecida aberta.
-2. Abra uma nova issue com título claro e objetivo.
-3. Descreva o problema/comportamento esperado.
-4. Inclua contexto técnico útil:
-   - ambiente (Node/pnpm/SO),
-   - passos para reproduzir,
-   - logs/prints quando aplicável.
+## Fluxo recomendado
 
-## Como contribuir com funcionalidades ou correções
+1. Crie branch de trabalho (`feat/*`, `fix/*`, `chore/*`).
+2. Faça mudancas focadas em um problema por vez.
+3. Rode validacoes locais antes de abrir PR.
+4. Atualize documentacao quando mudar comportamento.
 
-1. Faça um fork e crie uma branch descritiva:
-   - `feat/nome-curto-da-feature`
-   - `fix/nome-curto-do-bug`
-2. Instale dependências:
-
-```bash
-pnpm install
-```
-
-3. Rode validações locais antes de enviar:
+## Validacoes minimas
 
 ```bash
 pnpm lint
 pnpm typecheck
-pnpm build
 pnpm test
+pnpm build
 ```
 
-4. Abra um Pull Request com:
-   - contexto da mudança,
-   - motivação,
-   - impacto esperado,
-   - evidências de teste.
+Se alterar schema Prisma:
 
-## Boas práticas
+```bash
+pnpm check:prisma-drift
+```
 
-- Prefira mudanças pequenas e focadas.
-- Mantenha consistência de estilo e nomes.
-- Atualize documentação quando alterar comportamento.
+Se alterar auth, tokens, env ou pipeline:
+
+```bash
+pnpm security:secrets
+pnpm security:policy:diff
+```
+
+## Checklist de PR
+
+- Problema e solucao descritos com clareza.
+- Arquivos alterados fazem sentido para o escopo.
+- Validacoes relevantes executadas.
+- Riscos e impactos declarados.
+

@@ -5,9 +5,6 @@ import { getSecurityRuntimeConfig } from './security-config.js';
 import type { AuthPrincipal } from './security.types.js';
 
 type RequestLike = {
-  method?: string;
-  originalUrl?: string;
-  url?: string;
   headers: Record<string, string | string[] | undefined>;
   authPrincipal?: AuthPrincipal;
 };
@@ -19,12 +16,6 @@ function getHeaderValue(
   const value = headers[name.toLowerCase()];
   if (Array.isArray(value)) return (value[0] || '').trim();
   return (value || '').trim();
-}
-
-function extractPath(request: RequestLike) {
-  const raw = request.originalUrl || request.url || '';
-  const [path] = raw.split('?');
-  return path || '/';
 }
 
 function extractBearerToken(headers: Record<string, string | string[] | undefined>) {
@@ -48,23 +39,6 @@ export class AuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<RequestLike>();
     const config = getSecurityRuntimeConfig();
     if (!config.enabled) return true;
-
-    const path = extractPath(request);
-    if (path === '/health') return true;
-
-    const receiptsTokenHeader = getHeaderValue(request.headers, 'x-receipts-token');
-    if (
-      path.startsWith('/receipts/') &&
-      config.receiptsToken &&
-      receiptsTokenHeader &&
-      receiptsTokenHeader === config.receiptsToken
-    ) {
-      request.authPrincipal = {
-        role: 'operator',
-        tokenLabel: 'RECEIPTS_API_TOKEN'
-      };
-      return true;
-    }
 
     const appTokenHeader = getHeaderValue(request.headers, 'x-app-token');
     const bearerToken = extractBearerToken(request.headers);

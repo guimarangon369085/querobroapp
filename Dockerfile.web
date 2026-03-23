@@ -1,0 +1,56 @@
+FROM node:20-bookworm-slim AS base
+
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN corepack enable
+
+WORKDIR /app
+
+FROM base AS deps
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY apps/web/package.json apps/web/package.json
+COPY packages/shared/package.json packages/shared/package.json
+COPY packages/ui/package.json packages/ui/package.json
+
+RUN pnpm install --frozen-lockfile
+
+FROM deps AS build
+
+COPY . .
+
+ARG NEXT_PUBLIC_APP_URL
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+ARG APP_PUBLIC_BASE_URL
+
+ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=$NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+ENV APP_PUBLIC_BASE_URL=$APP_PUBLIC_BASE_URL
+
+RUN test -n "$NEXT_PUBLIC_APP_URL" && test -n "$NEXT_PUBLIC_API_URL"
+
+RUN pnpm --filter @querobroapp/shared build
+RUN pnpm --filter @querobroapp/ui build
+RUN pnpm --filter @querobroapp/web build
+
+FROM base AS runtime
+
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOST=0.0.0.0
+
+WORKDIR /app
+
+COPY --from=deps /app/node_modules /app/node_modules
+COPY --from=deps /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/turbo.json /app/
+COPY --from=build /app/apps/web /app/apps/web
+COPY --from=build /app/packages/shared /app/packages/shared
+COPY --from=build /app/packages/ui /app/packages/ui
+
+EXPOSE 3000
+
+CMD ["pnpm", "--filter", "@querobroapp/web", "exec", "next", "start", "-p", "3000", "-H", "0.0.0.0"]

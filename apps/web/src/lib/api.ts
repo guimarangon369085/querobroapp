@@ -1,7 +1,7 @@
-const devDefaultBaseUrl = 'http://127.0.0.1:3001';
-const baseUrl = (process.env.NEXT_PUBLIC_API_URL || devDefaultBaseUrl).trim() || devDefaultBaseUrl;
+import { devDefaultBaseUrl, getApiBaseUrl } from '@/lib/api-base-url';
 
 function toAbsoluteUrl(path: string) {
+  const baseUrl = getApiBaseUrl();
   if (/^https?:\/\//i.test(path)) return path;
   if (path.startsWith('/')) return `${baseUrl}${path}`;
   return `${baseUrl}/${path}`;
@@ -44,12 +44,27 @@ function extractErrorMessage(body: unknown) {
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const url = toAbsoluteUrl(path);
   const method = (options?.method || 'GET').toUpperCase();
+  const headers = new Headers(options?.headers || undefined);
+  const body = options?.body;
+  const hasExplicitContentType = headers.has('Content-Type');
+  const shouldSetJsonContentType =
+    body != null &&
+    !hasExplicitContentType &&
+    !(body instanceof FormData) &&
+    !(body instanceof URLSearchParams) &&
+    !(body instanceof Blob) &&
+    !(body instanceof ArrayBuffer) &&
+    !ArrayBuffer.isView(body);
+
+  if (shouldSetJsonContentType) {
+    headers.set('Content-Type', 'application/json');
+  }
 
   let res: Response;
   try {
     res = await fetch(url, {
-      headers: { 'Content-Type': 'application/json', ...(options?.headers || {}) },
-      ...options
+      ...options,
+      headers
     });
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'unknown error';

@@ -5,8 +5,15 @@ on:
     branches: ["main"]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
+  trust:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -24,13 +31,10 @@ jobs:
           cache: "pnpm"
 
       - name: Install
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
-      - name: Lint
-        run: pnpm lint
+      - name: Check Prisma schema drift
+        run: pnpm check:prisma-drift
 
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Build
-        run: pnpm build
+      - name: Run QA trust gate
+        run: QA_TRUST_INCLUDE_LINT=1 pnpm qa:trust
