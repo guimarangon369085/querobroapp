@@ -3386,6 +3386,19 @@ input[type='radio'] {
   text-align: left;
   overflow: hidden;
   cursor: pointer;
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+  touch-action: manipulation;
+}
+
+.orders-week-grid__event--dragging {
+  cursor: grabbing;
+  opacity: 0.94;
+  box-shadow: 0 10px 24px rgba(57, 33, 20, 0.18);
+}
+
+.orders-week-grid__event--ghost {
+  visibility: hidden;
 }
 
 .orders-week-grid__event-time {

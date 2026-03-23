@@ -60,6 +60,7 @@ const TEST_DATA_TAG = '[TESTE_E2E]';
 const TUTORIAL_QUERY_VALUE = 'primeira_vez';
 const MASS_PREP_EVENT_NAME = 'FAZER MASSA';
 const MONTH_WIDGET_MAX_DOTS = 8;
+const WEEK_TIMELINE_MAX_VISIBLE_EVENTS = 5;
 const SELECTED_ORDER_NEW_BOX_KEY = 'box-new';
 const MASS_READY_ITEM_NAME = 'MASSA PRONTA';
 const MASS_READY_BROAS_PER_RECIPE = 21;
@@ -760,6 +761,35 @@ type DayGridDragIntentState = {
   holdTimeoutId: number;
 };
 
+type WeekGridDragState = {
+  pointerId: number;
+  eventKey: string;
+  orderId: number;
+  previousScheduledAtIso: string | null;
+  entry: CalendarOrderEntry;
+  sourceDateKey: string;
+  previewDateKey: string;
+  baseMinutes: number;
+  previewMinutes: number;
+  height: number;
+  startClientY: number;
+};
+
+type WeekGridDragIntentState = {
+  pointerId: number;
+  eventKey: string;
+  orderId: number;
+  previousScheduledAtIso: string | null;
+  entry: CalendarOrderEntry;
+  sourceDateKey: string;
+  baseMinutes: number;
+  height: number;
+  target: HTMLButtonElement;
+  startClientX: number;
+  startClientY: number;
+  holdTimeoutId: number;
+};
+
 type TimelineLayoutInput<TEntry> = {
   entry: TEntry;
   startMinutes: number;
@@ -824,6 +854,83 @@ function buildTimelineLaneLayout<TEntry>(items: TimelineLayoutInput<TEntry>[]) {
   }
 
   return positioned;
+}
+
+function isMatchingOrderEntry(entry: CalendarOrderEntry, orderId?: number | null) {
+  return entry.kind === 'ORDER' && typeof orderId === 'number' && entry.order.id === orderId;
+}
+
+function buildWeekTimelineMetrics(
+  entries: CalendarOrderEntry[],
+  options: {
+    weekGridHeight: number;
+    dayGridDurationMinutes: number;
+    dayGridEndMinutes: number;
+    dayGridSnapMinutes: number;
+    dayGridStartMinutes: number;
+    weekGridMinEventHeight: number;
+    forcedOrderId?: number | null;
+  }
+) {
+  const {
+    weekGridHeight,
+    dayGridDurationMinutes,
+    dayGridEndMinutes,
+    dayGridSnapMinutes,
+    dayGridStartMinutes,
+    weekGridMinEventHeight,
+    forcedOrderId
+  } = options;
+  const pixelsPerMinute = weekGridHeight / dayGridDurationMinutes;
+  const baseDuration = dayGridSnapMinutes;
+
+  const entriesInsideGrid = entries
+    .filter((entry) => {
+      const minutes = minutesIntoDay(entry.createdAt);
+      return minutes >= dayGridStartMinutes && minutes < dayGridEndMinutes;
+    })
+    .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
+
+  let timelineSourceEntries = entriesInsideGrid.slice(0, WEEK_TIMELINE_MAX_VISIBLE_EVENTS);
+  if (typeof forcedOrderId === 'number' && forcedOrderId > 0) {
+    const alreadyVisible = timelineSourceEntries.some((entry) => isMatchingOrderEntry(entry, forcedOrderId));
+    if (!alreadyVisible) {
+      const forcedEntry = entriesInsideGrid.find((entry) => isMatchingOrderEntry(entry, forcedOrderId));
+      if (forcedEntry) {
+        timelineSourceEntries = [
+          ...timelineSourceEntries.filter((entry) => !isMatchingOrderEntry(entry, forcedOrderId)).slice(0, Math.max(WEEK_TIMELINE_MAX_VISIBLE_EVENTS - 1, 0)),
+          forcedEntry
+        ].sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
+      }
+    }
+  }
+
+  const timelineEvents = buildTimelineLaneLayout(
+    timelineSourceEntries.map((entry) => {
+      const startMinutes = clampNumber(
+        Math.round(minutesIntoDay(entry.createdAt) / dayGridSnapMinutes) * dayGridSnapMinutes,
+        dayGridStartMinutes,
+        dayGridEndMinutes - dayGridSnapMinutes
+      );
+
+      return {
+        entry,
+        startMinutes,
+        endMinutes: startMinutes + baseDuration,
+        top: Math.round((startMinutes - dayGridStartMinutes) * pixelsPerMinute),
+        height: weekGridMinEventHeight
+      };
+    })
+  );
+
+  return {
+    overflowCount: Math.max(entries.length - timelineSourceEntries.length, 0),
+    timelineLaneCount: Math.max(
+      timelineEvents.reduce((max, item) => Math.max(max, item.laneCount), 0),
+      1
+    ),
+    timelineEvents
+  };
 }
 
 function safeDateFromIso(iso?: string | null) {
@@ -1132,8 +1239,11 @@ function OrdersPageContent() {
   const [selectedCalendarDateKey, setSelectedCalendarDateKey] = useState(() => dateKeyFromDate(new Date()));
   const isOperationMode = true;
   const [dayGridDragState, setDayGridDragState] = useState<DayGridDragState | null>(null);
+  const [weekGridDragState, setWeekGridDragState] = useState<WeekGridDragState | null>(null);
   const dayGridDragIntentRef = useRef<DayGridDragIntentState | null>(null);
+  const weekGridDragIntentRef = useRef<WeekGridDragIntentState | null>(null);
   const dayGridSuppressClickRef = useRef<string | null>(null);
+  const weekGridSuppressClickRef = useRef<string | null>(null);
   const dayGridScrollLockRef = useRef<{
     bodyOverflow: string;
     bodyTouchAction: string;
@@ -1141,6 +1251,7 @@ function OrdersPageContent() {
     htmlTouchAction: string;
     preventTouchMove: (event: TouchEvent) => void;
   } | null>(null);
+  const weekGridCanvasByDateKeyRef = useRef(new Map<string, HTMLDivElement>());
   const [isStatusUpdatePending, setIsStatusUpdatePending] = useState(false);
   const [isMassPrepStockModalOpen, setIsMassPrepStockModalOpen] = useState(false);
   const [selectedMassPrepEvent, setSelectedMassPrepEvent] = useState<MassPrepEvent | null>(null);
@@ -2081,6 +2192,10 @@ function OrdersPageContent() {
       };
     });
   }, [calendarAnchorDate, calendarOrdersByDate, selectedCalendarDateKey, todayDateKey]);
+  const weekDateByKey = useMemo(
+    () => new Map(weekCells.map((cell) => [cell.key, cell.date] as const)),
+    [weekCells]
+  );
 
   const dayHourSlots = useMemo(() => Array.from({ length: 14 }, (_, index) => index + 8), []);
   const dayGridStartMinutes = (dayHourSlots[0] ?? 0) * 60;
@@ -2159,43 +2274,17 @@ function OrdersPageContent() {
     [dayGridDurationMinutes, dayGridLineSlots, dayGridStartMinutes, weekGridHeight]
   );
   const weekTimelineCells = useMemo(() => {
-    const pixelsPerMinute = weekGridHeight / dayGridDurationMinutes;
-    const baseDuration = dayGridSnapMinutes;
-
     return weekCells.map((cell) => {
-      const entriesInsideGrid = cell.entries.filter((entry) => {
-        const minutes = minutesIntoDay(entry.createdAt);
-        return minutes >= dayGridStartMinutes && minutes < dayGridEndMinutes;
-      });
-      const timelineSourceEntries = entriesInsideGrid.slice(0, 5);
-      const overflowCount = cell.entries.length - timelineSourceEntries.length;
-      const laneEndMinutes: number[] = [];
-
-      const timelineEvents = timelineSourceEntries.map((entry) => {
-        const snappedStartMinutes = clampNumber(
-          Math.round(minutesIntoDay(entry.createdAt) / dayGridSnapMinutes) * dayGridSnapMinutes,
+      const { overflowCount, timelineLaneCount, timelineEvents } = buildWeekTimelineMetrics(
+        cell.entries,
+        {
+          weekGridHeight,
+          dayGridDurationMinutes,
+          dayGridEndMinutes,
+          dayGridSnapMinutes,
           dayGridStartMinutes,
-          dayGridEndMinutes - dayGridSnapMinutes
-        );
-        let lane = laneEndMinutes.findIndex((value) => snappedStartMinutes >= value);
-        if (lane === -1) {
-          lane = laneEndMinutes.length;
-          laneEndMinutes.push(snappedStartMinutes + baseDuration);
-        } else {
-          laneEndMinutes[lane] = snappedStartMinutes + baseDuration;
+          weekGridMinEventHeight
         }
-
-        return {
-          entry,
-          lane,
-          top: Math.round((snappedStartMinutes - dayGridStartMinutes) * pixelsPerMinute),
-          height: weekGridMinEventHeight
-        };
-      });
-
-      const timelineLaneCount = Math.max(
-        timelineEvents.reduce((max, item) => Math.max(max, item.lane + 1), 0),
-        1
       );
 
       return {
@@ -2211,7 +2300,8 @@ function OrdersPageContent() {
     dayGridSnapMinutes,
     dayGridStartMinutes,
     weekCells,
-    weekGridHeight
+    weekGridHeight,
+    weekGridMinEventHeight
   ]);
 
   const visibleMonthCells = useMemo(
@@ -2259,6 +2349,14 @@ function OrdersPageContent() {
   const handleDayGridEventClick = (entry: CalendarOrderEntry, eventKey: string) => {
     if (dayGridSuppressClickRef.current === eventKey) {
       dayGridSuppressClickRef.current = null;
+      return;
+    }
+    openCalendarEntry(entry);
+  };
+
+  const handleWeekGridEventClick = (entry: CalendarOrderEntry, eventKey: string) => {
+    if (weekGridSuppressClickRef.current === eventKey) {
+      weekGridSuppressClickRef.current = null;
       return;
     }
     openCalendarEntry(entry);
@@ -2321,15 +2419,86 @@ function OrdersPageContent() {
     [lockDayGridScroll]
   );
 
+  const activateWeekGridDrag = useCallback(
+    (intent: WeekGridDragIntentState) => {
+      if (weekGridDragIntentRef.current?.pointerId !== intent.pointerId) return;
+      if (intent.target.isConnected) {
+        intent.target.setPointerCapture(intent.pointerId);
+      }
+      lockDayGridScroll();
+      setWeekGridDragState({
+        pointerId: intent.pointerId,
+        eventKey: intent.eventKey,
+        orderId: intent.orderId,
+        previousScheduledAtIso: intent.previousScheduledAtIso,
+        entry: intent.entry,
+        sourceDateKey: intent.sourceDateKey,
+        previewDateKey: intent.sourceDateKey,
+        baseMinutes: intent.baseMinutes,
+        previewMinutes: intent.baseMinutes,
+        height: intent.height,
+        startClientY: intent.startClientY
+      });
+      weekGridDragIntentRef.current = null;
+    },
+    [lockDayGridScroll]
+  );
+
   useEffect(() => {
     return () => {
       if (dayGridDragIntentRef.current) {
         window.clearTimeout(dayGridDragIntentRef.current.holdTimeoutId);
         dayGridDragIntentRef.current = null;
       }
+      if (weekGridDragIntentRef.current) {
+        window.clearTimeout(weekGridDragIntentRef.current.holdTimeoutId);
+        weekGridDragIntentRef.current = null;
+      }
       unlockDayGridScroll();
     };
   }, [unlockDayGridScroll]);
+
+  const registerWeekGridCanvas = useCallback((dateKey: string, element: HTMLDivElement | null) => {
+    if (element) {
+      weekGridCanvasByDateKeyRef.current.set(dateKey, element);
+      return;
+    }
+    weekGridCanvasByDateKeyRef.current.delete(dateKey);
+  }, []);
+
+  const resolveWeekGridPreviewPosition = useCallback(
+    (clientX: number, clientY: number, fallbackDateKey: string) => {
+      if (typeof document === 'undefined') return null;
+      const target = document.elementFromPoint(clientX, clientY);
+      const targetDay = target instanceof HTMLElement ? target.closest<HTMLElement>('[data-week-grid-date-key]') : null;
+      const nextDateKey = targetDay?.dataset.weekGridDateKey || fallbackDateKey;
+      const targetDate = weekDateByKey.get(nextDateKey);
+      const canvas = weekGridCanvasByDateKeyRef.current.get(nextDateKey);
+      if (!targetDate || !canvas) return null;
+
+      const rect = canvas.getBoundingClientRect();
+      const relativeY = clampNumber(clientY - rect.top, 0, rect.height);
+      const rawMinutes =
+        dayGridStartMinutes + (relativeY / Math.max(rect.height, 1)) * dayGridDurationMinutes;
+      const previewMinutes = clampNumber(
+        Math.round(rawMinutes / dayGridSnapMinutes) * dayGridSnapMinutes,
+        dayGridStartMinutes,
+        dayGridEndMinutes - dayGridSnapMinutes
+      );
+
+      return {
+        previewDateKey: nextDateKey,
+        previewMinutes
+      };
+    },
+    [
+      dayGridDurationMinutes,
+      dayGridEndMinutes,
+      dayGridSnapMinutes,
+      dayGridStartMinutes,
+      weekDateByKey
+    ]
+  );
 
   const handleDayGridEventPointerDown = (
     event: PointerEvent<HTMLButtonElement>,
@@ -2402,6 +2571,85 @@ function OrdersPageContent() {
     dayGridDragIntentRef.current = null;
   };
 
+  const handleWeekGridEventPointerDown = (
+    event: PointerEvent<HTMLButtonElement>,
+    cell: { key: string },
+    item: { entry: CalendarOrderEntry; height: number }
+  ) => {
+    if (!event.isPrimary) return;
+    if (item.entry.kind !== 'ORDER') return;
+    const orderId = item.entry.order.id;
+    if (!orderId) return;
+
+    const baseMinutes = clampNumber(
+      Math.round(minutesIntoDay(item.entry.createdAt) / dayGridSnapMinutes) * dayGridSnapMinutes,
+      dayGridStartMinutes,
+      dayGridEndMinutes - dayGridSnapMinutes
+    );
+
+    if (weekGridDragIntentRef.current) {
+      window.clearTimeout(weekGridDragIntentRef.current.holdTimeoutId);
+      weekGridDragIntentRef.current = null;
+    }
+    weekGridSuppressClickRef.current = null;
+    const intent: WeekGridDragIntentState = {
+      pointerId: event.pointerId,
+      eventKey: `week-order-${orderId}`,
+      orderId,
+      previousScheduledAtIso: item.entry.order.scheduledAt ?? null,
+      entry: item.entry,
+      sourceDateKey: cell.key,
+      baseMinutes,
+      height: item.height,
+      target: event.currentTarget,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      holdTimeoutId: 0
+    };
+    intent.holdTimeoutId = window.setTimeout(() => activateWeekGridDrag(intent), dayGridDragHoldMs);
+    weekGridDragIntentRef.current = intent;
+  };
+
+  const handleWeekGridEventPointerMove = (event: PointerEvent<HTMLButtonElement>) => {
+    const activeDrag = weekGridDragState;
+    if (activeDrag && event.pointerId === activeDrag.pointerId) {
+      event.preventDefault();
+      const preview = resolveWeekGridPreviewPosition(
+        event.clientX,
+        event.clientY,
+        activeDrag.previewDateKey
+      );
+      if (!preview) return;
+      if (
+        preview.previewDateKey === activeDrag.previewDateKey &&
+        preview.previewMinutes === activeDrag.previewMinutes
+      ) {
+        return;
+      }
+
+      setWeekGridDragState((current) =>
+        current
+          ? {
+              ...current,
+              previewDateKey: preview.previewDateKey,
+              previewMinutes: preview.previewMinutes
+            }
+          : current
+      );
+      return;
+    }
+
+    const intent = weekGridDragIntentRef.current;
+    if (!intent || event.pointerId !== intent.pointerId) return;
+
+    const distanceX = Math.abs(event.clientX - intent.startClientX);
+    const distanceY = Math.abs(event.clientY - intent.startClientY);
+    if (Math.max(distanceX, distanceY) < dayGridDragStartDistancePx) return;
+
+    window.clearTimeout(intent.holdTimeoutId);
+    weekGridDragIntentRef.current = null;
+  };
+
   const finishDayGridDrag = async (pointerId: number) => {
     if (!dayGridDragState || pointerId !== dayGridDragState.pointerId) return;
 
@@ -2416,6 +2664,35 @@ function OrdersPageContent() {
     await persistOrderSchedule(
       currentDrag.orderId,
       dateWithMinutes(currentDrag.baseDate, currentDrag.previewMinutes),
+      {
+        previousScheduledAtIso: currentDrag.previousScheduledAtIso,
+        notifyOnSuccess: false
+      }
+    );
+  };
+
+  const finishWeekGridDrag = async (pointerId: number) => {
+    if (!weekGridDragState || pointerId !== weekGridDragState.pointerId) return;
+
+    const currentDrag = weekGridDragState;
+    setWeekGridDragState(null);
+    unlockDayGridScroll();
+
+    weekGridSuppressClickRef.current = currentDrag.eventKey;
+
+    if (
+      currentDrag.previewDateKey === currentDrag.sourceDateKey &&
+      currentDrag.previewMinutes === currentDrag.baseMinutes
+    ) {
+      return;
+    }
+
+    const previewDate = weekDateByKey.get(currentDrag.previewDateKey);
+    if (!previewDate) return;
+
+    await persistOrderSchedule(
+      currentDrag.orderId,
+      dateWithMinutes(previewDate, currentDrag.previewMinutes),
       {
         previousScheduledAtIso: currentDrag.previousScheduledAtIso,
         notifyOnSuccess: false
@@ -2446,6 +2723,33 @@ function OrdersPageContent() {
     }
     if (dayGridDragState && event.pointerId === dayGridDragState.pointerId) {
       setDayGridDragState(null);
+      unlockDayGridScroll();
+    }
+  };
+
+  const handleWeekGridEventPointerUp = async (event: PointerEvent<HTMLButtonElement>) => {
+    const intent = weekGridDragIntentRef.current;
+    if (intent?.pointerId === event.pointerId) {
+      window.clearTimeout(intent.holdTimeoutId);
+      weekGridDragIntentRef.current = null;
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    await finishWeekGridDrag(event.pointerId);
+  };
+
+  const handleWeekGridEventPointerCancel = (event: PointerEvent<HTMLButtonElement>) => {
+    const intent = weekGridDragIntentRef.current;
+    if (intent?.pointerId === event.pointerId) {
+      window.clearTimeout(intent.holdTimeoutId);
+      weekGridDragIntentRef.current = null;
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (weekGridDragState && event.pointerId === weekGridDragState.pointerId) {
+      setWeekGridDragState(null);
       unlockDayGridScroll();
     }
   };
@@ -3492,107 +3796,161 @@ function OrdersPageContent() {
               </div>
             ) : calendarView === 'WEEK' ? (
               <div className="orders-week-grid">
-                {weekTimelineCells.map((cell) => (
-                  <div
-                    key={cell.key}
-                    className={`orders-week-grid__day ${
-                      cell.isToday ? 'orders-week-grid__day--today' : ''
-                    } ${cell.isSelected ? 'orders-week-grid__day--selected' : ''}`}
-                  >
-                    <button
-                      type="button"
-                      className="orders-week-grid__day-head w-full text-left"
-                      onClick={() => selectCalendarDate(cell.date)}
-                    >
-                      <div>
-                        <p className="orders-week-grid__weekday">
-                          {formatCalendarWeekdayLabel(cell.date)}
-                        </p>
-                        <p className="orders-week-grid__date">
-                          {cell.date.toLocaleDateString('pt-BR', {
-                            day: '2-digit',
-                            month: '2-digit'
-                          })}
-                        </p>
-                      </div>
-                      <span className="orders-week-grid__count">{cell.entries.length}</span>
-                    </button>
+                {weekTimelineCells.map((cell) => {
+                  const activeWeekDrag = weekGridDragState;
+                  let displayTimelineEvents = cell.timelineEvents;
+                  let displayTimelineLaneCount = cell.timelineLaneCount;
 
+                  if (activeWeekDrag && activeWeekDrag.previewDateKey === cell.key) {
+                    const filteredEntries = cell.entries.filter(
+                      (entry) => !isMatchingOrderEntry(entry, activeWeekDrag.orderId)
+                    );
+                    const previewDate = weekDateByKey.get(activeWeekDrag.previewDateKey);
+                    if (previewDate) {
+                      filteredEntries.push({
+                        ...activeWeekDrag.entry,
+                        createdAt: dateWithMinutes(previewDate, activeWeekDrag.previewMinutes),
+                        dateKey: activeWeekDrag.previewDateKey
+                      });
+                    }
+                    const previewMetrics = buildWeekTimelineMetrics(filteredEntries, {
+                      weekGridHeight,
+                      dayGridDurationMinutes,
+                      dayGridEndMinutes,
+                      dayGridSnapMinutes,
+                      dayGridStartMinutes,
+                      weekGridMinEventHeight,
+                      forcedOrderId:
+                        activeWeekDrag.previewDateKey === cell.key ? activeWeekDrag.orderId : undefined
+                    });
+                    displayTimelineEvents = previewMetrics.timelineEvents;
+                    displayTimelineLaneCount = previewMetrics.timelineLaneCount;
+                  }
+
+                  return (
                     <div
-                      className="orders-week-grid__canvas"
-                      style={
-                        {
-                          '--orders-week-grid-height': `${weekGridHeight}px`,
-                          '--orders-day-grid-lanes': `${cell.timelineLaneCount}`
-                        } as CSSProperties
-                      }
+                      key={cell.key}
+                      data-week-grid-date-key={cell.key}
+                      className={`orders-week-grid__day ${
+                        cell.isToday ? 'orders-week-grid__day--today' : ''
+                      } ${cell.isSelected ? 'orders-week-grid__day--selected' : ''}`}
                     >
-                      {weekGridLineOffsets.map((top, index) => (
-                        <div
-                          key={`week-line-${cell.key}-${index}`}
-                          className="orders-week-grid__line"
-                          style={{ top: `${top}px` }}
-                          aria-hidden="true"
-                        />
-                      ))}
-                      {cell.timelineEvents.length === 0 ? (
-                        <div className="orders-week-grid__empty">sem pedidos</div>
-                      ) : (
-                        cell.timelineEvents.map((item) => {
-                          const status = resolveCalendarEntryStatus(item.entry);
-                          const eventLabel = resolveCalendarEntryCompactName(item.entry);
-                          const eventNote = formatOrderNoteLabel(item.entry.order.notes);
-                          const isSelected = selectedOrder?.id === item.entry.order.id;
+                      <button
+                        type="button"
+                        className="orders-week-grid__day-head w-full text-left"
+                        onClick={() => selectCalendarDate(cell.date)}
+                      >
+                        <div>
+                          <p className="orders-week-grid__weekday">
+                            {formatCalendarWeekdayLabel(cell.date)}
+                          </p>
+                          <p className="orders-week-grid__date">
+                            {cell.date.toLocaleDateString('pt-BR', {
+                              day: '2-digit',
+                              month: '2-digit'
+                            })}
+                          </p>
+                        </div>
+                        <span className="orders-week-grid__count">{cell.entries.length}</span>
+                      </button>
 
-                          return (
-                            <button
-                              key={`week-event-${cell.key}-${calendarEntryBaseKey(item.entry)}`}
-                              type="button"
-                              className={`orders-week-grid__event ${
-                                isSelected
-                                  ? `ring-2 ring-offset-1 ${calendarStatusRingClass(status)}`
-                                  : ''
-                              }`}
-                              style={
-                                {
-                                  top: `${item.top}px`,
-                                  height: `${item.height}px`,
-                                  '--orders-day-grid-lane': `${item.lane}`,
-                                  ...calendarStatusEventSurfaceStyle(status)
-                                } as CSSProperties
-                              }
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                openCalendarEntry(item.entry);
-                              }}
-                            >
-                              <span
-                                className={`orders-calendar-chip__dot ${calendarStatusDotClass(status)}`}
-                                aria-hidden="true"
-                              />
-                              <span className="orders-week-grid__event-time">
-                                {item.entry.createdAt.toLocaleTimeString('pt-BR', {
-                                  hour: '2-digit',
-                                  minute: '2-digit'
-                                })}
-                              </span>
-                              <span className="orders-week-grid__event-name">{eventLabel}</span>
-                              {eventNote ? (
-                                <span className="orders-week-grid__event-note">{eventNote}</span>
-                              ) : null}
-                            </button>
-                          );
-                        })
-                      )}
+                      <div
+                        ref={(element) => registerWeekGridCanvas(cell.key, element)}
+                        className="orders-week-grid__canvas"
+                        style={
+                          {
+                            '--orders-week-grid-height': `${weekGridHeight}px`,
+                            '--orders-day-grid-lanes': `${displayTimelineLaneCount}`
+                          } as CSSProperties
+                        }
+                      >
+                        {weekGridLineOffsets.map((top, index) => (
+                          <div
+                            key={`week-line-${cell.key}-${index}`}
+                            className="orders-week-grid__line"
+                            style={{ top: `${top}px` }}
+                            aria-hidden="true"
+                          />
+                        ))}
+                        {displayTimelineEvents.length === 0 ? (
+                          <div className="orders-week-grid__empty">sem pedidos</div>
+                        ) : (
+                          displayTimelineEvents.map((item) => {
+                            const status = resolveCalendarEntryStatus(item.entry);
+                            const eventLabel = resolveCalendarEntryCompactName(item.entry);
+                            const eventNote = formatOrderNoteLabel(item.entry.order.notes);
+                            const isSelected = selectedOrder?.id === item.entry.order.id;
+                            const isDraggable = item.entry.kind === 'ORDER';
+                            const eventKey =
+                              item.entry.kind === 'ORDER' && item.entry.order.id
+                                ? `week-order-${item.entry.order.id}`
+                                : `week-${calendarEntryBaseKey(item.entry)}`;
+                            const isDragging = weekGridDragState?.eventKey === eventKey;
+                            const isSourceGhost =
+                              isDragging &&
+                              weekGridDragState?.sourceDateKey === cell.key &&
+                              weekGridDragState.previewDateKey !== cell.key;
+
+                            return (
+                              <button
+                                key={`week-event-${cell.key}-${eventKey}`}
+                                type="button"
+                                className={`orders-week-grid__event ${
+                                  isSelected
+                                    ? `ring-2 ring-offset-1 ${calendarStatusRingClass(status)}`
+                                    : ''
+                                } ${isDragging ? 'orders-week-grid__event--dragging' : ''} ${
+                                  isSourceGhost ? 'orders-week-grid__event--ghost' : ''
+                                }`}
+                                style={
+                                  {
+                                    top: `${item.top}px`,
+                                    height: `${item.height}px`,
+                                    '--orders-day-grid-lane': `${item.lane}`,
+                                    ...calendarStatusEventSurfaceStyle(status)
+                                  } as CSSProperties
+                                }
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleWeekGridEventClick(item.entry, eventKey);
+                                }}
+                                onPointerDown={
+                                  isDraggable
+                                    ? (event) => handleWeekGridEventPointerDown(event, cell, item)
+                                    : undefined
+                                }
+                                onPointerMove={isDraggable ? handleWeekGridEventPointerMove : undefined}
+                                onPointerUp={isDraggable ? handleWeekGridEventPointerUp : undefined}
+                                onPointerCancel={isDraggable ? handleWeekGridEventPointerCancel : undefined}
+                              >
+                                <span
+                                  className={`orders-calendar-chip__dot ${calendarStatusDotClass(status)}`}
+                                  aria-hidden="true"
+                                />
+                                <span className="orders-week-grid__event-time">
+                                  {item.entry.createdAt.toLocaleTimeString('pt-BR', {
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })}
+                                </span>
+                                <span className="orders-week-grid__event-name">{eventLabel}</span>
+                                {eventNote ? (
+                                  <span className="orders-week-grid__event-note">{eventNote}</span>
+                                ) : null}
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+
+                      {cell.overflowCount > 0 ? (
+                        <p className="orders-week-grid__overflow">
+                          +{cell.overflowCount} fora do horario
+                        </p>
+                      ) : null}
                     </div>
-
-                    {cell.overflowCount > 0 ? (
-                      <p className="orders-week-grid__overflow">
-                        +{cell.overflowCount} fora do horario
-                      </p>
-                    ) : null}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div
