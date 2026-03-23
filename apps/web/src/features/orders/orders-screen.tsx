@@ -760,6 +760,72 @@ type DayGridDragIntentState = {
   holdTimeoutId: number;
 };
 
+type TimelineLayoutInput<TEntry> = {
+  entry: TEntry;
+  startMinutes: number;
+  endMinutes: number;
+  top: number;
+  height: number;
+};
+
+type TimelineLayoutItem<TEntry> = TimelineLayoutInput<TEntry> & {
+  lane: number;
+  laneCount: number;
+};
+
+function buildTimelineLaneLayout<TEntry>(items: TimelineLayoutInput<TEntry>[]) {
+  if (items.length === 0) return [] as TimelineLayoutItem<TEntry>[];
+
+  const laneEndMinutes: number[] = [];
+  const positioned = items.map<TimelineLayoutItem<TEntry>>((item) => {
+    let lane = laneEndMinutes.findIndex((value) => item.startMinutes >= value);
+    if (lane === -1) {
+      lane = laneEndMinutes.length;
+      laneEndMinutes.push(item.endMinutes);
+    } else {
+      laneEndMinutes[lane] = item.endMinutes;
+    }
+
+    return {
+      ...item,
+      lane,
+      laneCount: 1
+    };
+  });
+
+  let clusterStartIndex = 0;
+  let clusterEndMinutes = positioned[0]?.endMinutes ?? 0;
+
+  for (let index = 0; index < positioned.length; index += 1) {
+    clusterEndMinutes =
+      index === clusterStartIndex
+        ? positioned[index].endMinutes
+        : Math.max(clusterEndMinutes, positioned[index].endMinutes);
+
+    const nextStartMinutes = positioned[index + 1]?.startMinutes ?? Number.POSITIVE_INFINITY;
+    if (nextStartMinutes < clusterEndMinutes) continue;
+
+    const laneCount = Math.max(
+      positioned
+        .slice(clusterStartIndex, index + 1)
+        .reduce((max, item) => Math.max(max, item.lane + 1), 0),
+      1
+    );
+
+    for (let clusterIndex = clusterStartIndex; clusterIndex <= index; clusterIndex += 1) {
+      positioned[clusterIndex] = {
+        ...positioned[clusterIndex],
+        laneCount
+      };
+    }
+
+    clusterStartIndex = index + 1;
+    clusterEndMinutes = positioned[clusterStartIndex]?.endMinutes ?? 0;
+  }
+
+  return positioned;
+}
+
 function safeDateFromIso(iso?: string | null) {
   if (!iso) return null;
   const parsed = new Date(iso);
@@ -2046,32 +2112,27 @@ function OrdersPageContent() {
     });
   }, [dayGridEndMinutes, dayGridStartMinutes, selectedDateEntries]);
   const selectedDateTimelineEvents = useMemo(() => {
-    const laneEndMinutes: number[] = [];
     const pixelsPerMinute = dayGridHeight / dayGridDurationMinutes;
     const baseDuration = dayGridSnapMinutes;
     const minCardHeight = Math.max(Math.round(baseDuration * pixelsPerMinute), 42);
 
-    return selectedDateEntriesInsideGrid.map((entry) => {
-      const snappedStartMinutes = clampNumber(
+    const timelineItems = selectedDateEntriesInsideGrid.map((entry) => {
+      const startMinutes = clampNumber(
         Math.round(minutesIntoDay(entry.createdAt) / dayGridSnapMinutes) * dayGridSnapMinutes,
         dayGridStartMinutes,
         dayGridEndMinutes - dayGridSnapMinutes
       );
-      let lane = laneEndMinutes.findIndex((value) => snappedStartMinutes >= value);
-      if (lane === -1) {
-        lane = laneEndMinutes.length;
-        laneEndMinutes.push(snappedStartMinutes + baseDuration);
-      } else {
-        laneEndMinutes[lane] = snappedStartMinutes + baseDuration;
-      }
 
       return {
         entry,
-        lane,
-        top: Math.round((snappedStartMinutes - dayGridStartMinutes) * pixelsPerMinute),
+        startMinutes,
+        endMinutes: startMinutes + baseDuration,
+        top: Math.round((startMinutes - dayGridStartMinutes) * pixelsPerMinute),
         height: minCardHeight
       };
     });
+
+    return buildTimelineLaneLayout(timelineItems);
   }, [
     dayGridDurationMinutes,
     dayGridEndMinutes,
@@ -2083,7 +2144,7 @@ function OrdersPageContent() {
   const dayTimelineLaneCount = useMemo(
     () =>
       Math.max(
-        selectedDateTimelineEvents.reduce((max, item) => Math.max(max, item.lane + 1), 0),
+        selectedDateTimelineEvents.reduce((max, item) => Math.max(max, item.laneCount), 0),
         1
       ),
     [selectedDateTimelineEvents]
@@ -3357,6 +3418,7 @@ function OrdersPageContent() {
                                 top: `${displayTop}px`,
                                 height: `${activeDrag ? activeDrag.height : item.height}px`,
                                 '--orders-day-grid-lane': `${activeDrag ? activeDrag.lane : item.lane}`,
+                                '--orders-day-grid-group-lanes': `${item.laneCount}`,
                                 ...calendarStatusEventSurfaceStyle(status)
                               } as CSSProperties
                             }

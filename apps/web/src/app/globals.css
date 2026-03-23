@@ -3657,8 +3657,12 @@ input[type='radio'] {
 .orders-day-grid__event {
   appearance: none;
   position: absolute;
-  left: calc((100% / var(--orders-day-grid-lanes)) * var(--orders-day-grid-lane) + 6px);
-  width: calc((100% / var(--orders-day-grid-lanes)) - 9px);
+  left: calc(
+    (100% / var(--orders-day-grid-group-lanes, var(--orders-day-grid-lanes, 1))) *
+      var(--orders-day-grid-lane) +
+      6px
+  );
+  width: calc((100% / var(--orders-day-grid-group-lanes, var(--orders-day-grid-lanes, 1))) - 9px);
   min-width: 0;
   border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--line-soft), white 18%);
