@@ -1,6 +1,7 @@
 const path = require('path');
 const js = require('@eslint/js');
 const { FlatCompat } = require('@eslint/eslintrc');
+const nextPlugin = require('@next/eslint-plugin-next');
 
 const compat = new FlatCompat({
   baseDirectory: __dirname,
@@ -14,6 +15,9 @@ const webCompat = new FlatCompat({
 
 module.exports = [
   {
+    plugins: {
+      '@next/next': nextPlugin
+    },
     ignores: [
       '**/node_modules/**',
       '**/dist/**',
