@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ensureApiServer, request } from './lib/api-server.mjs';
 
+async function nextAvailableSchedule(apiUrl, requestedAt) {
+  const availability = await request(apiUrl, `/orders/public-schedule?scheduledAt=${encodeURIComponent(requestedAt)}`);
+  return availability.requestedAvailable ? requestedAt : availability.nextAvailableAt;
+}
+
 test('customers: criar com telefone repetido reaproveita o cadastro ativo', async (t) => {
   const { apiUrl, shutdown } = await ensureApiServer();
   let customerId = null;
@@ -71,8 +76,13 @@ test('order intake google-form: nao colapsa clientes diferentes com o mesmo nome
 
   const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const customerName = `Cliente Mesmo Nome ${suffix}`;
+  const firstSchedule = await nextAvailableSchedule(apiUrl, new Date(Date.UTC(2030, 2, 15, 14, 30, 0)).toISOString());
+  const secondSchedule = await nextAvailableSchedule(
+    apiUrl,
+    new Date(new Date(firstSchedule).getTime() + 15 * 60 * 1000).toISOString()
+  );
 
-  const buildPayload = (externalId, address) => ({
+  const buildPayload = (externalId, address, scheduledAt) => ({
     version: 1,
     customer: {
       name: customerName,
@@ -80,7 +90,7 @@ test('order intake google-form: nao colapsa clientes diferentes com o mesmo nome
     },
     fulfillment: {
       mode: 'DELIVERY',
-      scheduledAt: new Date(Date.UTC(2030, 2, 15, 14, 30, 0)).toISOString()
+      scheduledAt
     },
     flavors: {
       T: 7,
@@ -97,7 +107,7 @@ test('order intake google-form: nao colapsa clientes diferentes com o mesmo nome
   const first = await request(apiUrl, '/orders/intake/google-form', {
     method: 'POST',
     headers: formToken ? { Authorization: `Bearer ${formToken}` } : undefined,
-    body: buildPayload(`same-name-a-${suffix}`, 'Rua Alfa, 10')
+    body: buildPayload(`same-name-a-${suffix}`, 'Rua Alfa, 10', firstSchedule)
   });
   createdOrderIds.push(first.order.id);
   createdCustomerIds.push(first.intake.customerId);
@@ -105,7 +115,7 @@ test('order intake google-form: nao colapsa clientes diferentes com o mesmo nome
   const second = await request(apiUrl, '/orders/intake/google-form', {
     method: 'POST',
     headers: formToken ? { Authorization: `Bearer ${formToken}` } : undefined,
-    body: buildPayload(`same-name-b-${suffix}`, 'Rua Beta, 20')
+    body: buildPayload(`same-name-b-${suffix}`, 'Rua Beta, 20', secondSchedule)
   });
   createdOrderIds.push(second.order.id);
   createdCustomerIds.push(second.intake.customerId);

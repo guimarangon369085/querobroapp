@@ -13,8 +13,16 @@ function listen(server) {
 }
 
 function closeServer(server) {
-  return new Promise((resolve) => {
-    server.close(() => resolve());
+  return new Promise((resolve, reject) => {
+    server.close((error) => {
+      if (error && error.code !== 'ERR_SERVER_NOT_RUNNING') {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+    server.closeIdleConnections?.();
+    server.closeAllConnections?.();
   });
 }
 
@@ -103,6 +111,7 @@ test('order created alert: publica no ntfy uma vez so mesmo com retry idempotent
       url: req.url,
       body
     });
+    res.setHeader('connection', 'close');
     res.writeHead(204).end();
   });
   const address = await listen(webhook);
@@ -211,6 +220,7 @@ test('order created alert: falha no ntfy nao bloqueia o pedido', async (t) => {
   let hitCount = 0;
   const failingWebhook = http.createServer(async (_req, res) => {
     hitCount += 1;
+    res.setHeader('connection', 'close');
     res.writeHead(500, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ error: 'forced failure' }));
   });
@@ -311,6 +321,7 @@ test('order created alert: nao envia confirmacao automatica ao cliente via Whats
       headers: req.headers,
       body: JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
     });
+    res.setHeader('connection', 'close');
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ messages: [{ id: `wamid.${graphHits.length}` }] }));
   });

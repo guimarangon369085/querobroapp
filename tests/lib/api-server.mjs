@@ -5,9 +5,13 @@ import { spawn, spawnSync } from 'node:child_process';
 
 const ROOT_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
 const API_APP_DIR = path.join(ROOT_DIR, 'apps', 'api');
+const API_PRISMA_DIR = path.join(API_APP_DIR, 'prisma');
+const API_TEMPLATE_DB_PATH = path.join(API_PRISMA_DIR, 'dev.db');
 const OUTPUT_DIR = path.join(ROOT_DIR, 'output', 'tests');
 const EXPLICIT_API_URL = String(process.env.QBAPP_E2E_API_URL || '').trim();
 const API_AUTH_ENABLED = String(process.env.APP_AUTH_ENABLED || 'false').trim() || 'false';
+
+let buildPromise = null;
 
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
@@ -62,6 +66,19 @@ function runCommand(command, args, options = {}) {
   return result;
 }
 
+async function ensureApiBuild() {
+  if (!buildPromise) {
+    buildPromise = Promise.resolve().then(() => {
+      runCommand('pnpm', ['--filter', '@querobroapp/api', 'prisma:generate:dev']);
+      runCommand('pnpm', ['--filter', '@querobroapp/api', 'build']);
+    });
+    buildPromise.catch(() => {
+      buildPromise = null;
+    });
+  }
+  await buildPromise;
+}
+
 async function isPortAvailable(port) {
   return new Promise((resolve) => {
     const server = net.createServer();
@@ -91,6 +108,45 @@ function tryAcquirePortLock(port) {
   }
 }
 
+function processExists(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ESRCH') {
+      return false;
+    }
+    return true;
+  }
+}
+
+function tryAcquirePortLockOrCleanup(port) {
+  const lock = tryAcquirePortLock(port);
+  if (lock) return lock;
+
+  const lockPath = path.join(OUTPUT_DIR, `api-${port}.lock`);
+  let stalePid = null;
+  try {
+    stalePid = Number.parseInt(fs.readFileSync(lockPath, 'utf8').trim(), 10);
+  } catch {
+    return null;
+  }
+
+  if (processExists(stalePid)) {
+    return null;
+  }
+
+  try {
+    fs.unlinkSync(lockPath);
+  } catch {
+    return null;
+  }
+
+  return tryAcquirePortLock(port);
+}
+
 function releasePortLock(lock) {
   if (!lock) return;
 
@@ -101,6 +157,26 @@ function releasePortLock(lock) {
   try {
     fs.unlinkSync(lock.lockPath);
   } catch {}
+}
+
+function removeDatabaseArtifacts(databasePath) {
+  for (const suffix of ['', '-shm', '-wal']) {
+    try {
+      fs.unlinkSync(`${databasePath}${suffix}`);
+    } catch {}
+  }
+}
+
+function prepareTestDatabase(port) {
+  const databasePath = path.join(OUTPUT_DIR, `api-${port}.db`);
+  removeDatabaseArtifacts(databasePath);
+  fs.copyFileSync(API_TEMPLATE_DB_PATH, databasePath);
+  const relativePath = path.relative(API_PRISMA_DIR, databasePath).split(path.sep).join('/');
+  const databaseUrl = `file:${relativePath.startsWith('.') ? relativePath : `./${relativePath}`}`;
+  return {
+    databasePath,
+    databaseUrl
+  };
 }
 
 async function shutdownChild(child) {
@@ -143,10 +219,10 @@ async function ensureApiServer() {
     };
   }
 
-  runCommand('pnpm', ['--filter', '@querobroapp/api', 'build']);
+  await ensureApiBuild();
 
   for (let port = 3101; port <= 3600; port += 1) {
-    const portLock = tryAcquirePortLock(port);
+    const portLock = tryAcquirePortLockOrCleanup(port);
     if (!portLock) continue;
 
     const apiUrl = `http://127.0.0.1:${port}`;
@@ -155,16 +231,19 @@ async function ensureApiServer() {
       continue;
     }
 
-    const apiLog = fs.openSync(path.join(OUTPUT_DIR, `api-${port}.log`), 'a');
-    const child = spawn('node', ['dist/main.js'], {
+    const testDatabase = prepareTestDatabase(port);
+    const apiLog = fs.openSync(path.join(OUTPUT_DIR, `api-${port}.log`), 'w');
+    const child = spawn('node', ['--env-file=.env', 'dist/main.js'], {
       cwd: API_APP_DIR,
       env: {
         ...process.env,
         APP_AUTH_ENABLED: API_AUTH_ENABLED,
+        DATABASE_URL: testDatabase.databaseUrl,
         PORT: String(port)
       },
       stdio: ['ignore', apiLog, apiLog]
     });
+    fs.closeSync(apiLog);
 
     try {
       const ready = await waitForServerStartup(apiUrl, child);
@@ -185,11 +264,13 @@ async function ensureApiServer() {
         shutdown: async () => {
           await shutdownChild(child);
           releasePortLock(portLock);
+          removeDatabaseArtifacts(testDatabase.databasePath);
         }
       };
     } catch (error) {
       await shutdownChild(child);
       releasePortLock(portLock);
+      removeDatabaseArtifacts(testDatabase.databasePath);
       continue;
     }
   }
