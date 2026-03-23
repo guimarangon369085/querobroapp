@@ -210,6 +210,16 @@ function formatCurrencyBR(value: number) {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+function formatUnitCurrencyBR(value: number) {
+  if (!Number.isFinite(value)) return 'R$ 0,0000';
+  return value.toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4
+  });
+}
+
 function inventoryCategoryLabel(category: string) {
   if (category === 'INGREDIENTE') return 'Ingrediente';
   if (category === 'EMBALAGEM_INTERNA') return 'Embalagem interna';
@@ -1964,7 +1974,13 @@ function StockPageContent() {
                                   Unidade de compra: {formatQty(entry.purchasePackSize)} {entry.unit}
                                 </p>
                                 <p className="text-sm text-neutral-600">
-                                  Custo unitário atual: {formatCurrencyBR(entry.unitCost)} por {entry.unit}
+                                  Custo unitário atual:{' '}
+                                  {formatUnitCurrencyBR(
+                                    entry.purchasePackSize > 0
+                                      ? entry.purchasePackCost / entry.purchasePackSize
+                                      : 0
+                                  )}{' '}
+                                  por {entry.unit}
                                 </p>
                                 {entry.sourceUrl ? (
                                   <a
