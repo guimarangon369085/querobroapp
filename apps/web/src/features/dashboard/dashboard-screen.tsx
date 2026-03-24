@@ -205,6 +205,35 @@ type DashboardSummary = {
   };
 };
 
+type MonthlyCogsEntry = {
+  monthKey: string;
+  monthLabel: string;
+  ordersCount: number;
+  itemsCount: number;
+  units: number;
+  revenue: number;
+  cogs: number;
+  grossProfit: number;
+  grossMarginPct: number;
+  warningsCount: number;
+  products: Array<{
+    productId: number;
+    productName: string;
+    quantity: number;
+    revenue: number;
+    cogs: number;
+  }>;
+  ingredients: Array<{
+    ingredientId: number;
+    ingredientName: string;
+    unit: string;
+    quantity: number;
+    unitCost: number;
+    amount: number;
+    orderCount: number;
+  }>;
+};
+
 type DashboardTone = 'amber' | 'sky' | 'mint' | 'rose' | 'ink';
 
 const PANEL_TONE_CLASSES: Record<DashboardTone, string> = {
@@ -259,22 +288,12 @@ function formatShortDateLabel(value: string) {
   return parsed.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 }
 
-function formatDateTimeLabel(value: string | null) {
-  if (!value) return 'Sem data';
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
+function formatMonthLabel(value: Date) {
+  const label = value.toLocaleDateString('pt-BR', {
+    month: 'long',
+    year: 'numeric'
   });
-}
-
-function paymentStatusBadgeClass(status: 'PENDENTE' | 'PARCIAL' | 'PAGO') {
-  if (status === 'PAGO') return 'border-emerald-200 bg-emerald-100 text-emerald-800';
-  if (status === 'PARCIAL') return 'border-amber-200 bg-amber-100 text-amber-800';
-  return 'border-neutral-200 bg-neutral-100 text-neutral-700';
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 function MetricCard({
@@ -535,6 +554,122 @@ export default function DashboardScreen() {
   const asOfLabel = summary ? new Date(summary.asOf).toLocaleString('pt-BR') : 'carregando...';
   const recentTrafficSeries = summary ? summary.traffic.dailySeries.slice(-10) : [];
   const recentBusinessSeries = summary ? summary.business.dailySeries.slice(-10) : [];
+  const cogsByMonth = useMemo<MonthlyCogsEntry[]>(() => {
+    if (!summary) return [];
+
+    const byMonth = new Map<
+      string,
+      {
+        monthKey: string;
+        monthLabel: string;
+        ordersCount: number;
+        itemsCount: number;
+        units: number;
+        revenue: number;
+        cogs: number;
+        grossProfit: number;
+        warningsCount: number;
+        products: Map<number, MonthlyCogsEntry['products'][number]>;
+        ingredients: Map<number, MonthlyCogsEntry['ingredients'][number]>;
+      }
+    >();
+
+    for (const entry of summary.business.cogsByOrder) {
+      const referenceDate = new Date(entry.scheduledAt || entry.createdAt);
+      const monthDate = Number.isNaN(referenceDate.getTime())
+        ? new Date(entry.createdAt)
+        : referenceDate;
+      const monthKey = Number.isNaN(monthDate.getTime())
+        ? 'sem-data'
+        : `${monthDate.getFullYear()}-${`${monthDate.getMonth() + 1}`.padStart(2, '0')}`;
+      const monthLabel = Number.isNaN(monthDate.getTime()) ? 'Sem data' : formatMonthLabel(monthDate);
+
+      const current = byMonth.get(monthKey) || {
+        monthKey,
+        monthLabel,
+        ordersCount: 0,
+        itemsCount: 0,
+        units: 0,
+        revenue: 0,
+        cogs: 0,
+        grossProfit: 0,
+        warningsCount: 0,
+        products: new Map<number, MonthlyCogsEntry['products'][number]>(),
+        ingredients: new Map<number, MonthlyCogsEntry['ingredients'][number]>()
+      };
+
+      current.ordersCount += 1;
+      current.itemsCount += entry.itemsCount;
+      current.units += entry.units;
+      current.revenue += entry.revenue;
+      current.cogs += entry.cogs;
+      current.grossProfit += entry.grossProfit;
+      current.warningsCount += entry.warnings.length;
+
+      for (const product of entry.products) {
+        const existingProduct = current.products.get(product.productId) || {
+          productId: product.productId,
+          productName: product.productName,
+          quantity: 0,
+          revenue: 0,
+          cogs: 0
+        };
+        existingProduct.quantity += product.quantity;
+        existingProduct.revenue += product.revenue;
+        existingProduct.cogs += product.cogs;
+        current.products.set(product.productId, existingProduct);
+      }
+
+      for (const ingredient of entry.ingredients) {
+        const existingIngredient = current.ingredients.get(ingredient.ingredientId) || {
+          ingredientId: ingredient.ingredientId,
+          ingredientName: ingredient.ingredientName,
+          unit: ingredient.unit,
+          quantity: 0,
+          unitCost: ingredient.unitCost,
+          amount: 0,
+          orderCount: 0
+        };
+        existingIngredient.quantity += ingredient.quantity;
+        existingIngredient.amount += ingredient.amount;
+        existingIngredient.unitCost = ingredient.unitCost;
+        existingIngredient.orderCount += 1;
+        current.ingredients.set(ingredient.ingredientId, existingIngredient);
+      }
+
+      byMonth.set(monthKey, current);
+    }
+
+    return Array.from(byMonth.values())
+      .map((entry) => ({
+        monthKey: entry.monthKey,
+        monthLabel: entry.monthLabel,
+        ordersCount: entry.ordersCount,
+        itemsCount: entry.itemsCount,
+        units: entry.units,
+        revenue: entry.revenue,
+        cogs: entry.cogs,
+        grossProfit: entry.grossProfit,
+        grossMarginPct: entry.revenue > 0 ? (entry.grossProfit / entry.revenue) * 100 : 0,
+        warningsCount: entry.warningsCount,
+        products: Array.from(entry.products.values())
+          .sort((left, right) => right.cogs - left.cogs || right.quantity - left.quantity)
+          .map((product) => ({
+            ...product,
+            revenue: Number(product.revenue.toFixed(2)),
+            cogs: Number(product.cogs.toFixed(2))
+          })),
+        ingredients: Array.from(entry.ingredients.values())
+          .sort((left, right) => right.amount - left.amount || right.quantity - left.quantity)
+          .map((ingredient) => ({
+            ...ingredient,
+            quantity: Number(ingredient.quantity.toFixed(3)),
+            amount: Number(ingredient.amount.toFixed(2)),
+            unitCost: Number(ingredient.unitCost.toFixed(4))
+          }))
+      }))
+      .sort((left, right) => right.monthKey.localeCompare(left.monthKey));
+  }, [summary]);
 
   const trafficMetrics = summary
     ? [
@@ -774,19 +909,19 @@ export default function DashboardScreen() {
 
           <section className="grid gap-4">
             <SectionPanel
-              title="COGS por pedido"
+              title="COGS por mês"
               tone="rose"
               tag={
                 <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-strong)]">
-                  {formatNumber(summary.business.cogsByOrder.length)} pedidos
+                  {formatNumber(cogsByMonth.length)} meses
                 </span>
               }
             >
-              {summary.business.cogsByOrder.length ? (
+              {cogsByMonth.length ? (
                 <div className="grid gap-3">
-                  {summary.business.cogsByOrder.map((entry) => (
+                  {cogsByMonth.map((entry) => (
                     <details
-                      key={entry.orderId}
+                      key={entry.monthKey}
                       className="group overflow-hidden rounded-[24px] border border-white/80 bg-white/86 shadow-[0_10px_24px_rgba(57,39,24,0.06)]"
                     >
                       <summary className="list-none cursor-pointer p-4 sm:p-5">
@@ -794,23 +929,19 @@ export default function DashboardScreen() {
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
                               <strong className="text-[color:var(--ink-strong)]">
-                                #{entry.orderDisplayNumber} · {entry.customerName}
+                                {entry.monthLabel}
                               </strong>
                               <span className="rounded-full border border-white/70 bg-white px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-strong)]">
-                                {entry.status}
+                                {formatNumber(entry.ordersCount)} pedido(s)
                               </span>
-                              <span className={`rounded-full border px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] ${paymentStatusBadgeClass(entry.grossProfit >= 0 ? 'PAGO' : 'PARCIAL')}`}>
-                                {entry.grossProfit >= 0 ? 'Margem positiva' : 'Margem pressionada'}
-                              </span>
-                              {entry.warnings.length ? (
+                              {entry.warningsCount ? (
                                 <span className="rounded-full border border-[rgba(162,81,66,0.18)] bg-[rgba(255,244,240,0.92)] px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-strong)]">
-                                  {formatNumber(entry.warnings.length)} alerta(s)
+                                  {formatNumber(entry.warningsCount)} alerta(s)
                                 </span>
                               ) : null}
                             </div>
                             <p className="mt-2 text-sm text-neutral-600">
-                              Criado em {formatDateTimeLabel(entry.createdAt)}
-                              {entry.scheduledAt ? ` · Agendado para ${formatDateTimeLabel(entry.scheduledAt)}` : ''}
+                              Resumo consolidado dos pedidos auditados nesse mês.
                             </p>
                             <div className="mt-3 grid gap-2 text-sm text-neutral-600 sm:grid-cols-2 xl:grid-cols-5">
                               <span>{formatNumber(entry.itemsCount)} item(ns)</span>
@@ -830,11 +961,24 @@ export default function DashboardScreen() {
                         <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
                           <div className="grid gap-3">
                             <div className="grid gap-2 rounded-[22px] border border-white/80 bg-white/78 p-4">
+                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">Resumo</p>
+                              <div className="grid gap-2 text-sm text-neutral-600 sm:grid-cols-2">
+                                <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/80 bg-white/70 px-3 py-2">
+                                  <span>Pedidos</span>
+                                  <span className="font-semibold text-neutral-900">{formatNumber(entry.ordersCount)}</span>
+                                </div>
+                                <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/80 bg-white/70 px-3 py-2">
+                                  <span>Margem</span>
+                                  <span className="font-semibold text-neutral-900">{formatPercent(entry.grossMarginPct)}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="grid gap-2 rounded-[22px] border border-white/80 bg-white/78 p-4">
                               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">Produtos</p>
                               <div className="grid gap-2 text-sm text-neutral-600">
-                                {entry.products.map((product) => (
+                                {entry.products.slice(0, 6).map((product) => (
                                   <div
-                                    key={`${entry.orderId}-${product.productId}`}
+                                    key={`${entry.monthKey}-${product.productId}`}
                                     className="flex flex-wrap items-center justify-between gap-2"
                                   >
                                     <span>{product.productName} · {formatNumber(product.quantity)} un</span>
@@ -843,16 +987,12 @@ export default function DashboardScreen() {
                                 ))}
                               </div>
                             </div>
-                            {entry.warnings.length ? (
+                            {entry.warningsCount ? (
                               <div className="grid gap-2 rounded-[22px] border border-[rgba(162,81,66,0.18)] bg-[rgba(255,244,240,0.9)] p-4 text-sm text-[color:var(--ink-strong)]">
                                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
                                   Alertas técnicos
                                 </p>
-                                {entry.warnings.map((warning) => (
-                                  <p key={`${entry.orderId}-${warning.code}-${warning.productId}`}>
-                                    {warning.productName} · {warning.message}
-                                  </p>
-                                ))}
+                                <p>{formatNumber(entry.warningsCount)} alerta(s) consolidados nesse mês.</p>
                               </div>
                             ) : null}
                           </div>
@@ -860,9 +1000,9 @@ export default function DashboardScreen() {
                           <div className="grid gap-2 rounded-[22px] border border-white/80 bg-white/78 p-4">
                             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">Ingredientes</p>
                             <div className="grid gap-2 text-sm text-neutral-600">
-                              {entry.ingredients.map((ingredient) => (
+                              {entry.ingredients.slice(0, 8).map((ingredient) => (
                                 <div
-                                  key={`${entry.orderId}-${ingredient.ingredientId}`}
+                                  key={`${entry.monthKey}-${ingredient.ingredientId}`}
                                   className="flex flex-wrap items-center justify-between gap-2"
                                 >
                                   <span>
@@ -879,7 +1019,7 @@ export default function DashboardScreen() {
                   ))}
                 </div>
               ) : (
-                <CompactEmpty message="Sem pedidos auditados na base." />
+                <CompactEmpty message="Sem meses auditados na base." />
               )}
             </SectionPanel>
           </section>

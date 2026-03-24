@@ -3947,6 +3947,25 @@ input[type='radio'] {
   box-shadow: none;
 }
 
+.orders-list-panel__line-button {
+  width: 100%;
+  display: grid;
+  gap: 1px;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+}
+
+.orders-list-panel__line-button--with-remove {
+  padding-right: 84px;
+}
+
+.orders-list-panel__line-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--tomato-500), white 24%);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
 .orders-list-panel__line.app-panel--interactive:hover {
   transform: none;
   border-color: color-mix(in srgb, var(--line-soft), var(--tomato-500) 22%);
@@ -4042,6 +4061,13 @@ input[type='radio'] {
   padding: 3px 8px;
   font-size: 0.7rem;
   border-radius: 8px;
+}
+
+.orders-list-panel__line-remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
 }
 
 .orders-list-panel__cta {

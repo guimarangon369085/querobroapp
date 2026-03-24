@@ -4141,91 +4141,91 @@ function OrdersPageContent() {
                     return (
                       <div
                         key={`list-${order.id ?? 'na'}`}
-                        className={`orders-list-panel__line app-panel app-panel--expandable grid gap-1 ${
+                        className={`orders-list-panel__line app-panel app-panel--expandable app-panel--interactive relative ${
                           isActive ? 'app-panel--expanded' : ''
                         }`}
                       >
-                        <div className="flex flex-wrap items-start justify-between gap-1">
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-1">
-                              <span
-                                className={`inline-flex items-center rounded-full border px-1.5 py-0 text-[10px] font-semibold leading-4 ${orderStatusBadgeClass(order.status || '')}`}
-                              >
+                        <button
+                          type="button"
+                          className={`orders-list-panel__line-button ${!isOperationMode ? 'orders-list-panel__line-button--with-remove' : ''}`}
+                          onClick={() => openOrderDetail(order)}
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-1">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-1">
                                 <span
-                                  className={`mr-1.5 inline-flex h-1.5 w-1.5 rounded-full ${statusDotClass}`}
-                                  aria-hidden="true"
-                                />
-                                {formatDisplayedOrderStatus(order.status)}
-                              </span>
-                              <span
-                                className={`inline-flex items-center rounded-full border px-1.5 py-0 text-[10px] font-semibold leading-4 ${orderPaymentBadgeClass(paymentStatus)}`}
-                              >
-                                {formatDisplayedPaymentStatus(paymentStatus)}
-                              </span>
-                              {isActive ? (
-                                <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-100 px-1.5 py-0 text-[10px] font-semibold leading-4 text-amber-900">
-                                  Em foco
+                                  className={`inline-flex items-center rounded-full border px-1.5 py-0 text-[10px] font-semibold leading-4 ${orderStatusBadgeClass(order.status || '')}`}
+                                >
+                                  <span
+                                    className={`mr-1.5 inline-flex h-1.5 w-1.5 rounded-full ${statusDotClass}`}
+                                    aria-hidden="true"
+                                  />
+                                  {formatDisplayedOrderStatus(order.status)}
                                 </span>
+                                <span
+                                  className={`inline-flex items-center rounded-full border px-1.5 py-0 text-[10px] font-semibold leading-4 ${orderPaymentBadgeClass(paymentStatus)}`}
+                                >
+                                  {formatDisplayedPaymentStatus(paymentStatus)}
+                                </span>
+                                {isActive ? (
+                                  <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-100 px-1.5 py-0 text-[10px] font-semibold leading-4 text-amber-900">
+                                    Em foco
+                                  </span>
+                                ) : null}
+                              </div>
+                              <p className="orders-list-panel__line-customer">{customerName}</p>
+                              <p className="orders-list-panel__line-meta">
+                                Pedido #{displayOrderNumber(order)} • {dateLabel}
+                              </p>
+                              {historyOrderNote ? (
+                                <p className="orders-list-panel__line-note">{historyOrderNote}</p>
                               ) : null}
+                              <p className="orders-list-panel__line-contact">{historyCustomerAddress}</p>
+                              <p className="orders-list-panel__line-contact">{historyCustomerPhone}</p>
                             </div>
-                            <p className="orders-list-panel__line-customer">{customerName}</p>
-                            <p className="orders-list-panel__line-meta">
-                              Pedido #{displayOrderNumber(order)} • {dateLabel}
-                            </p>
-                            {historyOrderNote ? (
-                              <p className="orders-list-panel__line-note">{historyOrderNote}</p>
-                            ) : null}
-                            <p className="orders-list-panel__line-contact">{historyCustomerAddress}</p>
-                            <p className="orders-list-panel__line-contact">{historyCustomerPhone}</p>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="orders-list-panel__line-total">
+                                {formatCurrencyBR(order.total ?? 0)}
+                              </span>
+                              <span className="app-panel__chevron" aria-hidden="true" />
+                            </div>
                           </div>
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="orders-list-panel__line-total">
-                              {formatCurrencyBR(order.total ?? 0)}
-                            </span>
-                            <button
-                              type="button"
-                              className="app-button app-button-ghost px-2 py-1 text-[11px]"
-                              onClick={() => openOrderDetail(order)}
-                            >
-                              Ver
-                            </button>
-                            {!isOperationMode ? (
-                              <button
-                                type="button"
-                                className="app-button app-button-danger"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  removeOrder(order.id!);
-                                }}
-                              >
-                                Remover
-                              </button>
-                            ) : null}
-                          </div>
-                        </div>
 
-                        <div className="app-panel__expand" aria-hidden={!isActive}>
-                          <div className="app-panel__expand-inner">
-                            <div className="app-panel__expand-surface grid gap-2 text-sm text-neutral-600">
-                              <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/80 bg-white/70 px-3 py-2">
-                                <span>Unidades</span>
-                                <span className="font-semibold text-neutral-900">{formatOrderUnitsLabel(itemCount)}</span>
-                              </div>
-                              <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/80 bg-white/70 px-3 py-2">
-                                <span>Pagamento</span>
-                                <span className="font-semibold text-neutral-900">
-                                  {paymentStatus === 'PAGO'
-                                    ? 'PIX recebido'
-                                    : balanceDue > 0
-                                      ? `Saldo ${formatCurrencyBR(balanceDue)}`
-                                      : paymentStatus === 'PENDENTE'
-                                        ? 'PIX pendente'
-                                        : paymentStatus}
-                                </span>
+                          <div className="app-panel__expand" aria-hidden={!isActive}>
+                            <div className="app-panel__expand-inner">
+                              <div className="app-panel__expand-surface grid gap-2 text-sm text-neutral-600">
+                                <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/80 bg-white/70 px-3 py-2">
+                                  <span>Unidades</span>
+                                  <span className="font-semibold text-neutral-900">{formatOrderUnitsLabel(itemCount)}</span>
+                                </div>
+                                <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/80 bg-white/70 px-3 py-2">
+                                  <span>Pagamento</span>
+                                  <span className="font-semibold text-neutral-900">
+                                    {paymentStatus === 'PAGO'
+                                      ? 'PIX recebido'
+                                      : balanceDue > 0
+                                        ? `Saldo ${formatCurrencyBR(balanceDue)}`
+                                        : paymentStatus === 'PENDENTE'
+                                          ? 'PIX pendente'
+                                          : paymentStatus}
+                                  </span>
+                                </div>
                               </div>
                             </div>
                           </div>
-                        </div>
+                        </button>
+                        {!isOperationMode ? (
+                          <button
+                            type="button"
+                            className="orders-list-panel__line-remove app-button app-button-danger"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              removeOrder(order.id!);
+                            }}
+                          >
+                            Remover
+                          </button>
+                        ) : null}
                       </div>
                     );
                   })
