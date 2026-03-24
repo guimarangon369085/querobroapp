@@ -6,7 +6,7 @@
     "dev": "NEXT_DISABLE_DEVTOOLS=1 next dev -H 127.0.0.1",
     "build": "next build",
     "lint": "eslint . --ext .ts,.tsx,.js,.cjs,.mjs --max-warnings=0",
-    "typecheck": "tsc -p tsconfig.json --noEmit --incremental false"
+    "typecheck": "next typegen && tsc -p tsconfig.json --noEmit --incremental false"
   },
   "dependencies": {
     "@querobroapp/shared": "workspace:*",
