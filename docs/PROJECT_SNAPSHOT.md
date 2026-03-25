@@ -158,6 +158,9 @@ Ultima atualizacao: 2026-03-23
 ## Validacao operacional mais recente
 
 - Data: 2026-03-25
+- Ciclo executado: `pnpm --filter @querobroapp/web build`
+- Resultado: o `/dashboard` passou a ignorar falhas transitórias de refresh quando já existem dados carregados, evitando o banner bloqueante `Service Unavailable` sobre métricas já resolvidas ao trocar o período.
+- Data: 2026-03-25
 - Ciclo executado: `pnpm --filter @querobroapp/web build`, `pnpm --filter @querobroapp/web typecheck`
 - Resultado: `/dashboard` passou a operar com um unico contexto de periodo, com `Periodo total` na mesma regua de selecao de `24h/7d/30d`; o bloco consolidado duplicado saiu, o botao `Atualizar` foi removido e a troca de periodo agora se reflete automaticamente ao clicar.
 - Data: 2026-03-23

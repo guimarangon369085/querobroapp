@@ -1,7 +1,7 @@
 'use client';
 
 import type { Coupon } from '@querobroapp/shared';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useFeedback } from '@/components/feedback-provider';
 import { formatCurrencyBR, formatDecimalInputBR, parseLocaleNumber } from '@/lib/format';
 
@@ -548,6 +548,11 @@ export default function DashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { notifyError, notifySuccess } = useFeedback();
+  const summaryRef = useRef<DashboardSummary | null>(null);
+
+  useEffect(() => {
+    summaryRef.current = summary;
+  }, [summary]);
 
   const loadCoupons = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -597,8 +602,9 @@ export default function DashboardScreen() {
         setError(null);
       } catch (loadError) {
         const message = loadError instanceof Error ? loadError.message : 'Nao foi possivel carregar o dashboard.';
-        setError(message);
-        if (!silent) {
+        const hasSummaryLoaded = summaryRef.current != null;
+        setError(hasSummaryLoaded ? null : message);
+        if (!silent && !hasSummaryLoaded) {
           notifyError(message);
         }
       } finally {
