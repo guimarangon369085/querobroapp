@@ -798,29 +798,16 @@ export class DashboardService {
   }
 
   private buildIntegrationRails() {
-    const hasRealtimeBankWebhook = this.hasAnyEnv(['OPEN_FINANCE_WEBHOOK_TOKEN', 'BANK_SYNC_WEBHOOK_TOKEN']);
-    const hasPluggyConfig = this.hasAnyEnv(['PLUGGY_CLIENT_ID', 'PLUGGY_CLIENT_SECRET']);
+    const hasRealtimeBankWebhook = this.hasAnyEnv(['BANK_SYNC_WEBHOOK_TOKEN']);
     const rails: IntegrationRail[] = [
       {
         id: 'pix_settlement_bridge',
-        label: 'Baixa PIX em tempo real',
+        label: 'Bridge Nubank Web',
         status: hasRealtimeBankWebhook ? 'READY' : 'PENDING',
         detail: hasRealtimeBankWebhook
-          ? 'Webhook canônico de liquidacao PIX armado para eventos bancarios server-to-server.'
-          : 'Backend pronto para receber eventos de liquidacao PIX por Open Finance ou bridge bancario.',
-        nextStep: 'Definir OPEN_FINANCE_WEBHOOK_TOKEN ou BANK_SYNC_WEBHOOK_TOKEN e conectar a fonte de eventos.'
-      },
-      {
-        id: 'open_finance_rail',
-        label: 'Trilho Open Finance',
-        status: hasRealtimeBankWebhook && hasPluggyConfig ? 'READY' : 'PENDING',
-        detail:
-          hasRealtimeBankWebhook && hasPluggyConfig
-            ? 'Conta oficial pode ser conciliada por webhook server-to-server, sem depender de Chrome autenticado.'
-            : hasPluggyConfig
-              ? 'Credenciais da Pluggy presentes; falta armar o token de webhook e registrar o endpoint.'
-              : 'Conta oficial mapeada, aguardando provedor Open Finance ou relay bancario.',
-        nextStep: 'Conectar a Pluggy ao endpoint /payments/pluggy/webhook e manter /payments/open-finance/webhook como trilho canônico.'
+          ? 'Bridge local do Nubank PJ armado para ler o webapp autenticado e reconciliar PIX no backend.'
+          : 'Backend pronto para receber conciliacao segura a partir do webapp autenticado do Nubank PJ.',
+        nextStep: 'Definir BANK_SYNC_WEBHOOK_TOKEN e manter a sessao autenticada do Nubank PJ no Mac operacional.'
       }
     ];
 

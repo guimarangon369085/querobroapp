@@ -193,31 +193,6 @@ export const PixReconciliationWebhookSchema = z.object({
   metadata: z.record(z.unknown()).optional()
 });
 
-export const OpenFinanceEventProviderEnum = z.enum(['OPEN_FINANCE', 'BELVO', 'PLUGGY', 'MANUAL_RELAY']);
-export const OpenFinanceTransactionDirectionEnum = z.enum(['INCOMING', 'OUTGOING']);
-export const OpenFinanceTransactionRailEnum = z.enum(['PIX', 'TED', 'DOC', 'TRANSFER', 'CARD', 'OTHER']);
-export const OpenFinanceTransactionStatusEnum = z.enum(['BOOKED', 'PENDING', 'CANCELED']);
-
-export const OpenFinancePixWebhookSchema = z
-  .object({
-    version: z.literal(1).default(1),
-    provider: OpenFinanceEventProviderEnum.default('OPEN_FINANCE'),
-    eventId: z.string().trim().min(1).max(160),
-    transactionId: z.string().trim().min(1).max(160).optional().nullable(),
-    accountId: z.string().trim().min(1).max(160).optional().nullable(),
-    rail: OpenFinanceTransactionRailEnum.default('PIX'),
-    direction: OpenFinanceTransactionDirectionEnum.default('INCOMING'),
-    status: OpenFinanceTransactionStatusEnum.default('BOOKED'),
-    amount: z.number().positive(),
-    bookedAt: z.string().datetime({ offset: true }),
-    payerName: z.string().trim().min(1).max(160),
-    payerDocument: z.string().trim().min(1).max(40).optional().nullable(),
-    endToEndId: z.string().trim().min(1).max(160).optional().nullable(),
-    txid: z.string().trim().min(1).max(80).optional().nullable(),
-    description: z.string().trim().min(1).max(500).optional().nullable(),
-    metadata: z.record(z.unknown()).optional()
-  });
-
 export const OrderIntakeChannelEnum = z.enum([
   'INTERNAL_DASHBOARD',
   'ADMIN_REPEAT',
@@ -817,8 +792,6 @@ export type Order = z.infer<typeof OrderSchema>;
 export type Payment = z.infer<typeof PaymentSchema>;
 export type PixSettlementWebhook = z.infer<typeof PixSettlementWebhookSchema>;
 export type PixReconciliationWebhook = z.infer<typeof PixReconciliationWebhookSchema>;
-export type OpenFinanceEventProvider = z.infer<typeof OpenFinanceEventProviderEnum>;
-export type OpenFinancePixWebhook = z.infer<typeof OpenFinancePixWebhookSchema>;
 export type OrderIntakeCustomerRef = z.infer<typeof OrderIntakeCustomerRefSchema>;
 export type OrderIntakeItem = z.infer<typeof OrderIntakeItemSchema>;
 export type OrderIntakePayment = z.infer<typeof OrderIntakePaymentSchema>;

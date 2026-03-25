@@ -7,6 +7,8 @@ const DEFAULT_API_URL = 'https://api.querobroa.com.br';
 const DEFAULT_STATE_FILE = path.join(ROOT_DIR, 'output', 'nubank-pix-bridge', 'state.json');
 const DEFAULT_POLL_MS = 60_000;
 const DEFAULT_RETRY_MS = 5 * 60_000;
+const NUBANK_HOME_URL = 'https://app.nubank.com.br/beta/pj/home/';
+const NUBANK_SAVINGS_URL = 'https://app.nubank.com.br/beta/pj/savings-account/';
 
 const FIND_NUBANK_TAB_SCRIPT = `
 on run
@@ -17,7 +19,10 @@ on run
       repeat with t from 1 to count of tabs of window w
         set tabRef to tab t of window w
         set tabUrl to URL of tabRef
-        if tabUrl contains "app.nubank.com.br/beta/pj/savings-account/" then
+        if tabUrl contains "${NUBANK_SAVINGS_URL}" then
+          return (w as text) & "," & (t as text)
+        end if
+        if tabUrl contains "${NUBANK_HOME_URL}" then
           return (w as text) & "," & (t as text)
         end if
         if fallbackWindowIndex is 0 and tabUrl contains "app.nubank.com.br/beta/pj/" then
@@ -28,12 +33,18 @@ on run
     end repeat
     if fallbackWindowIndex is not 0 then
       tell tab fallbackTabIndex of window fallbackWindowIndex
-        set URL to "https://app.nubank.com.br/beta/pj/savings-account/"
+        set URL to "${NUBANK_HOME_URL}"
       end tell
       return (fallbackWindowIndex as text) & "," & (fallbackTabIndex as text)
     end if
+    if count of windows is 0 then make new window
+    tell front window
+      make new tab with properties {URL:"${NUBANK_HOME_URL}"}
+      set active tab index to (count of tabs)
+      return ("1," & (count of tabs as text))
+    end tell
   end tell
-  error "Nenhuma aba autenticada do Nubank PJ foi encontrada no Google Chrome."
+  error "Nao foi possivel abrir o webapp do Nubank PJ no Google Chrome."
 end run
 `;
 

@@ -24,7 +24,7 @@ Ultima atualizacao: 2026-03-25
 - O backend agora aceita conciliacao segura de PIX por nome + valor em `POST /payments/pix-reconciliations/webhook`, mantendo a baixa canonica por `txid/paymentId` em `pix-settlements`.
 - Pedidos de `Entrega` agora podem receber cotacao de frete antes do submit final, com o valor incorporado ao total e ao PIX.
 - `/pedido`, `quick create` e a logica de caixas em `Pedidos` passaram a compartilhar o mesmo catalogo de caixas/sabores e as mesmas imagens originais da marca.
-- A automacao local `scripts/nubank-pix-bridge.mjs` agora consegue ler PIX de entrada visiveis no Nubank PJ pela aba autenticada do Chrome e delegar o matching seguro ao backend.
+- A automacao local `scripts/nubank-pix-bridge.mjs` segue como unico trilho ativo para baixa PIX automatica, lendo o webapp autenticado do Nubank PJ no Chrome e delegando o matching seguro ao backend.
 - O repo tambem inclui instalador de `launchd` para esse bridge (`bank:pix:bridge:install`), permitindo deixar a conciliacao rodando em segundo plano no Mac operacional.
 - Em `/pedido`, quando `Retirada` e selecionada, o ponto de retirada agora e preenchido automaticamente como `Alameda Jau, 731` e fica bloqueado para edicao pelo cliente.
 - `/pedido` agora salva localmente os dados do cliente neste aparelho, oferece `Refazer ultimo pedido` e trocou o subtotal/CTA flutuante de mobile por um bloco inline no fluxo, evitando sobreposicao no scroll.
@@ -71,9 +71,7 @@ Ultima atualizacao: 2026-03-25
 - A criacao de pedido agora dispara alerta operacional assincrono no backend, com `ntfy` como canal gratuito principal para iPhone/PWA e webhook como canal opcional.
 - A navegacao operacional foi normalizada: o item principal antes chamado `Agenda` agora se chama `PEDIDOS`, e o menu passou a usar labels em caixa alta de forma consistente.
 - `Clientes` nao coleta mais nem exibe email em nenhuma superficie ativa; nas paginas internas a ficha pode ficar incompleta enquanto o atendimento evolui, e o `/pedido` publico manteve as travas de cadastro sem esse campo.
-- O backend agora aceita eventos canônicos de Open Finance em `POST /payments/open-finance/webhook`, com idempotência por evento e reaproveitamento do matching de PIX já existente.
-- A API também passou a suportar a superfície real da Pluggy em `POST /payments/pluggy/webhook`, autenticando em `POST /auth`, lendo `transactions/created` e `transactions/updated` e traduzindo só crédito PIX de entrada para o trilho canônico de baixa.
-- O dashboard operacional passou a expor `Trilho Open Finance` como readiness real da baixa PIX server-to-server, separado do bridge local do Chrome/Nubank.
+- O dashboard operacional voltou a expor apenas o readiness do `Bridge Nubank Web`, sem trilhos paralelos de conciliacao PIX.
 
 ## O que um usuario consegue fazer hoje
 
