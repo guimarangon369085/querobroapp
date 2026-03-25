@@ -2225,6 +2225,66 @@ function OrdersPageContent() {
     const entries = calendarOrdersByDate.get(selectedCalendarDateKey) || [];
     return [...entries].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   }, [calendarOrdersByDate, selectedCalendarDateKey]);
+  const selectedDateProductionSummary = useMemo(() => {
+    const byCustomer = new Map<
+      string,
+      {
+        customerLabel: string;
+        flavorCounts: Map<number, { label: string; quantity: number }>;
+      }
+    >();
+
+    for (const entry of selectedDateEntries) {
+      if (entry.kind !== 'ORDER') continue;
+
+      const customerName = resolveCustomerName(entry.order);
+      const customerKey = entry.order.customerId
+        ? `customer:${entry.order.customerId}`
+        : `name:${normalizeTextForSort(customerName) || 'sem-cliente'}`;
+      const current = byCustomer.get(customerKey) || {
+        customerLabel: compactCustomerLabelForCalendar(customerName),
+        flavorCounts: new Map<number, { label: string; quantity: number }>()
+      };
+
+      for (const item of entry.order.items || []) {
+        const quantity = Math.max(Math.floor(item.quantity || 0), 0);
+        if (quantity <= 0) continue;
+
+        const label = compactOrderProductName(productMap.get(item.productId)?.name ?? `Produto ${item.productId}`);
+        const existing = current.flavorCounts.get(item.productId) || {
+          label,
+          quantity: 0
+        };
+        existing.quantity += quantity;
+        current.flavorCounts.set(item.productId, existing);
+      }
+
+      byCustomer.set(customerKey, current);
+    }
+
+    return Array.from(byCustomer.values()).map((entry) => ({
+      customerLabel: entry.customerLabel,
+      flavorSummary:
+        Array.from(entry.flavorCounts.entries())
+          .map(([productId, flavor]) => ({
+            productId,
+            label: flavor.label,
+            quantity: flavor.quantity,
+            product: productMap.get(productId) || null
+          }))
+          .sort((left, right) => {
+            const leftProduct = left.product;
+            const rightProduct = right.product;
+            if (leftProduct && rightProduct) {
+              const rankDiff = quickCreateProductRank(leftProduct) - quickCreateProductRank(rightProduct);
+              if (rankDiff !== 0) return rankDiff;
+            }
+            return left.label.localeCompare(right.label, 'pt-BR');
+          })
+          .map((flavor) => `${flavor.label} - ${flavor.quantity.toLocaleString('pt-BR')}`)
+          .join(' • ') || 'Sem sabores mapeados'
+    }));
+  }, [productMap, resolveCustomerName, selectedDateEntries]);
 
   const monthCells = useMemo(() => {
     const currentMonth = calendarAnchorDate.getMonth();
@@ -4106,6 +4166,32 @@ function OrdersPageContent() {
                   <p className="orders-list-panel__subtitle">Total {sortedVisibleOrderList.length}</p>
                 </div>
               </div>
+              {selectedDateProductionSummary.length > 0 ? (
+                <div className="mb-3 rounded-[22px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(155deg,rgba(255,252,247,0.96),rgba(245,236,226,0.9))] p-3 shadow-[0_12px_28px_rgba(70,44,26,0.06)]">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
+                        Resumo do dia
+                      </p>
+                      <p className="text-xs text-neutral-500">{selectedCalendarDateTitle}</p>
+                    </div>
+                    <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-strong)]">
+                      {selectedDateProductionSummary.length} cliente(s)
+                    </span>
+                  </div>
+                  <div className="mt-3 grid gap-2">
+                    {selectedDateProductionSummary.map((entry) => (
+                      <div
+                        key={`${entry.customerLabel}-${entry.flavorSummary}`}
+                        className="rounded-[18px] border border-white/80 bg-white/82 px-3 py-2 shadow-[0_8px_20px_rgba(57,39,24,0.04)]"
+                      >
+                        <p className="text-sm font-semibold text-[color:var(--ink-strong)]">{entry.customerLabel}</p>
+                        <p className="text-xs leading-5 text-neutral-600">{entry.flavorSummary}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               <div className="orders-list-panel__stack">
                 {sortedVisibleOrderList.length === 0 ? (
                   <p className="orders-list-panel__empty">

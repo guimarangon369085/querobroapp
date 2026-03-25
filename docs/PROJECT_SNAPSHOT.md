@@ -159,6 +159,9 @@ Ultima atualizacao: 2026-03-23
 
 - Data: 2026-03-25
 - Ciclo executado: `pnpm --filter @querobroapp/web build`
+- Resultado: `/pedidos` ganhou no box `PEDIDOS` um card `Resumo do dia` abaixo do total, consolidando por cliente os sabores e quantidades do dia selecionado para orientar rapidamente as fornadas.
+- Data: 2026-03-25
+- Ciclo executado: `pnpm --filter @querobroapp/web build`
 - Resultado: a régua de período do `/dashboard` passou a usar o mesmo padrão visual de `app-button-primary` e `app-button-ghost` do restante do app, corrigindo contraste e legibilidade dos botões.
 - Data: 2026-03-25
 - Ciclo executado: `pnpm --filter @querobroapp/web build`
