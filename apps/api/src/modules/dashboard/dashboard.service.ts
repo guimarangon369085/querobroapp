@@ -1,7 +1,21 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { resolveDisplayNumber, roundMoney } from '@querobroapp/shared';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException
+} from '@nestjs/common';
+import {
+  CouponResolveRequestSchema,
+  CouponResolveResponseSchema,
+  CouponSchema,
+  CouponUpsertSchema,
+  resolveDisplayNumber,
+  roundMoney
+} from '@querobroapp/shared';
 import { PrismaService } from '../../prisma.service.js';
 import { readBusinessRuntimeProfile } from '../../common/business-profile.js';
+import { normalizeCouponCode } from '../../common/coupons.js';
 import {
   OFFICIAL_BROA_FLAVOR_CODES,
   ORDER_BOX_UNITS,
@@ -632,8 +646,137 @@ type IntegrationRail = {
 export class DashboardService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
+  private formatCouponRecord(coupon: {
+    id: number;
+    code: string;
+    discountPct: number;
+    active: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+  }) {
+    return CouponSchema.parse({
+      id: coupon.id,
+      code: coupon.code,
+      discountPct: round2(coupon.discountPct),
+      active: coupon.active,
+      createdAt: coupon.createdAt.toISOString(),
+      updatedAt: coupon.updatedAt.toISOString()
+    });
+  }
+
   private hasEnv(name: string) {
     return Boolean(String(process.env[name] || '').trim());
+  }
+
+  async listCoupons() {
+    const coupons = await this.prisma.coupon.findMany({
+      orderBy: [{ active: 'desc' }, { code: 'asc' }]
+    });
+    return coupons.map((coupon) => this.formatCouponRecord(coupon));
+  }
+
+  async createCoupon(payload: unknown) {
+    const parsed = CouponUpsertSchema.safeParse(payload);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+    const data = parsed.data;
+    const code = normalizeCouponCode(data.code);
+    if (!code) {
+      throw new BadRequestException('Codigo do cupom obrigatorio.');
+    }
+    try {
+      const created = await this.prisma.coupon.create({
+        data: {
+          code,
+          discountPct: round2(data.discountPct),
+          active: data.active
+        }
+      });
+      return this.formatCouponRecord(created);
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
+        throw new ConflictException('Codigo do cupom ja cadastrado.');
+      }
+      throw error;
+    }
+  }
+
+  async updateCoupon(id: number, payload: unknown) {
+    const parsed = CouponUpsertSchema.safeParse(payload);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+    const data = parsed.data;
+    const code = normalizeCouponCode(data.code);
+    if (!code) {
+      throw new BadRequestException('Codigo do cupom obrigatorio.');
+    }
+    const existing = await this.prisma.coupon.findUnique({
+      where: { id }
+    });
+    if (!existing) {
+      throw new NotFoundException('Cupom nao encontrado.');
+    }
+    try {
+      const updated = await this.prisma.coupon.update({
+        where: { id },
+        data: {
+          code,
+          discountPct: round2(data.discountPct),
+          active: data.active
+        }
+      });
+      return this.formatCouponRecord(updated);
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
+        throw new ConflictException('Codigo do cupom ja cadastrado.');
+      }
+      throw error;
+    }
+  }
+
+  async removeCoupon(id: number) {
+    try {
+      await this.prisma.coupon.delete({
+        where: { id }
+      });
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') {
+        throw new NotFoundException('Cupom nao encontrado.');
+      }
+      throw error;
+    }
+  }
+
+  async resolveCoupon(payload: unknown) {
+    const parsed = CouponResolveRequestSchema.safeParse(payload);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+    const data = parsed.data;
+    const code = normalizeCouponCode(data.code);
+    if (!code) {
+      throw new BadRequestException('Informe um codigo de cupom valido.');
+    }
+    const coupon = await this.prisma.coupon.findFirst({
+      where: {
+        code,
+        active: true
+      }
+    });
+    if (!coupon) {
+      throw new BadRequestException('Cupom invalido ou inativo.');
+    }
+    const subtotal = round2(data.subtotal);
+    const discountAmount = round2((subtotal * round2(coupon.discountPct)) / 100);
+    return CouponResolveResponseSchema.parse({
+      code: coupon.code,
+      discountPct: round2(coupon.discountPct),
+      subtotal,
+      discountAmount,
+      subtotalAfterDiscount: round2(Math.max(subtotal - discountAmount, 0))
+    });
   }
 
   private buildIdentitySummary() {

@@ -1,8 +1,9 @@
 'use client';
 
+import type { Coupon } from '@querobroapp/shared';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useFeedback } from '@/components/feedback-provider';
-import { formatCurrencyBR } from '@/lib/format';
+import { formatCurrencyBR, formatDecimalInputBR, parseLocaleNumber } from '@/lib/format';
 
 type DashboardTrafficSummary = {
   windowLabel: string;
@@ -246,6 +247,11 @@ type MonthlyCogsEntry = {
 };
 
 type DashboardPeriodDays = DashboardSummary['selectedPeriod']['days'];
+type CouponDraft = {
+  code: string;
+  discountPct: string;
+  active: boolean;
+};
 
 type DashboardTone = 'amber' | 'sky' | 'mint' | 'rose' | 'ink';
 
@@ -313,6 +319,45 @@ function formatMonthLabel(value: Date) {
     year: 'numeric'
   });
   return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function normalizeCouponCodeInput(value: string) {
+  return value.replace(/\s+/g, ' ').trim().toUpperCase();
+}
+
+function buildCouponDraft(coupon?: Pick<Coupon, 'code' | 'discountPct' | 'active'> | null): CouponDraft {
+  return {
+    code: coupon?.code || '',
+    discountPct: formatDecimalInputBR(coupon?.discountPct ?? '', {
+      minFractionDigits: 0,
+      maxFractionDigits: 2
+    }),
+    active: coupon?.active ?? true
+  };
+}
+
+async function parseJsonResponse<T>(response: Response) {
+  const raw = await response.text();
+  let payload: unknown = null;
+
+  try {
+    payload = raw ? JSON.parse(raw) : null;
+  } catch {
+    payload = raw ? { message: raw } : null;
+  }
+
+  if (!response.ok) {
+    const message =
+      payload &&
+      typeof payload === 'object' &&
+      'message' in payload &&
+      typeof (payload as { message?: unknown }).message === 'string'
+        ? (payload as { message: string }).message
+        : 'Nao foi possivel concluir a operacao.';
+    throw new Error(message);
+  }
+
+  return payload as T;
 }
 
 function MetricCard({
@@ -492,10 +537,44 @@ function DailyBars({
 export default function DashboardScreen() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [selectedPeriodDays, setSelectedPeriodDays] = useState<DashboardPeriodDays>(7);
+  const [coupons, setCoupons] = useState<Coupon[]>([]);
+  const [couponDrafts, setCouponDrafts] = useState<Record<number, CouponDraft>>({});
+  const [newCouponDraft, setNewCouponDraft] = useState<CouponDraft>(() => buildCouponDraft());
+  const [couponsLoading, setCouponsLoading] = useState(true);
+  const [couponSavingKey, setCouponSavingKey] = useState<string | null>(null);
+  const [couponDeletingId, setCouponDeletingId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { notifyError } = useFeedback();
+  const { notifyError, notifySuccess } = useFeedback();
+
+  const loadCoupons = useCallback(
+    async (options?: { silent?: boolean }) => {
+      const silent = options?.silent ?? false;
+      if (!silent) {
+        setCouponsLoading(true);
+      }
+
+      try {
+        const response = await fetch('/api/dashboard-coupons', {
+          cache: 'no-store'
+        });
+        const payload = await parseJsonResponse<Coupon[]>(response);
+        const normalizedCoupons = Array.isArray(payload) ? payload : [];
+        setCoupons(normalizedCoupons);
+        setCouponDrafts(
+          Object.fromEntries(normalizedCoupons.map((coupon) => [coupon.id || 0, buildCouponDraft(coupon)]))
+        );
+      } catch (loadError) {
+        if (!silent) {
+          notifyError(loadError instanceof Error ? loadError.message : 'Nao foi possivel carregar os cupons.');
+        }
+      } finally {
+        setCouponsLoading(false);
+      }
+    },
+    [notifyError]
+  );
 
   const load = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -511,27 +590,8 @@ export default function DashboardScreen() {
         const response = await fetch(`/api/dashboard-summary?${params.toString()}`, {
           cache: 'no-store'
         });
-        const raw = await response.text();
-        let payload: unknown = null;
-
-        try {
-          payload = raw ? JSON.parse(raw) : null;
-        } catch {
-          payload = raw ? { message: raw } : null;
-        }
-
-        if (!response.ok) {
-          const message =
-            payload &&
-            typeof payload === 'object' &&
-            'message' in payload &&
-            typeof (payload as { message?: unknown }).message === 'string'
-              ? (payload as { message: string }).message
-              : 'Nao foi possivel carregar o dashboard.';
-          throw new Error(message);
-        }
-
-        setSummary(payload as DashboardSummary);
+        const payload = await parseJsonResponse<DashboardSummary>(response);
+        setSummary(payload);
         setError(null);
       } catch (loadError) {
         const message = loadError instanceof Error ? loadError.message : 'Nao foi possivel carregar o dashboard.';
@@ -550,6 +610,10 @@ export default function DashboardScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    void loadCoupons();
+  }, [loadCoupons]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -694,6 +758,139 @@ export default function DashboardScreen() {
       .sort((left, right) => right.monthKey.localeCompare(left.monthKey));
   }, [summary]);
 
+  const activeCouponsCount = useMemo(
+    () => coupons.reduce((sum, coupon) => sum + (coupon.active ? 1 : 0), 0),
+    [coupons]
+  );
+
+  const setCouponDraftField = useCallback(
+    (id: number, field: keyof CouponDraft, value: string | boolean) => {
+      setCouponDrafts((current) => ({
+        ...current,
+        [id]: {
+          ...(current[id] || buildCouponDraft(coupons.find((entry) => entry.id === id))),
+          [field]:
+            field === 'code'
+              ? normalizeCouponCodeInput(String(value))
+              : field === 'discountPct'
+                ? String(value)
+                : Boolean(value)
+        }
+      }));
+    },
+    [coupons]
+  );
+
+  const setNewCouponField = useCallback((field: keyof CouponDraft, value: string | boolean) => {
+    setNewCouponDraft((current) => ({
+      ...current,
+      [field]:
+        field === 'code'
+          ? normalizeCouponCodeInput(String(value))
+          : field === 'discountPct'
+            ? String(value)
+            : Boolean(value)
+    }));
+  }, []);
+
+  const persistCoupon = useCallback(
+    async (input: { id?: number; draft: CouponDraft }) => {
+      const code = normalizeCouponCodeInput(input.draft.code);
+      if (!code) {
+        throw new Error('Informe o codigo do cupom.');
+      }
+
+      const discountPct = parseLocaleNumber(input.draft.discountPct);
+      if (discountPct == null || discountPct < 0 || discountPct > 100) {
+        throw new Error('Informe um desconto entre 0 e 100.');
+      }
+
+      const requestInit: RequestInit = {
+        method: input.id ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code,
+          discountPct,
+          active: Boolean(input.draft.active)
+        })
+      };
+
+      const response = await fetch(
+        input.id ? `/api/dashboard-coupons/${input.id}` : '/api/dashboard-coupons',
+        requestInit
+      );
+      return parseJsonResponse<Coupon>(response);
+    },
+    []
+  );
+
+  const handleSaveCoupon = useCallback(
+    async (id: number) => {
+      const draft = couponDrafts[id];
+      if (!draft) return;
+
+      try {
+        setCouponSavingKey(`existing-${id}`);
+        const saved = await persistCoupon({ id, draft });
+        setCoupons((current) =>
+          current.map((entry) => (entry.id === id ? saved : entry))
+        );
+        setCouponDrafts((current) => ({
+          ...current,
+          [id]: buildCouponDraft(saved)
+        }));
+        notifySuccess(`Cupom ${saved.code} atualizado.`);
+      } catch (saveError) {
+        notifyError(saveError instanceof Error ? saveError.message : 'Nao foi possivel salvar o cupom.');
+      } finally {
+        setCouponSavingKey(null);
+      }
+    },
+    [couponDrafts, notifyError, notifySuccess, persistCoupon]
+  );
+
+  const handleAddCoupon = useCallback(async () => {
+    try {
+      setCouponSavingKey('new');
+      const created = await persistCoupon({ draft: newCouponDraft });
+      setCoupons((current) => [...current, created].sort((left, right) => left.code.localeCompare(right.code)));
+      setCouponDrafts((current) => ({
+        ...current,
+        [created.id || 0]: buildCouponDraft(created)
+      }));
+      setNewCouponDraft(buildCouponDraft());
+      notifySuccess(`Cupom ${created.code} criado.`);
+    } catch (saveError) {
+      notifyError(saveError instanceof Error ? saveError.message : 'Nao foi possivel criar o cupom.');
+    } finally {
+      setCouponSavingKey(null);
+    }
+  }, [newCouponDraft, notifyError, notifySuccess, persistCoupon]);
+
+  const handleDeleteCoupon = useCallback(
+    async (id: number) => {
+      try {
+        setCouponDeletingId(id);
+        const response = await fetch(`/api/dashboard-coupons/${id}`, {
+          method: 'DELETE'
+        });
+        await parseJsonResponse<{ ok: boolean }>(response);
+        setCoupons((current) => current.filter((entry) => entry.id !== id));
+        setCouponDrafts((current) => {
+          const next = { ...current };
+          delete next[id];
+          return next;
+        });
+        notifySuccess('Cupom excluido.');
+      } catch (deleteError) {
+        notifyError(deleteError instanceof Error ? deleteError.message : 'Nao foi possivel excluir o cupom.');
+      } finally {
+        setCouponDeletingId(null);
+      }
+    },
+    [notifyError, notifySuccess]
+  );
+
   const trafficMetrics = summary
     ? [
         { label: 'Sessões', value: formatNumber(summary.traffic.totals.sessions), tone: 'sky' as const },
@@ -778,7 +975,10 @@ export default function DashboardScreen() {
           <button
             type="button"
             className="rounded-full border border-white/70 bg-white/80 px-4 py-2 text-sm font-semibold text-[color:var(--ink-strong)] shadow-[0_12px_24px_rgba(57,39,24,0.08)] transition hover:bg-white"
-            onClick={() => void load({ silent: true })}
+            onClick={() => {
+              void load({ silent: true });
+              void loadCoupons({ silent: true });
+            }}
           >
             {refreshing ? 'Atualizando...' : 'Atualizar'}
           </button>
@@ -827,6 +1027,149 @@ export default function DashboardScreen() {
                   <MetricCard key={`business-${card.label}`} label={card.label} value={card.value} tone={card.tone} />
                 ))}
               </div>
+            </div>
+          </SectionPanel>
+
+          <SectionPanel
+            title="Cupons"
+            tone="ink"
+            tag={
+              <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-strong)]">
+                {formatNumber(activeCouponsCount)} ativo(s)
+              </span>
+            }
+          >
+            <div className="grid gap-4">
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <MetricCard label="Total de cupons" value={formatNumber(coupons.length)} tone="ink" />
+                <MetricCard label="Ativos" value={formatNumber(activeCouponsCount)} tone="mint" />
+                <MetricCard
+                  label="Inativos"
+                  value={formatNumber(Math.max(coupons.length - activeCouponsCount, 0))}
+                  tone="rose"
+                />
+                <MetricCard label="Box operacional" value="Dashboard" tone="amber" meta="CRUD de cupom e desconto percentual." />
+              </div>
+
+              <div className="grid gap-3 rounded-[24px] border border-white/80 bg-white/82 p-4 shadow-[0_10px_24px_rgba(57,39,24,0.06)]">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">Adicionar novo</p>
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(140px,180px)_130px_auto] lg:items-end">
+                  <label className="grid gap-1.5 text-sm text-neutral-600">
+                    <span>Codigo</span>
+                    <input
+                      className="app-input"
+                      value={newCouponDraft.code}
+                      onChange={(event) => setNewCouponField('code', event.target.value)}
+                      placeholder="Ex.: BROA10"
+                    />
+                  </label>
+                  <label className="grid gap-1.5 text-sm text-neutral-600">
+                    <span>Desconto %</span>
+                    <input
+                      className="app-input"
+                      inputMode="decimal"
+                      value={newCouponDraft.discountPct}
+                      onChange={(event) => setNewCouponField('discountPct', event.target.value)}
+                      placeholder="10"
+                    />
+                  </label>
+                  <label className="flex h-12 items-center gap-2 rounded-[16px] border border-white/80 bg-white px-4 text-sm font-medium text-[color:var(--ink-strong)]">
+                    <input
+                      checked={newCouponDraft.active}
+                      onChange={(event) => setNewCouponField('active', event.target.checked)}
+                      type="checkbox"
+                    />
+                    Ativo
+                  </label>
+                  <button
+                    type="button"
+                    className="app-button app-button-primary"
+                    disabled={couponSavingKey === 'new'}
+                    onClick={() => void handleAddCoupon()}
+                  >
+                    {couponSavingKey === 'new' ? 'Salvando...' : 'Adicionar'}
+                  </button>
+                </div>
+              </div>
+
+              {couponsLoading && !coupons.length ? (
+                <CompactEmpty message="Carregando os cupons..." />
+              ) : coupons.length ? (
+                <div className="grid gap-3">
+                  {coupons.map((coupon) => {
+                    const draft = couponDrafts[coupon.id || 0] || buildCouponDraft(coupon);
+                    const saving = couponSavingKey === `existing-${coupon.id}`;
+                    const deleting = couponDeletingId === coupon.id;
+                    return (
+                      <div
+                        key={coupon.id}
+                        className="grid gap-3 rounded-[24px] border border-white/80 bg-white/82 p-4 shadow-[0_10px_24px_rgba(57,39,24,0.06)]"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <strong className="text-[color:var(--ink-strong)]">{coupon.code}</strong>
+                            <span className="rounded-full border border-white/70 bg-white px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-strong)]">
+                              {coupon.active ? 'Ativo' : 'Inativo'}
+                            </span>
+                          </div>
+                          <span className="text-xs text-neutral-500">
+                            Atualizado em {coupon.updatedAt ? new Date(coupon.updatedAt).toLocaleString('pt-BR') : 'agora'}
+                          </span>
+                        </div>
+                        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(140px,180px)_130px_auto_auto] lg:items-end">
+                          <label className="grid gap-1.5 text-sm text-neutral-600">
+                            <span>Codigo</span>
+                            <input
+                              className="app-input"
+                              value={draft.code}
+                              onChange={(event) => setCouponDraftField(coupon.id || 0, 'code', event.target.value)}
+                            />
+                          </label>
+                          <label className="grid gap-1.5 text-sm text-neutral-600">
+                            <span>Desconto %</span>
+                            <input
+                              className="app-input"
+                              inputMode="decimal"
+                              value={draft.discountPct}
+                              onChange={(event) =>
+                                setCouponDraftField(coupon.id || 0, 'discountPct', event.target.value)
+                              }
+                            />
+                          </label>
+                          <label className="flex h-12 items-center gap-2 rounded-[16px] border border-white/80 bg-white px-4 text-sm font-medium text-[color:var(--ink-strong)]">
+                            <input
+                              checked={draft.active}
+                              onChange={(event) =>
+                                setCouponDraftField(coupon.id || 0, 'active', event.target.checked)
+                              }
+                              type="checkbox"
+                            />
+                            Ativo
+                          </label>
+                          <button
+                            type="button"
+                            className="app-button app-button-primary"
+                            disabled={saving || deleting}
+                            onClick={() => void handleSaveCoupon(coupon.id || 0)}
+                          >
+                            {saving ? 'Salvando...' : 'Salvar'}
+                          </button>
+                          <button
+                            type="button"
+                            className="app-button app-button-ghost"
+                            disabled={saving || deleting}
+                            onClick={() => void handleDeleteCoupon(coupon.id || 0)}
+                          >
+                            {deleting ? 'Excluindo...' : 'Excluir'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <CompactEmpty message="Nenhum cupom cadastrado ainda." />
+              )}
             </div>
           </SectionPanel>
 

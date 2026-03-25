@@ -43,6 +43,7 @@ import {
   isExternalOrderScheduleAllowed,
   resolveExternalOrderScheduleAvailability
 } from '../../common/external-order-schedule.js';
+import { mergeAppliedCouponIntoNotes, normalizeCouponCode } from '../../common/coupons.js';
 import { allocateNextPublicNumber } from '../../common/public-sequence.js';
 import { PaymentsService } from '../payments/payments.service.js';
 import { DeliveriesService } from '../deliveries/deliveries.service.js';
@@ -1439,6 +1440,47 @@ export class OrdersService {
     return this.buildOrderItemsFromFlavorCounts(data.flavors, productIdByCode);
   }
 
+  private async resolveCouponDiscount(input: {
+    couponCode?: string | null;
+    subtotal: number;
+  }) {
+    const normalizedCode = normalizeCouponCode(input.couponCode);
+    const subtotal = this.toMoney(input.subtotal);
+
+    if (!normalizedCode) {
+      return {
+        code: null,
+        discountPct: 0,
+        discountAmount: 0,
+        subtotalAfterDiscount: subtotal
+      };
+    }
+
+    const coupon = await this.prisma.coupon.findFirst({
+      where: {
+        code: normalizedCode,
+        active: true
+      },
+      select: {
+        code: true,
+        discountPct: true
+      }
+    });
+
+    if (!coupon) {
+      throw new BadRequestException('Cupom invalido ou inativo.');
+    }
+
+    const discountPct = this.toMoney(coupon.discountPct);
+    const discountAmount = this.toMoney((subtotal * discountPct) / 100);
+    return {
+      code: coupon.code,
+      discountPct,
+      discountAmount,
+      subtotalAfterDiscount: this.toMoney(Math.max(subtotal - discountAmount, 0))
+    };
+  }
+
   private async intakeExternalSubmission(
     data: ExternalOrderSubmissionPayload,
     params: {
@@ -1447,6 +1489,11 @@ export class OrdersService {
   ) {
     await this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt));
     const items = await this.resolveExternalSubmissionItems(data);
+    const pricedOrder = await this.priceOrderItems(this.prisma, items);
+    const coupon = await this.resolveCouponDiscount({
+      couponCode: data.couponCode ?? null,
+      subtotal: pricedOrder.subtotal
+    });
 
     return this.intake({
       version: 1,
@@ -1467,7 +1514,17 @@ export class OrdersService {
       delivery: data.delivery,
       order: {
         items,
-        notes: data.notes ?? undefined
+        discount: coupon.discountAmount,
+        notes:
+          mergeAppliedCouponIntoNotes(
+            data.notes ?? null,
+            coupon.code
+              ? {
+                  code: coupon.code,
+                  discountPct: coupon.discountPct
+                }
+              : null
+          ) ?? undefined
       },
       payment: {
         method: 'pix',
@@ -1493,6 +1550,10 @@ export class OrdersService {
 
     const items = await this.resolveExternalSubmissionItems(data);
     const pricedOrder = await this.priceOrderItems(this.prisma, items);
+    const coupon = await this.resolveCouponDiscount({
+      couponCode: data.couponCode ?? null,
+      subtotal: pricedOrder.subtotal
+    });
     const scheduledAt = this.parseOptionalDateTime(data.fulfillment.scheduledAt);
     const deliveryQuote = await this.deliveriesService.resolveDeliverySelection(
       data.delivery,
@@ -1507,7 +1568,7 @@ export class OrdersService {
         customerLng: data.customer.lng ?? null,
         customerDeliveryNotes: data.customer.deliveryNotes ?? null,
         items: pricedOrder.manifestItems,
-        subtotal: pricedOrder.subtotal
+        subtotal: coupon.subtotalAfterDiscount
       }),
       {
         enforceExternalSchedule: true,
@@ -1516,7 +1577,7 @@ export class OrdersService {
     );
 
     const deliveryFee = this.toMoney(deliveryQuote.fee ?? 0);
-    const discount = 0;
+    const discount = coupon.discountAmount;
     const total = this.computeOrderTotal(pricedOrder.subtotal, discount, deliveryFee);
 
     return ExternalOrderSubmissionPreviewSchema.parse({
@@ -1544,7 +1605,15 @@ export class OrdersService {
         discount,
         deliveryFee,
         total,
-        notes: data.notes ?? null
+        notes: mergeAppliedCouponIntoNotes(
+          data.notes ?? null,
+          coupon.code
+            ? {
+                code: coupon.code,
+                discountPct: coupon.discountPct
+              }
+            : null
+        )
       },
       delivery: deliveryQuote,
       payment: {
@@ -2025,6 +2094,8 @@ export class OrdersService {
     const isExternalIntakeChannel = data.source.channel === 'CUSTOMER_LINK';
     const quoteCustomer = await this.resolveDeliveryQuoteCustomer(data.customer);
     const pricedOrder = await this.priceOrderItems(this.prisma, data.order.items);
+    const discount = this.toMoney(data.order.discount ?? 0);
+    const quoteSubtotal = this.toMoney(Math.max(pricedOrder.subtotal - discount, 0));
     const scheduledAt = this.parseOptionalDateTime(data.fulfillment.scheduledAt);
     const deliveryQuote = await this.deliveriesService.resolveDeliverySelection(
       data.delivery,
@@ -2038,7 +2109,7 @@ export class OrdersService {
         customerLat: quoteCustomer.lat,
         customerLng: quoteCustomer.lng,
         customerDeliveryNotes: quoteCustomer.deliveryNotes,
-        subtotal: pricedOrder.subtotal,
+        subtotal: quoteSubtotal,
         items: pricedOrder.manifestItems
       }),
       {
@@ -2079,7 +2150,6 @@ export class OrdersService {
 
       const customer = await this.resolveIntakeCustomer(tx, data.customer);
       const { itemsData, subtotal } = pricedOrder;
-      const discount = this.toMoney(data.order.discount ?? 0);
       const deliveryFee = this.toMoney(deliveryQuote.fee ?? 0);
       const total = this.computeOrderTotal(subtotal, discount, deliveryFee);
 

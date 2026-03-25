@@ -5,6 +5,7 @@ import {
   formatExternalOrderMinimumSchedule,
   resolveExternalOrderMinimumSchedule,
   type ExternalOrderSubmission,
+  type CouponResolveResponse,
   type Product
 } from '@querobroapp/shared';
 import { GoogleAddressAutocompleteInput } from '@/components/form/GoogleAddressAutocompleteInput';
@@ -40,7 +41,6 @@ import { writeStoredOrderFinalized } from '@/lib/order-finalized-storage';
 const GOOGLE_MAPS_API_KEY = (process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '').trim();
 const PUBLIC_ORDER_HOUR_OPTIONS = Array.from({ length: 24 }, (_, index) => `${index}`.padStart(2, '0'));
 const PUBLIC_ORDER_MINUTE_OPTIONS = ['00', '15', '30', '45'] as const;
-const PUBLIC_ORDER_META_COUPON_NOTE_PREFIX = 'Cupom Meta:';
 
 type SelectedBoxSummary = {
   key: string;
@@ -88,6 +88,8 @@ type DeliveryQuote = {
   fallbackReason: string | null;
   breakdownLabel?: string | null;
 };
+
+type AppliedCoupon = CouponResolveResponse;
 
 type PublicOrderScheduleAvailability = {
   minimumAllowedAt: string;
@@ -167,17 +169,15 @@ function buildPrefilledBoxCountsFromSearchParams(source: { get(name: string): st
   };
 }
 
-function mergeMetaCouponIntoNotes(currentNotes: string, couponCode: string | null) {
-  const preservedLines = String(currentNotes || '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => !line.startsWith(PUBLIC_ORDER_META_COUPON_NOTE_PREFIX));
+function normalizeCouponCodeInput(value?: string | null) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+}
 
-  if (!couponCode) return preservedLines.join('\n');
-
-  preservedLines.push(`${PUBLIC_ORDER_META_COUPON_NOTE_PREFIX} ${couponCode}`);
-  return preservedLines.join('\n');
+function roundCurrency(value: number) {
+  return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 }
 
 function sanitizeStoredCustomBox(value: unknown) {
@@ -369,6 +369,11 @@ export function PublicOrderPage() {
   const [deliveryQuote, setDeliveryQuote] = useState<DeliveryQuote | null>(null);
   const [deliveryQuoteError, setDeliveryQuoteError] = useState<string | null>(null);
   const [isQuotingDelivery, setIsQuotingDelivery] = useState(false);
+  const [couponInput, setCouponInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [isResolvingCoupon, setIsResolvingCoupon] = useState(false);
+  const [pendingPrefilledCouponCode, setPendingPrefilledCouponCode] = useState<string | null>(null);
   const addressInputRef = useRef<HTMLInputElement | null>(null);
   const orderFormRef = useRef<HTMLFormElement | null>(null);
   const urlPrefillSignatureRef = useRef<string | null>(null);
@@ -523,10 +528,13 @@ export function PublicOrderPage() {
     setError(null);
     setDeliveryQuote(null);
     setDeliveryQuoteError(null);
+    setCouponError(null);
+    setAppliedCoupon(null);
+    setCouponInput(prefill.couponCode || '');
+    setPendingPrefilledCouponCode(prefill.couponCode || null);
     setForm((current) => ({
       ...current,
-      boxes: prefill.boxes,
-      notes: mergeMetaCouponIntoNotes(current.notes, prefill.couponCode)
+      boxes: prefill.boxes
     }));
   }, []);
 
@@ -709,6 +717,19 @@ export function PublicOrderPage() {
     () => calculateOrderSubtotalFromProductItems(computedOrderItems, productMapById),
     [computedOrderItems, productMapById]
   );
+  const normalizedCouponInput = useMemo(() => normalizeCouponCodeInput(couponInput), [couponInput]);
+  const isCouponApplied = useMemo(
+    () => Boolean(appliedCoupon?.code && appliedCoupon.code === normalizedCouponInput),
+    [appliedCoupon?.code, normalizedCouponInput]
+  );
+  const couponDiscountAmount = useMemo(() => {
+    if (!isCouponApplied || !appliedCoupon) return 0;
+    return roundCurrency((estimatedTotal * appliedCoupon.discountPct) / 100);
+  }, [appliedCoupon, estimatedTotal, isCouponApplied]);
+  const discountedSubtotal = useMemo(
+    () => roundCurrency(Math.max(estimatedTotal - couponDiscountAmount, 0)),
+    [couponDiscountAmount, estimatedTotal]
+  );
   const scheduledAtIso = useMemo(() => toLocalIso(form.date, form.time), [form.date, form.time]);
   const selectedBoxes = useMemo<SelectedBoxSummary[]>(
     () => [
@@ -754,7 +775,7 @@ export function PublicOrderPage() {
     [computedOrderItems, runtimeOrderCatalog.flavorProductByLegacyCode]
   );
   const deliveryFee = deliveryQuote?.fee ?? 0;
-  const displayTotal = estimatedTotal + deliveryFee;
+  const displayTotal = discountedSubtotal + deliveryFee;
   const parsedScheduledAt = useMemo(() => parseLocalDateTime(form.date, form.time), [form.date, form.time]);
   const minimumScheduleLabel = useMemo(
     () => (minimumSchedule ? formatExternalOrderMinimumSchedule(minimumSchedule) : null),
@@ -826,6 +847,73 @@ export function PublicOrderPage() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [syncMinimumSchedule]);
+
+  const applyCoupon = useCallback(
+    async (forcedCode?: string | null) => {
+      const code = normalizeCouponCodeInput(forcedCode ?? couponInput);
+      if (!code) {
+        setAppliedCoupon(null);
+        setCouponError(null);
+        return null;
+      }
+
+      if (estimatedTotal <= 0) {
+        setAppliedCoupon(null);
+        setCouponError('Escolha ao menos 1 caixa antes de aplicar o cupom.');
+        return null;
+      }
+
+      setIsResolvingCoupon(true);
+      setCouponError(null);
+
+      try {
+        const response = await fetch('/api/customer-form/coupon', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code,
+            subtotal: estimatedTotal
+          })
+        });
+        const raw = await response.text();
+        const data = raw ? (JSON.parse(raw) as AppliedCoupon | { message?: string }) : null;
+        if (!response.ok || !data || !('code' in data)) {
+          throw new Error(extractErrorMessage(data));
+        }
+        setCouponInput(data.code);
+        setAppliedCoupon(data);
+        setCouponError(null);
+        setPendingPrefilledCouponCode(null);
+        return data;
+      } catch (couponLoadError) {
+        const message =
+          couponLoadError instanceof Error ? couponLoadError.message : 'Nao foi possivel validar o cupom.';
+        setAppliedCoupon(null);
+        setCouponError(message);
+        return null;
+      } finally {
+        setIsResolvingCoupon(false);
+      }
+    },
+    [couponInput, estimatedTotal]
+  );
+
+  useEffect(() => {
+    if (!pendingPrefilledCouponCode) return;
+    if (estimatedTotal <= 0) return;
+    if (appliedCoupon?.code === pendingPrefilledCouponCode) {
+      setPendingPrefilledCouponCode(null);
+      return;
+    }
+    void applyCoupon(pendingPrefilledCouponCode);
+  }, [appliedCoupon?.code, applyCoupon, estimatedTotal, pendingPrefilledCouponCode]);
+
+  const clearCoupon = useCallback(() => {
+    setCouponInput('');
+    setAppliedCoupon(null);
+    setCouponError(null);
+    setPendingPrefilledCouponCode(null);
+  }, []);
 
   const setBoxQuantity = (code: string, nextValue: number | string) => {
     const normalized = typeof nextValue === 'number' ? String(Math.max(Math.floor(nextValue), 0)) : nextValue;
@@ -912,7 +1000,7 @@ export function PublicOrderPage() {
     setIsQuotingDelivery(false);
   }, [
     draftSessionId,
-    estimatedTotal,
+    discountedSubtotal,
     form.address,
     form.fulfillmentMode,
     form.lat,
@@ -990,6 +1078,12 @@ export function PublicOrderPage() {
       return null;
     }
 
+    if (normalizedCouponInput && !isCouponApplied) {
+      setDeliveryQuote(null);
+      setDeliveryQuoteError('Aplique o cupom antes de calcular o frete.');
+      return null;
+    }
+
     if (minimumSchedule && parsedScheduledAt && parsedScheduledAt.getTime() < minimumSchedule.getTime()) {
       setDeliveryQuote(null);
       setDeliveryQuoteError(buildPublicOrderScheduleErrorMessage(minimumSchedule));
@@ -1003,14 +1097,15 @@ export function PublicOrderPage() {
       sessionId: analyticsSessionId,
       eventType: 'FUNNEL',
       path: '/pedido',
-      label: 'public_order_quote_requested',
-      meta: {
-        fulfillmentMode: form.fulfillmentMode,
-        totalBroas,
-        estimatedTotal,
-        orderDraftSessionId: draftSessionId
-      }
-    });
+        label: 'public_order_quote_requested',
+        meta: {
+          fulfillmentMode: form.fulfillmentMode,
+          totalBroas,
+          estimatedTotal,
+          discountedSubtotal,
+          orderDraftSessionId: draftSessionId
+        }
+      });
 
     try {
       const response = await fetch('/api/delivery-quote', {
@@ -1027,7 +1122,7 @@ export function PublicOrderPage() {
           },
           manifest: {
             items: flavorManifestItems,
-            subtotal: estimatedTotal,
+            subtotal: discountedSubtotal,
             totalUnits: totalBroas
           }
         })
@@ -1075,6 +1170,7 @@ export function PublicOrderPage() {
     }
   }, [
     draftSessionId,
+    discountedSubtotal,
     estimatedTotal,
     form.address,
     form.fulfillmentMode,
@@ -1082,7 +1178,9 @@ export function PublicOrderPage() {
     form.lng,
     form.placeId,
     incompleteCustomBoxes.length,
+    isCouponApplied,
     minimumSchedule,
+    normalizedCouponInput,
     parsedScheduledAt,
     scheduledAtIso,
     flavorManifestItems,
@@ -1093,6 +1191,8 @@ export function PublicOrderPage() {
     form.fulfillmentMode !== 'DELIVERY' || Boolean(deliveryQuote?.quoteToken);
   const primaryActionLabel = isSubmitting
     ? 'FINALIZANDO...'
+    : isResolvingCoupon
+      ? 'VALIDANDO CUPOM...'
     : form.fulfillmentMode === 'DELIVERY' && !hasDeliveryQuoteReady
       ? isQuotingDelivery
         ? 'CALCULANDO FRETE...'
@@ -1151,6 +1251,10 @@ export function PublicOrderPage() {
       );
       return;
     }
+    if (normalizedCouponInput && !isCouponApplied) {
+      setError('Aplique o cupom antes de finalizar o pedido.');
+      return;
+    }
     if (form.fulfillmentMode === 'DELIVERY') {
       if (isQuotingDelivery) {
         setError('Aguarde o frete terminar de calcular.');
@@ -1190,6 +1294,7 @@ export function PublicOrderPage() {
           : undefined,
       flavors: legacyFlavorCounts,
       items: computedOrderItems,
+      couponCode: isCouponApplied ? appliedCoupon?.code ?? null : null,
       notes: form.notes.trim() || null,
       source: {
         channel: 'PUBLIC_FORM',
@@ -1207,6 +1312,7 @@ export function PublicOrderPage() {
       fulfillment: payloadBase.fulfillment,
       delivery: payloadBase.delivery,
       items: payloadBase.items,
+      couponCode: payloadBase.couponCode,
       notes: payloadBase.notes
     });
     const payload = {
@@ -1256,7 +1362,7 @@ export function PublicOrderPage() {
         savedAt: new Date().toISOString(),
         returnPath: '/pedido',
         returnLabel: 'Fazer novo pedido',
-        productSubtotal: estimatedTotal,
+        productSubtotal: discountedSubtotal,
         order: result.order,
         intake: {
           stage: result.intake.stage,
@@ -1271,7 +1377,7 @@ export function PublicOrderPage() {
         label: 'public_order_submitted',
         meta: {
           orderId: result.order.id,
-          total: result.order.total ?? estimatedTotal,
+          total: result.order.total ?? displayTotal,
           fulfillmentMode: form.fulfillmentMode,
           orderDraftSessionId: draftSessionId
         }
@@ -1315,6 +1421,10 @@ export function PublicOrderPage() {
     setError(null);
     setDeliveryQuote(null);
     setDeliveryQuoteError(null);
+    setCouponInput('');
+    setAppliedCoupon(null);
+    setCouponError(null);
+    setPendingPrefilledCouponCode(null);
     void syncMinimumSchedule();
   };
 
@@ -1785,6 +1895,74 @@ export function PublicOrderPage() {
               </FormField>
             </section>
 
+            <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
+              <div className="mb-4">
+                <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Cupom</h2>
+                <p className="mt-2 text-sm leading-6 text-[color:var(--ink-muted)]">
+                  Se tiver um codigo de desconto, aplique antes de calcular o frete.
+                </p>
+              </div>
+              <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto_auto] xl:items-end">
+                <FormField label="Codigo do cupom">
+                  <input
+                    className="app-input xl:h-14 xl:text-[1.02rem]"
+                    value={couponInput}
+                    onChange={(event) => {
+                      const nextValue = normalizeCouponCodeInput(event.target.value);
+                      setCouponInput(nextValue);
+                      setCouponError(null);
+                      setPendingPrefilledCouponCode(null);
+                      if (appliedCoupon?.code && appliedCoupon.code !== nextValue) {
+                        setAppliedCoupon(null);
+                      }
+                    }}
+                    placeholder="Ex.: BROA10"
+                    autoCapitalize="characters"
+                    spellCheck={false}
+                  />
+                </FormField>
+                <button
+                  type="button"
+                  className="app-button app-button-primary"
+                  disabled={isResolvingCoupon}
+                  onClick={() => {
+                    void applyCoupon();
+                  }}
+                >
+                  {isResolvingCoupon ? 'Aplicando...' : isCouponApplied ? 'Reaplicar' : 'Aplicar'}
+                </button>
+                <button
+                  type="button"
+                  className="app-button app-button-ghost"
+                  disabled={isResolvingCoupon || (!couponInput && !appliedCoupon)}
+                  onClick={clearCoupon}
+                >
+                  Limpar
+                </button>
+              </div>
+              {couponError ? (
+                <div className="app-inline-notice app-inline-notice--warning mt-3 rounded-[20px] px-4 py-3">
+                  {couponError}
+                </div>
+              ) : isCouponApplied && appliedCoupon ? (
+                <div className="mt-3 rounded-[20px] border border-[rgba(102,165,128,0.18)] bg-[rgb(243,251,246)] px-4 py-3 text-sm leading-6 text-[color:var(--ink-strong)]">
+                  Cupom <strong>{appliedCoupon.code}</strong> aplicado com{' '}
+                  <strong>
+                    {Number(appliedCoupon.discountPct).toLocaleString('pt-BR', {
+                      minimumFractionDigits: 0,
+                      maximumFractionDigits: 2
+                    })}
+                    %
+                  </strong>{' '}
+                  de desconto.
+                </div>
+              ) : (
+                <p className="mt-3 text-sm leading-6 text-[color:var(--ink-muted)]">
+                  O desconto entra no total do pedido e tambem no calculo do frete.
+                </p>
+              )}
+            </section>
+
             {error ? (
               <div className="app-inline-notice app-inline-notice--error rounded-[24px] px-5 py-4 shadow-[0_14px_32px_rgba(157,31,44,0.08)]">
                 {error}
@@ -1800,7 +1978,7 @@ export function PublicOrderPage() {
               </div>
               <button
                 className="app-button app-button-primary"
-                disabled={isSubmitting || isQuotingDelivery}
+                disabled={isSubmitting || isQuotingDelivery || isResolvingCoupon}
                 onClick={() => {
                   void handlePrimaryAction();
                 }}
@@ -1845,6 +2023,19 @@ export function PublicOrderPage() {
                       <strong className="mt-1 block text-base text-[color:var(--ink-strong)]">
                         {formatCurrencyBRL(estimatedTotal)}
                       </strong>
+                    </div>
+                    <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white px-3 py-3">
+                      <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
+                        Desconto
+                      </span>
+                      <strong className="mt-1 block text-base text-[color:var(--ink-strong)]">
+                        -{formatCurrencyBRL(couponDiscountAmount)}
+                      </strong>
+                      {isCouponApplied && appliedCoupon ? (
+                        <span className="mt-1 block text-[0.72rem] leading-5 text-[color:var(--ink-muted)]">
+                          {appliedCoupon.code}
+                        </span>
+                      ) : null}
                     </div>
                     <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white px-3 py-3">
                       <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
@@ -1939,7 +2130,7 @@ export function PublicOrderPage() {
                 <div className="grid gap-2 rounded-[20px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(160deg,#fff8f1,#f4e7d8)] p-4 shadow-[0_18px_34px_rgba(70,44,26,0.08)] sm:rounded-[24px]">
                   <button
                     className="app-button app-button-primary w-full"
-                    disabled={isSubmitting || isQuotingDelivery}
+                    disabled={isSubmitting || isQuotingDelivery || isResolvingCoupon}
                     onClick={() => {
                       void handlePrimaryAction();
                     }}

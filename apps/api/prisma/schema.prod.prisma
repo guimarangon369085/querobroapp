@@ -52,6 +52,17 @@ model Product {
   @@index([active])
 }
 
+model Coupon {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  discountPct Float
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([active])
+}
+
 model Order {
   id                 Int                 @id @default(autoincrement())
   publicNumber       Int?                @unique

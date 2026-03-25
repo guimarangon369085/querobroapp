@@ -95,6 +95,34 @@ export const ProductSchema = z.object({
   createdAt: z.string().optional().nullable()
 });
 
+export const CouponSchema = z.object({
+  id: z.number().int().positive().optional(),
+  code: z.string().trim().min(1).max(80),
+  discountPct: z.number().nonnegative().max(100),
+  active: z.boolean().default(true),
+  createdAt: z.string().optional().nullable(),
+  updatedAt: z.string().optional().nullable()
+});
+
+export const CouponUpsertSchema = CouponSchema.pick({
+  code: true,
+  discountPct: true,
+  active: true
+});
+
+export const CouponResolveRequestSchema = z.object({
+  code: z.string().trim().min(1).max(80),
+  subtotal: z.number().nonnegative().default(0)
+});
+
+export const CouponResolveResponseSchema = z.object({
+  code: z.string().trim().min(1).max(80),
+  discountPct: z.number().nonnegative().max(100),
+  subtotal: z.number().nonnegative(),
+  discountAmount: z.number().nonnegative(),
+  subtotalAfterDiscount: z.number().nonnegative()
+});
+
 export const OrderItemSchema = z.object({
   id: z.number().int().positive().optional(),
   orderId: z.number().int().positive().optional(),
@@ -316,6 +344,7 @@ export const ExternalOrderSubmissionSchema = z
     delivery: DeliveryQuoteSelectionSchema.optional(),
     flavors: ExternalOrderFlavorCountsSchema,
     items: z.array(ExternalOrderSubmissionItemSchema).default([]),
+    couponCode: z.string().trim().min(1).max(80).optional().nullable(),
     notes: z.string().optional().nullable(),
     source: z
       .object({
@@ -751,6 +780,10 @@ export type PixChargeStatus = z.infer<typeof PixChargeStatusEnum>;
 export type ExternalOrderSubmissionChannel = z.infer<typeof ExternalOrderSubmissionChannelEnum>;
 export type ExternalOrderFlavorCounts = z.infer<typeof ExternalOrderFlavorCountsSchema>;
 export type ExternalOrderSubmission = z.infer<typeof ExternalOrderSubmissionSchema>;
+export type Coupon = z.infer<typeof CouponSchema>;
+export type CouponUpsert = z.infer<typeof CouponUpsertSchema>;
+export type CouponResolveRequest = z.infer<typeof CouponResolveRequestSchema>;
+export type CouponResolveResponse = z.infer<typeof CouponResolveResponseSchema>;
 
 export type Customer = z.infer<typeof CustomerSchema>;
 export type Product = z.infer<typeof ProductSchema>;
