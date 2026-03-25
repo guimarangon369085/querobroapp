@@ -97,6 +97,11 @@ Variaveis obrigatorias:
 - `BUSINESS_BANK_BRANCH=0001`
 - `BUSINESS_BANK_ACCOUNT=770733822-0`
 - `BANK_SYNC_WEBHOOK_TOKEN=<token forte para a bridge de baixa PIX>`
+- `OPEN_FINANCE_WEBHOOK_TOKEN=<token forte para webhooks server-to-server de Open Finance>`
+- `PLUGGY_WEBHOOK_TOKEN=<token forte configurado no webhook da Pluggy>`
+- `PLUGGY_CLIENT_ID=<client id da aplicacao Pluggy>`
+- `PLUGGY_CLIENT_SECRET=<client secret da aplicacao Pluggy>`
+- `PLUGGY_API_URL=https://api.pluggy.ai`
 - `PIX_RECONCILIATION_LOOKBACK_DAYS=45`
 - `PIX_RECONCILIATION_ALLOW_UNIQUE_AMOUNT_FALLBACK=false`
 - `DELIVERY_MANUAL_FALLBACK_FEE=12`

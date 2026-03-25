@@ -1,6 +1,6 @@
 # PROJECT_SNAPSHOT
 
-Ultima atualizacao: 2026-03-23
+Ultima atualizacao: 2026-03-25
 
 ## Estado atual
 
@@ -71,6 +71,9 @@ Ultima atualizacao: 2026-03-23
 - A criacao de pedido agora dispara alerta operacional assincrono no backend, com `ntfy` como canal gratuito principal para iPhone/PWA e webhook como canal opcional.
 - A navegacao operacional foi normalizada: o item principal antes chamado `Agenda` agora se chama `PEDIDOS`, e o menu passou a usar labels em caixa alta de forma consistente.
 - `Clientes` nao coleta mais nem exibe email em nenhuma superficie ativa; nas paginas internas a ficha pode ficar incompleta enquanto o atendimento evolui, e o `/pedido` publico manteve as travas de cadastro sem esse campo.
+- O backend agora aceita eventos canônicos de Open Finance em `POST /payments/open-finance/webhook`, com idempotência por evento e reaproveitamento do matching de PIX já existente.
+- A API também passou a suportar a superfície real da Pluggy em `POST /payments/pluggy/webhook`, autenticando em `POST /auth`, lendo `transactions/created` e `transactions/updated` e traduzindo só crédito PIX de entrada para o trilho canônico de baixa.
+- O dashboard operacional passou a expor `Trilho Open Finance` como readiness real da baixa PIX server-to-server, separado do bridge local do Chrome/Nubank.
 
 ## O que um usuario consegue fazer hoje
 

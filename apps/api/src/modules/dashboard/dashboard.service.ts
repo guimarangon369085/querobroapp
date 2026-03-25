@@ -668,6 +668,10 @@ export class DashboardService {
     return Boolean(String(process.env[name] || '').trim());
   }
 
+  private hasAnyEnv(names: string[]) {
+    return names.some((name) => this.hasEnv(name));
+  }
+
   async listCoupons() {
     const coupons = await this.prisma.coupon.findMany({
       orderBy: [{ active: 'desc' }, { code: 'asc' }]
@@ -794,24 +798,29 @@ export class DashboardService {
   }
 
   private buildIntegrationRails() {
+    const hasRealtimeBankWebhook = this.hasAnyEnv(['OPEN_FINANCE_WEBHOOK_TOKEN', 'BANK_SYNC_WEBHOOK_TOKEN']);
+    const hasPluggyConfig = this.hasAnyEnv(['PLUGGY_CLIENT_ID', 'PLUGGY_CLIENT_SECRET']);
     const rails: IntegrationRail[] = [
       {
         id: 'pix_settlement_bridge',
         label: 'Baixa PIX em tempo real',
-        status: this.hasEnv('BANK_SYNC_WEBHOOK_TOKEN') ? 'READY' : 'PENDING',
-        detail: this.hasEnv('BANK_SYNC_WEBHOOK_TOKEN')
-          ? 'Webhook canônico de liquidacao PIX armado no backend.'
-          : 'Bridge pronta no codigo, aguardando token para aceitar eventos bancarios.',
-        nextStep: 'Definir BANK_SYNC_WEBHOOK_TOKEN e ligar a fonte de eventos.'
+        status: hasRealtimeBankWebhook ? 'READY' : 'PENDING',
+        detail: hasRealtimeBankWebhook
+          ? 'Webhook canônico de liquidacao PIX armado para eventos bancarios server-to-server.'
+          : 'Backend pronto para receber eventos de liquidacao PIX por Open Finance ou bridge bancario.',
+        nextStep: 'Definir OPEN_FINANCE_WEBHOOK_TOKEN ou BANK_SYNC_WEBHOOK_TOKEN e conectar a fonte de eventos.'
       },
       {
-        id: 'nubank_rail',
-        label: 'Trilho Nubank',
-        status: this.hasEnv('BANK_SYNC_WEBHOOK_TOKEN') ? 'READY' : 'PENDING',
-        detail: this.hasEnv('BANK_SYNC_WEBHOOK_TOKEN')
-          ? 'Conta oficial mapeada; o ERP ja consegue receber eventos de liquidacao via bridge.'
-          : 'Conta oficial mapeada, mas ainda sem emissor conectado para realtime.',
-        nextStep: 'Conectar uma automacao Nubank/Open Finance ao endpoint /payments/pix-settlements/webhook.'
+        id: 'open_finance_rail',
+        label: 'Trilho Open Finance',
+        status: hasRealtimeBankWebhook && hasPluggyConfig ? 'READY' : 'PENDING',
+        detail:
+          hasRealtimeBankWebhook && hasPluggyConfig
+            ? 'Conta oficial pode ser conciliada por webhook server-to-server, sem depender de Chrome autenticado.'
+            : hasPluggyConfig
+              ? 'Credenciais da Pluggy presentes; falta armar o token de webhook e registrar o endpoint.'
+              : 'Conta oficial mapeada, aguardando provedor Open Finance ou relay bancario.',
+        nextStep: 'Conectar a Pluggy ao endpoint /payments/pluggy/webhook e manter /payments/open-finance/webhook como trilho canônico.'
       }
     ];
 
