@@ -157,6 +157,9 @@ Ultima atualizacao: 2026-03-23
 
 ## Validacao operacional mais recente
 
+- Data: 2026-03-25
+- Ciclo executado: `pnpm --filter @querobroapp/web build`, `pnpm --filter @querobroapp/web typecheck`
+- Resultado: `/dashboard` passou a operar com um unico contexto de periodo, com `Periodo total` na mesma regua de selecao de `24h/7d/30d`; o bloco consolidado duplicado saiu, o botao `Atualizar` foi removido e a troca de periodo agora se reflete automaticamente ao clicar.
 - Data: 2026-03-23
 - Ciclo executado: `pnpm --filter @querobroapp/api build`, `node --test tests/dashboard-cogs-summary.test.mjs tests/order-mass-prep-automation.test.mjs tests/mass-prep-batch-priority.test.mjs`, deploy Railway `passionate-nourishment` (`fc55e5e7-c2d3-46af-b505-5db59296d59e`), recalibracao das BOMs publicadas via `PUT /boms/:id` para os produtos `3,4,5,6,7,297` e leitura autenticada de `dashboard/summary`.
 - Resultado: a receita oficial de `36 broas` entrou de ponta a ponta, `qtyPerUnit` virou a base canonica do COGS, os recheios ficaram unificados em `8g` por broa, e o dashboard publicado caiu de `R$ 42.199,34` para `R$ 7.108,59` de COGS sobre `433` pedidos, sem warnings.

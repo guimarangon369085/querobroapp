@@ -247,6 +247,7 @@ type MonthlyCogsEntry = {
 };
 
 type DashboardPeriodDays = DashboardSummary['selectedPeriod']['days'];
+type DashboardPeriodSelection = 'all' | DashboardPeriodDays;
 type CouponDraft = {
   code: string;
   discountPct: string;
@@ -255,10 +256,11 @@ type CouponDraft = {
 
 type DashboardTone = 'amber' | 'sky' | 'mint' | 'rose' | 'ink';
 
-const DASHBOARD_PERIOD_OPTIONS: Array<{ days: DashboardPeriodDays; label: string }> = [
-  { days: 1, label: 'Ultimas 24h' },
-  { days: 7, label: 'Ultimos 7 dias' },
-  { days: 30, label: 'Ultimos 30 dias' }
+const DASHBOARD_PERIOD_OPTIONS: Array<{ value: DashboardPeriodSelection; label: string }> = [
+  { value: 'all', label: 'Periodo total' },
+  { value: 1, label: 'Ultimas 24h' },
+  { value: 7, label: 'Ultimos 7 dias' },
+  { value: 30, label: 'Ultimos 30 dias' }
 ];
 
 const PANEL_TONE_CLASSES: Record<DashboardTone, string> = {
@@ -536,7 +538,7 @@ function DailyBars({
 
 export default function DashboardScreen() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [selectedPeriodDays, setSelectedPeriodDays] = useState<DashboardPeriodDays>(7);
+  const [selectedPeriod, setSelectedPeriod] = useState<DashboardPeriodSelection>('all');
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [couponDrafts, setCouponDrafts] = useState<Record<number, CouponDraft>>({});
   const [newCouponDraft, setNewCouponDraft] = useState<CouponDraft>(() => buildCouponDraft());
@@ -544,7 +546,6 @@ export default function DashboardScreen() {
   const [couponSavingKey, setCouponSavingKey] = useState<string | null>(null);
   const [couponDeletingId, setCouponDeletingId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { notifyError, notifySuccess } = useFeedback();
 
@@ -579,15 +580,16 @@ export default function DashboardScreen() {
   const load = useCallback(
     async (options?: { silent?: boolean }) => {
       const silent = options?.silent ?? false;
-      if (silent) {
-        setRefreshing(true);
-      } else {
+      if (!silent) {
         setLoading(true);
       }
 
       try {
-        const params = new URLSearchParams({ days: String(selectedPeriodDays) });
-        const response = await fetch(`/api/dashboard-summary?${params.toString()}`, {
+        const params = new URLSearchParams();
+        if (selectedPeriod !== 'all') {
+          params.set('days', String(selectedPeriod));
+        }
+        const response = await fetch(`/api/dashboard-summary${params.size ? `?${params.toString()}` : ''}`, {
           cache: 'no-store'
         });
         const payload = await parseJsonResponse<DashboardSummary>(response);
@@ -601,10 +603,9 @@ export default function DashboardScreen() {
         }
       } finally {
         setLoading(false);
-        setRefreshing(false);
       }
     },
-    [notifyError, selectedPeriodDays]
+    [notifyError, selectedPeriod]
   );
 
   useEffect(() => {
@@ -624,23 +625,29 @@ export default function DashboardScreen() {
     return () => window.clearInterval(timer);
   }, [load]);
 
-  const selectedTraffic = summary?.selectedPeriod.traffic || null;
-  const selectedBusiness = summary?.selectedPeriod.business || null;
+  const activeTraffic =
+    summary && selectedPeriod === 'all' ? summary.traffic : summary?.selectedPeriod.traffic || null;
+  const activeBusiness =
+    summary && selectedPeriod === 'all' ? summary.business : summary?.selectedPeriod.business || null;
+  const activePeriodLabel =
+    selectedPeriod === 'all'
+      ? summary?.traffic.windowLabel || 'Base inteira'
+      : summary?.selectedPeriod.label || 'Ultimos 7 dias';
   const topTrafficMix = useMemo(
     () =>
-      selectedTraffic
+      activeTraffic
         ? [
-            { label: 'Mobile', sessions: selectedTraffic.deviceMix.find((entry) => entry.label === 'mobile')?.sessions || 0 },
-            { label: 'Tablet', sessions: selectedTraffic.deviceMix.find((entry) => entry.label === 'tablet')?.sessions || 0 },
-            { label: 'Desktop', sessions: selectedTraffic.deviceMix.find((entry) => entry.label === 'desktop')?.sessions || 0 }
+            { label: 'Mobile', sessions: activeTraffic.deviceMix.find((entry) => entry.label === 'mobile')?.sessions || 0 },
+            { label: 'Tablet', sessions: activeTraffic.deviceMix.find((entry) => entry.label === 'tablet')?.sessions || 0 },
+            { label: 'Desktop', sessions: activeTraffic.deviceMix.find((entry) => entry.label === 'desktop')?.sessions || 0 }
           ]
         : [],
-    [selectedTraffic]
+    [activeTraffic]
   );
 
   const asOfLabel = summary ? new Date(summary.asOf).toLocaleString('pt-BR') : 'carregando...';
-  const recentTrafficSeries = selectedTraffic ? selectedTraffic.dailySeries.slice(-10) : [];
-  const recentBusinessSeries = selectedBusiness ? selectedBusiness.dailySeries.slice(-10) : [];
+  const recentTrafficSeries = activeTraffic ? activeTraffic.dailySeries.slice(-10) : [];
+  const recentBusinessSeries = activeBusiness ? activeBusiness.dailySeries.slice(-10) : [];
   const cogsByMonth = useMemo<MonthlyCogsEntry[]>(() => {
     if (!summary) return [];
 
@@ -891,51 +898,29 @@ export default function DashboardScreen() {
     [notifyError, notifySuccess]
   );
 
-  const trafficMetrics = summary
+  const trafficMetrics = summary && activeTraffic
     ? [
-        { label: 'Sessões', value: formatNumber(summary.traffic.totals.sessions), tone: 'sky' as const },
-        { label: 'Pageviews', value: formatNumber(summary.traffic.totals.pageViews), tone: 'mint' as const },
-        { label: 'Pág/sessão', value: formatDecimal(summary.traffic.totals.avgPagesPerSession), tone: 'amber' as const },
-        { label: 'Bounce', value: formatPercent(summary.traffic.totals.bounceRatePct), tone: 'rose' as const },
-        { label: 'Home → /pedido', value: formatPercent(summary.traffic.funnel.orderPageConversionPct), tone: 'sky' as const },
-        { label: 'Quote → envio', value: formatPercent(summary.traffic.funnel.quoteToSubmitPct), tone: 'mint' as const },
+        { label: 'Sessões', value: formatNumber(activeTraffic.totals.sessions), tone: 'sky' as const },
+        { label: 'Pageviews', value: formatNumber(activeTraffic.totals.pageViews), tone: 'mint' as const },
+        { label: 'Pág/sessão', value: formatDecimal(activeTraffic.totals.avgPagesPerSession), tone: 'amber' as const },
+        { label: 'Bounce', value: formatPercent(activeTraffic.totals.bounceRatePct), tone: 'rose' as const },
+        { label: 'Home → /pedido', value: formatPercent(activeTraffic.funnel.orderPageConversionPct), tone: 'sky' as const },
+        { label: 'Quote → envio', value: formatPercent(activeTraffic.funnel.quoteToSubmitPct), tone: 'mint' as const },
         { label: 'Integrações ready', value: formatNumber(summary.integrations.readyCount), tone: 'ink' as const },
         { label: 'Integrações pending', value: formatNumber(summary.integrations.pendingCount), tone: 'amber' as const }
       ]
     : [];
 
-  const selectedTrafficMetrics = selectedTraffic
+  const businessMetrics = activeBusiness
     ? [
-        { label: 'Sessões', value: formatNumber(selectedTraffic.totals.sessions), tone: 'sky' as const },
-        { label: 'Pageviews', value: formatNumber(selectedTraffic.totals.pageViews), tone: 'mint' as const },
-        { label: 'Pág/sessão', value: formatDecimal(selectedTraffic.totals.avgPagesPerSession), tone: 'amber' as const },
-        { label: 'Bounce', value: formatPercent(selectedTraffic.totals.bounceRatePct), tone: 'rose' as const }
-      ]
-    : [];
-
-  const businessMetrics = summary
-    ? [
-        { label: 'Pedidos', value: formatNumber(summary.business.kpis.ordersInRange), tone: 'amber' as const },
-        { label: 'Receita', value: formatCurrencyBR(summary.business.kpis.grossRevenueInRange), tone: 'mint' as const },
-        { label: 'Recebido', value: formatCurrencyBR(summary.business.kpis.paidRevenueInRange), tone: 'sky' as const },
-        { label: 'Em aberto', value: formatCurrencyBR(summary.business.kpis.outstandingBalance), tone: 'rose' as const },
-        { label: 'Ticket médio', value: formatCurrencyBR(summary.business.kpis.avgTicketInRange), tone: 'ink' as const },
-        { label: 'Margem', value: formatPercent(summary.business.kpis.grossMarginPctInRange), tone: 'sky' as const },
-        { label: 'Clientes', value: formatNumber(summary.business.kpis.totalCustomers), tone: 'mint' as const },
-        { label: 'Recorrência', value: formatPercent(summary.business.customerMetrics.repeatRatePct), tone: 'amber' as const }
-      ]
-    : [];
-
-  const selectedBusinessMetrics = selectedBusiness
-    ? [
-        { label: 'Pedidos', value: formatNumber(selectedBusiness.kpis.ordersInRange), tone: 'amber' as const },
-        { label: 'Receita', value: formatCurrencyBR(selectedBusiness.kpis.grossRevenueInRange), tone: 'mint' as const },
-        { label: 'Recebido', value: formatCurrencyBR(selectedBusiness.kpis.paidRevenueInRange), tone: 'sky' as const },
-        { label: 'COGS', value: formatCurrencyBR(selectedBusiness.kpis.estimatedCogsInRange), tone: 'rose' as const },
-        { label: 'Lucro bruto', value: formatCurrencyBR(selectedBusiness.kpis.grossProfitInRange), tone: 'ink' as const },
-        { label: 'Clientes novos', value: formatNumber(selectedBusiness.customerMetrics.newCustomersInRange), tone: 'mint' as const },
-        { label: 'Recorrência', value: formatPercent(selectedBusiness.customerMetrics.repeatRatePct), tone: 'amber' as const },
-        { label: 'Ticket médio', value: formatCurrencyBR(selectedBusiness.kpis.avgTicketInRange), tone: 'sky' as const }
+        { label: 'Pedidos', value: formatNumber(activeBusiness.kpis.ordersInRange), tone: 'amber' as const },
+        { label: 'Receita', value: formatCurrencyBR(activeBusiness.kpis.grossRevenueInRange), tone: 'mint' as const },
+        { label: 'Recebido', value: formatCurrencyBR(activeBusiness.kpis.paidRevenueInRange), tone: 'sky' as const },
+        { label: 'Em aberto', value: formatCurrencyBR(activeBusiness.kpis.outstandingBalance), tone: 'rose' as const },
+        { label: 'Ticket médio', value: formatCurrencyBR(activeBusiness.kpis.avgTicketInRange), tone: 'ink' as const },
+        { label: 'Margem', value: formatPercent(activeBusiness.kpis.grossMarginPctInRange), tone: 'sky' as const },
+        { label: 'Clientes', value: formatNumber(activeBusiness.kpis.totalCustomers), tone: 'mint' as const },
+        { label: 'Recorrência', value: formatPercent(activeBusiness.customerMetrics.repeatRatePct), tone: 'amber' as const }
       ]
     : [];
 
@@ -945,43 +930,28 @@ export default function DashboardScreen() {
         <div className="flex flex-wrap gap-2 text-sm">
           <span className="rounded-full border border-white/70 bg-white/78 px-3 py-1.5 text-neutral-700">{asOfLabel}</span>
           <span className="rounded-full border border-white/70 bg-white/78 px-3 py-1.5 text-neutral-700">
-            Acumulado · {summary ? summary.traffic.windowLabel : 'Base inteira'}
-          </span>
-          <span className="rounded-full border border-white/70 bg-white/78 px-3 py-1.5 text-neutral-700">
-            Periodo · {summary ? summary.selectedPeriod.label : 'Ultimos 7 dias'}
+            Periodo · {activePeriodLabel}
           </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex flex-wrap items-center gap-2 rounded-full border border-white/70 bg-white/82 p-1">
-            {DASHBOARD_PERIOD_OPTIONS.map((option) => {
-              const active = option.days === selectedPeriodDays;
-              return (
-                <button
-                  key={option.days}
-                  type="button"
-                  className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${
-                    active
-                      ? 'bg-[color:var(--brand-600)] text-white shadow-[0_10px_18px_rgba(176,96,45,0.24)]'
-                      : 'text-[color:var(--ink-strong)] hover:bg-white'
-                  }`}
-                  onClick={() => setSelectedPeriodDays(option.days)}
-                >
-                  {option.label}
-                </button>
-              );
-            })}
-          </div>
-          <button
-            type="button"
-            className="rounded-full border border-white/70 bg-white/80 px-4 py-2 text-sm font-semibold text-[color:var(--ink-strong)] shadow-[0_12px_24px_rgba(57,39,24,0.08)] transition hover:bg-white"
-            onClick={() => {
-              void load({ silent: true });
-              void loadCoupons({ silent: true });
-            }}
-          >
-            {refreshing ? 'Atualizando...' : 'Atualizar'}
-          </button>
+        <div className="flex flex-wrap items-center gap-2 rounded-full border border-white/70 bg-white/82 p-1">
+          {DASHBOARD_PERIOD_OPTIONS.map((option) => {
+            const active = option.value === selectedPeriod;
+            return (
+              <button
+                key={String(option.value)}
+                type="button"
+                className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${
+                  active
+                    ? 'bg-[color:var(--brand-600)] text-white shadow-[0_10px_18px_rgba(176,96,45,0.24)]'
+                    : 'text-[color:var(--ink-strong)] hover:bg-white'
+                }`}
+                onClick={() => setSelectedPeriod(option.value)}
+              >
+                {option.label}
+              </button>
+            );
+          })}
         </div>
       </section>
 
@@ -1006,29 +976,6 @@ export default function DashboardScreen() {
               <MetricCard key={card.label} label={card.label} value={card.value} tone={card.tone} />
             ))}
           </section>
-
-          <SectionPanel
-            title="Periodo selecionado"
-            tone="amber"
-            tag={
-              <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-strong)]">
-                {summary.selectedPeriod.label}
-              </span>
-            }
-          >
-            <div className="grid gap-4">
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                {selectedTrafficMetrics.map((card) => (
-                  <MetricCard key={`traffic-${card.label}`} label={card.label} value={card.value} tone={card.tone} />
-                ))}
-              </div>
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                {selectedBusinessMetrics.map((card) => (
-                  <MetricCard key={`business-${card.label}`} label={card.label} value={card.value} tone={card.tone} />
-                ))}
-              </div>
-            </div>
-          </SectionPanel>
 
           <SectionPanel
             title="Cupons"
@@ -1179,15 +1126,15 @@ export default function DashboardScreen() {
               tone="sky"
               tag={
                 <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-strong)]">
-                  {summary.selectedPeriod.label}
+                  {activePeriodLabel}
                 </span>
               }
             >
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <MetricCard label="Home" value={formatNumber(selectedTraffic?.funnel.homeSessions || 0)} tone="sky" />
-                <MetricCard label="/pedido" value={formatNumber(selectedTraffic?.funnel.orderSessions || 0)} tone="mint" />
-                <MetricCard label="Quote" value={formatNumber(selectedTraffic?.funnel.quoteSuccessSessions || 0)} tone="amber" />
-                <MetricCard label="Enviados" value={formatNumber(selectedTraffic?.funnel.submittedSessions || 0)} tone="rose" />
+                <MetricCard label="Home" value={formatNumber(activeTraffic?.funnel.homeSessions || 0)} tone="sky" />
+                <MetricCard label="/pedido" value={formatNumber(activeTraffic?.funnel.orderSessions || 0)} tone="mint" />
+                <MetricCard label="Quote" value={formatNumber(activeTraffic?.funnel.quoteSuccessSessions || 0)} tone="amber" />
+                <MetricCard label="Enviados" value={formatNumber(activeTraffic?.funnel.submittedSessions || 0)} tone="rose" />
               </div>
             </SectionPanel>
 
@@ -1196,7 +1143,7 @@ export default function DashboardScreen() {
               tone="mint"
               tag={
                 <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-strong)]">
-                  {summary.selectedPeriod.label}
+                  {activePeriodLabel}
                 </span>
               }
             >
@@ -1207,15 +1154,15 @@ export default function DashboardScreen() {
                 </div>
                 <div className="grid gap-2">
                   <p className="text-sm font-semibold text-[color:var(--ink-strong)]">Fontes</p>
-                  <DistributionList items={selectedTraffic?.topSources || []} valueKey="sessions" tone="sky" />
+                  <DistributionList items={activeTraffic?.topSources || []} valueKey="sessions" tone="sky" />
                 </div>
                 <div className="grid gap-2">
                   <p className="text-sm font-semibold text-[color:var(--ink-strong)]">Status</p>
-                  <DistributionList items={selectedBusiness?.statusMix || []} tone="rose" />
+                  <DistributionList items={activeBusiness?.statusMix || []} tone="rose" />
                 </div>
                 <div className="grid gap-2">
                   <p className="text-sm font-semibold text-[color:var(--ink-strong)]">Entrega / retirada</p>
-                  <DistributionList items={selectedBusiness?.fulfillmentMix || []} tone="amber" />
+                  <DistributionList items={activeBusiness?.fulfillmentMix || []} tone="amber" />
                 </div>
               </div>
             </SectionPanel>
@@ -1227,7 +1174,7 @@ export default function DashboardScreen() {
               tone="amber"
               tag={
                 <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-strong)]">
-                  {summary.selectedPeriod.label}
+                  {activePeriodLabel}
                 </span>
               }
             >
@@ -1248,27 +1195,27 @@ export default function DashboardScreen() {
               tone="rose"
               tag={
                 <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-strong)]">
-                  {summary.selectedPeriod.label}
+                  {activePeriodLabel}
                 </span>
               }
             >
               <div className="grid gap-4">
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  <MetricCard label="Produto liquido" value={formatCurrencyBR(selectedBusiness?.kpis.productNetRevenueInRange || 0)} tone="ink" />
-                  <MetricCard label="Frete" value={formatCurrencyBR(selectedBusiness?.kpis.deliveryRevenueInRange || 0)} tone="amber" />
+                  <MetricCard label="Produto liquido" value={formatCurrencyBR(activeBusiness?.kpis.productNetRevenueInRange || 0)} tone="ink" />
+                  <MetricCard label="Frete" value={formatCurrencyBR(activeBusiness?.kpis.deliveryRevenueInRange || 0)} tone="amber" />
                   <MetricCard
                     label="COGS"
-                    value={formatCurrencyBR(selectedBusiness?.kpis.estimatedCogsInRange || 0)}
+                    value={formatCurrencyBR(activeBusiness?.kpis.estimatedCogsInRange || 0)}
                     tone="rose"
-                    meta={`${formatNumber(selectedBusiness?.kpis.costedOrdersInRange || 0)} pedidos auditados no periodo${
-                      (selectedBusiness?.kpis.cogsWarningsInRange || 0)
-                        ? ` · ${formatNumber(selectedBusiness?.kpis.cogsWarningsInRange || 0)} alerta(s)`
+                    meta={`${formatNumber(activeBusiness?.kpis.costedOrdersInRange || 0)} pedidos auditados no periodo${
+                      (activeBusiness?.kpis.cogsWarningsInRange || 0)
+                        ? ` · ${formatNumber(activeBusiness?.kpis.cogsWarningsInRange || 0)} alerta(s)`
                         : ''
                     }`}
                   />
-                  <MetricCard label="Lucro bruto" value={formatCurrencyBR(selectedBusiness?.kpis.grossProfitInRange || 0)} tone="mint" />
-                  <MetricCard label="Pos-frete" value={formatCurrencyBR(selectedBusiness?.kpis.contributionAfterFreightInRange || 0)} tone="sky" />
-                  <MetricCard label="Descontos" value={formatCurrencyBR(selectedBusiness?.kpis.discountsInRange || 0)} tone="ink" />
+                  <MetricCard label="Lucro bruto" value={formatCurrencyBR(activeBusiness?.kpis.grossProfitInRange || 0)} tone="mint" />
+                  <MetricCard label="Pos-frete" value={formatCurrencyBR(activeBusiness?.kpis.contributionAfterFreightInRange || 0)} tone="sky" />
+                  <MetricCard label="Descontos" value={formatCurrencyBR(activeBusiness?.kpis.discountsInRange || 0)} tone="ink" />
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="grid gap-2">
@@ -1551,13 +1498,13 @@ export default function DashboardScreen() {
               tone="sky"
               tag={
                 <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-strong)]">
-                  {summary.selectedPeriod.label}
+                  {activePeriodLabel}
                 </span>
               }
             >
-              {selectedTraffic?.vitalBenchmarks.length ? (
+              {activeTraffic?.vitalBenchmarks.length ? (
                 <div className="grid gap-4 sm:grid-cols-2">
-                  {selectedTraffic.vitalBenchmarks.map((metric) => (
+                  {activeTraffic.vitalBenchmarks.map((metric) => (
                     <MetricCard
                       key={metric.name}
                       label={metric.name}
@@ -1577,7 +1524,7 @@ export default function DashboardScreen() {
               tone="ink"
               tag={
                 <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-strong)]">
-                  {summary.selectedPeriod.label}
+                  {activePeriodLabel}
                 </span>
               }
             >
@@ -1585,7 +1532,7 @@ export default function DashboardScreen() {
                 <div className="grid gap-2">
                   <p className="text-sm font-semibold text-[color:var(--ink-strong)]">Rotas</p>
                   <DistributionList
-                    items={(selectedTraffic?.topPaths || []).map((entry) => ({
+                    items={(activeTraffic?.topPaths || []).map((entry) => ({
                       label: `${entry.path} · ${entry.surface}`,
                       value: entry.views
                     }))}
@@ -1595,7 +1542,7 @@ export default function DashboardScreen() {
                 <div className="grid gap-2">
                   <p className="text-sm font-semibold text-[color:var(--ink-strong)]">Links</p>
                   <DistributionList
-                    items={(selectedTraffic?.topLinks || []).map((entry) => ({
+                    items={(activeTraffic?.topLinks || []).map((entry) => ({
                       label: entry.label || entry.href,
                       clicks: entry.clicks
                     }))}
@@ -1605,9 +1552,9 @@ export default function DashboardScreen() {
                 </div>
                 <div className="grid gap-2">
                   <p className="text-sm font-semibold text-[color:var(--ink-strong)]">Páginas lentas</p>
-                  {selectedTraffic?.slowPages.length ? (
+                  {activeTraffic?.slowPages.length ? (
                     <div className="grid gap-3">
-                      {selectedTraffic.slowPages.map((entry) => (
+                      {activeTraffic.slowPages.map((entry) => (
                         <div
                           key={`${entry.path}-${entry.metricName}`}
                           className="rounded-[24px] border border-white/80 bg-white/82 p-4 shadow-[0_10px_24px_rgba(57,39,24,0.06)]"
