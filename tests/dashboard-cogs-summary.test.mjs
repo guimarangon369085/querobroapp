@@ -1,9 +1,36 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
 import test from 'node:test';
 import { ensureApiServer, request } from './lib/api-server.mjs';
 
 function approxEqual(left, right, epsilon = 0.0001) {
   return Math.abs(Number(left || 0) - Number(right || 0)) <= epsilon;
+}
+
+function resolveTestDatabasePath(apiUrl) {
+  const port = new URL(apiUrl).port;
+  return path.join(process.cwd(), 'output', 'tests', `api-${port}.db`);
+}
+
+function updateOrderCreatedAt(apiUrl, orderId, createdAt) {
+  const databasePath = resolveTestDatabasePath(apiUrl);
+  const result = spawnSync(
+    'sqlite3',
+    [databasePath, `UPDATE "Order" SET "createdAt" = '${createdAt}' WHERE "id" = ${Number(orderId)};`],
+    {
+      cwd: process.cwd(),
+      encoding: 'utf8'
+    }
+  );
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  if (typeof result.status === 'number' && result.status !== 0) {
+    throw new Error(`sqlite3 falhou ao ajustar createdAt do pedido ${orderId}: ${String(result.stderr || '').trim()}`);
+  }
 }
 
 test('dashboard summary calcula COGS por pedido a partir dos ingredientes da ficha técnica', async (t) => {
@@ -191,6 +218,128 @@ test('dashboard summary calcula COGS por pedido a partir dos ingredientes da fic
   const aggregateIngredientB = summaryAfter.business.cogsByIngredient.find((entry) => entry.ingredientId === ingredientB.id);
   assert.ok(aggregateIngredientB, 'ingrediente B deveria aparecer no agregado');
   assert.equal(approxEqual(aggregateIngredientB.amount, expectedIngredientBAmount), true);
+});
+
+test('dashboard summary mantem acumulado e filtra o periodo selecionado', async (t) => {
+  const { apiUrl, shutdown } = await ensureApiServer();
+  t.after(async () => {
+    await shutdown();
+  });
+
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const summaryBefore = await request(apiUrl, '/dashboard/summary?days=30');
+
+  const ingredient = await request(apiUrl, '/inventory-items', {
+    method: 'POST',
+    body: {
+      name: `INGREDIENTE DASHBOARD WINDOW [TESTE_E2E] ${suffix}`,
+      category: 'INGREDIENTE',
+      unit: 'g',
+      purchasePackSize: 1,
+      purchasePackCost: 1
+    }
+  });
+
+  await request(apiUrl, '/inventory-movements', {
+    method: 'POST',
+    body: {
+      itemId: ingredient.id,
+      type: 'ADJUST',
+      quantity: 100,
+      reason: `DASHBOARD_WINDOW_TEST setup ${suffix}`
+    }
+  });
+
+  const product = await request(apiUrl, '/inventory-products', {
+    method: 'POST',
+    body: {
+      name: `Produto Dashboard Window [TESTE_E2E] ${suffix}`,
+      category: 'Sabores',
+      unit: 'un',
+      price: 10,
+      active: true
+    }
+  });
+
+  const existingBoms = await request(apiUrl, '/boms');
+  const existingBom = existingBoms.find((entry) => entry.productId === product.id) || null;
+  const bomPayload = {
+    productId: product.id,
+    name: `BOM Dashboard Window [TESTE_E2E] ${suffix}`,
+    saleUnitLabel: 'Unidade',
+    yieldUnits: 1,
+    items: [{ itemId: ingredient.id, qtyPerSaleUnit: 1 }]
+  };
+
+  await (existingBom
+    ? request(apiUrl, `/boms/${existingBom.id}`, { method: 'PUT', body: bomPayload })
+    : request(apiUrl, '/boms', { method: 'POST', body: bomPayload }));
+
+  const customer = await request(apiUrl, '/customers', {
+    method: 'POST',
+    body: {
+      name: `Cliente Dashboard Window [TESTE_E2E] ${suffix}`,
+      phone: '11977776666',
+      address: 'Rua Janela, 30'
+    }
+  });
+
+  const recentOrder = await request(apiUrl, '/orders', {
+    method: 'POST',
+    body: {
+      customerId: customer.id,
+      scheduledAt: new Date(Date.UTC(2032, 0, 11, 14, 0, 0)).toISOString(),
+      items: [{ productId: product.id, quantity: 1 }]
+    }
+  });
+
+  const oldOrder = await request(apiUrl, '/orders', {
+    method: 'POST',
+    body: {
+      customerId: customer.id,
+      scheduledAt: new Date(Date.UTC(2032, 0, 12, 14, 0, 0)).toISOString(),
+      items: [{ productId: product.id, quantity: 1 }]
+    }
+  });
+
+  const fortyDaysAgo = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString();
+  updateOrderCreatedAt(apiUrl, oldOrder.id, fortyDaysAgo);
+
+  const summaryAfter = await request(apiUrl, '/dashboard/summary?days=30');
+
+  assert.equal(summaryAfter.selectedPeriod.label, 'Ultimos 30 dias');
+  assert.equal(
+    summaryAfter.business.kpis.ordersInRange - summaryBefore.business.kpis.ordersInRange,
+    2
+  );
+  assert.equal(
+    summaryAfter.selectedPeriod.business.kpis.ordersInRange -
+      summaryBefore.selectedPeriod.business.kpis.ordersInRange,
+    1
+  );
+  assert.equal(
+    approxEqual(
+      summaryAfter.business.kpis.estimatedCogsInRange - summaryBefore.business.kpis.estimatedCogsInRange,
+      2
+    ),
+    true
+  );
+  assert.equal(
+    approxEqual(
+      summaryAfter.selectedPeriod.business.kpis.estimatedCogsInRange -
+        summaryBefore.selectedPeriod.business.kpis.estimatedCogsInRange,
+      1
+    ),
+    true
+  );
+  assert.equal(
+    summaryAfter.selectedPeriod.business.cogsByOrder.some((entry) => entry.orderId === recentOrder.id),
+    true
+  );
+  assert.equal(
+    summaryAfter.selectedPeriod.business.cogsByOrder.some((entry) => entry.orderId === oldOrder.id),
+    false
+  );
 });
 
 test('dashboard summary prioriza qtyPerUnit quando o pedido esta em broas', async (t) => {

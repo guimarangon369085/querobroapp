@@ -115,12 +115,23 @@ type DashboardCogsAuditSummary = {
   grossProfit: number;
 };
 
+type DashboardWindowDays = 1 | 7 | 30;
+type DashboardWindowKey = '24h' | '7d' | '30d';
+
+type DashboardWindowSelection = {
+  key: DashboardWindowKey;
+  days: DashboardWindowDays;
+  label: string;
+  startsAt: Date;
+};
+
 const SAO_PAULO_TIMEZONE = 'America/Sao_Paulo';
 const LEGACY_IMPORTED_ORDER_MARKER = '[IMPORTADO_PLANILHA_LEGADA]';
 const LEGACY_HISTORICAL_BOX_PRODUCT_KEY = 'CAIXA HISTORICA SEM COMPOSICAO';
 const LEGACY_PREMIUM_BROA_FLAVOR_CODES = OFFICIAL_BROA_FLAVOR_CODES.filter(
   (code): code is Exclude<OfficialBroaFlavorCode, 'T'> => code !== 'T'
 );
+const SUPPORTED_DASHBOARD_WINDOW_DAYS: DashboardWindowDays[] = [1, 7, 30];
 const saoPauloFormatter = new Intl.DateTimeFormat('en-CA', {
   timeZone: SAO_PAULO_TIMEZONE,
   year: 'numeric',
@@ -147,6 +158,23 @@ function round2(value: number) {
 
 function round3(value: number) {
   return Math.round((Number(value) || 0) * 1000) / 1000;
+}
+
+function normalizeDashboardWindowDays(value?: string | number | null): DashboardWindowDays {
+  const parsed = Math.floor(Number(value || 0));
+  return SUPPORTED_DASHBOARD_WINDOW_DAYS.includes(parsed as DashboardWindowDays)
+    ? (parsed as DashboardWindowDays)
+    : 7;
+}
+
+function buildDashboardWindowSelection(reference: Date, value?: string | number | null): DashboardWindowSelection {
+  const days = normalizeDashboardWindowDays(value);
+  return {
+    key: days === 1 ? '24h' : days === 7 ? '7d' : '30d',
+    days,
+    label: days === 1 ? 'Ultimas 24h' : days === 7 ? 'Ultimos 7 dias' : 'Ultimos 30 dias',
+    startsAt: new Date(reference.getTime() - days * 24 * 60 * 60 * 1000)
+  };
 }
 
 function normalizeLegacyText(value?: string | null) {
@@ -1058,7 +1086,9 @@ export class DashboardService {
     });
   }
 
-  async getSummary() {
+  async getSummary(options?: { days?: string | number | null }) {
+    const asOf = new Date();
+    const selectedWindow = buildDashboardWindowSelection(asOf, options?.days);
     const [events, orders, customers, boms, inventoryItems, priceEntries, products] = await Promise.all([
       this.loadAnalyticsEvents(),
       this.loadOrders(),
@@ -1087,26 +1117,50 @@ export class DashboardService {
       })
     ]);
 
-    const traffic = this.buildTrafficSummary(events);
+    const traffic = this.buildTrafficSummary(events, { windowLabel: 'Base inteira' });
     const business = this.buildBusinessSummary({
       orders,
       customers,
       boms,
       inventoryItems,
       priceEntries,
-      products
+      products,
+      windowLabel: 'Base inteira',
+      asOf
+    });
+    const selectedTraffic = this.buildTrafficSummary(
+      events.filter((event) => event.createdAt.getTime() >= selectedWindow.startsAt.getTime()),
+      { windowLabel: selectedWindow.label }
+    );
+    const selectedBusiness = this.buildBusinessSummary({
+      orders: orders.filter((order) => order.createdAt.getTime() >= selectedWindow.startsAt.getTime()),
+      customers,
+      boms,
+      inventoryItems,
+      priceEntries,
+      products,
+      windowLabel: selectedWindow.label,
+      rangeStartsAt: selectedWindow.startsAt,
+      asOf
     });
 
     return {
-      asOf: new Date().toISOString(),
+      asOf: asOf.toISOString(),
       identity: this.buildIdentitySummary(),
       integrations: this.buildIntegrationRails(),
       traffic,
-      business
+      business,
+      selectedPeriod: {
+        key: selectedWindow.key,
+        days: selectedWindow.days,
+        label: selectedWindow.label,
+        traffic: selectedTraffic,
+        business: selectedBusiness
+      }
     };
   }
 
-  private buildTrafficSummary(events: LoadedAnalyticsEvent[]) {
+  private buildTrafficSummary(events: LoadedAnalyticsEvent[], options?: { windowLabel?: string }) {
     const pageViews = events.filter((event) => event.eventType === 'PAGE_VIEW');
     const linkClicks = events.filter((event) => event.eventType === 'LINK_CLICK');
     const webVitals = events.filter((event) => event.eventType === 'WEB_VITAL' && typeof event.metricValue === 'number');
@@ -1275,7 +1329,7 @@ export class DashboardService {
     );
 
     return {
-      windowLabel: 'Base inteira',
+      windowLabel: options?.windowLabel || 'Base inteira',
       totals: {
         sessions: sessions.size,
         publicSessions: publicSessions.size,
@@ -1333,8 +1387,21 @@ export class DashboardService {
     inventoryItems: LoadedInventoryItem[];
     priceEntries: LoadedInventoryPriceEntry[];
     products: LoadedProduct[];
+    windowLabel?: string;
+    rangeStartsAt?: Date;
+    asOf?: Date;
   }) {
-    const { orders, customers, boms, inventoryItems, priceEntries, products } = params;
+    const {
+      orders,
+      customers,
+      boms,
+      inventoryItems,
+      priceEntries,
+      products,
+      windowLabel,
+      rangeStartsAt,
+      asOf
+    } = params;
     const activeOrders = orders.filter((order) => order.status !== 'CANCELADO');
     const totalCogsBreakdown = this.buildOrderCogsBreakdown({
       rangeOrders: activeOrders,
@@ -1344,9 +1411,12 @@ export class DashboardService {
       products
     });
     const orderCogsByOrderId = new Map(totalCogsBreakdown.orders.map((entry) => [entry.orderId, entry.cogs]));
+    const todayKey = toDayKey(asOf || new Date());
+    const activeCustomerIds = new Set<number>();
 
     const customerOrderCount = new Map<number, number>();
     for (const order of activeOrders) {
+      activeCustomerIds.add(order.customerId);
       customerOrderCount.set(order.customerId, (customerOrderCount.get(order.customerId) || 0) + 1);
     }
 
@@ -1408,6 +1478,13 @@ export class DashboardService {
     const outstandingBalance = sumBy(pendingReceivables, (entry) => entry.amount);
     const grossProfitTotal = round2(productNetRevenueTotal - totalOrderCost);
     const contributionAfterFreightTotal = round2(grossRevenueTotal - totalOrderCost);
+    const ordersToday = activeOrders.filter((order) => toDayKey(order.createdAt) === todayKey).length;
+    const grossRevenueToday = round2(
+      sumBy(
+        activeOrders.filter((order) => toDayKey(order.createdAt) === todayKey),
+        (order) => order.total || 0
+      )
+    );
 
     const dailySeriesMap = new Map<
       string,
@@ -1490,10 +1567,14 @@ export class DashboardService {
       .sort((left, right) => right.revenue - left.revenue)
       .slice(0, 8);
 
-    const repeatCustomersTotal = customers.filter((customer) => (customerOrderCount.get(customer.id) || 0) >= 2).length;
+    const returningCustomersCount = customers.filter((customer) => (customerOrderCount.get(customer.id) || 0) >= 2).length;
+    const newCustomersInRange = rangeStartsAt
+      ? customers.filter((customer) => customer.createdAt.getTime() >= rangeStartsAt.getTime()).length
+      : customers.length;
+    const repeatRateBase = rangeStartsAt ? activeCustomerIds.size : customers.length;
     const auditRevenue = round2(sumBy(totalCogsBreakdown.orders, (entry) => entry.revenue));
     const cogsAudit: DashboardCogsAuditSummary = {
-      windowLabel: 'Base inteira',
+      windowLabel: windowLabel || 'Base inteira',
       ordersCount: totalCogsBreakdown.orders.length,
       ingredientsCount: totalCogsBreakdown.ingredients.length,
       warningsCount: totalCogsBreakdown.warnings.length,
@@ -1503,13 +1584,13 @@ export class DashboardService {
     };
 
     return {
-      windowLabel: 'Base inteira',
+      windowLabel: windowLabel || 'Base inteira',
       kpis: {
         totalCustomers: customers.length,
-        ordersToday: activeOrders.length,
+        ordersToday,
         ordersInRange: activeOrders.length,
         ordersAllTime: activeOrders.length,
-        grossRevenueToday: round2(grossRevenueTotal),
+        grossRevenueToday,
         grossRevenueInRange: round2(grossRevenueTotal),
         grossRevenueAllTime: round2(grossRevenueTotal),
         paidRevenueInRange: round2(paidRevenueTotal),
@@ -1527,9 +1608,9 @@ export class DashboardService {
       },
       cogsAudit,
       customerMetrics: {
-        newCustomersInRange: customers.length,
-        returningCustomersInRange: repeatCustomersTotal,
-        repeatRatePct: toPercent(repeatCustomersTotal, customers.length)
+        newCustomersInRange,
+        returningCustomersInRange: returningCustomersCount,
+        repeatRatePct: toPercent(returningCustomersCount, repeatRateBase)
       },
       statusMix: [...statusMix.entries()]
         .map(([label, value]) => ({ label, value }))

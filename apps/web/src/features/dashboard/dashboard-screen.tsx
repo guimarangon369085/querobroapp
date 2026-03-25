@@ -4,6 +4,178 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { useFeedback } from '@/components/feedback-provider';
 import { formatCurrencyBR } from '@/lib/format';
 
+type DashboardTrafficSummary = {
+  windowLabel: string;
+  totals: {
+    sessions: number;
+    publicSessions: number;
+    internalSessions: number;
+    pageViews: number;
+    publicPageViews: number;
+    internalPageViews: number;
+    avgPagesPerSession: number;
+    bounceRatePct: number;
+  };
+  topPaths: Array<{
+    path: string;
+    views: number;
+    sessions: number;
+    surface: 'public' | 'internal';
+  }>;
+  topSources: Array<{ label: string; sessions: number }>;
+  topReferrers: Array<{ label: string; sessions: number }>;
+  topLinks: Array<{ href: string; label: string; clicks: number }>;
+  deviceMix: Array<{ label: string; sessions: number }>;
+  browserMix: Array<{ label: string; sessions: number }>;
+  osMix: Array<{ label: string; sessions: number }>;
+  vitalBenchmarks: Array<{
+    name: string;
+    unit: string;
+    median: number;
+    p75: number;
+    sampleSize: number;
+  }>;
+  slowPages: Array<{
+    path: string;
+    metricName: string;
+    median: number;
+    p75: number;
+    sampleSize: number;
+  }>;
+  dailySeries: Array<{
+    date: string;
+    pageViews: number;
+    publicPageViews: number;
+    internalPageViews: number;
+    sessions: number;
+  }>;
+  funnel: {
+    homeSessions: number;
+    orderSessions: number;
+    quoteSuccessSessions: number;
+    submittedSessions: number;
+    orderPageConversionPct: number;
+    quoteToSubmitPct: number;
+  };
+};
+
+type DashboardBusinessSummary = {
+  windowLabel: string;
+  kpis: {
+    totalCustomers: number;
+    ordersToday: number;
+    ordersInRange: number;
+    ordersAllTime: number;
+    grossRevenueToday: number;
+    grossRevenueInRange: number;
+    grossRevenueAllTime: number;
+    paidRevenueInRange: number;
+    outstandingBalance: number;
+    avgTicketInRange: number;
+    discountsInRange: number;
+    deliveryRevenueInRange: number;
+    productNetRevenueInRange: number;
+    estimatedCogsInRange: number;
+    costedOrdersInRange: number;
+    cogsWarningsInRange: number;
+    grossProfitInRange: number;
+    grossMarginPctInRange: number;
+    contributionAfterFreightInRange: number;
+  };
+  cogsAudit: {
+    windowLabel: string;
+    ordersCount: number;
+    ingredientsCount: number;
+    warningsCount: number;
+    revenue: number;
+    cogs: number;
+    grossProfit: number;
+  };
+  customerMetrics: {
+    newCustomersInRange: number;
+    returningCustomersInRange: number;
+    repeatRatePct: number;
+  };
+  statusMix: Array<{ label: string; value: number }>;
+  fulfillmentMix: Array<{ label: string; value: number }>;
+  quoteMix: Array<{ label: string; value: number }>;
+  dailySeries: Array<{
+    date: string;
+    orders: number;
+    grossRevenue: number;
+    paidRevenue: number;
+    cogs: number;
+    grossProfit: number;
+  }>;
+  cogsByIngredient: Array<{
+    ingredientId: number;
+    ingredientName: string;
+    unit: string;
+    quantity: number;
+    unitCost: number;
+    amount: number;
+    orderCount: number;
+  }>;
+  cogsByOrder: Array<{
+    orderId: number;
+    orderDisplayNumber: number;
+    customerName: string;
+    createdAt: string;
+    scheduledAt: string | null;
+    status: string;
+    itemsCount: number;
+    units: number;
+    revenue: number;
+    cogs: number;
+    grossProfit: number;
+    products: Array<{
+      productId: number;
+      productName: string;
+      quantity: number;
+      revenue: number;
+      cogs: number;
+    }>;
+    ingredients: Array<{
+      ingredientId: number;
+      ingredientName: string;
+      unit: string;
+      quantity: number;
+      unitCost: number;
+      amount: number;
+    }>;
+    warnings: Array<{
+      code: 'BOM_MISSING' | 'BOM_ITEM_MISSING_QTY';
+      productId: number;
+      productName: string;
+      message: string;
+    }>;
+  }>;
+  cogsWarnings: Array<{
+    code: 'BOM_MISSING' | 'BOM_ITEM_MISSING_QTY';
+    orderId: number;
+    orderDisplayNumber: number;
+    productId: number;
+    productName: string;
+    message: string;
+  }>;
+  topProducts: Array<{
+    productId: number;
+    productName: string;
+    units: number;
+    revenue: number;
+    cogs: number;
+    profit: number;
+    marginPct: number;
+  }>;
+  recentReceivables: Array<{
+    orderId: number;
+    customerName: string;
+    amount: number;
+    status: string;
+    dueDate: string | null;
+  }>;
+};
+
 type DashboardSummary = {
   asOf: string;
   identity: {
@@ -33,175 +205,14 @@ type DashboardSummary = {
       nextStep: string;
     }>;
   };
-  traffic: {
-    windowLabel: string;
-    totals: {
-      sessions: number;
-      publicSessions: number;
-      internalSessions: number;
-      pageViews: number;
-      publicPageViews: number;
-      internalPageViews: number;
-      avgPagesPerSession: number;
-      bounceRatePct: number;
-    };
-    topPaths: Array<{
-      path: string;
-      views: number;
-      sessions: number;
-      surface: 'public' | 'internal';
-    }>;
-    topSources: Array<{ label: string; sessions: number }>;
-    topReferrers: Array<{ label: string; sessions: number }>;
-    topLinks: Array<{ href: string; label: string; clicks: number }>;
-    deviceMix: Array<{ label: string; sessions: number }>;
-    browserMix: Array<{ label: string; sessions: number }>;
-    osMix: Array<{ label: string; sessions: number }>;
-    vitalBenchmarks: Array<{
-      name: string;
-      unit: string;
-      median: number;
-      p75: number;
-      sampleSize: number;
-    }>;
-    slowPages: Array<{
-      path: string;
-      metricName: string;
-      median: number;
-      p75: number;
-      sampleSize: number;
-    }>;
-    dailySeries: Array<{
-      date: string;
-      pageViews: number;
-      publicPageViews: number;
-      internalPageViews: number;
-      sessions: number;
-    }>;
-    funnel: {
-      homeSessions: number;
-      orderSessions: number;
-      quoteSuccessSessions: number;
-      submittedSessions: number;
-      orderPageConversionPct: number;
-      quoteToSubmitPct: number;
-    };
-  };
-  business: {
-    windowLabel: string;
-    kpis: {
-      totalCustomers: number;
-      ordersToday: number;
-      ordersInRange: number;
-      ordersAllTime: number;
-      grossRevenueToday: number;
-      grossRevenueInRange: number;
-      grossRevenueAllTime: number;
-      paidRevenueInRange: number;
-      outstandingBalance: number;
-      avgTicketInRange: number;
-      discountsInRange: number;
-      deliveryRevenueInRange: number;
-      productNetRevenueInRange: number;
-      estimatedCogsInRange: number;
-      costedOrdersInRange: number;
-      cogsWarningsInRange: number;
-      grossProfitInRange: number;
-      grossMarginPctInRange: number;
-      contributionAfterFreightInRange: number;
-    };
-    cogsAudit: {
-      windowLabel: string;
-      ordersCount: number;
-      ingredientsCount: number;
-      warningsCount: number;
-      revenue: number;
-      cogs: number;
-      grossProfit: number;
-    };
-    customerMetrics: {
-      newCustomersInRange: number;
-      returningCustomersInRange: number;
-      repeatRatePct: number;
-    };
-    statusMix: Array<{ label: string; value: number }>;
-    fulfillmentMix: Array<{ label: string; value: number }>;
-    quoteMix: Array<{ label: string; value: number }>;
-    dailySeries: Array<{
-      date: string;
-      orders: number;
-      grossRevenue: number;
-      paidRevenue: number;
-      cogs: number;
-      grossProfit: number;
-    }>;
-    cogsByIngredient: Array<{
-      ingredientId: number;
-      ingredientName: string;
-      unit: string;
-      quantity: number;
-      unitCost: number;
-      amount: number;
-      orderCount: number;
-    }>;
-    cogsByOrder: Array<{
-      orderId: number;
-      orderDisplayNumber: number;
-      customerName: string;
-      createdAt: string;
-      scheduledAt: string | null;
-      status: string;
-      itemsCount: number;
-      units: number;
-      revenue: number;
-      cogs: number;
-      grossProfit: number;
-      products: Array<{
-        productId: number;
-        productName: string;
-        quantity: number;
-        revenue: number;
-        cogs: number;
-      }>;
-      ingredients: Array<{
-        ingredientId: number;
-        ingredientName: string;
-        unit: string;
-        quantity: number;
-        unitCost: number;
-        amount: number;
-      }>;
-      warnings: Array<{
-        code: 'BOM_MISSING' | 'BOM_ITEM_MISSING_QTY';
-        productId: number;
-        productName: string;
-        message: string;
-      }>;
-    }>;
-    cogsWarnings: Array<{
-      code: 'BOM_MISSING' | 'BOM_ITEM_MISSING_QTY';
-      orderId: number;
-      orderDisplayNumber: number;
-      productId: number;
-      productName: string;
-      message: string;
-    }>;
-    topProducts: Array<{
-      productId: number;
-      productName: string;
-      units: number;
-      revenue: number;
-      cogs: number;
-      profit: number;
-      marginPct: number;
-    }>;
-    recentReceivables: Array<{
-      orderId: number;
-      customerName: string;
-      amount: number;
-      status: string;
-      dueDate: string | null;
-    }>;
+  traffic: DashboardTrafficSummary;
+  business: DashboardBusinessSummary;
+  selectedPeriod: {
+    key: '24h' | '7d' | '30d';
+    days: 1 | 7 | 30;
+    label: string;
+    traffic: DashboardTrafficSummary;
+    business: DashboardBusinessSummary;
   };
 };
 
@@ -234,7 +245,15 @@ type MonthlyCogsEntry = {
   }>;
 };
 
+type DashboardPeriodDays = DashboardSummary['selectedPeriod']['days'];
+
 type DashboardTone = 'amber' | 'sky' | 'mint' | 'rose' | 'ink';
+
+const DASHBOARD_PERIOD_OPTIONS: Array<{ days: DashboardPeriodDays; label: string }> = [
+  { days: 1, label: 'Ultimas 24h' },
+  { days: 7, label: 'Ultimos 7 dias' },
+  { days: 30, label: 'Ultimos 30 dias' }
+];
 
 const PANEL_TONE_CLASSES: Record<DashboardTone, string> = {
   amber:
@@ -472,6 +491,7 @@ function DailyBars({
 
 export default function DashboardScreen() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [selectedPeriodDays, setSelectedPeriodDays] = useState<DashboardPeriodDays>(7);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -487,7 +507,8 @@ export default function DashboardScreen() {
       }
 
       try {
-        const response = await fetch('/api/dashboard-summary', {
+        const params = new URLSearchParams({ days: String(selectedPeriodDays) });
+        const response = await fetch(`/api/dashboard-summary?${params.toString()}`, {
           cache: 'no-store'
         });
         const raw = await response.text();
@@ -523,7 +544,7 @@ export default function DashboardScreen() {
         setRefreshing(false);
       }
     },
-    [notifyError]
+    [notifyError, selectedPeriodDays]
   );
 
   useEffect(() => {
@@ -539,21 +560,23 @@ export default function DashboardScreen() {
     return () => window.clearInterval(timer);
   }, [load]);
 
+  const selectedTraffic = summary?.selectedPeriod.traffic || null;
+  const selectedBusiness = summary?.selectedPeriod.business || null;
   const topTrafficMix = useMemo(
     () =>
-      summary
+      selectedTraffic
         ? [
-            { label: 'Mobile', sessions: summary.traffic.deviceMix.find((entry) => entry.label === 'mobile')?.sessions || 0 },
-            { label: 'Tablet', sessions: summary.traffic.deviceMix.find((entry) => entry.label === 'tablet')?.sessions || 0 },
-            { label: 'Desktop', sessions: summary.traffic.deviceMix.find((entry) => entry.label === 'desktop')?.sessions || 0 }
+            { label: 'Mobile', sessions: selectedTraffic.deviceMix.find((entry) => entry.label === 'mobile')?.sessions || 0 },
+            { label: 'Tablet', sessions: selectedTraffic.deviceMix.find((entry) => entry.label === 'tablet')?.sessions || 0 },
+            { label: 'Desktop', sessions: selectedTraffic.deviceMix.find((entry) => entry.label === 'desktop')?.sessions || 0 }
           ]
         : [],
-    [summary]
+    [selectedTraffic]
   );
 
   const asOfLabel = summary ? new Date(summary.asOf).toLocaleString('pt-BR') : 'carregando...';
-  const recentTrafficSeries = summary ? summary.traffic.dailySeries.slice(-10) : [];
-  const recentBusinessSeries = summary ? summary.business.dailySeries.slice(-10) : [];
+  const recentTrafficSeries = selectedTraffic ? selectedTraffic.dailySeries.slice(-10) : [];
+  const recentBusinessSeries = selectedBusiness ? selectedBusiness.dailySeries.slice(-10) : [];
   const cogsByMonth = useMemo<MonthlyCogsEntry[]>(() => {
     if (!summary) return [];
 
@@ -684,6 +707,15 @@ export default function DashboardScreen() {
       ]
     : [];
 
+  const selectedTrafficMetrics = selectedTraffic
+    ? [
+        { label: 'Sessões', value: formatNumber(selectedTraffic.totals.sessions), tone: 'sky' as const },
+        { label: 'Pageviews', value: formatNumber(selectedTraffic.totals.pageViews), tone: 'mint' as const },
+        { label: 'Pág/sessão', value: formatDecimal(selectedTraffic.totals.avgPagesPerSession), tone: 'amber' as const },
+        { label: 'Bounce', value: formatPercent(selectedTraffic.totals.bounceRatePct), tone: 'rose' as const }
+      ]
+    : [];
+
   const businessMetrics = summary
     ? [
         { label: 'Pedidos', value: formatNumber(summary.business.kpis.ordersInRange), tone: 'amber' as const },
@@ -697,17 +729,52 @@ export default function DashboardScreen() {
       ]
     : [];
 
+  const selectedBusinessMetrics = selectedBusiness
+    ? [
+        { label: 'Pedidos', value: formatNumber(selectedBusiness.kpis.ordersInRange), tone: 'amber' as const },
+        { label: 'Receita', value: formatCurrencyBR(selectedBusiness.kpis.grossRevenueInRange), tone: 'mint' as const },
+        { label: 'Recebido', value: formatCurrencyBR(selectedBusiness.kpis.paidRevenueInRange), tone: 'sky' as const },
+        { label: 'COGS', value: formatCurrencyBR(selectedBusiness.kpis.estimatedCogsInRange), tone: 'rose' as const },
+        { label: 'Lucro bruto', value: formatCurrencyBR(selectedBusiness.kpis.grossProfitInRange), tone: 'ink' as const },
+        { label: 'Clientes novos', value: formatNumber(selectedBusiness.customerMetrics.newCustomersInRange), tone: 'mint' as const },
+        { label: 'Recorrência', value: formatPercent(selectedBusiness.customerMetrics.repeatRatePct), tone: 'amber' as const },
+        { label: 'Ticket médio', value: formatCurrencyBR(selectedBusiness.kpis.avgTicketInRange), tone: 'sky' as const }
+      ]
+    : [];
+
   return (
     <div className="grid gap-4 pb-10">
       <section className="app-panel flex flex-wrap items-center justify-between gap-3 rounded-[30px] p-4 sm:p-5">
         <div className="flex flex-wrap gap-2 text-sm">
           <span className="rounded-full border border-white/70 bg-white/78 px-3 py-1.5 text-neutral-700">{asOfLabel}</span>
           <span className="rounded-full border border-white/70 bg-white/78 px-3 py-1.5 text-neutral-700">
-            {summary ? summary.traffic.windowLabel : 'Base inteira'}
+            Acumulado · {summary ? summary.traffic.windowLabel : 'Base inteira'}
+          </span>
+          <span className="rounded-full border border-white/70 bg-white/78 px-3 py-1.5 text-neutral-700">
+            Periodo · {summary ? summary.selectedPeriod.label : 'Ultimos 7 dias'}
           </span>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 rounded-full border border-white/70 bg-white/82 p-1">
+            {DASHBOARD_PERIOD_OPTIONS.map((option) => {
+              const active = option.days === selectedPeriodDays;
+              return (
+                <button
+                  key={option.days}
+                  type="button"
+                  className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${
+                    active
+                      ? 'bg-[color:var(--brand-600)] text-white shadow-[0_10px_18px_rgba(176,96,45,0.24)]'
+                      : 'text-[color:var(--ink-strong)] hover:bg-white'
+                  }`}
+                  onClick={() => setSelectedPeriodDays(option.days)}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
           <button
             type="button"
             className="rounded-full border border-white/70 bg-white/80 px-4 py-2 text-sm font-semibold text-[color:var(--ink-strong)] shadow-[0_12px_24px_rgba(57,39,24,0.08)] transition hover:bg-white"
@@ -740,17 +807,56 @@ export default function DashboardScreen() {
             ))}
           </section>
 
-          <section className="grid gap-4 xl:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
-            <SectionPanel title="Funil" tone="sky">
+          <SectionPanel
+            title="Periodo selecionado"
+            tone="amber"
+            tag={
+              <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-strong)]">
+                {summary.selectedPeriod.label}
+              </span>
+            }
+          >
+            <div className="grid gap-4">
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <MetricCard label="Home" value={formatNumber(summary.traffic.funnel.homeSessions)} tone="sky" />
-                <MetricCard label="/pedido" value={formatNumber(summary.traffic.funnel.orderSessions)} tone="mint" />
-                <MetricCard label="Quote" value={formatNumber(summary.traffic.funnel.quoteSuccessSessions)} tone="amber" />
-                <MetricCard label="Enviados" value={formatNumber(summary.traffic.funnel.submittedSessions)} tone="rose" />
+                {selectedTrafficMetrics.map((card) => (
+                  <MetricCard key={`traffic-${card.label}`} label={card.label} value={card.value} tone={card.tone} />
+                ))}
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                {selectedBusinessMetrics.map((card) => (
+                  <MetricCard key={`business-${card.label}`} label={card.label} value={card.value} tone={card.tone} />
+                ))}
+              </div>
+            </div>
+          </SectionPanel>
+
+          <section className="grid gap-4 xl:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
+            <SectionPanel
+              title="Funil"
+              tone="sky"
+              tag={
+                <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-strong)]">
+                  {summary.selectedPeriod.label}
+                </span>
+              }
+            >
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <MetricCard label="Home" value={formatNumber(selectedTraffic?.funnel.homeSessions || 0)} tone="sky" />
+                <MetricCard label="/pedido" value={formatNumber(selectedTraffic?.funnel.orderSessions || 0)} tone="mint" />
+                <MetricCard label="Quote" value={formatNumber(selectedTraffic?.funnel.quoteSuccessSessions || 0)} tone="amber" />
+                <MetricCard label="Enviados" value={formatNumber(selectedTraffic?.funnel.submittedSessions || 0)} tone="rose" />
               </div>
             </SectionPanel>
 
-            <SectionPanel title="Mix" tone="mint">
+            <SectionPanel
+              title="Mix"
+              tone="mint"
+              tag={
+                <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-strong)]">
+                  {summary.selectedPeriod.label}
+                </span>
+              }
+            >
               <div className="grid gap-4 xl:grid-cols-2">
                 <div className="grid gap-2">
                   <p className="text-sm font-semibold text-[color:var(--ink-strong)]">Dispositivos</p>
@@ -758,22 +864,30 @@ export default function DashboardScreen() {
                 </div>
                 <div className="grid gap-2">
                   <p className="text-sm font-semibold text-[color:var(--ink-strong)]">Fontes</p>
-                  <DistributionList items={summary.traffic.topSources} valueKey="sessions" tone="sky" />
+                  <DistributionList items={selectedTraffic?.topSources || []} valueKey="sessions" tone="sky" />
                 </div>
                 <div className="grid gap-2">
                   <p className="text-sm font-semibold text-[color:var(--ink-strong)]">Status</p>
-                  <DistributionList items={summary.business.statusMix} tone="rose" />
+                  <DistributionList items={selectedBusiness?.statusMix || []} tone="rose" />
                 </div>
                 <div className="grid gap-2">
                   <p className="text-sm font-semibold text-[color:var(--ink-strong)]">Entrega / retirada</p>
-                  <DistributionList items={summary.business.fulfillmentMix} tone="amber" />
+                  <DistributionList items={selectedBusiness?.fulfillmentMix || []} tone="amber" />
                 </div>
               </div>
             </SectionPanel>
           </section>
 
           <section className="grid gap-4 xl:grid-cols-2">
-            <SectionPanel title="Tráfego diário" tone="amber">
+            <SectionPanel
+              title="Trafego diario"
+              tone="amber"
+              tag={
+                <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-strong)]">
+                  {summary.selectedPeriod.label}
+                </span>
+              }
+            >
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="grid gap-2">
                   <p className="text-sm font-semibold text-[color:var(--ink-strong)]">Sessões</p>
@@ -786,24 +900,32 @@ export default function DashboardScreen() {
               </div>
             </SectionPanel>
 
-            <SectionPanel title="Financeiro" tone="rose">
+            <SectionPanel
+              title="Financeiro"
+              tone="rose"
+              tag={
+                <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-strong)]">
+                  {summary.selectedPeriod.label}
+                </span>
+              }
+            >
               <div className="grid gap-4">
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  <MetricCard label="Produto líquido" value={formatCurrencyBR(summary.business.kpis.productNetRevenueInRange)} tone="ink" />
-                  <MetricCard label="Frete" value={formatCurrencyBR(summary.business.kpis.deliveryRevenueInRange)} tone="amber" />
+                  <MetricCard label="Produto liquido" value={formatCurrencyBR(selectedBusiness?.kpis.productNetRevenueInRange || 0)} tone="ink" />
+                  <MetricCard label="Frete" value={formatCurrencyBR(selectedBusiness?.kpis.deliveryRevenueInRange || 0)} tone="amber" />
                   <MetricCard
                     label="COGS"
-                    value={formatCurrencyBR(summary.business.kpis.estimatedCogsInRange)}
+                    value={formatCurrencyBR(selectedBusiness?.kpis.estimatedCogsInRange || 0)}
                     tone="rose"
-                    meta={`${formatNumber(summary.business.kpis.costedOrdersInRange)} pedidos auditados na base${
-                      summary.business.kpis.cogsWarningsInRange
-                        ? ` · ${formatNumber(summary.business.kpis.cogsWarningsInRange)} alerta(s)`
+                    meta={`${formatNumber(selectedBusiness?.kpis.costedOrdersInRange || 0)} pedidos auditados no periodo${
+                      (selectedBusiness?.kpis.cogsWarningsInRange || 0)
+                        ? ` · ${formatNumber(selectedBusiness?.kpis.cogsWarningsInRange || 0)} alerta(s)`
                         : ''
                     }`}
                   />
-                  <MetricCard label="Lucro bruto" value={formatCurrencyBR(summary.business.kpis.grossProfitInRange)} tone="mint" />
-                  <MetricCard label="Pós-frete" value={formatCurrencyBR(summary.business.kpis.contributionAfterFreightInRange)} tone="sky" />
-                  <MetricCard label="Descontos" value={formatCurrencyBR(summary.business.kpis.discountsInRange)} tone="ink" />
+                  <MetricCard label="Lucro bruto" value={formatCurrencyBR(selectedBusiness?.kpis.grossProfitInRange || 0)} tone="mint" />
+                  <MetricCard label="Pos-frete" value={formatCurrencyBR(selectedBusiness?.kpis.contributionAfterFreightInRange || 0)} tone="sky" />
+                  <MetricCard label="Descontos" value={formatCurrencyBR(selectedBusiness?.kpis.discountsInRange || 0)} tone="ink" />
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="grid gap-2">
@@ -1081,10 +1203,18 @@ export default function DashboardScreen() {
           </section>
 
           <section className="grid gap-4 xl:grid-cols-2">
-            <SectionPanel title="Vitals" tone="sky">
-              {summary.traffic.vitalBenchmarks.length ? (
+            <SectionPanel
+              title="Vitals"
+              tone="sky"
+              tag={
+                <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-strong)]">
+                  {summary.selectedPeriod.label}
+                </span>
+              }
+            >
+              {selectedTraffic?.vitalBenchmarks.length ? (
                 <div className="grid gap-4 sm:grid-cols-2">
-                  {summary.traffic.vitalBenchmarks.map((metric) => (
+                  {selectedTraffic.vitalBenchmarks.map((metric) => (
                     <MetricCard
                       key={metric.name}
                       label={metric.name}
@@ -1099,12 +1229,20 @@ export default function DashboardScreen() {
               )}
             </SectionPanel>
 
-            <SectionPanel title="Rotas / links" tone="ink">
+            <SectionPanel
+              title="Rotas / links"
+              tone="ink"
+              tag={
+                <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-strong)]">
+                  {summary.selectedPeriod.label}
+                </span>
+              }
+            >
               <div className="grid gap-4">
                 <div className="grid gap-2">
                   <p className="text-sm font-semibold text-[color:var(--ink-strong)]">Rotas</p>
                   <DistributionList
-                    items={summary.traffic.topPaths.map((entry) => ({
+                    items={(selectedTraffic?.topPaths || []).map((entry) => ({
                       label: `${entry.path} · ${entry.surface}`,
                       value: entry.views
                     }))}
@@ -1114,7 +1252,7 @@ export default function DashboardScreen() {
                 <div className="grid gap-2">
                   <p className="text-sm font-semibold text-[color:var(--ink-strong)]">Links</p>
                   <DistributionList
-                    items={summary.traffic.topLinks.map((entry) => ({
+                    items={(selectedTraffic?.topLinks || []).map((entry) => ({
                       label: entry.label || entry.href,
                       clicks: entry.clicks
                     }))}
@@ -1124,9 +1262,9 @@ export default function DashboardScreen() {
                 </div>
                 <div className="grid gap-2">
                   <p className="text-sm font-semibold text-[color:var(--ink-strong)]">Páginas lentas</p>
-                  {summary.traffic.slowPages.length ? (
+                  {selectedTraffic?.slowPages.length ? (
                     <div className="grid gap-3">
-                      {summary.traffic.slowPages.map((entry) => (
+                      {selectedTraffic.slowPages.map((entry) => (
                         <div
                           key={`${entry.path}-${entry.metricName}`}
                           className="rounded-[24px] border border-white/80 bg-white/82 p-4 shadow-[0_10px_24px_rgba(57,39,24,0.06)]"

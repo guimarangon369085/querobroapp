@@ -13,6 +13,15 @@ export async function GET(request: Request) {
     return buildErrorResponse(404, { message: 'Nao encontrado.' });
   }
 
+  const requestUrl = new URL(request.url);
+  const upstreamUrl = new URL(
+    `${resolveServerBridgeApiBaseUrl(request, process.env.ORDER_FORM_API_URL)}/dashboard/summary`
+  );
+  const days = requestUrl.searchParams.get('days');
+  if (days) {
+    upstreamUrl.searchParams.set('days', days);
+  }
+
   const bridgeToken =
     String(process.env.DASHBOARD_BRIDGE_TOKEN || '').trim() ||
     String(process.env.ORDER_FORM_BRIDGE_TOKEN || '').trim();
@@ -23,14 +32,11 @@ export async function GET(request: Request) {
   }
 
   try {
-    const response = await fetch(
-      `${resolveServerBridgeApiBaseUrl(request, process.env.ORDER_FORM_API_URL)}/dashboard/summary`,
-      {
-        method: 'GET',
-        headers,
-        cache: 'no-store'
-      }
-    );
+    const response = await fetch(upstreamUrl, {
+      method: 'GET',
+      headers,
+      cache: 'no-store'
+    });
 
     const raw = await response.text();
     const contentType = response.headers.get('content-type') || 'application/json';

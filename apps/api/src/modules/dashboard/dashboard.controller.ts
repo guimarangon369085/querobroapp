@@ -1,4 +1,4 @@
-import { Controller, Get, Headers, Inject, UnauthorizedException } from '@nestjs/common';
+import { Controller, Get, Headers, Inject, Query, UnauthorizedException } from '@nestjs/common';
 import { Public } from '../../security/public.decorator.js';
 import { getSecurityRuntimeConfig } from '../../security/security-config.js';
 import { DashboardService } from './dashboard.service.js';
@@ -36,9 +36,10 @@ export class DashboardController {
   @Get('summary')
   summary(
     @Headers('authorization') authorization?: string,
-    @Headers('x-dashboard-token') dashboardToken?: string
+    @Headers('x-dashboard-token') dashboardToken?: string,
+    @Query('days') days?: string
   ) {
     this.assertDashboardAccess(authorization, dashboardToken);
-    return this.service.getSummary();
+    return this.service.getSummary({ days });
   }
 }
