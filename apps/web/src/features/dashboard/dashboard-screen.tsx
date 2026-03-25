@@ -947,11 +947,7 @@ export default function DashboardScreen() {
               <button
                 key={String(option.value)}
                 type="button"
-                className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${
-                  active
-                    ? 'bg-[color:var(--brand-600)] text-white shadow-[0_10px_18px_rgba(176,96,45,0.24)]'
-                    : 'text-[color:var(--ink-strong)] hover:bg-white'
-                }`}
+                className={`app-button min-h-10 px-4 py-2 text-[0.78rem] ${active ? 'app-button-primary' : 'app-button-ghost'}`}
                 onClick={() => setSelectedPeriod(option.value)}
               >
                 {option.label}

@@ -159,6 +159,9 @@ Ultima atualizacao: 2026-03-23
 
 - Data: 2026-03-25
 - Ciclo executado: `pnpm --filter @querobroapp/web build`
+- Resultado: a régua de período do `/dashboard` passou a usar o mesmo padrão visual de `app-button-primary` e `app-button-ghost` do restante do app, corrigindo contraste e legibilidade dos botões.
+- Data: 2026-03-25
+- Ciclo executado: `pnpm --filter @querobroapp/web build`
 - Resultado: o `/dashboard` passou a ignorar falhas transitórias de refresh quando já existem dados carregados, evitando o banner bloqueante `Service Unavailable` sobre métricas já resolvidas ao trocar o período.
 - Data: 2026-03-25
 - Ciclo executado: `pnpm --filter @querobroapp/web build`, `pnpm --filter @querobroapp/web typecheck`
