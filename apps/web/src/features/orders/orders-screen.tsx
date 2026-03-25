@@ -2229,6 +2229,7 @@ function OrdersPageContent() {
     const byCustomer = new Map<
       string,
       {
+        customerKey: string;
         customerLabel: string;
         flavorCounts: Map<number, { label: string; quantity: number }>;
       }
@@ -2242,6 +2243,7 @@ function OrdersPageContent() {
         ? `customer:${entry.order.customerId}`
         : `name:${normalizeTextForSort(customerName) || 'sem-cliente'}`;
       const current = byCustomer.get(customerKey) || {
+        customerKey,
         customerLabel: compactCustomerLabelForCalendar(customerName),
         flavorCounts: new Map<number, { label: string; quantity: number }>()
       };
@@ -2263,12 +2265,13 @@ function OrdersPageContent() {
     }
 
     return Array.from(byCustomer.values()).map((entry) => ({
+      customerKey: entry.customerKey,
       customerLabel: entry.customerLabel,
-      flavorSummary:
+      flavorLines:
         Array.from(entry.flavorCounts.entries())
           .map(([productId, flavor]) => ({
             productId,
-            label: flavor.label,
+            label: flavor.label.replace(/\s+\([^)]+\)\s*$/u, '').trim(),
             quantity: flavor.quantity,
             product: productMap.get(productId) || null
           }))
@@ -2281,8 +2284,7 @@ function OrdersPageContent() {
             }
             return left.label.localeCompare(right.label, 'pt-BR');
           })
-          .map((flavor) => `${flavor.label} - ${flavor.quantity.toLocaleString('pt-BR')}`)
-          .join(' • ') || 'Sem sabores mapeados'
+          .map((flavor) => `${flavor.quantity.toLocaleString('pt-BR')} ${flavor.label}`)
     }));
   }, [productMap, resolveCustomerName, selectedDateEntries]);
 
@@ -4182,11 +4184,19 @@ function OrdersPageContent() {
                   <div className="mt-3 grid gap-2">
                     {selectedDateProductionSummary.map((entry) => (
                       <div
-                        key={`${entry.customerLabel}-${entry.flavorSummary}`}
+                        key={entry.customerKey}
                         className="rounded-[18px] border border-white/80 bg-white/82 px-3 py-2 shadow-[0_8px_20px_rgba(57,39,24,0.04)]"
                       >
                         <p className="text-sm font-semibold text-[color:var(--ink-strong)]">{entry.customerLabel}</p>
-                        <p className="text-xs leading-5 text-neutral-600">{entry.flavorSummary}</p>
+                        {entry.flavorLines.length > 0 ? (
+                          <div className="mt-1 grid gap-0.5 text-xs leading-5 text-neutral-600">
+                            {entry.flavorLines.map((line) => (
+                              <p key={`${entry.customerKey}-${line}`}>{line}</p>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs leading-5 text-neutral-600">Sem sabores mapeados</p>
+                        )}
                       </div>
                     ))}
                   </div>

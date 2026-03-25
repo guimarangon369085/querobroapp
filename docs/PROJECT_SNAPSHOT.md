@@ -158,6 +158,9 @@ Ultima atualizacao: 2026-03-23
 ## Validacao operacional mais recente
 
 - Data: 2026-03-25
+- Ciclo executado: `pnpm --filter @querobroapp/web build`
+- Resultado: o `Resumo do dia` em `/pedidos` passou a listar cada sabor em uma linha, no formato `7 Tradicional`, removendo o codigo entre parenteses e melhorando a leitura sequencial para a escolha das fornadas.
+- Data: 2026-03-25
 - Ciclo executado: `pnpm --filter @querobroapp/api build`, `node --test tests/order-created-alerts.test.mjs`
 - Resultado: os alertas de `order.created` enviados via `ntfy` passaram a incluir um resumo compacto dos sabores do pedido no formato `Sabores: Tradicional - 7 • Goiabada - 7`, e o webhook operacional agora carrega o mesmo resumo estruturado.
 - Data: 2026-03-25
