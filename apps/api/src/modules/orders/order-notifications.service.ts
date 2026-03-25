@@ -13,6 +13,11 @@ type OrderAlertOrder = {
   paymentStatus?: string | null;
   scheduledAt?: Date | string | null;
   notes?: string | null;
+  items?: Array<{
+    productId: number;
+    quantity: number;
+    name?: string | null;
+  }>;
   customer: {
     id?: number | null;
     publicNumber?: number | null;
@@ -116,13 +121,45 @@ export class OrderNotificationsService {
     return `Frete: ${this.formatMoney(order.deliveryFee)}`;
   }
 
+  private compactProductName(value?: string | null) {
+    const normalized = String(value || '')
+      .replace(/^Broa\s+/i, '')
+      .replace(/\s+\([^)]+\)\s*$/u, '')
+      .trim();
+    return normalized || 'Produto';
+  }
+
+  private buildFlavorSummary(order: OrderAlertOrder) {
+    const items = Array.isArray(order.items) ? order.items : [];
+    if (items.length === 0) return '';
+
+    const byProduct = new Map<string, { label: string; quantity: number }>();
+    for (const item of items) {
+      const quantity = Math.max(Math.floor(item.quantity || 0), 0);
+      if (quantity <= 0) continue;
+      const key = String(item.productId || item.name || '').trim() || `${byProduct.size + 1}`;
+      const current = byProduct.get(key) || {
+        label: this.compactProductName(item.name),
+        quantity: 0
+      };
+      current.quantity += quantity;
+      byProduct.set(key, current);
+    }
+
+    return Array.from(byProduct.values())
+      .map((entry) => `${entry.label} - ${entry.quantity.toLocaleString('pt-BR')}`)
+      .join(' • ');
+  }
+
   private buildAlertBody(input: OrderAlertInput, operationsUrl: string) {
     const { order, intake } = input;
     const orderNumber = resolveDisplayNumber(order) ?? order.id;
+    const flavorSummary = this.buildFlavorSummary(order);
     const lines = [
       `Novo pedido #${orderNumber}`,
       `${this.formatChannel(intake.channel)} | ${this.formatMode(order.fulfillmentMode)}`,
       `Cliente: ${order.customer.name.trim()}`,
+      flavorSummary ? `Sabores: ${flavorSummary}` : null,
       order.customer.phone ? `Telefone: ${order.customer.phone}` : null,
       `Agendamento: ${this.formatScheduledAt(order.scheduledAt)}`,
       order.fulfillmentMode === 'DELIVERY'
@@ -142,6 +179,7 @@ export class OrderNotificationsService {
 
   private buildWebhookPayload(input: OrderAlertInput, operationsUrl: string, message: string) {
     const { order, intake } = input;
+    const flavorSummary = this.buildFlavorSummary(order);
     return {
       event: 'order.created',
       createdAt: new Date().toISOString(),
@@ -162,7 +200,13 @@ export class OrderNotificationsService {
         deliveryFee: Number(order.deliveryFee || 0),
         deliveryProvider: String(order.deliveryProvider || 'NONE'),
         total: Number(order.total || 0),
-        paymentStatus: String(order.paymentStatus || 'PENDENTE')
+        paymentStatus: String(order.paymentStatus || 'PENDENTE'),
+        flavorSummary: flavorSummary || null,
+        items: (order.items || []).map((item) => ({
+          productId: item.productId,
+          name: item.name || null,
+          quantity: Math.max(Math.floor(item.quantity || 0), 0)
+        }))
       },
       customer: {
         id: Number(order.customer.id || intake.customerId || 0) || null,

@@ -2232,6 +2232,28 @@ export class OrdersService {
       if (!freshOrder) throw new NotFoundException('Pedido nao encontrado');
 
       const order = this.withFinancial(freshOrder);
+      const productNameById =
+        freshOrder.items.length > 0
+          ? new Map(
+              (
+                await tx.product.findMany({
+                  where: {
+                    id: {
+                      in: Array.from(new Set(freshOrder.items.map((item) => item.productId)))
+                    }
+                  },
+                  select: { id: true, name: true }
+                })
+              ).map((product) => [product.id, product.name] as const)
+            )
+          : new Map<number, string>();
+      const orderAlertPayload = {
+        ...order,
+        items: order.items.map((item) => ({
+          ...item,
+          name: productNameById.get(item.productId) || null
+        }))
+      };
       const latestPayment =
         paymentRecord
           ? freshOrder.payments.find((entry) => entry.id === paymentRecord?.id) ?? paymentRecord
@@ -2246,7 +2268,10 @@ export class OrdersService {
       };
 
       if (data.intent !== 'DRAFT') {
-        createdFreshResult = result;
+        createdFreshResult = {
+          ...result,
+          order: orderAlertPayload
+        };
       }
 
       if (idemKey) {

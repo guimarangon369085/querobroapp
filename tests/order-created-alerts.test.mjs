@@ -210,6 +210,8 @@ test('order created alert: publica no ntfy uma vez so mesmo com retry idempotent
   assert.equal(hits[0].headers.click, 'https://querobroa.com.br/pedidos');
   assert.match(hits[0].body, /Novo pedido #/);
   assert.match(hits[0].body, /Cliente:/);
+  assert.match(hits[0].body, /Sabores:/);
+  assert.match(hits[0].body, /Alerta Pedido .* - 1/);
 });
 
 test('order created alert: falha no ntfy nao bloqueia o pedido', async (t) => {
