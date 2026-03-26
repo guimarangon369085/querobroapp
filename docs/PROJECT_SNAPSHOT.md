@@ -49,10 +49,10 @@ Ultima atualizacao: 2026-03-25
 - O bloco `Entrega ou retirada` de `/pedido` agora responde ao tamanho real do painel via container query, sem voltar a colapsar `Endereco/Data/Horario` em Chrome/desktop ou em larguras intermediarias.
 - O popup de detalhe de pedido em `/pedidos` agora usa os proprios icones de etapa como botoes diretos de status, sem setas laterais; ao selecionar uma etapa, o backend percorre o caminho intermediario automaticamente para preservar os mesmos recalculos e gatilhos operacionais.
 - O popup de detalhe de pedido em `/pedidos` removeu o bloco completo de PIX e reorganizou o resumo logo abaixo de `Caixas`, exibindo `Produtos`, `Frete` e `Total` na ordem operacional.
-- O backend de estoque agora bloqueia edicao de itens e exclusao de pedido depois que o pedido ja gerou movimentacoes fisicas (`MASS_PREP`, `PRODUCTION_BATCH` ou equivalentes), evitando dessintonia entre composicao do pedido e baixa real.
+- O backend de estoque agora bloqueia edicao de itens e exclusao de pedido depois que o pedido ja gerou movimentacoes fisicas (`PRODUCTION_BATCH` ou equivalentes), evitando dessintonia entre composicao do pedido e baixa real.
 - O calculo de `D+1`/`production/requirements` agora desconta o que ja foi produzido na runtime de fornadas para o mesmo pedido, em vez de continuar projetando demanda cheia apos a baixa real do batch.
-- O ajuste manual de saldo em `Estoque` e no popup de `FAZER MASSA` agora ancora o saldo contado com `ADJUST` absoluto por familia, em vez de simular delta relativo sobre historico antigo.
-- O preparo manual de `MASSA PRONTA` agora usa idempotencia por `requestKey` no backend e trava de duplo disparo no frontend, evitando duplicar a primeira baixa de insumos por tap/click repetido.
+- O ajuste manual de saldo em `Estoque` agora ancora o saldo contado com `ADJUST` absoluto por familia, em vez de simular delta relativo sobre historico antigo.
+- `/pedidos` deixou de renderizar eventos auxiliares de `FAZER MASSA`; a agenda agora mostra apenas pedidos reais, sem popup/manual extra para preparo, preservando apenas as baixas de ingredientes que o proprio pedido gera.
 - O shell operacional mobile agora bloqueia `touch callout`/menu de contexto irrelevante nas superficies interativas do app, reduzindo conflito entre long-press nativo do iPhone e gestos como arrastar pedidos no calendario, sem desabilitar selecao em campos de texto.
 - `/pedido` e `/pedidos` agora redirecionam o pos-criacao para `/pedidofinalizado`, com card final isolado, retorno contextual (`Fazer novo pedido` ou `Voltar para pedidos`) e preservacao apenas dos dados cadastrais do cliente no caso publico.
 - `/pedidofinalizado` agora roda sem shell operacional, sem menu lateral e sem topbar, isolado como rota publica de conclusao.
@@ -194,7 +194,7 @@ Ultima atualizacao: 2026-03-25
 - Resultado: frete fixo por raio entrou em producao sem rastros ativos de Uber/Loggi, `/pedidos` manteve liberdade de edicao interna e o dominio publico respondeu `200` em `/`, `/pedido` e `/pedidos`, com quote publico validado em `R$ 12` e cenario manual acima de `5 km` retornando `R$ 18`.
 - Data: 2026-03-20
 - Ciclo executado: `pnpm --filter @querobroapp/api typecheck`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/api lint`, `pnpm --filter @querobroapp/web lint`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web build`, `node --test --test-concurrency=1 tests/inventory-overview-effective-balance.test.mjs tests/mass-prep-batch-priority.test.mjs`
-- Resultado: estoque manual passou a usar `ADJUST` absoluto, o popup de `FAZER MASSA` ficou blindado contra duplo disparo, e foi aplicada no ledger local a correcao calculada para neutralizar a duplicidade historica da conversao manual de 13/03/2026 19:42:27.
+- Resultado: estoque manual passou a usar `ADJUST` absoluto, e foi aplicada no ledger local a correcao calculada para neutralizar a duplicidade historica da conversao manual de 13/03/2026 19:42:27; o popup de `FAZER MASSA` foi posteriormente removido da operacao.
 - Data: 2026-03-20
 - Ciclo executado: `pnpm --filter @querobroapp/web lint`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`
 - Data: 2026-03-20

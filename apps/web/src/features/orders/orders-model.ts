@@ -23,19 +23,6 @@ export type OrderView = Omit<Order, 'deliveryProvider' | 'deliveryFeeSource'> & 
   paymentStatus?: 'PENDENTE' | 'PARCIAL' | 'PAGO';
 };
 
-export type MassPrepEvent = {
-  version: 1;
-  id: string;
-  eventName: 'FAZER MASSA';
-  orderId: number;
-  startsAt: string;
-  endsAt: string;
-  durationMinutes: number;
-  massRecipes: number;
-  status: 'INGREDIENTES' | 'PREPARO' | 'NO_FORNO' | 'PRONTA';
-  createdAt: string;
-};
-
 export type DeliveryReadiness = {
   provider: 'NONE' | 'LOCAL';
   mode: 'PROVIDER';

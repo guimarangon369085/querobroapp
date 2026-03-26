@@ -117,11 +117,6 @@ export class InventoryController {
     return this.service.createMovement(body);
   }
 
-  @Post('inventory-mass-ready/prepare')
-  prepareMassReady(@Body() body: unknown) {
-    return this.service.prepareMassReady(body);
-  }
-
   @Delete('inventory-movements/:id')
   async removeMovement(@Param('id') id: string) {
     await this.service.removeMovement(parseWithSchema(idSchema, id));

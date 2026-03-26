@@ -52,11 +52,6 @@ export class OrdersController {
     return this.service.list();
   }
 
-  @Get('mass-prep-events')
-  listMassPrepEvents() {
-    return this.service.listMassPrepEvents();
-  }
-
   @Post()
   create(@Body() body: unknown) {
     return this.service.create(body);
@@ -130,17 +125,6 @@ export class OrdersController {
   @Put(':id')
   update(@Param('id') id: string, @Body() body: unknown) {
     return this.service.update(parseWithSchema(idSchema, id), body);
-  }
-
-  @Delete(':id/mass-prep-event')
-  async removeMassPrepEvent(@Param('id') id: string) {
-    await this.service.removeMassPrepEvent(parseWithSchema(idSchema, id));
-    return { ok: true };
-  }
-
-  @Patch(':id/mass-prep-event/status')
-  updateMassPrepEventStatus(@Param('id') id: string, @Body() body: unknown) {
-    return this.service.updateMassPrepEventStatus(parseWithSchema(idSchema, id), body);
   }
 
   @Delete(':id')

@@ -10,7 +10,6 @@ import type {
   DeliveryReadiness,
   DeliveryQuote,
   DeliveryTracking,
-  MassPrepEvent,
   OrderView,
   ProductionBoard
 } from './orders-model';
@@ -19,7 +18,6 @@ export type OrdersWorkspaceData = {
   orders: OrderView[];
   customers: Customer[];
   products: Product[];
-  massPrepEvents: MassPrepEvent[];
 };
 
 export type OrderIntakeResult = {
@@ -28,14 +26,13 @@ export type OrderIntakeResult = {
 };
 
 export async function fetchOrdersWorkspace(): Promise<OrdersWorkspaceData> {
-  const [orders, customers, products, massPrepEvents] = await Promise.all([
+  const [orders, customers, products] = await Promise.all([
     apiFetch<OrderView[]>('/orders'),
     apiFetch<Customer[]>('/customers'),
-    apiFetch<Product[]>('/inventory-products'),
-    apiFetch<MassPrepEvent[]>('/orders/mass-prep-events')
+    apiFetch<Product[]>('/inventory-products')
   ]);
 
-  return { orders, customers, products, massPrepEvents };
+  return { orders, customers, products };
 }
 
 export function submitOrderIntake(payload: OrderIntake) {

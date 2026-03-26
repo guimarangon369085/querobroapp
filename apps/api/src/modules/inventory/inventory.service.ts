@@ -6,14 +6,10 @@ import { parseLocaleNumber } from '../../common/normalize.js';
 import { parseWithSchema } from '../../common/validation.js';
 import { z } from 'zod';
 import {
-  addInventoryLookupItem,
-  buildInventoryItemLookup,
-  findInventoryByAliases,
   MASS_READY_BROAS_PER_RECIPE,
   MASS_READY_ITEM_NAME,
   massPrepRecipeIngredients,
   pickInventoryFamilyRepresentative,
-  resolveExecutableMassPrepRecipes,
   resolveInventoryDefinition,
   resolveInventoryFamilyItemIds,
   resolveInventoryFamilyKey
@@ -74,17 +70,6 @@ const inventoryMovementCreateSchema = z.object({
   unitCost: optionalNullableNonNegativeNumberInputSchema
 });
 
-const MASS_PREP_SOURCE = 'MASS_PREP';
-const MASS_PREP_SOURCE_LABEL = 'MANUAL_POPUP';
-const MANUAL_MASS_PREP_IDEMPOTENCY_SCOPE = 'INVENTORY_MANUAL_MASS_PREP';
-
-const prepareMassReadySchema = z.object({
-  recipes: z.coerce.number().int().positive().max(2),
-  orderId: z.coerce.number().int().positive().optional().nullable(),
-  reason: z.string().trim().optional().nullable(),
-  requestKey: z.string().trim().min(1).max(120).optional().nullable()
-});
-
 const setEffectiveBalanceSchema = z.object({
   quantity: nonNegativeNumberInputSchema,
   reason: z.string().trim().optional().nullable()
@@ -117,19 +102,6 @@ type InventoryPriceSyncSourceResult = {
   status: 'UPDATED' | 'FALLBACK' | 'SKIPPED';
   message: string;
   updatedItems: InventoryPriceSyncItemResult[];
-};
-
-type PrepareMassReadyResponse = {
-  ok: true;
-  recipesPrepared: number;
-  massReadyItemId: number;
-  consumedIngredients: Array<{
-    itemId: number;
-    name: string;
-    requiredQty: number;
-    availableQty: number;
-    unit: string;
-  }>;
 };
 
 type InventoryPriceEntryRecord = {
@@ -204,24 +176,6 @@ export class InventoryService {
   private roundMoney(value: number) {
     if (!Number.isFinite(value)) return 0;
     return Math.round((value + Number.EPSILON) * 100) / 100;
-  }
-
-  private parsePrepareMassReadyResponse(responseJson: string): PrepareMassReadyResponse {
-    try {
-      const parsed = JSON.parse(responseJson) as PrepareMassReadyResponse;
-      if (
-        parsed?.ok === true &&
-        typeof parsed.massReadyItemId === 'number' &&
-        typeof parsed.recipesPrepared === 'number' &&
-        Array.isArray(parsed.consumedIngredients)
-      ) {
-        return parsed;
-      }
-    } catch {
-      // continua abaixo
-    }
-
-    throw new ConflictException('Registro de preparo manual de MASSA PRONTA corrompido.');
   }
 
   private normalizeInventoryItemName(name: string) {
@@ -1109,197 +1063,6 @@ export class InventoryService {
         appliedType: 'ADJUST',
         appliedQuantity: desiredEffectiveBalance
       };
-    });
-  }
-
-  async prepareMassReady(payload: unknown) {
-    const data = parseWithSchema(prepareMassReadySchema, payload ?? {});
-    const requestKey = data.requestKey?.trim() || null;
-    const requestHash = JSON.stringify({
-      recipes: data.recipes,
-      orderId: data.orderId ?? null,
-      reason: data.reason?.trim() || null
-    });
-
-    if (requestKey) {
-      const existing = await this.prisma.idempotencyRecord.findUnique({
-        where: {
-          scope_idemKey: {
-            scope: MANUAL_MASS_PREP_IDEMPOTENCY_SCOPE,
-            idemKey: requestKey
-          }
-        }
-      });
-
-      if (existing) {
-        if (existing.requestHash !== requestHash) {
-          throw new BadRequestException(
-            'Chave de preparo manual ja foi usada com outro payload.'
-          );
-        }
-        return this.parsePrepareMassReadyResponse(existing.responseJson);
-      }
-    }
-
-    return this.prisma.$transaction(async (tx) => {
-      const inventoryItems = await tx.inventoryItem.findMany({ orderBy: { id: 'asc' } });
-      const inventoryByLookup = buildInventoryItemLookup(inventoryItems);
-
-      let massReadyItem = findInventoryByAliases(inventoryByLookup, {
-        canonicalName: MASS_READY_ITEM_NAME,
-        aliases: [MASS_READY_ITEM_NAME]
-      });
-      if (!massReadyItem) {
-        massReadyItem = await tx.inventoryItem.create({
-          data: {
-            name: MASS_READY_ITEM_NAME,
-            category: 'INGREDIENTE',
-            unit: 'receita',
-            purchasePackSize: 1,
-            purchasePackCost: 0
-          }
-        });
-        addInventoryLookupItem(inventoryByLookup, massReadyItem);
-      }
-
-      const ingredientPlan: Array<{
-        item: InventoryItemLookupEntry;
-        qtyPerRecipe: number;
-        availableQty: number;
-        canonicalName: string;
-        unit: string;
-      }> = [];
-      let possibleRecipesFromIngredients = Number.POSITIVE_INFINITY;
-
-      for (const ingredient of massPrepRecipeIngredients) {
-        let item = findInventoryByAliases(inventoryByLookup, ingredient);
-        if (!item) {
-          item = await tx.inventoryItem.create({
-            data: {
-              name: ingredient.canonicalName,
-              category: 'INGREDIENTE',
-              unit: ingredient.unit,
-              purchasePackSize: ingredient.purchasePackSize,
-              purchasePackCost: ingredient.purchasePackCost
-            }
-          });
-          addInventoryLookupItem(inventoryByLookup, item);
-        }
-
-        const movements = await tx.inventoryMovement.findMany({
-          where: {
-            itemId: {
-              in: resolveInventoryFamilyItemIds(inventoryItems, ingredient)
-            }
-          },
-          select: { itemId: true, type: true, quantity: true },
-          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
-        });
-        const availableQty = this.toQty(
-          Array.from(this.buildBalanceByItemId(movements).values()).reduce(
-            (sum, value) => this.toQty(sum + value),
-            0
-          )
-        );
-        const possibleForIngredient = ingredient.qtyPerRecipe
-          ? Math.floor(availableQty / ingredient.qtyPerRecipe)
-          : 0;
-        possibleRecipesFromIngredients = Math.min(possibleRecipesFromIngredients, possibleForIngredient);
-
-        ingredientPlan.push({
-          item,
-          qtyPerRecipe: ingredient.qtyPerRecipe,
-          availableQty: this.toQty(availableQty),
-          canonicalName: ingredient.canonicalName,
-          unit: ingredient.unit
-        });
-      }
-
-      const recipesPrepared = resolveExecutableMassPrepRecipes(
-        data.recipes,
-        Number.isFinite(possibleRecipesFromIngredients) ? possibleRecipesFromIngredients : 0
-      );
-      if (recipesPrepared <= 0) {
-        const missingIngredients = ingredientPlan.map(
-          (ingredient) =>
-            `${ingredient.canonicalName}: disponivel ${this.toQty(ingredient.availableQty)} ${ingredient.unit}; necessario ${ingredient.qtyPerRecipe} ${ingredient.unit}.`
-        );
-        throw new BadRequestException(
-          `Estoque insuficiente para preparar MASSA PRONTA. ${missingIngredients.join(' | ')}`
-        );
-      }
-
-      const consumptionReason =
-        data.reason?.trim() ||
-        `Consumo de insumos para MASSA PRONTA (${recipesPrepared} receita(s))`;
-      const replenishmentReason =
-        data.reason?.trim() || `Reposicao manual de MASSA PRONTA (${recipesPrepared} receita(s))`;
-
-      for (const ingredient of ingredientPlan) {
-        await tx.inventoryMovement.create({
-          data: {
-            itemId: ingredient.item.id,
-            orderId: data.orderId ?? null,
-            type: 'OUT',
-            quantity: this.toQty(ingredient.qtyPerRecipe * recipesPrepared),
-            reason: consumptionReason,
-            source: MASS_PREP_SOURCE,
-            sourceLabel: MASS_PREP_SOURCE_LABEL
-          }
-        });
-      }
-
-      await tx.inventoryMovement.create({
-        data: {
-          itemId: massReadyItem.id,
-          orderId: data.orderId ?? null,
-          type: 'IN',
-          quantity: recipesPrepared,
-          reason: replenishmentReason,
-          source: MASS_PREP_SOURCE,
-          sourceLabel: MASS_PREP_SOURCE_LABEL
-        }
-      });
-
-      const response: PrepareMassReadyResponse = {
-        ok: true,
-        recipesPrepared,
-        massReadyItemId: massReadyItem.id,
-        consumedIngredients: ingredientPlan.map((ingredient) => ({
-          itemId: ingredient.item.id,
-          name: ingredient.item.name,
-          requiredQty: this.toQty(ingredient.qtyPerRecipe * recipesPrepared),
-          availableQty: ingredient.availableQty,
-          unit: ingredient.unit
-        }))
-      };
-
-      if (requestKey) {
-        const expiresAt = new Date();
-        expiresAt.setDate(expiresAt.getDate() + 7);
-        await tx.idempotencyRecord.upsert({
-          where: {
-            scope_idemKey: {
-              scope: MANUAL_MASS_PREP_IDEMPOTENCY_SCOPE,
-              idemKey: requestKey
-            }
-          },
-          update: {
-            requestHash,
-            responseJson: JSON.stringify(response),
-            expiresAt
-          },
-          create: {
-            scope: MANUAL_MASS_PREP_IDEMPOTENCY_SCOPE,
-            idemKey: requestKey,
-            requestHash,
-            responseJson: JSON.stringify(response),
-            expiresAt
-          }
-        });
-      }
-
-      return response;
     });
   }
 

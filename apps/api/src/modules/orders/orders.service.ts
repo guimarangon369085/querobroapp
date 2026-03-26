@@ -1,5 +1,4 @@
 import { BadRequestException, Injectable, NotFoundException, Inject } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
 import type { Customer as PrismaCustomer, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
 import {
@@ -25,16 +24,12 @@ import {
   computeBroaPaperBagCount,
   computeBroaPackagingPlan,
   findInventoryByAliases,
-  MASS_PREP_DEFAULT_BATCH_RECIPES,
   MASS_READY_BROAS_PER_RECIPE,
   MASS_READY_ITEM_NAME,
-  massPrepRecipeIngredients,
   ORDER_BOX_UNITS,
   orderFillingIngredientsByFlavorCode,
-  resolveExecutableMassPrepRecipes,
   resolveInventoryDefinition,
-  resolveInventoryFamilyItemIds,
-  resolvePlannedMassPrepRecipes
+  resolveInventoryFamilyItemIds
 } from '../inventory/inventory-formulas.js';
 import { normalizePhone, normalizeText, normalizeTitle } from '../../common/normalize.js';
 import {
@@ -125,10 +120,7 @@ function resolveOrderStatusPath(currentStatus: string, targetStatus: OrderStatus
   return path;
 }
 
-const MASS_PREP_EVENT_SCOPE = 'MASS_PREP_EVENT';
 const ORDER_INTAKE_SCOPE = 'ORDER_INTAKE';
-const MASS_PREP_EVENT_NAME = 'FAZER MASSA';
-const MASS_PREP_EVENT_DURATION_MINUTES = 60;
 const ORDER_BOX_PRICE_CUSTOM = 52;
 const ORDER_BOX_PRICE_TRADITIONAL = 40;
 const ORDER_BOX_PRICE_MIXED_GOIABADA = 45;
@@ -139,8 +131,7 @@ const ORDER_BOX_PRICE_TRADITIONAL_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRIC
 const ORDER_BOX_PRICE_MIXED_GOIABADA_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRICE_MIXED_GOIABADA);
 const ORDER_BOX_PRICE_MIXED_OTHER_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRICE_MIXED_OTHER);
 const ORDER_BOX_PRICE_GOIABADA_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRICE_GOIABADA);
-const MASS_PREP_SOURCE = 'MASS_PREP';
-const MASS_PREP_SOURCE_LABEL_PREFIX = 'ORDER_';
+const ORDER_FORMULA_SOURCE_LABEL_PREFIX = 'ORDER_';
 const ORDER_FORMULA_SOURCE_MASS_READY = 'MASS_READY';
 const ORDER_FORMULA_SOURCE_FILLING = 'ORDER_FILLING';
 const ORDER_FORMULA_SOURCE_PACKAGING = 'ORDER_PACKAGING';
@@ -149,31 +140,6 @@ const ORDER_FORMULA_SOURCES = [
   ORDER_FORMULA_SOURCE_FILLING,
   ORDER_FORMULA_SOURCE_PACKAGING
 ] as const;
-
-const massPrepEventStatusSchema = z.enum(['INGREDIENTES', 'PREPARO', 'NO_FORNO', 'PRONTA']);
-const massPrepEventStatusTransitions: Record<z.infer<typeof massPrepEventStatusSchema>, z.infer<typeof massPrepEventStatusSchema>[]> = {
-  INGREDIENTES: ['PREPARO'],
-  PREPARO: ['NO_FORNO'],
-  NO_FORNO: ['PRONTA'],
-  PRONTA: []
-};
-
-const massPrepEventSchema = z.object({
-  version: z.literal(1),
-  id: z.string().min(1),
-  eventName: z.literal(MASS_PREP_EVENT_NAME),
-  orderId: z.number().int().positive(),
-  startsAt: z.string().datetime(),
-  endsAt: z.string().datetime(),
-  durationMinutes: z.number().int().positive(),
-  massRecipes: z.number().int().positive(),
-  status: massPrepEventStatusSchema.default('INGREDIENTES'),
-  createdAt: z.string().datetime()
-});
-
-const massPrepEventStatusPayloadSchema = z.object({
-  status: massPrepEventStatusSchema
-});
 
 type OrderWithRelations = Prisma.OrderGetPayload<{
   include: { items: true; customer: true; payments: true };
@@ -185,8 +151,6 @@ type OrderIntakeMeta = z.infer<typeof OrderIntakeMetaSchema>;
 type PixCharge = z.infer<typeof PixChargeSchema>;
 type ExternalOrderSubmissionPayload = z.infer<typeof ExternalOrderSubmissionSchema>;
 type ExternalOrderSubmissionPreview = z.infer<typeof ExternalOrderSubmissionPreviewSchema>;
-
-type MassPrepEvent = z.infer<typeof massPrepEventSchema>;
 type OrderFlavorCode = 'T' | 'G' | 'D' | 'Q' | 'R';
 type FillingFlavorCode = Exclude<OrderFlavorCode, 'T'>;
 type OrderPricingFlavorKind = 'TRADITIONAL' | 'GOIABADA' | 'PREMIUM';
@@ -239,10 +203,6 @@ export class OrdersService {
     return Math.round((value + Number.EPSILON) * 10000) / 10000;
   }
 
-  private massPrepEventIdemKey(orderId: number) {
-    return `ORDER_${orderId}`;
-  }
-
   private inventoryBalanceFromMovements(
     movements: Array<{
       type: string;
@@ -260,10 +220,6 @@ export class OrdersService {
       }
     }
     return balance;
-  }
-
-  private massPrepEventDate(order: Pick<OrderWithRelations, 'scheduledAt' | 'createdAt'>) {
-    return order.scheduledAt ? new Date(order.scheduledAt) : new Date(order.createdAt);
   }
 
   private formatDate(value: Date) {
@@ -294,43 +250,8 @@ export class OrdersService {
     };
   }
 
-  private async saveMassPrepEvent(tx: TransactionClient, event: MassPrepEvent) {
-    const expiresAt = new Date();
-    expiresAt.setFullYear(expiresAt.getFullYear() + 10);
-    const idemKey = this.massPrepEventIdemKey(event.orderId);
-
-    await tx.idempotencyRecord.upsert({
-      where: {
-        scope_idemKey: {
-          scope: MASS_PREP_EVENT_SCOPE,
-          idemKey
-        }
-      },
-      update: {
-        requestHash: event.id,
-        responseJson: JSON.stringify(event),
-        expiresAt
-      },
-      create: {
-        scope: MASS_PREP_EVENT_SCOPE,
-        idemKey,
-        requestHash: event.id,
-        responseJson: JSON.stringify(event),
-        expiresAt
-      }
-    });
-  }
-
-  private parseMassPrepEvent(raw: string): MassPrepEvent | null {
-    try {
-      return massPrepEventSchema.parse(JSON.parse(raw));
-    } catch {
-      return null;
-    }
-  }
-
   private orderFormulaSourceLabel(orderId: number) {
-    return `${MASS_PREP_SOURCE_LABEL_PREFIX}${orderId}`;
+    return `${ORDER_FORMULA_SOURCE_LABEL_PREFIX}${orderId}`;
   }
 
   private resolveOrderFlavorCodeFromProductName(value?: string | null): OrderFlavorCode | null {
@@ -575,43 +496,6 @@ export class OrdersService {
     );
   }
 
-  private async resolveMassPrepRecipesPossibleFromIngredients(tx: TransactionClient) {
-    const inventoryItems = await tx.inventoryItem.findMany({ orderBy: { id: 'asc' } });
-    let possibleRecipes = Number.POSITIVE_INFINITY;
-
-    for (const ingredient of massPrepRecipeIngredients) {
-      const availableQty = this.toQty(
-        await this.loadInventoryFamilyBalance(
-          tx,
-          resolveInventoryFamilyItemIds(inventoryItems, ingredient)
-        )
-      );
-      const possibleForIngredient = ingredient.qtyPerRecipe
-        ? Math.floor(availableQty / ingredient.qtyPerRecipe)
-        : 0;
-      possibleRecipes = Math.min(possibleRecipes, possibleForIngredient);
-    }
-
-    return Number.isFinite(possibleRecipes) ? Math.max(possibleRecipes, 0) : 0;
-  }
-
-  private async getMassPrepEventRecord(tx: TransactionClient, orderId: number) {
-    return tx.idempotencyRecord.findUnique({
-      where: {
-        scope_idemKey: {
-          scope: MASS_PREP_EVENT_SCOPE,
-          idemKey: this.massPrepEventIdemKey(orderId)
-        }
-      }
-    });
-  }
-
-  private async getMassPrepEvent(tx: TransactionClient, orderId: number) {
-    const record = await this.getMassPrepEventRecord(tx, orderId);
-    if (!record) return null;
-    return this.parseMassPrepEvent(record.responseJson);
-  }
-
   private async resolveOrderFillingBroasByFlavorCode(
     tx: TransactionClient,
     items: Array<{ productId: number; quantity: number }>
@@ -673,15 +557,6 @@ export class OrdersService {
         'Pedido com movimentacoes fisicas de estoque nao pode ser excluido.'
       );
     }
-  }
-
-  private async clearMassPrepEventArtifact(tx: TransactionClient, orderId: number) {
-    await tx.idempotencyRecord.deleteMany({
-      where: {
-        scope: MASS_PREP_EVENT_SCOPE,
-        idemKey: this.massPrepEventIdemKey(orderId)
-      }
-    });
   }
 
   private async syncPaperBagReservationsForCustomerDateGroup(
@@ -906,260 +781,15 @@ export class OrdersService {
     };
   }
 
-  private async syncMassPrepEventForOrder(
-    tx: TransactionClient,
-    order: Pick<OrderWithRelations, 'id' | 'scheduledAt' | 'createdAt'>,
-    massReadyItemId: number,
-    requiredMassRecipes: number
-  ) {
-    const existingEvent = await this.getMassPrepEvent(tx, order.id);
-    const orderReferenceDate = this.massPrepEventDate(order);
-    const startsAt = new Date(orderReferenceDate.getTime() - MASS_PREP_EVENT_DURATION_MINUTES * 60_000);
-    const endsAt = new Date(orderReferenceDate);
-
-    const massReadyMovements = await tx.inventoryMovement.findMany({
-      where: { itemId: massReadyItemId },
-      select: { type: true, quantity: true, orderId: true, source: true },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
-    });
-    const availableMassReadyExcludingOrderFormula = this.toQty(
-      this.inventoryBalanceFromMovements(
-        massReadyMovements.filter(
-          (movement) =>
-            !(movement.orderId === order.id && movement.source === ORDER_FORMULA_SOURCE_MASS_READY)
-        )
-      )
-    );
-    const missingMassRecipes = Math.max(
-      this.toQty(requiredMassRecipes - availableMassReadyExcludingOrderFormula),
-      0
-    );
-    const possibleRecipesFromIngredients =
-      missingMassRecipes > 0
-        ? await this.resolveMassPrepRecipesPossibleFromIngredients(tx)
-        : 0;
-    const recipesToPrepare = resolvePlannedMassPrepRecipes(
-      missingMassRecipes,
-      possibleRecipesFromIngredients
-    );
-
-    if (!existingEvent) {
-      if (recipesToPrepare <= 0) return null;
-      const createdEvent = massPrepEventSchema.parse({
-        version: 1,
-        id: `mass-prep-${randomUUID()}`,
-        eventName: MASS_PREP_EVENT_NAME,
-        orderId: order.id,
-        startsAt: startsAt.toISOString(),
-        endsAt: endsAt.toISOString(),
-        durationMinutes: MASS_PREP_EVENT_DURATION_MINUTES,
-        massRecipes: recipesToPrepare,
-        status: 'INGREDIENTES',
-        createdAt: new Date().toISOString()
-      });
-      await this.saveMassPrepEvent(tx, createdEvent);
-      return createdEvent;
-    }
-
-    let changed = false;
-    const nextEvent: MassPrepEvent = { ...existingEvent };
-    const nextStartsAtIso = startsAt.toISOString();
-    const nextEndsAtIso = endsAt.toISOString();
-
-    if (nextEvent.startsAt !== nextStartsAtIso) {
-      nextEvent.startsAt = nextStartsAtIso;
-      changed = true;
-    }
-    if (nextEvent.endsAt !== nextEndsAtIso) {
-      nextEvent.endsAt = nextEndsAtIso;
-      changed = true;
-    }
-    if (
-      nextEvent.status === 'INGREDIENTES' &&
-      recipesToPrepare > 0 &&
-      nextEvent.massRecipes !== recipesToPrepare
-    ) {
-      nextEvent.massRecipes = recipesToPrepare;
-      changed = true;
-    }
-
-    if (!changed) return nextEvent;
-    const parsedEvent = massPrepEventSchema.parse(nextEvent);
-    await this.saveMassPrepEvent(tx, parsedEvent);
-    return parsedEvent;
-  }
-
-  private async syncOrderInventoryAndMassPrepEvent(
+  private async syncOrderInventoryArtifacts(
     tx: TransactionClient,
     order: Pick<OrderWithRelations, 'id' | 'customerId' | 'scheduledAt' | 'createdAt' | 'items'>
   ) {
-    const formula = await this.syncOrderFormulaInventory(tx, order);
-    await this.syncMassPrepEventForOrder(tx, order, formula.massReadyItem.id, formula.requiredMassRecipes);
+    await this.syncOrderFormulaInventory(tx, order);
     await this.syncPaperBagReservationsForCustomerDateGroup(tx, {
       customerId: order.customerId,
       targetDate: this.orderTargetDate(order).date
     });
-  }
-
-  private async syncMassPrepEventScheduleAndCoverage(
-    tx: TransactionClient,
-    order: Pick<OrderWithRelations, 'id' | 'scheduledAt' | 'createdAt' | 'items'>
-  ) {
-    const inventoryItems = await tx.inventoryItem.findMany({ orderBy: { id: 'asc' } });
-    const inventoryByLookup = buildInventoryItemLookup(inventoryItems);
-    const productIds = Array.from(new Set((order.items || []).map((item) => item.productId)));
-    const products = productIds.length
-      ? await tx.product.findMany({
-          where: { id: { in: productIds } },
-          select: { id: true, name: true }
-        })
-      : [];
-    const productNameById = new Map(products.map((product) => [product.id, product.name]));
-    const massReadyItem = await this.ensureInventoryItemByAliases(tx, inventoryByLookup, {
-      canonicalName: MASS_READY_ITEM_NAME,
-      aliases: [MASS_READY_ITEM_NAME],
-      category: 'INGREDIENTE',
-      unit: 'receita',
-      purchasePackSize: 1,
-      purchasePackCost: 0
-    });
-    const broaSummary = this.buildOfficialBroaSummaryFromItems(order.items || [], productNameById);
-    const requiredMassRecipes = this.toQty(
-      broaSummary.totalBroas / MASS_READY_BROAS_PER_RECIPE
-    );
-    await this.syncMassPrepEventForOrder(tx, order, massReadyItem.id, requiredMassRecipes);
-  }
-
-  private async prepareMassForEvent(
-    tx: TransactionClient,
-    event: Pick<MassPrepEvent, 'orderId' | 'massRecipes'>
-  ) {
-    const plannedRecipes = Math.max(Math.floor(event.massRecipes || 0), 0);
-    if (plannedRecipes <= 0) {
-      throw new BadRequestException('Evento FAZER MASSA sem receitas para preparar.');
-    }
-
-    const inventoryItems = await tx.inventoryItem.findMany({ orderBy: { id: 'asc' } });
-    const inventoryByLookup = buildInventoryItemLookup(inventoryItems);
-    const sourceLabel = this.orderFormulaSourceLabel(event.orderId);
-
-    const massReadyItem = await this.ensureInventoryItemByAliases(tx, inventoryByLookup, {
-      canonicalName: MASS_READY_ITEM_NAME,
-      aliases: [MASS_READY_ITEM_NAME],
-      category: 'INGREDIENTE',
-      unit: 'receita',
-      purchasePackSize: 1,
-      purchasePackCost: 0
-    });
-
-    const plan: Array<{
-      item: InventoryLookupItem;
-      qtyPerRecipe: number;
-      availableQty: number;
-      displayName: string;
-      unit: string;
-    }> = [];
-    let possibleRecipesFromIngredients = Number.POSITIVE_INFINITY;
-
-    for (const ingredient of massPrepRecipeIngredients) {
-      const item = await this.ensureInventoryItemByAliases(tx, inventoryByLookup, {
-        canonicalName: ingredient.canonicalName,
-        aliases: ingredient.aliases,
-        category: ingredient.category,
-        unit: ingredient.unit,
-        purchasePackSize: ingredient.purchasePackSize,
-        purchasePackCost: ingredient.purchasePackCost
-      });
-      const availableQty = this.toQty(
-        await this.loadInventoryFamilyBalance(
-          tx,
-          resolveInventoryFamilyItemIds(inventoryItems, ingredient)
-        )
-      );
-      const possibleForIngredient = ingredient.qtyPerRecipe
-        ? Math.floor(availableQty / ingredient.qtyPerRecipe)
-        : 0;
-      possibleRecipesFromIngredients = Math.min(possibleRecipesFromIngredients, possibleForIngredient);
-      plan.push({
-        item,
-        qtyPerRecipe: ingredient.qtyPerRecipe,
-        availableQty,
-        displayName: ingredient.canonicalName,
-        unit: ingredient.unit
-      });
-    }
-
-    const recipes = resolveExecutableMassPrepRecipes(
-      MASS_PREP_DEFAULT_BATCH_RECIPES,
-      Number.isFinite(possibleRecipesFromIngredients) ? possibleRecipesFromIngredients : 0
-    );
-    if (recipes <= 0) {
-      const missingIngredients = plan.map(
-        (ingredient) =>
-          `${ingredient.displayName}: disponivel ${ingredient.availableQty} ${ingredient.unit}, necessario ${ingredient.qtyPerRecipe} ${ingredient.unit}`
-      );
-      throw new BadRequestException(
-        `Nao ha insumos suficientes para iniciar PREPARO. ${missingIngredients.join(' | ')}`
-      );
-    }
-
-    for (const ingredient of plan) {
-      await tx.inventoryMovement.create({
-        data: {
-          itemId: ingredient.item.id,
-          orderId: event.orderId,
-          type: 'OUT',
-          quantity: this.toQty(ingredient.qtyPerRecipe * recipes),
-          reason: `Consumo de insumos para MASSA PRONTA (${recipes} receita(s))`,
-          source: MASS_PREP_SOURCE,
-          sourceLabel
-        }
-      });
-    }
-
-    await tx.inventoryMovement.create({
-      data: {
-        itemId: massReadyItem.id,
-        orderId: event.orderId,
-        type: 'IN',
-        quantity: recipes,
-        reason: `Reposicao de MASSA PRONTA (${recipes} receita(s))`,
-        source: MASS_PREP_SOURCE,
-        sourceLabel
-      }
-    });
-
-    return recipes;
-  }
-
-  private async syncMassPrepEventStatusFromOrderStatus(
-    tx: TransactionClient,
-    orderId: number,
-    orderStatus: string
-  ) {
-    const event = await this.getMassPrepEvent(tx, orderId);
-    if (!event) return null;
-
-    let nextStatus = event.status;
-
-    if (orderStatus === 'EM_PREPARACAO' && event.status === 'PREPARO') {
-      nextStatus = 'NO_FORNO';
-    }
-
-    if ((orderStatus === 'PRONTO' || orderStatus === 'ENTREGUE') && event.status !== 'PRONTA') {
-      nextStatus = 'PRONTA';
-    }
-
-    if (nextStatus === event.status) {
-      return event;
-    }
-
-    const updatedEvent = massPrepEventSchema.parse({
-      ...event,
-      status: nextStatus
-    });
-    await this.saveMassPrepEvent(tx, updatedEvent);
-    return updatedEvent;
   }
 
   private getPaidAmount(
@@ -2223,7 +1853,7 @@ export class OrdersService {
       });
       if (!hydratedOrder) throw new NotFoundException('Pedido nao encontrado');
 
-      await this.syncOrderInventoryAndMassPrepEvent(tx, hydratedOrder);
+      await this.syncOrderInventoryArtifacts(tx, hydratedOrder);
 
       const freshOrder = await tx.order.findUnique({
         where: { id: createdOrder.id },
@@ -2404,101 +2034,6 @@ export class OrdersService {
     });
   }
 
-  async listMassPrepEvents() {
-    const records = await this.prisma.idempotencyRecord.findMany({
-      where: { scope: MASS_PREP_EVENT_SCOPE },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
-    });
-
-    const events = records
-      .map((record) => this.parseMassPrepEvent(record.responseJson))
-      .filter((entry): entry is MassPrepEvent => Boolean(entry));
-
-    return events.sort((left, right) => {
-      const leftTime = new Date(left.startsAt).getTime();
-      const rightTime = new Date(right.startsAt).getTime();
-      return leftTime - rightTime;
-    });
-  }
-
-  async removeMassPrepEvent(orderId: number) {
-    const order = await this.prisma.order.findUnique({ where: { id: orderId }, select: { id: true } });
-    if (!order) throw new NotFoundException('Pedido nao encontrado');
-
-    await this.prisma.idempotencyRecord.deleteMany({
-      where: {
-        scope: MASS_PREP_EVENT_SCOPE,
-        idemKey: this.massPrepEventIdemKey(orderId)
-      }
-    });
-  }
-
-  async updateMassPrepEventStatus(orderId: number, payload: unknown) {
-    const data = massPrepEventStatusPayloadSchema.parse(payload ?? {});
-
-    return this.prisma.$transaction(async (tx) => {
-      const order = await tx.order.findUnique({
-        where: { id: orderId },
-        select: { id: true, status: true }
-      });
-      if (!order) throw new NotFoundException('Pedido nao encontrado');
-
-      const event = await this.getMassPrepEvent(tx, orderId);
-      if (!event) {
-        throw new NotFoundException('Evento FAZER MASSA nao encontrado para este pedido.');
-      }
-
-      if (event.status === data.status) {
-        return event;
-      }
-
-      const allowed = massPrepEventStatusTransitions[event.status] || [];
-      if (!allowed.includes(data.status)) {
-        throw new BadRequestException(`Transicao invalida: ${event.status} -> ${data.status}`);
-      }
-
-      let preparedRecipes = event.massRecipes;
-      if (event.status === 'INGREDIENTES' && data.status === 'PREPARO') {
-        preparedRecipes = await this.prepareMassForEvent(tx, event);
-      }
-
-      const updated = massPrepEventSchema.parse({
-        ...event,
-        massRecipes: preparedRecipes,
-        status: data.status
-      });
-      await this.saveMassPrepEvent(tx, updated);
-
-      if (data.status === 'NO_FORNO' && order.status !== 'EM_PREPARACAO') {
-        const allowedOrderStatuses = statusTransitions[order.status] || [];
-        if (!allowedOrderStatuses.includes('EM_PREPARACAO')) {
-          throw new BadRequestException(
-            `Pedido nao pode sincronizar para NO FORNO a partir de ${order.status}.`
-          );
-        }
-        await tx.order.update({
-          where: { id: order.id },
-          data: { status: 'EM_PREPARACAO' }
-        });
-      }
-
-      if (data.status === 'PRONTA' && order.status !== 'PRONTO') {
-        const allowedOrderStatuses = statusTransitions[order.status] || [];
-        if (!allowedOrderStatuses.includes('PRONTO')) {
-          throw new BadRequestException(
-            `Pedido nao pode sincronizar para PRONTO a partir de ${order.status}.`
-          );
-        }
-        await tx.order.update({
-          where: { id: order.id },
-          data: { status: 'PRONTO' }
-        });
-      }
-
-      return updated;
-    });
-  }
-
   async create(payload: unknown) {
     const data = OrderSchema.pick({ customerId: true, notes: true, discount: true, scheduledAt: true, items: true, fulfillmentMode: true }).parse(
       payload
@@ -2575,7 +2110,7 @@ export class OrdersService {
         include: { items: true, customer: true, payments: true }
       });
 
-      await this.syncOrderInventoryAndMassPrepEvent(tx, updated);
+      await this.syncOrderInventoryArtifacts(tx, updated);
       const nextTargetDate = this.orderTargetDate(updated).date;
       if (nextTargetDate !== previousTargetDate) {
         await this.syncPaperBagReservationsForCustomerDateGroup(tx, {
@@ -2596,7 +2131,6 @@ export class OrdersService {
 
       await this.clearOrderFormulaArtifacts(tx, id);
       await tx.order.delete({ where: { id } });
-      await this.clearMassPrepEventArtifact(tx, id);
       await this.syncPaperBagReservationsForCustomerDateGroup(tx, {
         customerId: order.customerId,
         targetDate
@@ -2646,7 +2180,7 @@ export class OrdersService {
         include: { items: true, customer: true, payments: true }
       });
       if (!updatedOrder) throw new NotFoundException('Pedido nao encontrado');
-      await this.syncOrderInventoryAndMassPrepEvent(tx, updatedOrder);
+      await this.syncOrderInventoryArtifacts(tx, updatedOrder);
       return this.withFinancial(updatedOrder);
     });
   }
@@ -2706,7 +2240,7 @@ export class OrdersService {
         include: { items: true, customer: true, payments: true }
       });
 
-      await this.syncOrderInventoryAndMassPrepEvent(tx, updatedOrder);
+      await this.syncOrderInventoryArtifacts(tx, updatedOrder);
       return this.withFinancial(updatedOrder);
     });
   }
@@ -2744,7 +2278,7 @@ export class OrdersService {
         include: { items: true, customer: true, payments: true }
       });
       if (!updatedOrder) throw new NotFoundException('Pedido nao encontrado');
-      await this.syncOrderInventoryAndMassPrepEvent(tx, updatedOrder);
+      await this.syncOrderInventoryArtifacts(tx, updatedOrder);
       return this.withFinancial(updatedOrder);
     });
   }
@@ -2776,14 +2310,10 @@ export class OrdersService {
         });
         if (stepStatus === 'CANCELADO') {
           await this.clearOrderFormulaArtifacts(tx, orderId);
-          await this.clearMassPrepEventArtifact(tx, orderId);
           await this.syncPaperBagReservationsForCustomerDateGroup(tx, {
             customerId: updatedOrder.customerId,
             targetDate: this.orderTargetDate(updatedOrder).date
           });
-        }
-        if (stepStatus === 'EM_PREPARACAO' || stepStatus === 'PRONTO' || stepStatus === 'ENTREGUE') {
-          await this.syncMassPrepEventStatusFromOrderStatus(tx, orderId, stepStatus);
         }
       }
 

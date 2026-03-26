@@ -17,8 +17,6 @@ import {
   resolveDisplayNumber,
   roundMoney,
   type Customer,
-  type InventoryItem,
-  type InventoryMovement,
   type OrderIntake,
   type Product
 } from '@querobroapp/shared';
@@ -31,12 +29,11 @@ import {
   formatCurrencyBR,
   formatMoneyInputBR,
   formatPhoneBR,
-  parseCurrencyBR,
-  parseLocaleNumber
+  parseCurrencyBR
 } from '@/lib/format';
 import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
 import { useTutorialSpotlight } from '@/hooks/use-tutorial-spotlight';
-import { AppIcon, type AppIconName } from '@/components/app-icons';
+import { AppIcon } from '@/components/app-icons';
 import { useFeedback } from '@/components/feedback-provider';
 import { BuilderLayoutItemSlot, BuilderLayoutProvider } from '@/components/builder-layout';
 import { OrdersBoard } from './orders-board';
@@ -48,7 +45,7 @@ import {
   compactOrderProductName,
   resolveOrderVirtualBoxLabel
 } from './order-box-catalog';
-import { type DeliveryQuote, type MassPrepEvent, type OrderView } from './orders-model';
+import { type DeliveryQuote, type OrderView } from './orders-model';
 import {
   fetchInternalDeliveryQuote,
   fetchOrdersWorkspace,
@@ -57,39 +54,9 @@ import {
 
 const TEST_DATA_TAG = '[TESTE_E2E]';
 const TUTORIAL_QUERY_VALUE = 'primeira_vez';
-const MASS_PREP_EVENT_NAME = 'FAZER MASSA';
 const MONTH_WIDGET_MAX_DOTS = 8;
 const WEEK_TIMELINE_MAX_VISIBLE_EVENTS = 5;
 const SELECTED_ORDER_NEW_BOX_KEY = 'box-new';
-const MASS_READY_ITEM_NAME = 'MASSA PRONTA';
-const MASS_READY_BROAS_PER_RECIPE = 21;
-const MASS_PREP_DEFAULT_BATCH_RECIPES = 2;
-const MASS_PREP_RECIPE_INGREDIENTS = [
-  { key: 'LEITE', displayName: 'Leite', aliases: ['LEITE'], unit: 'ml', qtyPerRecipe: 240 },
-  {
-    key: 'MANTEIGA',
-    displayName: 'Manteiga',
-    aliases: ['MANTEIGA', 'MANTEIGA COM SAL'],
-    unit: 'g',
-    qtyPerRecipe: 150
-  },
-  { key: 'ACUCAR', displayName: 'Acucar', aliases: ['ACUCAR', 'AÇÚCAR'], unit: 'g', qtyPerRecipe: 120 },
-  {
-    key: 'FARINHA_DE_TRIGO',
-    displayName: 'Farinha de trigo',
-    aliases: ['FARINHA DE TRIGO'],
-    unit: 'g',
-    qtyPerRecipe: 130
-  },
-  {
-    key: 'FUBA_DE_CANJICA',
-    displayName: 'Fuba de canjica',
-    aliases: ['FUBA DE CANJICA', 'FUBÁ DE CANJICA'],
-    unit: 'g',
-    qtyPerRecipe: 130
-  },
-  { key: 'OVOS', displayName: 'Ovos', aliases: ['OVOS'], unit: 'uni', qtyPerRecipe: 6 }
-] as const;
 
 type OrderVirtualBoxPart = {
   productId: number;
@@ -377,13 +344,6 @@ function orderPaymentBadgeClass(status?: string | null) {
   return 'bg-neutral-100 text-neutral-700 border-neutral-200';
 }
 
-function massPrepStatusBadgeClass(status?: MassPrepEventStatus | null) {
-  if (status === 'PRONTA') return 'bg-emerald-100 text-emerald-800 border-emerald-200';
-  if (status === 'NO_FORNO') return 'bg-amber-100 text-amber-800 border-amber-200';
-  if (status === 'PREPARO') return 'bg-orange-100 text-orange-800 border-orange-200';
-  return 'bg-rose-100 text-rose-800 border-rose-200';
-}
-
 function formatDisplayedOrderStatus(status?: string | null) {
   if (!status) return '';
   if (status === 'EM_PREPARACAO') return 'NO FORNO';
@@ -399,14 +359,6 @@ function formatDisplayedPaymentStatus(status?: string | null) {
 
 function formatWorkflowPaymentToggleLabel(status?: string | null) {
   return status === 'PAGO' ? 'PAGO' : 'NAO PAGO';
-}
-
-function formatMassPrepStatus(status?: MassPrepEventStatus | null) {
-  if (!status) return '';
-  if (status === 'PREPARO') return 'EM PREPARO';
-  if (status === 'NO_FORNO') return 'NO FORNO';
-  if (status === 'PRONTA') return 'PRONTA';
-  return status;
 }
 
 function displayOrderNumber(order?: { id?: number | null; publicNumber?: number | null } | null) {
@@ -439,23 +391,6 @@ function formatCustomerFullAddress(customer?: Customer | null) {
   return structuredParts.join(', ');
 }
 
-function inventoryCategoryLabel(category?: string | null) {
-  if (category === 'INGREDIENTE') return 'Ingrediente';
-  if (category === 'EMBALAGEM_INTERNA') return 'Embalagem interna';
-  if (category === 'EMBALAGEM_EXTERNA') return 'Embalagem externa';
-  return category || 'Sem categoria';
-}
-
-function formatInventoryBalance(value: number) {
-  if (!Number.isFinite(value)) return '0';
-  return value.toLocaleString('pt-BR', { maximumFractionDigits: 4 });
-}
-
-function formatInventoryBalanceInput(value: number) {
-  if (!Number.isFinite(value)) return '0';
-  return value.toLocaleString('pt-BR', { maximumFractionDigits: 4 });
-}
-
 function normalizeTextForSort(value?: string | null) {
   return (value || '')
     .normalize('NFD')
@@ -478,11 +413,6 @@ function sortQuickCreateProducts(products: Product[]) {
     if (leftRank !== rightRank) return leftRank - rightRank;
     return (left.name || '').localeCompare(right.name || '', 'pt-BR');
   });
-}
-
-function roundInventoryQty(value: number) {
-  if (!Number.isFinite(value)) return 0;
-  return Math.round((value + Number.EPSILON) * 10000) / 10000;
 }
 
 type OrderWorkflowIllustrationName =
@@ -669,81 +599,11 @@ const orderWorkflowStatusMeta: Record<
   }
 };
 
-type MassPrepEventStatus = MassPrepEvent['status'];
-type MassPrepWorkflowStatus = MassPrepEventStatus;
-const MASS_PREP_EVENT_STATUSES: MassPrepEventStatus[] = [
-  'INGREDIENTES',
-  'PREPARO',
-  'NO_FORNO',
-  'PRONTA'
-];
-const massPrepEventStatusTransitions: Record<MassPrepEventStatus, MassPrepEventStatus[]> = {
-  INGREDIENTES: ['PREPARO'],
-  PREPARO: ['NO_FORNO'],
-  NO_FORNO: ['PRONTA'],
-  PRONTA: []
-};
-const massPrepWorkflowStatusMeta: Record<
-  MassPrepWorkflowStatus,
-  {
-    label: string;
-    icon: AppIconName;
-    activeClassName: string;
-    passedDotClassName: string;
-    activeLineClassName: string;
-  }
-> = {
-  INGREDIENTES: {
-    label: 'Ingredientes',
-    icon: 'spark',
-    activeClassName: 'border-rose-300 bg-rose-100 text-rose-800',
-    passedDotClassName: 'bg-rose-500',
-    activeLineClassName: 'bg-rose-400'
-  },
-  PREPARO: {
-    label: 'Preparo',
-    icon: 'tools',
-    activeClassName: 'border-orange-300 bg-orange-100 text-orange-800',
-    passedDotClassName: 'bg-orange-500',
-    activeLineClassName: 'bg-orange-400'
-  },
-  NO_FORNO: {
-    label: 'No Forno',
-    icon: 'pedidos',
-    activeClassName: 'border-amber-300 bg-amber-100 text-amber-800',
-    passedDotClassName: 'bg-amber-500',
-    activeLineClassName: 'bg-amber-400'
-  },
-  PRONTA: {
-    label: 'Pronta',
-    icon: 'plus',
-    activeClassName: 'border-emerald-300 bg-emerald-100 text-emerald-800',
-    passedDotClassName: 'bg-emerald-500',
-    activeLineClassName: 'bg-emerald-400'
-  }
-};
-
 function toOrderWorkflowStatus(status?: string | null): OrderWorkflowStatus | null {
   if (!status) return null;
   return ORDER_WORKFLOW_STATUSES.includes(status as OrderWorkflowStatus)
     ? (status as OrderWorkflowStatus)
     : null;
-}
-
-function resolveAdjacentMassPrepWorkflowStatus(
-  currentStatus: MassPrepEventStatus | null | undefined,
-  direction: 'backward' | 'forward'
-): MassPrepWorkflowStatus | null {
-  if (!currentStatus) return null;
-
-  const currentIndex = MASS_PREP_EVENT_STATUSES.indexOf(currentStatus);
-  if (currentIndex < 0) return null;
-  const candidateIndex = direction === 'forward' ? currentIndex + 1 : currentIndex - 1;
-  const candidate = MASS_PREP_EVENT_STATUSES[candidateIndex];
-  if (!candidate) return null;
-
-  const allowedTransitions = massPrepEventStatusTransitions[currentStatus] || [];
-  return allowedTransitions.includes(candidate) ? candidate : null;
 }
 
 type CalendarViewMode = 'DAY' | 'WEEK' | 'MONTH';
@@ -755,19 +615,9 @@ const calendarViewLabels: Record<CalendarViewMode, string> = {
 };
 
 type CalendarOrderEntry = {
-  kind: 'ORDER' | 'MASS_PREP';
   order: OrderView;
   createdAt: Date;
   dateKey: string;
-  massPrepEvent: MassPrepEvent | null;
-};
-
-type InventoryBalanceCard = {
-  itemId: number;
-  name: string;
-  unit: string;
-  category: string;
-  balance: number;
 };
 
 type DayGridDragState = {
@@ -894,7 +744,7 @@ function buildTimelineLaneLayout<TEntry>(items: TimelineLayoutInput<TEntry>[]) {
 }
 
 function isMatchingOrderEntry(entry: CalendarOrderEntry, orderId?: number | null) {
-  return entry.kind === 'ORDER' && typeof orderId === 'number' && entry.order.id === orderId;
+  return typeof orderId === 'number' && entry.order.id === orderId;
 }
 
 function buildWeekTimelineMetrics(
@@ -1193,51 +1043,7 @@ function dateWithMinutes(date: Date, minutes: number) {
 }
 
 function calendarEntryBaseKey(entry: CalendarOrderEntry) {
-  if (entry.kind === 'MASS_PREP' && entry.massPrepEvent?.id) {
-    return `mass-${entry.massPrepEvent.id}`;
-  }
   return `order-${entry.order.id ?? '-'}-${entry.createdAt.getTime()}`;
-}
-
-function buildInventoryBalanceMap(movements: InventoryMovement[]) {
-  const ordered = [...movements].sort((left, right) => {
-    const leftTime = safeDateFromIso(left.createdAt ?? null)?.getTime() ?? 0;
-    const rightTime = safeDateFromIso(right.createdAt ?? null)?.getTime() ?? 0;
-    if (leftTime !== rightTime) return leftTime - rightTime;
-    return (left.id ?? 0) - (right.id ?? 0);
-  });
-
-  const balanceByItem = new Map<number, number>();
-  for (const movement of ordered) {
-    const itemId = movement.itemId;
-    if (!itemId) continue;
-    const current = balanceByItem.get(itemId) || 0;
-    if (movement.type === 'IN') {
-      balanceByItem.set(itemId, roundInventoryQty(current + movement.quantity));
-    } else if (movement.type === 'OUT') {
-      balanceByItem.set(itemId, roundInventoryQty(current - movement.quantity));
-    } else if (movement.type === 'ADJUST') {
-      balanceByItem.set(itemId, roundInventoryQty(movement.quantity));
-    }
-  }
-  return balanceByItem;
-}
-
-function buildInventoryBalanceCards(
-  inventoryItems: InventoryItem[],
-  inventoryMovements: InventoryMovement[]
-) {
-  const balanceByItem = buildInventoryBalanceMap(inventoryMovements);
-  return inventoryItems
-    .filter((item) => typeof item.id === 'number')
-    .map((item) => ({
-      itemId: item.id as number,
-      name: item.name,
-      unit: item.unit,
-      category: item.category,
-      balance: roundInventoryQty(balanceByItem.get(item.id as number) || 0)
-    }))
-    .sort((left, right) => left.name.localeCompare(right.name, 'pt-BR'));
 }
 
 function OrdersPageContent() {
@@ -1245,7 +1051,6 @@ function OrdersPageContent() {
   const searchParams = useSearchParams();
   const { tutorialMode, isSpotlightSlot } = useTutorialSpotlight(searchParams, TUTORIAL_QUERY_VALUE);
   const [orders, setOrders] = useState<OrderView[]>([]);
-  const [massPrepEvents, setMassPrepEvents] = useState<MassPrepEvent[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<OrderView | null>(null);
@@ -1290,21 +1095,6 @@ function OrdersPageContent() {
   } | null>(null);
   const weekGridCanvasByDateKeyRef = useRef(new Map<string, HTMLDivElement>());
   const [isStatusUpdatePending, setIsStatusUpdatePending] = useState(false);
-  const [isMassPrepStockModalOpen, setIsMassPrepStockModalOpen] = useState(false);
-  const [selectedMassPrepEvent, setSelectedMassPrepEvent] = useState<MassPrepEvent | null>(null);
-  const [massPrepStockCards, setMassPrepStockCards] = useState<InventoryBalanceCard[]>([]);
-  const [massPrepEditBalanceByItemId, setMassPrepEditBalanceByItemId] = useState<Record<number, string>>({});
-  const [massPrepEditErrorByItemId, setMassPrepEditErrorByItemId] = useState<Record<number, string>>({});
-  const [massPrepSavingItemId, setMassPrepSavingItemId] = useState<number | null>(null);
-  const massPrepPendingActionItemIdsRef = useRef<Set<number>>(new Set());
-  const [massPrepPrepareError, setMassPrepPrepareError] = useState<string | null>(null);
-  const [isPreparingMassReady, setIsPreparingMassReady] = useState(false);
-  const massPrepPrepareInFlightRef = useRef(false);
-  const massPrepPrepareRequestKeyRef = useRef<string | null>(null);
-  const [isUpdatingMassPrepStatus, setIsUpdatingMassPrepStatus] = useState(false);
-  const [isDeletingMassPrepEvent, setIsDeletingMassPrepEvent] = useState(false);
-  const [massPrepStockLoading, setMassPrepStockLoading] = useState(false);
-  const [massPrepStockError, setMassPrepStockError] = useState<string | null>(null);
   const [selectedOrderEditScheduledAt, setSelectedOrderEditScheduledAt] = useState<string>('');
   const [selectedOrderEditNotes, setSelectedOrderEditNotes] = useState<string>('');
   const [selectedOrderEditError, setSelectedOrderEditError] = useState<string | null>(null);
@@ -1319,27 +1109,17 @@ function OrdersPageContent() {
   const newOrderQuoteRequestIdRef = useRef(0);
   const newOrderDialogRef = useRef<HTMLDivElement | null>(null);
   const orderDetailDialogRef = useRef<HTMLDivElement | null>(null);
-  const massPrepDialogRef = useRef<HTMLDivElement | null>(null);
   const selectedOrderId = selectedOrder?.id ?? null;
-  const selectedMassPrepEventId = selectedMassPrepEvent?.id ?? null;
   const newOrderTitleId = useId();
   const orderDetailTitleId = useId();
-  const massPrepTitleId = useId();
   const { confirm, notifyError, notifySuccess, presentSuccess } = useFeedback();
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const {
-        orders: ordersData,
-        customers: customersData,
-        products: productsData,
-        massPrepEvents: massPrepEventsData
-      } =
-        await fetchOrdersWorkspace();
+      const { orders: ordersData, customers: customersData, products: productsData } = await fetchOrdersWorkspace();
       setOrders(ordersData);
-      setMassPrepEvents(massPrepEventsData);
       setCustomers(customersData);
       setProducts(productsData);
       if (selectedOrderId) {
@@ -1349,13 +1129,6 @@ function OrdersPageContent() {
           setIsOrderDetailModalOpen(false);
         }
       }
-      if (selectedMassPrepEventId) {
-        const freshMassPrep = massPrepEventsData.find((entry) => entry.id === selectedMassPrepEventId) || null;
-        setSelectedMassPrepEvent(freshMassPrep);
-        if (!freshMassPrep) {
-          setIsMassPrepStockModalOpen(false);
-        }
-      }
       return ordersData;
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Falha ao carregar dados de pedidos.');
@@ -1363,7 +1136,7 @@ function OrdersPageContent() {
     } finally {
       setLoading(false);
     }
-  }, [selectedMassPrepEventId, selectedOrderId]);
+  }, [selectedOrderId]);
 
   const openOrderDetail = useCallback((order: OrderView) => {
     setSelectedOrder(order);
@@ -1377,7 +1150,6 @@ function OrdersPageContent() {
 
   const openNewOrderModal = useCallback(() => {
     setIsOrderDetailModalOpen(false);
-    setIsMassPrepStockModalOpen(false);
     setOrderError(null);
     setIsNewOrderModalOpen(true);
   }, []);
@@ -1385,21 +1157,6 @@ function OrdersPageContent() {
   const closeNewOrderModal = useCallback(() => {
     setIsNewOrderModalOpen(false);
     setOrderError(null);
-  }, []);
-
-  const closeMassPrepStockModal = useCallback(() => {
-    setIsMassPrepStockModalOpen(false);
-    setSelectedMassPrepEvent(null);
-    setMassPrepEditBalanceByItemId({});
-    setMassPrepEditErrorByItemId({});
-    setMassPrepSavingItemId(null);
-    setMassPrepPrepareError(null);
-    setIsPreparingMassReady(false);
-    setIsUpdatingMassPrepStatus(false);
-    setIsDeletingMassPrepEvent(false);
-    setMassPrepStockLoading(false);
-    setMassPrepStockError(null);
-    setMassPrepStockCards([]);
   }, []);
 
   useDialogA11y({
@@ -1413,224 +1170,9 @@ function OrdersPageContent() {
     dialogRef: orderDetailDialogRef,
     onClose: closeOrderDetail
   });
-
-  useDialogA11y({
-    isOpen: isMassPrepStockModalOpen,
-    dialogRef: massPrepDialogRef,
-    onClose: closeMassPrepStockModal
-  });
-
-  const loadMassPrepStockSnapshot = useCallback(async () => {
-    const [inventoryItems, inventoryMovements] = await Promise.all([
-      apiFetch<InventoryItem[]>('/inventory-items'),
-      apiFetch<InventoryMovement[]>('/inventory-movements')
-    ]);
-    return buildInventoryBalanceCards(inventoryItems, inventoryMovements);
-  }, []);
-
-  const openMassPrepStockModal = useCallback(
-    async (entry: CalendarOrderEntry) => {
-      if (entry.kind !== 'MASS_PREP' || !entry.massPrepEvent) {
-        return;
-      }
-
-      setSelectedOrder(entry.order);
-      setIsOrderDetailModalOpen(false);
-      setSelectedMassPrepEvent(entry.massPrepEvent);
-      setIsMassPrepStockModalOpen(true);
-      setMassPrepStockLoading(true);
-      setMassPrepStockError(null);
-      setMassPrepEditErrorByItemId({});
-      setMassPrepSavingItemId(null);
-      setMassPrepPrepareError(null);
-      setIsPreparingMassReady(false);
-      setIsUpdatingMassPrepStatus(false);
-      setIsDeletingMassPrepEvent(false);
-
-      try {
-        const cards = await loadMassPrepStockSnapshot();
-        setMassPrepStockCards(cards);
-        setMassPrepEditBalanceByItemId(
-          Object.fromEntries(
-            cards.map((card) => [card.itemId, formatInventoryBalanceInput(card.balance)])
-          )
-        );
-      } catch (err) {
-        setMassPrepStockCards([]);
-        setMassPrepEditBalanceByItemId({});
-        setMassPrepStockError(err instanceof Error ? err.message : 'Nao foi possivel carregar o saldo de estoque.');
-      } finally {
-        setMassPrepStockLoading(false);
-      }
-    },
-    [loadMassPrepStockSnapshot]
-  );
-
-  const saveMassPrepItemBalance = useCallback(
-    async (itemId: number) => {
-      if (massPrepPendingActionItemIdsRef.current.has(itemId)) return;
-
-      const rawValue = massPrepEditBalanceByItemId[itemId];
-      const parsedValue = parseLocaleNumber(rawValue);
-      if (parsedValue == null || !Number.isFinite(parsedValue)) {
-        setMassPrepEditErrorByItemId((current) => ({
-          ...current,
-          [itemId]: 'Informe um saldo valido.'
-        }));
-        return;
-      }
-
-      const currentCard = massPrepStockCards.find((card) => card.itemId === itemId);
-      if (!currentCard) return;
-
-      const normalizedCurrent = roundInventoryQty(currentCard.balance);
-      const normalizedNext = roundInventoryQty(parsedValue);
-      if (Math.abs(normalizedCurrent - normalizedNext) < 0.0001) {
-        setMassPrepEditBalanceByItemId((current) => ({
-          ...current,
-          [itemId]: formatInventoryBalanceInput(currentCard.balance)
-        }));
-        setMassPrepEditErrorByItemId((current) => ({
-          ...current,
-          [itemId]: ''
-        }));
-        return;
-      }
-
-      const delta = roundInventoryQty(normalizedNext - normalizedCurrent);
-      const deltaAbs = roundInventoryQty(Math.abs(delta));
-      const movementLabel = delta > 0 ? 'entrada' : 'saida';
-
-      massPrepPendingActionItemIdsRef.current.add(itemId);
-      try {
-        const accepted = await confirm({
-          title: delta > 0 ? 'Confirmar entrada?' : 'Confirmar saida?',
-          description: `Saldo: ${formatInventoryBalance(normalizedCurrent)} ${currentCard.unit}. Vai para ${formatInventoryBalance(
-            normalizedNext
-          )} ${currentCard.unit}. Registra ${movementLabel} de ${formatInventoryBalance(deltaAbs)} ${
-            currentCard.unit
-          } em ${currentCard.name}.`,
-          confirmLabel: delta > 0 ? 'Confirmar entrada' : 'Confirmar saida',
-          cancelLabel: 'Cancelar'
-        });
-        if (!accepted) {
-          setMassPrepEditBalanceByItemId((current) => ({
-            ...current,
-            [itemId]: formatInventoryBalanceInput(currentCard.balance)
-          }));
-          setMassPrepEditErrorByItemId((current) => ({
-            ...current,
-            [itemId]: ''
-          }));
-          return;
-        }
-
-        setMassPrepSavingItemId(itemId);
-        setMassPrepEditErrorByItemId((current) => ({
-          ...current,
-          [itemId]: ''
-        }));
-
-        await apiFetch(`/inventory-items/${itemId}/effective-balance`, {
-          method: 'POST',
-          body: JSON.stringify({
-            quantity: normalizedNext,
-            reason: `Ajuste manual via pop-up FAZER MASSA (${formatInventoryBalance(
-              normalizedCurrent
-            )} -> ${formatInventoryBalance(normalizedNext)} ${currentCard.unit})`
-          })
-        });
-
-        const refreshedCards = await loadMassPrepStockSnapshot();
-        setMassPrepStockCards(refreshedCards);
-        setMassPrepEditBalanceByItemId(
-          Object.fromEntries(
-            refreshedCards.map((card) => [card.itemId, formatInventoryBalanceInput(card.balance)])
-          )
-        );
-        notifySuccess(
-          `${delta > 0 ? 'Entrada' : 'Saida'} registrada: ${formatInventoryBalance(deltaAbs)} ${currentCard.unit} em ${currentCard.name}.`
-        );
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Nao foi possivel salvar o saldo deste item.';
-        setMassPrepEditErrorByItemId((current) => ({
-          ...current,
-          [itemId]: message
-        }));
-        notifyError(message);
-      } finally {
-        massPrepPendingActionItemIdsRef.current.delete(itemId);
-        setMassPrepSavingItemId(null);
-      }
-    },
-    [confirm, loadMassPrepStockSnapshot, massPrepEditBalanceByItemId, massPrepStockCards, notifyError, notifySuccess]
-  );
-
-  const removeSelectedMassPrepEvent = useCallback(async () => {
-    const orderId = selectedMassPrepEvent?.orderId;
-    if (!orderId) return;
-
-    const accepted = await confirm({
-      title: 'Excluir FAZER MASSA?',
-      description: 'O pedido continua. So o evento sera removido.',
-      confirmLabel: 'Excluir evento',
-      cancelLabel: 'Cancelar',
-      danger: true
-    });
-    if (!accepted) return;
-
-    setIsDeletingMassPrepEvent(true);
-    try {
-      await apiFetch(`/orders/${orderId}/mass-prep-event`, { method: 'DELETE' });
-      closeMassPrepStockModal();
-      await loadAll();
-      notifySuccess('FAZER MASSA excluido.');
-    } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Nao foi possivel excluir FAZER MASSA.');
-    } finally {
-      setIsDeletingMassPrepEvent(false);
-    }
-  }, [closeMassPrepStockModal, confirm, loadAll, notifyError, notifySuccess, selectedMassPrepEvent]);
-
-  const updateSelectedMassPrepEventStatus = useCallback(
-    async (nextStatus: MassPrepEventStatus) => {
-      if (!selectedMassPrepEvent) return;
-      if (selectedMassPrepEvent.status === nextStatus) return;
-
-      setIsUpdatingMassPrepStatus(true);
-      setMassPrepPrepareError(null);
-      try {
-        const updatedEvent = await apiFetch<MassPrepEvent>(
-          `/orders/${selectedMassPrepEvent.orderId}/mass-prep-event/status`,
-          {
-            method: 'PATCH',
-            body: JSON.stringify({ status: nextStatus })
-          }
-        );
-        setSelectedMassPrepEvent(updatedEvent);
-        await loadAll();
-        notifySuccess(`FAZER MASSA: ${formatMassPrepStatus(nextStatus)}.`);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Nao foi possivel atualizar FAZER MASSA.';
-        setMassPrepPrepareError(message);
-        notifyError(message);
-      } finally {
-        setIsUpdatingMassPrepStatus(false);
-      }
-    },
-    [loadAll, notifyError, notifySuccess, selectedMassPrepEvent]
-  );
-
-  const openCalendarEntry = useCallback(
-    (entry: CalendarOrderEntry) => {
-      if (entry.kind === 'MASS_PREP') {
-        void openMassPrepStockModal(entry);
-        return;
-      }
-      openOrderDetail(entry.order);
-    },
-    [openMassPrepStockModal, openOrderDetail]
-  );
+  const openCalendarEntry = useCallback((entry: CalendarOrderEntry) => {
+    openOrderDetail(entry.order);
+  }, [openOrderDetail]);
 
   useEffect(() => {
     loadAll().catch(() => {
@@ -2104,10 +1646,7 @@ function OrdersPageContent() {
   }, [customerMap, orders]);
 
   const resolveCalendarEntryCompactName = useCallback(
-    (entry: CalendarOrderEntry) => {
-      if (entry.kind === 'MASS_PREP') return MASS_PREP_EVENT_NAME;
-      return compactCustomerLabelForCalendar(resolveCustomerName(entry.order));
-    },
+    (entry: CalendarOrderEntry) => compactCustomerLabelForCalendar(resolveCustomerName(entry.order)),
     [resolveCustomerName]
   );
   const resolveCalendarEntryGridLabel = useCallback(
@@ -2116,21 +1655,12 @@ function OrdersPageContent() {
       const customerName = resolveCustomerName(entry.order);
       const customerAddress = formatCustomerFullAddress(customer) || 'Endereco nao informado';
 
-      if (entry.kind === 'MASS_PREP') {
-        return `${MASS_PREP_EVENT_NAME} • ${customerName} • ${customerAddress}`;
-      }
-
       return `${customerName} • ${customerAddress}`;
     },
     [customerMap, resolveCustomerName]
   );
 
-  const resolveCalendarEntryStatus = useCallback((entry: CalendarOrderEntry) => {
-    if (entry.kind === 'MASS_PREP') {
-      return entry.massPrepEvent?.status || 'INGREDIENTES';
-    }
-    return entry.order.status || '';
-  }, []);
+  const resolveCalendarEntryStatus = useCallback((entry: CalendarOrderEntry) => entry.order.status || '', []);
 
   const visibleOrders = useMemo(() => {
     if (!isOperationMode) return orders;
@@ -2154,43 +1684,17 @@ function OrdersPageContent() {
   }, [visibleOrders]);
 
   const calendarEntries = useMemo<CalendarOrderEntry[]>(() => {
-    const orderEntries = visibleOrders
+    return visibleOrders
       .map((order) => {
         const createdAt = resolveOrderDate(order) || new Date();
         return {
-          kind: 'ORDER' as const,
           order,
           createdAt,
-          dateKey: dateKeyFromDate(startOfLocalDay(createdAt)),
-          massPrepEvent: null
+          dateKey: dateKeyFromDate(startOfLocalDay(createdAt))
         };
-      });
-
-    const visibleOrderById = new Map<number, OrderView>();
-    for (const order of visibleOrders) {
-      if (order.id) {
-        visibleOrderById.set(order.id, order);
-      }
-    }
-
-    const massPrepEntries: CalendarOrderEntry[] = [];
-    for (const event of massPrepEvents) {
-      const linkedOrder = visibleOrderById.get(event.orderId);
-      if (!linkedOrder) continue;
-      const createdAt = safeDateFromIso(event.startsAt);
-      if (!createdAt) continue;
-      massPrepEntries.push({
-        kind: 'MASS_PREP',
-        order: linkedOrder,
-        createdAt,
-        dateKey: dateKeyFromDate(startOfLocalDay(createdAt)),
-        massPrepEvent: event
-      });
-    }
-
-    return [...orderEntries, ...massPrepEntries]
+      })
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-  }, [massPrepEvents, visibleOrders]);
+  }, [visibleOrders]);
 
   const calendarOrdersByDate = useMemo(() => {
     const grouped = new Map<string, CalendarOrderEntry[]>();
@@ -2236,8 +1740,6 @@ function OrdersPageContent() {
     >();
 
     for (const entry of selectedDateEntries) {
-      if (entry.kind !== 'ORDER') continue;
-
       const customerName = resolveCustomerName(entry.order);
       const customerKey = entry.order.customerId
         ? `customer:${entry.order.customerId}`
@@ -2635,7 +2137,6 @@ function OrdersPageContent() {
     item: { entry: CalendarOrderEntry; lane: number; height: number }
   ) => {
     if (!event.isPrimary) return;
-    if (item.entry.kind !== 'ORDER') return;
     const orderId = item.entry.order.id;
     if (!orderId) return;
 
@@ -2707,7 +2208,6 @@ function OrdersPageContent() {
     item: { entry: CalendarOrderEntry; height: number }
   ) => {
     if (!event.isPrimary) return;
-    if (item.entry.kind !== 'ORDER') return;
     const orderId = item.entry.order.id;
     if (!orderId) return;
 
@@ -3226,136 +2726,6 @@ function OrdersPageContent() {
     ? ORDER_WORKFLOW_STATUSES.indexOf(selectedOrderWorkflowStatus)
     : -1;
   const selectedOrderPaymentStatus = selectedOrder?.paymentStatus || 'PENDENTE';
-  const selectedMassPrepStatus = selectedMassPrepEvent?.status ?? null;
-  const selectedMassPrepWorkflowIndex = selectedMassPrepStatus
-    ? MASS_PREP_EVENT_STATUSES.indexOf(selectedMassPrepStatus)
-    : -1;
-  const selectedMassPrepPreviousWorkflowStatus = resolveAdjacentMassPrepWorkflowStatus(
-    selectedMassPrepStatus,
-    'backward'
-  );
-  const selectedMassPrepNextWorkflowStatus = resolveAdjacentMassPrepWorkflowStatus(
-    selectedMassPrepStatus,
-    'forward'
-  );
-  const massReadyLookupName = useMemo(() => normalizeTextForSort(MASS_READY_ITEM_NAME), []);
-  const massPrepIngredientCards = useMemo(() => {
-    return massPrepStockCards.filter((card) => normalizeTextForSort(card.name) !== massReadyLookupName);
-  }, [massPrepStockCards, massReadyLookupName]);
-  const massPrepRecipesPossibleFromStock = useMemo(() => {
-    let possibleRecipes = Number.POSITIVE_INFINITY;
-
-    for (const ingredient of MASS_PREP_RECIPE_INGREDIENTS) {
-      const ingredientCard =
-        massPrepIngredientCards.find((card) =>
-          ingredient.aliases.some(
-            (alias) => normalizeTextForSort(alias) === normalizeTextForSort(card.name)
-          )
-        ) || null;
-      const availableQty = roundInventoryQty(ingredientCard?.balance || 0);
-      const possibleForIngredient = ingredient.qtyPerRecipe
-        ? Math.floor(availableQty / ingredient.qtyPerRecipe)
-        : 0;
-      possibleRecipes = Math.min(possibleRecipes, possibleForIngredient);
-    }
-
-    return Number.isFinite(possibleRecipes) ? Math.max(possibleRecipes, 0) : 0;
-  }, [massPrepIngredientCards]);
-  const massPrepExecutableBatchRecipes =
-    massPrepRecipesPossibleFromStock >= MASS_PREP_DEFAULT_BATCH_RECIPES
-      ? MASS_PREP_DEFAULT_BATCH_RECIPES
-      : massPrepRecipesPossibleFromStock >= 1
-        ? 1
-        : 0;
-  const massPrepDraftTargetRecipes =
-    massPrepExecutableBatchRecipes > 0 ? massPrepExecutableBatchRecipes : 1;
-  const massPrepRecipeAvailabilityRows = useMemo(() => {
-    return MASS_PREP_RECIPE_INGREDIENTS.map((ingredient) => {
-      const ingredientCard =
-        massPrepIngredientCards.find((card) =>
-          ingredient.aliases.some(
-            (alias) => normalizeTextForSort(alias) === normalizeTextForSort(card.name)
-          )
-        ) || null;
-      const availableQty = roundInventoryQty(ingredientCard?.balance || 0);
-      const requiredForDraft = roundInventoryQty(
-        ingredient.qtyPerRecipe * massPrepDraftTargetRecipes
-      );
-      const missingForDraft = roundInventoryQty(Math.max(requiredForDraft - availableQty, 0));
-      return {
-        key: ingredient.key,
-        displayName: ingredient.displayName,
-        unit: ingredient.unit,
-        qtyPerRecipe: ingredient.qtyPerRecipe,
-        ingredientCard,
-        availableQty,
-        requiredForDraft,
-        missingForDraft
-      };
-    });
-  }, [massPrepDraftTargetRecipes, massPrepIngredientCards]);
-  const massPrepHasMissingForDraft = massPrepExecutableBatchRecipes <= 0;
-
-  const prepareMassReadyFromIngredients = useCallback(async () => {
-    if (!selectedMassPrepEvent) return;
-    if (massPrepHasMissingForDraft) {
-      setMassPrepPrepareError('Falta insumo para 1 receita de MASSA PRONTA.');
-      return;
-    }
-    if (massPrepPrepareInFlightRef.current) return;
-
-    massPrepPrepareInFlightRef.current = true;
-    setMassPrepPrepareError(null);
-    setIsPreparingMassReady(true);
-    try {
-      const requestKey =
-        massPrepPrepareRequestKeyRef.current ||
-        (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-          ? crypto.randomUUID()
-          : `mass-prep-${Date.now()}-${Math.round(Math.random() * 1_000_000)}`);
-      massPrepPrepareRequestKeyRef.current = requestKey;
-      const response = await apiFetch<{ recipesPrepared: number }>('/inventory-mass-ready/prepare', {
-        method: 'POST',
-        body: JSON.stringify({
-          recipes: MASS_PREP_DEFAULT_BATCH_RECIPES,
-          orderId: selectedMassPrepEvent.orderId,
-          reason: `Conversao manual via pop-up ${MASS_PREP_EVENT_NAME}`,
-          requestKey
-        })
-      });
-
-      const refreshedCards = await loadMassPrepStockSnapshot();
-      setMassPrepStockCards(refreshedCards);
-      setMassPrepEditBalanceByItemId(
-        Object.fromEntries(
-          refreshedCards.map((card) => [card.itemId, formatInventoryBalanceInput(card.balance)])
-        )
-      );
-      massPrepPrepareRequestKeyRef.current = null;
-      notifySuccess(`MASSA PRONTA +${response.recipesPrepared} receita(s).`);
-    } catch (err) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : 'Nao foi possivel gerar MASSA PRONTA.';
-      setMassPrepPrepareError(message);
-      notifyError(message);
-    } finally {
-      massPrepPrepareInFlightRef.current = false;
-      setIsPreparingMassReady(false);
-    }
-  }, [
-    loadMassPrepStockSnapshot,
-    massPrepHasMissingForDraft,
-    notifyError,
-    notifySuccess,
-    selectedMassPrepEvent
-  ]);
-
-  useEffect(() => {
-    massPrepPrepareInFlightRef.current = false;
-    massPrepPrepareRequestKeyRef.current = null;
-  }, [selectedMassPrepEvent?.id]);
 
   const selectOrderWorkflowStatus = async (targetStatus: OrderWorkflowStage) => {
     if (!selectedOrder?.id || selectedOrderIsCancelled) return;
@@ -3825,7 +3195,7 @@ function OrdersPageContent() {
                       selectedDateTimelineEvents.map((item) => {
                         const status = resolveCalendarEntryStatus(item.entry);
                         const isSelected = selectedOrder?.id === item.entry.order.id;
-                        const isDraggable = item.entry.kind === 'ORDER';
+                        const isDraggable = true;
                         const eventKey = `timeline-${calendarEntryBaseKey(item.entry)}`;
                         const eventLabel = resolveCalendarEntryGridLabel(item.entry);
                         const eventNote = formatOrderNoteLabel(item.entry.order.notes);
@@ -4017,11 +3387,10 @@ function OrdersPageContent() {
                             const eventLabel = resolveCalendarEntryCompactName(item.entry);
                             const eventNote = formatOrderNoteLabel(item.entry.order.notes);
                             const isSelected = selectedOrder?.id === item.entry.order.id;
-                            const isDraggable = item.entry.kind === 'ORDER';
-                            const eventKey =
-                              item.entry.kind === 'ORDER' && item.entry.order.id
-                                ? `week-order-${item.entry.order.id}`
-                                : `week-${calendarEntryBaseKey(item.entry)}`;
+                            const isDraggable = true;
+                            const eventKey = item.entry.order.id
+                              ? `week-order-${item.entry.order.id}`
+                              : `week-${calendarEntryBaseKey(item.entry)}`;
                             const isDragging = weekGridDragState?.eventKey === eventKey;
                             const isSourceGhost =
                               isDragging &&
@@ -4900,261 +4269,6 @@ function OrdersPageContent() {
             </div>
           </div>
 
-            </div>
-          </div>
-        </div>
-      ) : null}
-      {isMassPrepStockModalOpen && selectedMassPrepEvent ? (
-        <div className="order-detail-modal" role="presentation" onClick={closeMassPrepStockModal}>
-          <div
-            className="order-detail-modal__dialog"
-            ref={massPrepDialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={massPrepTitleId}
-            tabIndex={-1}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h2 id={massPrepTitleId} className="sr-only">
-              Saldo atual de estoque para fazer massa
-            </h2>
-            <button type="button" className="order-detail-modal__close" onClick={closeMassPrepStockModal}>
-              <AppIcon name="close" className="h-4 w-4" />
-              Fechar
-            </button>
-            <div className="app-panel order-detail-modal__panel grid gap-4">
-              <div className="rounded-2xl border border-white/70 bg-white/80 p-3">
-                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
-                  <div className="min-w-0 sm:flex-1">
-                    <ol className="order-workflow-strip">
-                      {MASS_PREP_EVENT_STATUSES.map((status, index) => {
-                        const stageMeta = massPrepWorkflowStatusMeta[status];
-                        const isCurrent = selectedMassPrepStatus === status;
-                        const isPassed = selectedMassPrepWorkflowIndex > index;
-                        const isConnectorActive = selectedMassPrepWorkflowIndex > index;
-
-                        return (
-                          <li key={status} className="order-workflow-strip__item">
-                            <div className="order-workflow-strip__step">
-                              <span
-                                className={`flex h-9 w-9 items-center justify-center rounded-full border ${
-                                  isCurrent
-                                    ? stageMeta.activeClassName
-                                    : isPassed
-                                      ? 'border-neutral-300 bg-neutral-100 text-neutral-700'
-                                      : 'border-neutral-200 bg-white text-neutral-400'
-                                }`}
-                              >
-                                {isCurrent ? (
-                                  <AppIcon name={stageMeta.icon} className="h-4 w-4" />
-                                ) : (
-                                  <span
-                                    className={`h-2.5 w-2.5 rounded-full ${
-                                      isPassed ? stageMeta.passedDotClassName : 'bg-neutral-300'
-                                    }`}
-                                  />
-                                )}
-                              </span>
-                              <span
-                                className={`mt-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${
-                                  isCurrent
-                                    ? 'text-neutral-800'
-                                    : isPassed
-                                      ? 'text-neutral-600'
-                                      : 'text-neutral-400'
-                                }`}
-                              >
-                                {stageMeta.label}
-                              </span>
-                            </div>
-                            {index < MASS_PREP_EVENT_STATUSES.length - 1 ? (
-                              <span
-                                className={`order-workflow-strip__connector mx-2 mt-4 h-[2px] w-10 shrink-0 rounded-full ${
-                                  isConnectorActive ? stageMeta.activeLineClassName : 'bg-neutral-200'
-                                }`}
-                              />
-                            ) : null}
-                          </li>
-                        );
-                      })}
-                    </ol>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <span
-                        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${massPrepStatusBadgeClass(selectedMassPrepStatus)}`}
-                      >
-                        {formatMassPrepStatus(selectedMassPrepStatus)}
-                      </span>
-                      {selectedMassPrepStatus === 'INGREDIENTES' ? (
-                        <span
-                          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${
-                            massPrepHasMissingForDraft
-                              ? 'border-rose-200 bg-rose-50 text-rose-700'
-                              : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                          }`}
-                        >
-                          {massPrepHasMissingForDraft ? 'Falta insumo' : 'Ingredientes ok'}
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
-                    <button
-                      type="button"
-                      className="app-button app-button-ghost flex-1 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none"
-                      onClick={() => {
-                        if (!selectedMassPrepPreviousWorkflowStatus) return;
-                        void updateSelectedMassPrepEventStatus(selectedMassPrepPreviousWorkflowStatus);
-                      }}
-                      disabled={
-                        isUpdatingMassPrepStatus ||
-                        isDeletingMassPrepEvent ||
-                        !selectedMassPrepPreviousWorkflowStatus
-                      }
-                      aria-label="Voltar etapa"
-                    >
-                      <AppIcon name="back" className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      className="app-button app-button-primary flex-1 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none"
-                      onClick={() => {
-                        if (!selectedMassPrepNextWorkflowStatus) return;
-                        void updateSelectedMassPrepEventStatus(selectedMassPrepNextWorkflowStatus);
-                      }}
-                      disabled={
-                        isUpdatingMassPrepStatus ||
-                        isDeletingMassPrepEvent ||
-                        !selectedMassPrepNextWorkflowStatus ||
-                        (selectedMassPrepNextWorkflowStatus === 'PREPARO' && massPrepHasMissingForDraft)
-                      }
-                      aria-label="Avancar etapa"
-                    >
-                      <AppIcon name="back" className="h-4 w-4 rotate-180" />
-                    </button>
-                    <button
-                      type="button"
-                      className="app-button app-button-danger w-full disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-                      onClick={() => {
-                        void removeSelectedMassPrepEvent();
-                      }}
-                      disabled={isDeletingMassPrepEvent || isUpdatingMassPrepStatus}
-                    >
-                      {isDeletingMassPrepEvent ? 'Excluindo...' : 'Excluir evento'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {massPrepStockLoading ? (
-                <p className="rounded-2xl border border-dashed border-neutral-200 bg-white/70 px-3 py-4 text-sm text-neutral-500">
-                  Carregando estoque...
-                </p>
-              ) : massPrepStockError ? (
-                <p className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-4 text-sm text-rose-700">
-                  {massPrepStockError}
-                </p>
-              ) : (
-                <div className="grid gap-3">
-                  <article className="mass-prep-ready-highlight">
-                    <h4 className="mass-prep-ready-highlight__title">MASSA PRONTA</h4>
-                    <p className="text-xs text-neutral-600">
-                      Padrao: 2 receitas = 42 broas. Se faltar insumo: 1 receita ={' '}
-                      {MASS_READY_BROAS_PER_RECIPE} broas.
-                    </p>
-                    <p className="text-xs text-neutral-600">
-                      Proxima: {massPrepDraftTargetRecipes} receita(s) ={' '}
-                      {massPrepDraftTargetRecipes * MASS_READY_BROAS_PER_RECIPE} broa(s).
-                    </p>
-                    <button
-                      type="button"
-                      className="app-button app-button-primary disabled:cursor-not-allowed disabled:opacity-60"
-                      onClick={() => {
-                        void prepareMassReadyFromIngredients();
-                      }}
-                      disabled={isPreparingMassReady || massPrepExecutableBatchRecipes <= 0}
-                    >
-                      {isPreparingMassReady
-                        ? 'Lançando...'
-                        : `MASSA PRONTA (+${massPrepDraftTargetRecipes})`}
-                    </button>
-                    <div className="mass-prep-ready-highlight__recipe-grid">
-                      {massPrepRecipeAvailabilityRows.map((row) => (
-                        <div
-                          key={`mass-prep-ingredient-recipe-${row.key}`}
-                          className={`mass-prep-ready-highlight__recipe-row ${
-                            row.missingForDraft > 0 ? 'mass-prep-ready-highlight__recipe-row--missing' : ''
-                          }`}
-                        >
-                          <span>{row.displayName}</span>
-                          <span>
-                            {row.requiredForDraft} {row.unit} / saldo {formatInventoryBalance(row.availableQty)}{' '}
-                            {row.ingredientCard?.unit || row.unit}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                    {massPrepPrepareError ? (
-                      <p className="mass-prep-ready-highlight__error">{massPrepPrepareError}</p>
-                    ) : null}
-                  </article>
-
-                  {massPrepIngredientCards.length === 0 ? (
-                    <p className="rounded-2xl border border-dashed border-neutral-200 bg-white/70 px-3 py-4 text-sm text-neutral-500">
-                      Sem ingredientes no estoque.
-                    </p>
-                  ) : null}
-
-                  <div className="mass-prep-stock-grid">
-                    {massPrepIngredientCards.map((card) => {
-                      const editValue =
-                        massPrepEditBalanceByItemId[card.itemId] ?? formatInventoryBalanceInput(card.balance);
-                      const itemError = massPrepEditErrorByItemId[card.itemId];
-                      const isSavingItem = massPrepSavingItemId === card.itemId;
-
-                      return (
-                        <article key={`mass-prep-stock-${card.itemId}`} className="mass-prep-stock-card">
-                          <p className="mass-prep-stock-card__category">{inventoryCategoryLabel(card.category)}</p>
-                          <h4 className="mass-prep-stock-card__name">{card.name}</h4>
-                          <p className="mass-prep-stock-card__balance">
-                            Saldo: {formatInventoryBalance(card.balance)} {card.unit}
-                          </p>
-                          <label className="mass-prep-stock-card__edit-label">
-                            Novo saldo ({card.unit})
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              className="app-input mass-prep-stock-card__input"
-                              value={editValue}
-                              onChange={(event) => {
-                                const nextValue = event.target.value;
-                                setMassPrepEditBalanceByItemId((current) => ({
-                                  ...current,
-                                  [card.itemId]: nextValue
-                                }));
-                                setMassPrepEditErrorByItemId((current) => ({
-                                  ...current,
-                                  [card.itemId]: ''
-                                }));
-                              }}
-                              onBlur={() => {
-                                void saveMassPrepItemBalance(card.itemId);
-                              }}
-                              onKeyDown={(event) => {
-                                if (event.key !== 'Enter') return;
-                                event.preventDefault();
-                                void saveMassPrepItemBalance(card.itemId);
-                              }}
-                              placeholder="0"
-                              disabled={isSavingItem}
-                            />
-                          </label>
-                          {itemError ? <p className="mass-prep-stock-card__error">{itemError}</p> : null}
-                        </article>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         </div>
