@@ -186,7 +186,7 @@ Ultima atualizacao: 2026-03-26
 - Resultado: o proxy `/api/internal` passou a devolver `Cache-Control: no-store` explicito e o `apiFetch` ganhou retry curto em falha de rede nos `GETs`, reduzindo o risco de o Safari ficar preso em `Load failed` ou em resposta operacional stale logo apos troca de deploy/auth.
 - Data: 2026-03-26
 - Ciclo executado: inspeção do payload real de `/api/internal/orders` e ajuste do proxy interno.
-- Resultado: o bridge interno deixou de repassar `content-encoding`/`etag` do upstream para corpos ja descomprimidos; isso corrige o `Load failed` de Safari ao carregar `Pedidos` depois da troca de auth/deploy.
+- Resultado: o bridge interno passou a reconstruir a resposta com corpo proprio e apenas headers seguros (`content-type` + `no-store`), sem herdar metadados HTTP do upstream; isso corrige o `Load failed` de Safari ao carregar `Pedidos` depois da troca de auth/deploy.
 - Data: 2026-03-25
 - Ciclo executado: `pnpm --filter @querobroapp/web build`, `pnpm --filter @querobroapp/web typecheck`
 - Resultado: `/dashboard` passou a operar com um unico contexto de periodo, com `Periodo total` na mesma regua de selecao de `24h/7d/30d`; o bloco consolidado duplicado saiu, o botao `Atualizar` foi removido e a troca de periodo agora se reflete automaticamente ao clicar.

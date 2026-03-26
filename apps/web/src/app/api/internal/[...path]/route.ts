@@ -4,21 +4,6 @@ import { resolveServerBridgeApiBaseUrl } from '@/lib/server-bridge-api-base-url'
 export const dynamic = 'force-dynamic';
 
 const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
-const HOP_BY_HOP_HEADERS = new Set([
-  'connection',
-  'content-encoding',
-  'content-length',
-  'etag',
-  'host',
-  'keep-alive',
-  'proxy-authenticate',
-  'proxy-authorization',
-  'te',
-  'trailer',
-  'transfer-encoding',
-  'upgrade'
-]);
-
 function buildErrorResponse(status: number, payload: unknown) {
   return NextResponse.json(payload, { status });
 }
@@ -84,15 +69,17 @@ async function proxyRequest(request: Request, context: { params: Promise<{ path:
   try {
     const upstreamResponse = await fetch(upstreamUrl, requestInit);
     const responseHeaders = new Headers();
-    upstreamResponse.headers.forEach((value, key) => {
-      if (HOP_BY_HOP_HEADERS.has(key.toLowerCase())) return;
-      responseHeaders.set(key, value);
-    });
+    const contentType = upstreamResponse.headers.get('content-type');
+    if (contentType) {
+      responseHeaders.set('content-type', contentType);
+    }
     responseHeaders.set('cache-control', 'private, no-cache, no-store, max-age=0, must-revalidate');
     responseHeaders.set('pragma', 'no-cache');
     responseHeaders.set('expires', '0');
 
-    return new NextResponse(upstreamResponse.body, {
+    const body = upstreamResponse.status === 204 ? null : Buffer.from(await upstreamResponse.arrayBuffer());
+
+    return new NextResponse(body, {
       status: upstreamResponse.status,
       headers: responseHeaders
     });
