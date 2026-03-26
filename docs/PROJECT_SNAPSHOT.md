@@ -235,6 +235,10 @@ Ultima atualizacao: 2026-03-26
 ## Atualizacoes recentes
 
 - Data: 2026-03-26
+- Ciclo executado: `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`
+- Resultado: o horario inicial do fluxo publico `/pedido` deixou de abrir `08:00` e passou a abrir `09:00`, usando a mesma regra compartilhada de disponibilidade para web e API.
+
+- Data: 2026-03-26
 - Ciclo executado: `pnpm --filter @querobroapp/web build`, criacao de `apps/web/public/meta-catalog.csv`, inspeção do Commerce Manager autenticado e download do feed manual atual do catalogo da Meta.
 - Resultado: ficou confirmado que o item `Caixa Sabores` do WhatsApp Business nao consome a arte do site automaticamente; o catalogo depende de um feed CSV manual da Meta. O repositorio passou a carregar um `meta-catalog.csv` publico com `image_link` novo para `QUEROBROA-S`, usando a arte vertical atual de `sabores-caixa.jpg`.
 
