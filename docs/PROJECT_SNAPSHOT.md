@@ -72,6 +72,7 @@ Ultima atualizacao: 2026-03-25
 - A navegacao operacional foi normalizada: o item principal antes chamado `Agenda` agora se chama `PEDIDOS`, e o menu passou a usar labels em caixa alta de forma consistente.
 - `Clientes` nao coleta mais nem exibe email em nenhuma superficie ativa; nas paginas internas a ficha pode ficar incompleta enquanto o atendimento evolui, e o `/pedido` publico manteve as travas de cadastro sem esse campo.
 - O dashboard operacional voltou a expor apenas o readiness do `Bridge Nubank Web`, sem trilhos paralelos de conciliacao PIX.
+- O fluxo de cupons agora registra tentativa invalida no backend com motivo (`sem cupons ativos`, `cupom inativo` ou `codigo nao encontrado`) e devolve mensagem explicita ao publico, para nao ficar ambiguo quando um cupom ainda nao foi cadastrado em producao.
 
 ## O que um usuario consegue fazer hoje
 

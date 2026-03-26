@@ -61,7 +61,7 @@ test('coupon management: CRUD interno e resolve publico', async (t) => {
     }
   });
 
-  assert.equal(invalidResolve.message, 'Cupom invalido ou inativo.');
+  assert.equal(invalidResolve.message, `Cupom ${created.code} esta inativo.`);
 
   const removed = await request(apiUrl, `/dashboard/coupons/${created.id}`, {
     method: 'DELETE',
@@ -69,6 +69,17 @@ test('coupon management: CRUD interno e resolve publico', async (t) => {
   });
 
   assert.deepEqual(removed, { ok: true });
+
+  const noActiveCoupons = await requestExpectError(apiUrl, '/dashboard/coupons/resolve', 400, {
+    method: 'POST',
+    headers: formToken ? { Authorization: `Bearer ${formToken}` } : undefined,
+    body: {
+      code: 'DEVA',
+      subtotal: 80
+    }
+  });
+
+  assert.equal(noActiveCoupons.message, 'Nenhum cupom ativo cadastrado no momento.');
 });
 
 test('customer-form preview aplica desconto do cupom no total e nas notas', async (t) => {

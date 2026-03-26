@@ -3,6 +3,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException
 } from '@nestjs/common';
 import {
@@ -644,6 +645,8 @@ type IntegrationRail = {
 
 @Injectable()
 export class DashboardService {
+  private readonly logger = new Logger(DashboardService.name);
+
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   private formatCouponRecord(coupon: {
@@ -765,12 +768,41 @@ export class DashboardService {
     }
     const coupon = await this.prisma.coupon.findFirst({
       where: {
-        code,
+        code
+      }
+    });
+    const activeCouponsCount = await this.prisma.coupon.count({
+      where: {
         active: true
       }
     });
     if (!coupon) {
-      throw new BadRequestException('Cupom invalido ou inativo.');
+      this.logger.warn(
+        JSON.stringify({
+          event: 'coupon_resolve_failed',
+          reason: activeCouponsCount > 0 ? 'CODE_NOT_FOUND' : 'NO_ACTIVE_COUPONS',
+          code,
+          subtotal: round2(data.subtotal),
+          activeCouponsCount
+        })
+      );
+      throw new BadRequestException(
+        activeCouponsCount > 0
+          ? `Cupom ${code} nao encontrado entre os cupons ativos.`
+          : 'Nenhum cupom ativo cadastrado no momento.'
+      );
+    }
+    if (!coupon.active) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'coupon_resolve_failed',
+          reason: 'COUPON_INACTIVE',
+          code,
+          subtotal: round2(data.subtotal),
+          activeCouponsCount
+        })
+      );
+      throw new BadRequestException(`Cupom ${code} esta inativo.`);
     }
     const subtotal = round2(data.subtotal);
     const discountAmount = round2((subtotal * round2(coupon.discountPct)) / 100);
