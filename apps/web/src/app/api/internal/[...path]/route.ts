@@ -6,7 +6,9 @@ export const dynamic = 'force-dynamic';
 const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
+  'content-encoding',
   'content-length',
+  'etag',
   'host',
   'keep-alive',
   'proxy-authenticate',
