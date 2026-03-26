@@ -12,6 +12,8 @@ import { getPublicAppOrigin } from '@/lib/public-site-config';
 
 const metadataBase = getPublicAppOrigin({ allowLocalFallback: process.env.NODE_ENV !== 'production' });
 
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   metadataBase: metadataBase ? new URL(metadataBase) : undefined,
   title: 'QUEROBROAPP',

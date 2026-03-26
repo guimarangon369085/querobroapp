@@ -4,6 +4,7 @@ import type { Coupon } from '@querobroapp/shared';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useFeedback } from '@/components/feedback-provider';
 import { formatCurrencyBR, formatDecimalInputBR, parseLocaleNumber } from '@/lib/format';
+import { apiFetch } from '@/lib/api';
 
 type DashboardTrafficSummary = {
   windowLabel: string;
@@ -338,30 +339,6 @@ function buildCouponDraft(coupon?: Pick<Coupon, 'code' | 'discountPct' | 'active
   };
 }
 
-async function parseJsonResponse<T>(response: Response) {
-  const raw = await response.text();
-  let payload: unknown = null;
-
-  try {
-    payload = raw ? JSON.parse(raw) : null;
-  } catch {
-    payload = raw ? { message: raw } : null;
-  }
-
-  if (!response.ok) {
-    const message =
-      payload &&
-      typeof payload === 'object' &&
-      'message' in payload &&
-      typeof (payload as { message?: unknown }).message === 'string'
-        ? (payload as { message: string }).message
-        : 'Nao foi possivel concluir a operacao.';
-    throw new Error(message);
-  }
-
-  return payload as T;
-}
-
 function MetricCard({
   label,
   value,
@@ -562,10 +539,9 @@ export default function DashboardScreen() {
       }
 
       try {
-        const response = await fetch('/api/dashboard-coupons', {
+        const payload = await apiFetch<Coupon[]>('/dashboard/coupons', {
           cache: 'no-store'
         });
-        const payload = await parseJsonResponse<Coupon[]>(response);
         const normalizedCoupons = Array.isArray(payload) ? payload : [];
         setCoupons(normalizedCoupons);
         setCouponDrafts(
@@ -590,14 +566,11 @@ export default function DashboardScreen() {
       }
 
       try {
-        const params = new URLSearchParams();
-        if (selectedPeriod !== 'all') {
-          params.set('days', String(selectedPeriod));
-        }
-        const response = await fetch(`/api/dashboard-summary${params.size ? `?${params.toString()}` : ''}`, {
+        const path =
+          selectedPeriod !== 'all' ? `/dashboard/summary?days=${encodeURIComponent(String(selectedPeriod))}` : '/dashboard/summary';
+        const payload = await apiFetch<DashboardSummary>(path, {
           cache: 'no-store'
         });
-        const payload = await parseJsonResponse<DashboardSummary>(response);
         setSummary(payload);
         setError(null);
       } catch (loadError) {
@@ -818,21 +791,14 @@ export default function DashboardScreen() {
         throw new Error('Informe um desconto entre 0 e 100.');
       }
 
-      const requestInit: RequestInit = {
+      return apiFetch<Coupon>(input.id ? `/dashboard/coupons/${input.id}` : '/dashboard/coupons', {
         method: input.id ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           code,
           discountPct,
           active: Boolean(input.draft.active)
         })
-      };
-
-      const response = await fetch(
-        input.id ? `/api/dashboard-coupons/${input.id}` : '/api/dashboard-coupons',
-        requestInit
-      );
-      return parseJsonResponse<Coupon>(response);
+      });
     },
     []
   );
@@ -884,10 +850,9 @@ export default function DashboardScreen() {
     async (id: number) => {
       try {
         setCouponDeletingId(id);
-        const response = await fetch(`/api/dashboard-coupons/${id}`, {
+        await apiFetch<{ ok: boolean }>(`/dashboard/coupons/${id}`, {
           method: 'DELETE'
         });
-        await parseJsonResponse<{ ok: boolean }>(response);
         setCoupons((current) => current.filter((entry) => entry.id !== id));
         setCouponDrafts((current) => {
           const next = { ...current };

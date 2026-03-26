@@ -30,76 +30,48 @@ function extractBearerToken(authHeader?: string | null) {
 export class DashboardController {
   constructor(@Inject(DashboardService) private readonly service: DashboardService) {}
 
-  private assertDashboardAccess(authorization?: string | null, explicitToken?: string | null) {
+  private assertCouponResolveAccess(authorization?: string | null, explicitToken?: string | null) {
     const configuredToken =
-      String(process.env.DASHBOARD_BRIDGE_TOKEN || '').trim() ||
-      String(process.env.ORDER_FORM_BRIDGE_TOKEN || '').trim();
+      String(process.env.ORDER_FORM_BRIDGE_TOKEN || '').trim() ||
+      String(process.env.DASHBOARD_BRIDGE_TOKEN || '').trim();
     const providedToken = String(explicitToken || '').trim() || extractBearerToken(authorization);
 
     if (configuredToken) {
       if (providedToken === configuredToken) return;
-      throw new UnauthorizedException('Token do bridge de dashboard invalido.');
+      throw new UnauthorizedException('Token do bridge de cupom invalido.');
     }
 
-    if ((process.env.NODE_ENV || 'development') === 'production' || getSecurityRuntimeConfig().enabled) {
-      throw new UnauthorizedException(
-        'DASHBOARD_BRIDGE_TOKEN ou ORDER_FORM_BRIDGE_TOKEN obrigatorio para expor o dashboard.'
-      );
+    if ((process.env.NODE_ENV || 'development') !== 'production' && !getSecurityRuntimeConfig().enabled) {
+      return;
     }
+
+    throw new UnauthorizedException(
+      'ORDER_FORM_BRIDGE_TOKEN ou DASHBOARD_BRIDGE_TOKEN obrigatorio para expor a validacao publica de cupons.'
+    );
   }
 
-  @Public()
   @Get('summary')
-  summary(
-    @Headers('authorization') authorization?: string,
-    @Headers('x-dashboard-token') dashboardToken?: string,
-    @Query('days') days?: string
-  ) {
-    this.assertDashboardAccess(authorization, dashboardToken);
+  summary(@Query('days') days?: string) {
     return this.service.getSummary({ days });
   }
 
-  @Public()
   @Get('coupons')
-  listCoupons(
-    @Headers('authorization') authorization?: string,
-    @Headers('x-dashboard-token') dashboardToken?: string
-  ) {
-    this.assertDashboardAccess(authorization, dashboardToken);
+  listCoupons() {
     return this.service.listCoupons();
   }
 
-  @Public()
   @Post('coupons')
-  createCoupon(
-    @Body() body: unknown,
-    @Headers('authorization') authorization?: string,
-    @Headers('x-dashboard-token') dashboardToken?: string
-  ) {
-    this.assertDashboardAccess(authorization, dashboardToken);
+  createCoupon(@Body() body: unknown) {
     return this.service.createCoupon(body);
   }
 
-  @Public()
   @Put('coupons/:id')
-  updateCoupon(
-    @Param('id') id: string,
-    @Body() body: unknown,
-    @Headers('authorization') authorization?: string,
-    @Headers('x-dashboard-token') dashboardToken?: string
-  ) {
-    this.assertDashboardAccess(authorization, dashboardToken);
+  updateCoupon(@Param('id') id: string, @Body() body: unknown) {
     return this.service.updateCoupon(parseWithSchema(idSchema, id), body);
   }
 
-  @Public()
   @Delete('coupons/:id')
-  async removeCoupon(
-    @Param('id') id: string,
-    @Headers('authorization') authorization?: string,
-    @Headers('x-dashboard-token') dashboardToken?: string
-  ) {
-    this.assertDashboardAccess(authorization, dashboardToken);
+  async removeCoupon(@Param('id') id: string) {
     await this.service.removeCoupon(parseWithSchema(idSchema, id));
     return { ok: true };
   }
@@ -111,7 +83,7 @@ export class DashboardController {
     @Headers('authorization') authorization?: string,
     @Headers('x-order-form-token') formToken?: string
   ) {
-    this.assertDashboardAccess(authorization, formToken);
+    this.assertCouponResolveAccess(authorization, formToken);
     return this.service.resolveCoupon(body);
   }
 }

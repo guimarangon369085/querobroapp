@@ -1,7 +1,7 @@
-import { devDefaultBaseUrl, getApiBaseUrl } from '@/lib/api-base-url';
+import { devDefaultBaseUrl, getInternalApiBaseUrl } from '@/lib/api-base-url';
 
 function toAbsoluteUrl(path: string) {
-  const baseUrl = getApiBaseUrl();
+  const baseUrl = getInternalApiBaseUrl();
   if (/^https?:\/\//i.test(path)) return path;
   if (path.startsWith('/')) return `${baseUrl}${path}`;
   return `${baseUrl}/${path}`;

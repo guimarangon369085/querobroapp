@@ -1,6 +1,5 @@
 import {
   isLoopbackHost,
-  isOpsOrLoopbackHost,
   normalizeHost,
   resolveRequestHostFromHeaders
 } from '@/lib/public-site-config';
@@ -49,12 +48,4 @@ export function isTrustedSameOriginBridgeRequest(request: Request) {
 
   const isProduction = (process.env.NODE_ENV || 'development') === 'production';
   return !isProduction && isLoopbackHost(requestHost);
-}
-
-export function isTrustedDashboardBridgeRequest(request: Request) {
-  const requestHost = resolveRequestHost(request);
-  if (!isOpsOrLoopbackHost(requestHost)) {
-    return false;
-  }
-  return isTrustedSameOriginBridgeRequest(request);
 }

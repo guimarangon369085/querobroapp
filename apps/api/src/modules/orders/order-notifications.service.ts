@@ -111,6 +111,14 @@ export class OrderNotificationsService {
     return mode === 'PICKUP' ? 'Retirada' : 'Entrega';
   }
 
+  private compactCustomerName(value?: string | null) {
+    const parts = String(value || '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    return parts[0] || 'Cliente';
+  }
+
   private formatDeliveryLabel(order: OrderAlertOrder) {
     if (order.fulfillmentMode === 'PICKUP') return 'Frete: retirado no local';
     const provider = String(order.deliveryProvider || '').trim();
@@ -158,18 +166,13 @@ export class OrderNotificationsService {
     const lines = [
       `Novo pedido #${orderNumber}`,
       `${this.formatChannel(intake.channel)} | ${this.formatMode(order.fulfillmentMode)}`,
-      `Cliente: ${order.customer.name.trim()}`,
+      `Cliente: ${this.compactCustomerName(order.customer.name)}`,
       flavorSummary ? `Sabores: ${flavorSummary}` : null,
-      order.customer.phone ? `Telefone: ${order.customer.phone}` : null,
       `Agendamento: ${this.formatScheduledAt(order.scheduledAt)}`,
-      order.fulfillmentMode === 'DELIVERY'
-        ? `Destino: ${order.customer.address?.trim() || 'Endereco nao informado'}`
-        : 'Retirada: Alameda Jau, 731',
+      order.fulfillmentMode === 'DELIVERY' ? 'Modo: entrega' : 'Modo: retirada',
       this.formatDeliveryLabel(order),
       `Total: ${this.formatMoney(order.total)}`,
       `PIX: ${intake.pixStatus === 'PAGO' ? 'pago' : 'pendente'}`,
-      order.notes?.trim() ? `Obs pedido: ${order.notes.trim()}` : null,
-      order.customer.deliveryNotes?.trim() ? `Obs entrega: ${order.customer.deliveryNotes.trim()}` : null,
       '',
       `Abrir operacao: ${operationsUrl}`
     ];

@@ -112,48 +112,48 @@ export class OrdersController {
     return this.service.getPublicScheduleAvailability(scheduledAt ?? null);
   }
 
-  @Get(':id/pix-charge')
+  @Get(':id(\\d+)/pix-charge')
   pixCharge(@Param('id') id: string) {
     return this.service.getPixCharge(parseWithSchema(idSchema, id));
   }
 
-  @Get(':id')
+  @Get(':id(\\d+)')
   get(@Param('id') id: string) {
     return this.service.get(parseWithSchema(idSchema, id));
   }
 
-  @Put(':id')
+  @Put(':id(\\d+)')
   update(@Param('id') id: string, @Body() body: unknown) {
     return this.service.update(parseWithSchema(idSchema, id), body);
   }
 
-  @Delete(':id')
+  @Delete(':id(\\d+)')
   async remove(@Param('id') id: string) {
     await this.service.remove(parseWithSchema(idSchema, id));
     return { ok: true };
   }
 
-  @Post(':id/items')
+  @Post(':id(\\d+)/items')
   addItem(@Param('id') id: string, @Body() body: unknown) {
     return this.service.addItem(parseWithSchema(idSchema, id), body);
   }
 
-  @Put(':id/items')
+  @Put(':id(\\d+)/items')
   replaceItems(@Param('id') id: string, @Body() body: unknown) {
     return this.service.replaceItems(parseWithSchema(idSchema, id), body);
   }
 
-  @Delete(':id/items/:itemId')
+  @Delete(':id(\\d+)/items/:itemId(\\d+)')
   removeItem(@Param('id') id: string, @Param('itemId') itemId: string) {
     return this.service.removeItem(parseWithSchema(idSchema, id), parseWithSchema(idSchema, itemId));
   }
 
-  @Patch(':id/status')
+  @Patch(':id(\\d+)/status')
   updateStatus(@Param('id') id: string, @Body() body: { status?: string }) {
     return this.service.updateStatus(parseWithSchema(idSchema, id), body?.status);
   }
 
-  @Patch(':id/mark-paid')
+  @Patch(':id(\\d+)/mark-paid')
   markPaid(@Param('id') id: string, @Body() body: unknown) {
     return this.service.markPaid(parseWithSchema(idSchema, id), body);
   }
