@@ -232,6 +232,12 @@ Ultima atualizacao: 2026-03-26
 8. O dashboard ainda faz leituras pesadas e pode pedir agregacao/caching dedicado antes do go-live pleno.
 9. O alerta imediato de novo pedido agora suporta `ntfy`, mas o iPhone ainda precisa assinar o topico configurado para comecar a receber os pushes.
 
+## Atualizacoes recentes
+
+- Data: 2026-03-26
+- Ciclo executado: `pnpm --filter @querobroapp/web build`, criacao de `apps/web/public/meta-catalog.csv`, inspeção do Commerce Manager autenticado e download do feed manual atual do catalogo da Meta.
+- Resultado: ficou confirmado que o item `Caixa Sabores` do WhatsApp Business nao consome a arte do site automaticamente; o catalogo depende de um feed CSV manual da Meta. O repositorio passou a carregar um `meta-catalog.csv` publico com `image_link` novo para `QUEROBROA-S`, usando a arte vertical atual de `sabores-caixa.jpg`.
+
 ## Como religar e validar rapido
 
 1. `./scripts/stop-all.sh`
