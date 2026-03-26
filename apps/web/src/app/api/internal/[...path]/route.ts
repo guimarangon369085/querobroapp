@@ -86,6 +86,9 @@ async function proxyRequest(request: Request, context: { params: Promise<{ path:
       if (HOP_BY_HOP_HEADERS.has(key.toLowerCase())) return;
       responseHeaders.set(key, value);
     });
+    responseHeaders.set('cache-control', 'private, no-cache, no-store, max-age=0, must-revalidate');
+    responseHeaders.set('pragma', 'no-cache');
+    responseHeaders.set('expires', '0');
 
     return new NextResponse(upstreamResponse.body, {
       status: upstreamResponse.status,

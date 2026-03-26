@@ -1,5 +1,9 @@
 import { devDefaultBaseUrl, getInternalApiBaseUrl } from '@/lib/api-base-url';
 
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function toAbsoluteUrl(path: string) {
   const baseUrl = getInternalApiBaseUrl();
   if (/^https?:\/\//i.test(path)) return path;
@@ -44,6 +48,7 @@ function extractErrorMessage(body: unknown) {
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const url = toAbsoluteUrl(path);
   const method = (options?.method || 'GET').toUpperCase();
+  const canRetryNetworkError = method === 'GET' || method === 'HEAD';
   const headers = new Headers(options?.headers || undefined);
   const body = options?.body;
   const hasExplicitContentType = headers.has('Content-Type');
@@ -60,17 +65,33 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
     headers.set('Content-Type', 'application/json');
   }
 
+  const requestInit: RequestInit = {
+    ...options,
+    headers,
+    cache: options?.cache ?? 'no-store'
+  };
+
   let res: Response;
   try {
-    res = await fetch(url, {
-      ...options,
-      headers
-    });
+    res = await fetch(url, requestInit);
   } catch (error) {
-    const reason = error instanceof Error ? error.message : 'unknown error';
-    throw new Error(
-      `[apiFetch] ${method} ${url} failed to fetch (${reason}). Dicas: API offline em ${devDefaultBaseUrl} ou bloqueio de CORS.`
-    );
+    if (!canRetryNetworkError) {
+      const reason = error instanceof Error ? error.message : 'unknown error';
+      throw new Error(
+        `[apiFetch] ${method} ${url} failed to fetch (${reason}). Dicas: API offline em ${devDefaultBaseUrl} ou bloqueio de CORS.`
+      );
+    }
+
+    await wait(250);
+
+    try {
+      res = await fetch(url, requestInit);
+    } catch (retryError) {
+      const reason = retryError instanceof Error ? retryError.message : 'unknown error';
+      throw new Error(
+        `[apiFetch] ${method} ${url} failed to fetch (${reason}). Dicas: API offline em ${devDefaultBaseUrl} ou bloqueio de CORS.`
+      );
+    }
   }
 
   if (!res.ok) {

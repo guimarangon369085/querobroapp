@@ -181,6 +181,9 @@ Ultima atualizacao: 2026-03-26
 - Data: 2026-03-26
 - Ciclo executado: `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, probes HTTP anonimos/autenticados em `querobroa.com.br` e `api.querobroa.com.br`, deploy Railway da API com auth ligada.
 - Resultado: bridges dedicados de dashboard/cupom foram removidos, o web interno passou a usar `/api/internal` com token server-to-server, a API operacional fechou leituras anonimas com `401`, `mass-prep-events` saiu do roteamento real e o build da API passou a limpar `dist` antes do `tsc`; o prompt de Basic Auth do navegador foi revertido em seguida para devolver acesso publico as telas internas.
+- Data: 2026-03-26
+- Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, probes em `/pedidos` e `/api/internal/orders` apos o revert do Basic Auth.
+- Resultado: o proxy `/api/internal` passou a devolver `Cache-Control: no-store` explicito e o `apiFetch` ganhou retry curto em falha de rede nos `GETs`, reduzindo o risco de o Safari ficar preso em `Load failed` ou em resposta operacional stale logo apos troca de deploy/auth.
 - Data: 2026-03-25
 - Ciclo executado: `pnpm --filter @querobroapp/web build`, `pnpm --filter @querobroapp/web typecheck`
 - Resultado: `/dashboard` passou a operar com um unico contexto de periodo, com `Periodo total` na mesma regua de selecao de `24h/7d/30d`; o bloco consolidado duplicado saiu, o botao `Atualizar` foi removido e a troca de periodo agora se reflete automaticamente ao clicar.
