@@ -48,6 +48,7 @@ Ultima atualizacao: 2026-03-26
 - `/pedido` agora deixa explicito antes do submit que pedido novo nao entra para hoje, mostrando o primeiro horario disponivel na propria area de agendamento e no resumo lateral.
 - A `Caixa Sabores` de `/pedido` agora mostra uma composicao com as 5 artes oficiais dos sabores no mesmo envelope visual da imagem anterior.
 - A composicao de `Caixa Sabores` agora foi centralizada em arte compartilhada de 5 colunas, evitando que `/pedido` e outros pontos do web recaiam no JPG legado `sabores-caixa.jpg` por fallback generico.
+- O asset publico `sabores-caixa.jpg` tambem foi atualizado para a mesma composicao vertical full bleed de 5 colunas, alinhando site e catalogos que consumam essa imagem estatica.
 - O autocomplete de endereco em `/pedido` e `/clientes` saiu do widget legado `google.maps.places.Autocomplete` e passou para a API nova programatica do Google Places, preservando os inputs atuais e eliminando o warning de deprecacao no console.
 - A linha de quantidade dos cards de caixas em `/pedido` saiu do grid aninhado fragil e passou a usar miolo flexivel com container query por card, evitando que o selo `0 caixas` seja esmagado entre input e botao `+` em Safari/desktop.
 - O bloco `Entrega ou retirada` de `/pedido` agora responde ao tamanho real do painel via container query, sem voltar a colapsar `Endereco/Data/Horario` em Chrome/desktop ou em larguras intermediarias.
