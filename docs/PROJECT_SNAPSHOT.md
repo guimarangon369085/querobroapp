@@ -26,7 +26,7 @@ Ultima atualizacao: 2026-03-26
 - `/pedido`, `quick create` e a logica de caixas em `Pedidos` passaram a compartilhar o mesmo catalogo de caixas/sabores e as mesmas imagens originais da marca.
 - A automacao local `scripts/nubank-pix-bridge.mjs` segue como unico trilho ativo para baixa PIX automatica, lendo o webapp autenticado do Nubank PJ no Chrome e delegando o matching seguro ao backend.
 - O repo tambem inclui instalador de `launchd` para esse bridge (`bank:pix:bridge:install`), permitindo deixar a conciliacao rodando em segundo plano no Mac operacional.
-- As superficies internas do web (`/dashboard`, `/pedidos`, `/clientes`, `/estoque` e proxy `/api/internal`) agora exigem autenticacao HTTP Basic no edge, enquanto `/`, `/pedido` e `/pedidofinalizado` permanecem publicos.
+- As superficies internas do web voltaram a abrir sem prompt de navegador; o endurecimento ficou concentrado na API direta e no proxy server-to-server do app.
 - A API agora roda com `APP_AUTH_ENABLED=true` em producao; leituras operacionais anonimas como `/orders`, `/customers`, `/payments`, `/dashboard/summary` e `/runtime-config` passaram a responder `401`.
 - O tema publico do builder/home passou a ser servido por `/api/runtime-theme`, que usa token server-to-server sem reabrir `runtime-config` completo ao navegador.
 - Os alertas de `ntfy` foram saneados para nao carregar telefone, endereco completo nem observacoes do cliente; o texto operacional ficou reduzido a nome curto, sabores, agenda, modo, frete, total, PIX e link interno.
@@ -180,7 +180,7 @@ Ultima atualizacao: 2026-03-26
 - Resultado: o `/dashboard` passou a ignorar falhas transitórias de refresh quando já existem dados carregados, evitando o banner bloqueante `Service Unavailable` sobre métricas já resolvidas ao trocar o período.
 - Data: 2026-03-26
 - Ciclo executado: `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, probes HTTP anonimos/autenticados em `querobroa.com.br` e `api.querobroa.com.br`, deploy Railway da API com auth ligada.
-- Resultado: bridges dedicados de dashboard/cupom foram removidos, o web interno passou a usar `/api/internal` com token server-to-server, `dashboard/pedidos` ficaram bloqueados por Basic Auth, a API operacional fechou leituras anonimas com `401`, `mass-prep-events` saiu do roteamento real e o build da API passou a limpar `dist` antes do `tsc`.
+- Resultado: bridges dedicados de dashboard/cupom foram removidos, o web interno passou a usar `/api/internal` com token server-to-server, a API operacional fechou leituras anonimas com `401`, `mass-prep-events` saiu do roteamento real e o build da API passou a limpar `dist` antes do `tsc`; o prompt de Basic Auth do navegador foi revertido em seguida para devolver acesso publico as telas internas.
 - Data: 2026-03-25
 - Ciclo executado: `pnpm --filter @querobroapp/web build`, `pnpm --filter @querobroapp/web typecheck`
 - Resultado: `/dashboard` passou a operar com um unico contexto de periodo, com `Periodo total` na mesma regua de selecao de `24h/7d/30d`; o bloco consolidado duplicado saiu, o botao `Atualizar` foi removido e a troca de periodo agora se reflete automaticamente ao clicar.
