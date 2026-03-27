@@ -1450,12 +1450,12 @@ export function PublicOrderPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(227,212,181,0.42),transparent_32%),radial-gradient(circle_at_top_right,rgba(198,219,210,0.46),transparent_28%),linear-gradient(180deg,#f7efe4_0%,#f3e9dc_100%)]">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(234,223,200,0.5),transparent_34%),radial-gradient(circle_at_top_right,rgba(210,228,219,0.54),transparent_30%),linear-gradient(180deg,#fbf4ea_0%,#f7efe3_100%)]">
       <div className="mx-auto w-full max-w-[1720px] px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:py-8 xl:px-10 2xl:px-12">
         <section className="public-order-layout">
           <form
             autoComplete="on"
-            className="grid gap-4 rounded-[26px] border border-[rgba(126,79,45,0.1)] bg-[rgb(255,252,248)] p-4 shadow-[0_22px_60px_rgba(70,44,26,0.12)] sm:gap-5 sm:rounded-[32px] sm:p-6 sm:shadow-[0_26px_90px_rgba(70,44,26,0.12)] xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:shadow-none"
+            className="grid gap-4 rounded-[26px] border border-[rgba(126,79,45,0.1)] bg-[rgb(255,253,250)] p-4 shadow-[0_22px_60px_rgba(70,44,26,0.1)] sm:gap-5 sm:rounded-[32px] sm:p-6 sm:shadow-[0_26px_90px_rgba(70,44,26,0.1)] xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:shadow-none"
             onSubmit={onSubmit}
             ref={orderFormRef}
           >

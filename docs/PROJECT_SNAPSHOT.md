@@ -4,6 +4,8 @@ Ultima atualizacao: 2026-03-27
 
 ## Estado atual
 
+- 2026-03-27: `/pedidos` deixou de renderizar qualquer card intermediario entre o calendario e a secao `PEDIDOS`; o bloco de overflow do dia foi removido e o fluxo visual agora segue direto para `Resumo do dia` e lista. No mesmo ciclo, a paleta oficial do web foi levemente iluminada, com tons e gradientes mais brilhantes em `globals.css`, ícones, dashboard, `/pedido`, `/pedido/feito` e cards de caixas, preservando a mesma família cromática e hierarquia.
+
 - 2026-03-27: a identidade visual do web foi reancorada na paleta oficial da QUEROBROA para superficies internas e publicas. `globals.css` passou a centralizar tokens em creme, blush, sálvia, dourado, oliva e tostado; dashboard, pedidos, clientes, `/pedido`, `/pedido/feito`, cards de caixas e ícones foram harmonizados para operar na mesma família cromática, preservando contraste, hierarquia e gradientes suaves.
 
 - 2026-03-27: `/pedidos` removeu o card solto acima do calendario e levou o `Novo pedido` para o toolbar em mobile. O `Resumo do dia` agora reordena clientes com pedidos pendentes no topo e muda o tom do card conforme o progresso (`a fazer`, `parcial`, `pronto`).

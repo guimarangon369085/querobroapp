@@ -2282,13 +2282,6 @@ function OrdersPageContent() {
       return endMinutes > dayGridStartMinutes && startMinutes < dayGridEndMinutes;
     });
   }, [dayGridEndMinutes, dayGridStartMinutes, selectedDateEntries]);
-  const selectedDateOverflowEntries = useMemo(() => {
-    return selectedDateEntries.filter((entry) => {
-      const startMinutes = minutesIntoDay(entry.productionStartAt);
-      const endMinutes = startMinutes + entry.durationMinutes;
-      return !(endMinutes > dayGridStartMinutes && startMinutes < dayGridEndMinutes);
-    });
-  }, [dayGridEndMinutes, dayGridStartMinutes, selectedDateEntries]);
   const selectedDateTimelineEvents = useMemo(() => {
     const pixelsPerMinute = dayGridHeight / dayGridDurationMinutes;
     const minCardHeight = Math.max(Math.round(dayGridSnapMinutes * pixelsPerMinute), 42);
@@ -3887,44 +3880,6 @@ function OrdersPageContent() {
                     )}
                   </div>
                 </div>
-                {selectedDateOverflowEntries.length > 0 ? (
-                  <div className="orders-day-timeline__overflow">
-                    <div className="orders-day-timeline__overflow-list">
-                      {selectedDateOverflowEntries.map((entry) => {
-                        const entryNote = formatOrderNoteLabel(entry.order.notes);
-                        return (
-                          <button
-                            type="button"
-                            key={`overflow-${calendarEntryBaseKey(entry)}`}
-                            className={`orders-day-timeline__event ${
-                              selectedOrder?.id === entry.order.id
-                                ? `ring-2 ring-offset-1 ${calendarStatusRingClass(resolveCalendarEntryStatus(entry))}`
-                                : ''
-                            }`}
-                            style={calendarStatusEventSurfaceStyle(resolveCalendarEntryStatus(entry))}
-                            onClick={() => openCalendarEntry(entry)}
-                          >
-                            <div className="flex items-center gap-2">
-                              <span
-                                className={`orders-calendar-chip__dot ${calendarStatusDotClass(resolveCalendarEntryStatus(entry))}`}
-                                aria-hidden="true"
-                              />
-                              <span className="orders-day-timeline__event-title">
-                                {resolveCalendarEntryCompactName(entry)}
-                              </span>
-                            </div>
-                            {entryNote ? (
-                              <span className="orders-day-timeline__event-note">{entryNote}</span>
-                            ) : null}
-                            <span className="orders-day-timeline__event-meta">
-                              {formatCalendarEntryTimeRangeLabel(entry)}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : null}
               </div>
             ) : calendarView === 'WEEK' ? (
               <div className="orders-week-grid">

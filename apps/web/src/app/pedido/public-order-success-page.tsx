@@ -76,9 +76,9 @@ export function PublicOrderSuccessPage() {
   const { intake, order, productSubtotal } = successPayload;
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(227,212,181,0.42),transparent_32%),radial-gradient(circle_at_top_right,rgba(198,219,210,0.46),transparent_28%),linear-gradient(180deg,#f7efe4_0%,#f3e9dc_100%)]">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(234,223,200,0.5),transparent_34%),radial-gradient(circle_at_top_right,rgba(210,228,219,0.54),transparent_30%),linear-gradient(180deg,#fbf4ea_0%,#f7efe3_100%)]">
       <div className="mx-auto flex min-h-screen w-full max-w-[920px] items-center justify-center px-4 py-8 sm:px-6 sm:py-10 lg:px-8">
-        <section className="w-full overflow-hidden rounded-[24px] border border-[color:var(--tone-sage-line)] bg-[linear-gradient(165deg,rgba(245,250,247,0.98),rgba(233,242,237,0.92))] p-4 shadow-[0_18px_40px_rgba(84,99,90,0.12)] sm:rounded-[30px] sm:p-6 sm:shadow-[0_26px_80px_rgba(84,99,90,0.12)]">
+        <section className="w-full overflow-hidden rounded-[24px] border border-[color:var(--tone-sage-line)] bg-[linear-gradient(165deg,rgba(250,253,251,0.99),rgba(239,247,242,0.95))] p-4 shadow-[0_18px_40px_rgba(84,99,90,0.1)] sm:rounded-[30px] sm:p-6 sm:shadow-[0_26px_80px_rgba(84,99,90,0.1)]">
           <div>
             <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-[color:var(--tone-sage-ink)]">Pedido recebido</p>
             <h1 className="mt-1.5 text-[1.55rem] font-semibold text-[color:var(--ink-strong)] sm:mt-2 sm:text-3xl">

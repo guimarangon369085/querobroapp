@@ -16,16 +16,16 @@ type IconProps = {
   className?: string;
 };
 
-const ICON_OUTLINE = '#6b4330';
-const ICON_HIGHLIGHT = '#fff9f2';
-const ICON_CREAM = '#f3e5cf';
-const ICON_BLUSH = '#eed5cf';
-const ICON_SAGE = '#dce9e2';
-const ICON_GOLD = '#d6b485';
-const ICON_OLIVE = '#d8d3b9';
-const ICON_WHITE = '#fffdf8';
-const ICON_TERRACOTTA = '#c18a78';
-const ICON_ROAST = '#8f604f';
+const ICON_OUTLINE = '#734938';
+const ICON_HIGHLIGHT = '#fffcf7';
+const ICON_CREAM = '#f7ead7';
+const ICON_BLUSH = '#f3ddd7';
+const ICON_SAGE = '#e3efe8';
+const ICON_GOLD = '#e0bf90';
+const ICON_OLIVE = '#e2dcc0';
+const ICON_WHITE = '#fffefb';
+const ICON_TERRACOTTA = '#cc937e';
+const ICON_ROAST = '#9a6756';
 
 const iconStroke = {
   stroke: ICON_OUTLINE,

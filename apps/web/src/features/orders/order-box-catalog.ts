@@ -210,7 +210,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 7 broas tradicionais',
     art: ORDER_FLAVOR_CARD_ART_BY_CODE.T,
     accentClassName:
-      'border-[color:var(--tone-cream-line)] bg-[linear-gradient(165deg,var(--tone-cream-surface),rgba(255,250,244,0.96))]',
+      'border-[color:var(--tone-cream-line)] bg-[linear-gradient(165deg,var(--tone-cream-surface),rgba(255,253,249,0.98))]',
     units: { T: 7, G: 0, D: 0, Q: 0, R: 0, RJ: 0 },
     priceEstimate: 40
   },
@@ -220,7 +220,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 7 broas de goiabada',
     art: ORDER_FLAVOR_CARD_ART_BY_CODE.G,
     accentClassName:
-      'border-[color:var(--tone-blush-line)] bg-[linear-gradient(165deg,var(--tone-blush-surface),rgba(255,248,246,0.96))]',
+      'border-[color:var(--tone-blush-line)] bg-[linear-gradient(165deg,var(--tone-blush-surface),rgba(255,250,248,0.98))]',
     units: { T: 0, G: 7, D: 0, Q: 0, R: 0, RJ: 0 },
     priceEstimate: 50
   },
@@ -230,7 +230,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 7 broas de doce de leite',
     art: ORDER_FLAVOR_CARD_ART_BY_CODE.D,
     accentClassName:
-      'border-[color:var(--tone-gold-line)] bg-[linear-gradient(165deg,var(--tone-gold-surface),rgba(255,249,242,0.96))]',
+      'border-[color:var(--tone-gold-line)] bg-[linear-gradient(165deg,var(--tone-gold-surface),rgba(255,251,246,0.98))]',
     units: { T: 0, G: 0, D: 7, Q: 0, R: 0, RJ: 0 },
     priceEstimate: 52
   },
@@ -240,7 +240,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 7 broas de queijo do serro',
     art: ORDER_FLAVOR_CARD_ART_BY_CODE.Q,
     accentClassName:
-      'border-[color:var(--tone-sage-line)] bg-[linear-gradient(165deg,var(--tone-sage-surface),rgba(250,252,250,0.95))]',
+      'border-[color:var(--tone-sage-line)] bg-[linear-gradient(165deg,var(--tone-sage-surface),rgba(252,254,252,0.97))]',
     units: { T: 0, G: 0, D: 0, Q: 7, R: 0, RJ: 0 },
     priceEstimate: 52
   },
@@ -250,7 +250,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 7 broas de requeijão de corte',
     art: ORDER_FLAVOR_CARD_ART_BY_CODE.R,
     accentClassName:
-      'border-[color:var(--tone-olive-line)] bg-[linear-gradient(165deg,var(--tone-olive-surface),rgba(252,250,245,0.96))]',
+      'border-[color:var(--tone-olive-line)] bg-[linear-gradient(165deg,var(--tone-olive-surface),rgba(254,252,248,0.98))]',
     units: { T: 0, G: 0, D: 0, Q: 0, R: 7, RJ: 0 },
     priceEstimate: 52
   },
@@ -260,7 +260,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 7 broas de romeu e julieta',
     art: ORDER_FLAVOR_CARD_ART_BY_CODE.RJ,
     accentClassName:
-      'border-[color:var(--tone-roast-line)] bg-[linear-gradient(165deg,var(--tone-roast-surface),rgba(250,242,238,0.96))]',
+      'border-[color:var(--tone-roast-line)] bg-[linear-gradient(165deg,var(--tone-roast-surface),rgba(253,246,242,0.98))]',
     units: { T: 0, G: 0, D: 0, Q: 0, R: 0, RJ: 7 },
     priceEstimate: 52
   },
@@ -270,7 +270,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 4 tradicionais + 3 goiabada',
     art: ORDER_MISTA_CARD_ART_BY_CODE.G,
     accentClassName:
-      'border-[color:var(--tone-blush-line)] bg-[linear-gradient(165deg,var(--tone-blush-surface),rgba(251,241,236,0.96))]',
+      'border-[color:var(--tone-blush-line)] bg-[linear-gradient(165deg,var(--tone-blush-surface),rgba(253,246,242,0.98))]',
     units: { T: 4, G: 3, D: 0, Q: 0, R: 0, RJ: 0 },
     priceEstimate: 45
   },
@@ -280,7 +280,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 4 tradicionais + 3 doce de leite',
     art: ORDER_MISTA_CARD_ART_BY_CODE.D,
     accentClassName:
-      'border-[color:var(--tone-gold-line)] bg-[linear-gradient(165deg,var(--tone-gold-surface),rgba(248,237,226,0.96))]',
+      'border-[color:var(--tone-gold-line)] bg-[linear-gradient(165deg,var(--tone-gold-surface),rgba(251,242,232,0.98))]',
     units: { T: 4, G: 0, D: 3, Q: 0, R: 0, RJ: 0 },
     priceEstimate: 47
   },
@@ -290,7 +290,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 4 tradicionais + 3 queijo do serro',
     art: ORDER_MISTA_CARD_ART_BY_CODE.Q,
     accentClassName:
-      'border-[color:var(--tone-sage-line)] bg-[linear-gradient(165deg,var(--tone-sage-surface),rgba(242,238,230,0.96))]',
+      'border-[color:var(--tone-sage-line)] bg-[linear-gradient(165deg,var(--tone-sage-surface),rgba(246,243,236,0.98))]',
     units: { T: 4, G: 0, D: 0, Q: 3, R: 0, RJ: 0 },
     priceEstimate: 47
   },
@@ -300,7 +300,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 4 tradicionais + 3 requeijão de corte',
     art: ORDER_MISTA_CARD_ART_BY_CODE.R,
     accentClassName:
-      'border-[color:var(--tone-olive-line)] bg-[linear-gradient(165deg,var(--tone-olive-surface),rgba(247,239,225,0.96))]',
+      'border-[color:var(--tone-olive-line)] bg-[linear-gradient(165deg,var(--tone-olive-surface),rgba(250,244,232,0.98))]',
     units: { T: 4, G: 0, D: 0, Q: 0, R: 3, RJ: 0 },
     priceEstimate: 47
   }
@@ -574,18 +574,18 @@ function resolveRuntimeOrderMixedBoxPrice(kind: RuntimeOrderFlavorKind) {
 function resolveRuntimeOrderAccentClass(kind: RuntimeOrderFlavorKind, mode: 'SINGLE' | 'MIXED') {
   if (mode === 'MIXED') {
     if (kind === 'GOIABADA') {
-      return 'border-[color:var(--tone-blush-line)] bg-[linear-gradient(165deg,var(--tone-blush-surface),rgba(251,241,236,0.96))]';
+      return 'border-[color:var(--tone-blush-line)] bg-[linear-gradient(165deg,var(--tone-blush-surface),rgba(253,246,242,0.98))]';
     }
-    return 'border-[color:var(--tone-roast-line)] bg-[linear-gradient(165deg,var(--tone-roast-surface),rgba(250,242,238,0.96))]';
+    return 'border-[color:var(--tone-roast-line)] bg-[linear-gradient(165deg,var(--tone-roast-surface),rgba(253,246,242,0.98))]';
   }
 
   if (kind === 'TRADITIONAL') {
-    return 'border-[color:var(--tone-cream-line)] bg-[linear-gradient(165deg,var(--tone-cream-surface),rgba(255,250,244,0.96))]';
+    return 'border-[color:var(--tone-cream-line)] bg-[linear-gradient(165deg,var(--tone-cream-surface),rgba(255,253,249,0.98))]';
   }
   if (kind === 'GOIABADA') {
-    return 'border-[color:var(--tone-blush-line)] bg-[linear-gradient(165deg,var(--tone-blush-surface),rgba(255,248,246,0.96))]';
+    return 'border-[color:var(--tone-blush-line)] bg-[linear-gradient(165deg,var(--tone-blush-surface),rgba(255,250,248,0.98))]';
   }
-  return 'border-[color:var(--tone-olive-line)] bg-[linear-gradient(165deg,var(--tone-olive-surface),rgba(252,250,245,0.96))]';
+  return 'border-[color:var(--tone-olive-line)] bg-[linear-gradient(165deg,var(--tone-olive-surface),rgba(254,252,248,0.98))]';
 }
 
 function buildRuntimeOrderLegacyBoxCode(product: RuntimeOrderFlavorProduct, mode: 'SINGLE' | 'MIXED'): OrderBoxCode | null {

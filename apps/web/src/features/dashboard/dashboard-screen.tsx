@@ -269,15 +269,15 @@ const DASHBOARD_PERIOD_OPTIONS: Array<{ value: DashboardPeriodSelection; label: 
 
 const PANEL_TONE_CLASSES: Record<DashboardTone, string> = {
   amber:
-    'border-[color:var(--tone-gold-line)] bg-[linear-gradient(155deg,rgba(250,243,233,0.97),rgba(243,230,211,0.9))]',
+    'border-[color:var(--tone-gold-line)] bg-[linear-gradient(155deg,rgba(255,250,244,0.98),rgba(248,238,221,0.94))]',
   sky:
-    'border-[color:var(--tone-sage-line)] bg-[linear-gradient(155deg,rgba(245,250,247,0.97),rgba(233,242,237,0.9))]',
+    'border-[color:var(--tone-sage-line)] bg-[linear-gradient(155deg,rgba(250,253,251,0.98),rgba(239,247,242,0.94))]',
   mint:
-    'border-[color:var(--tone-olive-line)] bg-[linear-gradient(155deg,rgba(248,247,240,0.97),rgba(238,235,222,0.92))]',
+    'border-[color:var(--tone-olive-line)] bg-[linear-gradient(155deg,rgba(251,249,243,0.98),rgba(242,239,228,0.95))]',
   rose:
-    'border-[color:var(--tone-blush-line)] bg-[linear-gradient(155deg,rgba(252,247,245,0.97),rgba(243,229,224,0.92))]',
+    'border-[color:var(--tone-blush-line)] bg-[linear-gradient(155deg,rgba(255,250,248,0.98),rgba(247,236,231,0.95))]',
   ink:
-    'border-[rgba(57,45,35,0.14)] bg-[linear-gradient(155deg,rgba(255,252,249,0.98),rgba(238,233,226,0.92))]'
+    'border-[rgba(57,45,35,0.14)] bg-[linear-gradient(155deg,rgba(255,253,250,0.99),rgba(243,238,231,0.95))]'
 };
 
 const BAR_TONE_CLASSES: Record<DashboardTone, string> = {
