@@ -327,6 +327,17 @@ function deriveDiscountPctFromOrder(order?: Pick<OrderView, 'subtotal' | 'discou
   return roundMoney((discount / subtotal) * 100);
 }
 
+function normalizeDiscountPctInput(value: string | number | null | undefined) {
+  const parsed = parseLocaleNumber(value);
+  const clamped = parsed == null ? 0 : Math.min(Math.max(roundMoney(parsed), 0), 100);
+  return (
+    formatDecimalInputBR(clamped, {
+      minFractionDigits: 0,
+      maxFractionDigits: 2
+    }) || '0'
+  );
+}
+
 function containsTestDataTag(value?: string | null) {
   return (value || '').toLowerCase().includes(TEST_DATA_TAG.toLowerCase());
 }
@@ -2572,12 +2583,7 @@ function OrdersPageContent() {
 
       setNewOrderItems(lastOrderDraft.items);
       setNewOrderFulfillmentMode(lastOrderDraft.fulfillmentMode);
-      setNewOrderDiscountPct(
-        formatDecimalInputBR(lastOrderDraft.discountPct, {
-          minFractionDigits: 0,
-          maxFractionDigits: 2
-        }) || '0'
-      );
+      setNewOrderDiscountPct(normalizeDiscountPctInput(lastOrderDraft.discountPct));
       setNewOrderNotes(lastOrderDraft.notes);
       setOrderError(null);
       setRestoredLastOrderDraft({
@@ -3778,14 +3784,7 @@ function OrdersPageContent() {
                 }}
                 onScheduledAtChange={setNewOrderScheduledAt}
                 onDiscountChange={setNewOrderDiscountPct}
-                onDiscountBlur={() =>
-                  setNewOrderDiscountPct(
-                    formatDecimalInputBR(newOrderDiscountPct || '0', {
-                      minFractionDigits: 0,
-                      maxFractionDigits: 2
-                    }) || '0'
-                  )
-                }
+                onDiscountBlur={() => setNewOrderDiscountPct(normalizeDiscountPctInput(newOrderDiscountPct))}
                 onNotesChange={setNewOrderNotes}
                 onCreateOrder={createOrder}
                 onRefreshDeliveryQuote={() => {

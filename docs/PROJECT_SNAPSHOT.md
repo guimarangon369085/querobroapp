@@ -246,6 +246,10 @@ Ultima atualizacao: 2026-03-26
 - Ciclo executado: `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, `node --test tests/order-discount-pct-marketing.test.mjs`
 - Resultado: o novo pedido interno em `/pedidos` passou a aceitar desconto em percentual, o financeiro passou a tratar esse abatimento manual como investimento de marketing em amostras, o dashboard ganhou a metrica dedicada e pedidos com `100%` de desconto deixaram de gerar cobranca PIX pendente.
 
+- Data: 2026-03-27
+- Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`
+- Resultado: o campo de desconto do novo pedido em `/pedidos` foi endurecido como campo livre de `0%` a `100%`, com hint explicito e normalizacao visual do valor digitado para nao deixar a interface mostrar percentuais acima do limite.
+
 ## Como religar e validar rapido
 
 1. `./scripts/stop-all.sh`
