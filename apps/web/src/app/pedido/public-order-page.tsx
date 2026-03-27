@@ -16,6 +16,7 @@ import { apiFetch } from '@/lib/api';
 import { normalizePhone } from '@/lib/format';
 import { OrderCardArtwork } from '@/features/orders/order-card-artwork';
 import {
+  ORDER_BOX_PRICE_CUSTOM,
   ORDER_BOX_UNITS,
   ORDER_CUSTOM_BOX_CATALOG_CODE,
   buildRuntimeOrderCatalog,
@@ -343,10 +344,10 @@ function formatCustomBoxParts(
 function PublicOrderSaboresCollage({ art }: { art: OrderCardArt }) {
   return (
     <div className="relative aspect-[16/10] overflow-hidden rounded-[18px] bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.92),transparent_34%),linear-gradient(155deg,rgba(248,239,230,0.98),rgba(238,222,202,0.92))] xl:aspect-[21/10]">
-      <span className="sr-only">Composicao da Caixa Sabores com os sabores ativos do catalogo.</span>
+      <span className="sr-only">Composicao da Monte Sua Caixa com os sabores ativos do catalogo.</span>
       <div className="absolute inset-[10px] sm:inset-4" aria-hidden="true">
         <OrderCardArtwork
-          alt="Composicao da Caixa Sabores"
+          alt="Composicao da Monte Sua Caixa"
           art={art}
           className="rounded-[14px] border border-white/85 bg-white/92 shadow-[0_18px_36px_rgba(70,44,26,0.16)]"
           overlayClassName="absolute inset-0 bg-[linear-gradient(180deg,transparent_18%,rgba(46,29,20,0.14)_100%)]"
@@ -748,7 +749,7 @@ export function PublicOrderPage() {
         })),
       ...activeCustomBoxes.map((box) => ({
         key: box.id,
-        label: `Caixa Sabores #${box.index + 1}`,
+        label: `Monte Sua Caixa #${box.index + 1}`,
         quantity: 1,
         quantityLabel: box.isComplete ? '1 cx' : `${box.totalUnits}/7`,
         detail: formatCustomBoxParts(box.flavors, flavorProducts)
@@ -1268,7 +1269,7 @@ export function PublicOrderPage() {
     if (incompleteCustomBoxes.length > 0) {
       const firstOpenBox = incompleteCustomBoxes[0];
       setError(
-        `Complete a Caixa Sabores #${firstOpenBox.index + 1}. Faltam ${firstOpenBox.remainingUnits} broa(s) para fechar 7.`
+        `Complete a Monte Sua Caixa #${firstOpenBox.index + 1}. Faltam ${firstOpenBox.remainingUnits} broa(s) para fechar 7.`
       );
       return;
     }
@@ -1777,11 +1778,12 @@ export function PublicOrderPage() {
               <div className="mt-4 rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-[rgb(247,239,230)] p-4 sm:mt-5 sm:rounded-[26px] sm:p-5 xl:p-6">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between xl:items-center">
                   <div>
-                    <h3 className="text-[1.1rem] font-semibold text-[color:var(--ink-strong)] sm:text-[1.35rem]">
-                      Caixa Sabores
-                    </h3>
+                    <h3 className="text-[1.1rem] font-semibold text-[color:var(--ink-strong)] sm:text-[1.35rem]">Monte Sua Caixa</h3>
                     <p className="mt-1 text-[0.82rem] leading-5 text-[color:var(--ink-muted)] sm:text-sm">
-                      Monte 7 broas.
+                      Monte sua caixa com 7 broas como quiser!
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-[color:var(--ink-strong)]">
+                      {formatCurrencyBRL(ORDER_BOX_PRICE_CUSTOM)}
                     </p>
                   </div>
                   <button
@@ -1809,11 +1811,11 @@ export function PublicOrderPage() {
                         <div className="public-order-custom-card__header">
                           <div>
                             <p className="text-sm font-semibold text-[color:var(--ink-strong)]">
-                              Caixa Sabores #{box.index + 1}
+                              Monte Sua Caixa #{box.index + 1}
                             </p>
                             <p className="mt-1 text-[0.82rem] leading-5 text-[color:var(--ink-muted)]">
                               {box.totalUnits === 0
-                                ? 'Monte 7 broas.'
+                                ? 'Monte sua caixa com 7 broas.'
                                 : box.isComplete
                                   ? 'Fechada.'
                                   : `Faltam ${box.remainingUnits}.`}
@@ -1865,7 +1867,7 @@ export function PublicOrderPage() {
                                   className="public-order-custom-row__button h-10 rounded-[14px] border border-white/85 bg-white text-[1.15rem] font-semibold text-[color:var(--ink-strong)] transition hover:bg-white sm:text-xl"
                                   onClick={() => adjustCustomBoxFlavor(box.id, String(product.id), -1)}
                                   disabled={quantity <= 0}
-                                  aria-label={`Diminuir ${product.label} na Caixa Sabores #${box.index + 1}`}
+                                  aria-label={`Diminuir ${product.label} na Monte Sua Caixa #${box.index + 1}`}
                                 >
                                   −
                                 </button>
@@ -1877,7 +1879,7 @@ export function PublicOrderPage() {
                                   className="public-order-custom-row__button h-10 rounded-[14px] border border-white/85 bg-white text-[1.15rem] font-semibold text-[color:var(--ink-strong)] transition hover:bg-white sm:text-xl"
                                   onClick={() => adjustCustomBoxFlavor(box.id, String(product.id), 1)}
                                   disabled={box.totalUnits >= ORDER_BOX_UNITS}
-                                  aria-label={`Aumentar ${product.label} na Caixa Sabores #${box.index + 1}`}
+                                  aria-label={`Aumentar ${product.label} na Monte Sua Caixa #${box.index + 1}`}
                                 >
                                   +
                                 </button>
@@ -1977,11 +1979,7 @@ export function PublicOrderPage() {
                   </strong>{' '}
                   de desconto.
                 </div>
-              ) : (
-                <p className="mt-3 text-sm leading-6 text-[color:var(--ink-muted)]">
-                  O desconto entra no total do pedido e tambem no calculo do frete.
-                </p>
-              )}
+              ) : null}
             </section>
 
             {error ? (
@@ -2092,8 +2090,8 @@ export function PublicOrderPage() {
                 {incompleteCustomBoxes.length > 0 ? (
                   <div className="app-inline-notice app-inline-notice--warning rounded-[20px] px-4 py-3 sm:rounded-[24px]">
                     {incompleteCustomBoxes.length === 1
-                      ? 'Falta completar 1 Caixa Sabores.'
-                      : `Faltam completar ${incompleteCustomBoxes.length} caixas Sabores.`}
+                      ? 'Falta completar 1 Monte Sua Caixa.'
+                      : `Faltam completar ${incompleteCustomBoxes.length} caixas Monte Sua Caixa.`}
                   </div>
                 ) : null}
 

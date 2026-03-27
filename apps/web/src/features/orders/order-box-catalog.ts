@@ -85,19 +85,19 @@ export const ORDER_CUSTOM_BOX_CATALOG_CODE = 'S' as const;
 export type OrderCatalogPrefillCode = OrderBoxCode | typeof ORDER_CUSTOM_BOX_CATALOG_CODE;
 
 export const ORDER_FLAVOR_OFFICIAL_BOX_NAME_BY_CODE: Record<OrderFlavorCode, string> = {
-  T: 'Caixa Tradicional (T)',
-  G: 'Caixa de Goiabada (G)',
-  D: 'Caixa de Doce de Leite (D)',
-  Q: 'Caixa de Queijo (Q)',
-  R: 'Caixa de Requeijão de Corte (R)',
-  RJ: 'Caixa Romeu e Julieta (RJ)'
+  T: 'Caixa Tradicional',
+  G: 'Caixa de Goiabada',
+  D: 'Caixa de Doce de Leite',
+  Q: 'Caixa de Queijo',
+  R: 'Caixa de Requeijão de Corte',
+  RJ: 'Caixa Romeu e Julieta'
 };
 
 export const ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE: Record<OrderMistaShortcutCode, string> = {
-  G: 'Caixa Mista de Goiabada (MG)',
-  D: 'Caixa Mista de Doce de Leite (MD)',
-  Q: 'Caixa Mista de Queijo do Serro (MQ)',
-  R: 'Caixa Mista de Requeijão de Corte (MR)'
+  G: 'Caixa Mista de Goiabada',
+  D: 'Caixa Mista de Doce de Leite',
+  Q: 'Caixa Mista de Queijo do Serro',
+  R: 'Caixa Mista de Requeijão de Corte'
 };
 
 const ORDER_CARDAPIO_IMAGE_PATHS = {
@@ -392,7 +392,10 @@ export const ORDER_BRAND_GALLERY_IMAGES = [
 ] as const;
 
 export function compactOrderProductName(name: string) {
-  const compacted = name.replace(/^Broa\s+/i, '').trim();
+  const compacted = name
+    .replace(/^Broa\s+/i, '')
+    .replace(/\s*\(([A-Z]{1,3})\)\s*$/i, '')
+    .trim();
   return compacted
     .replace(/requeij[aã]o de corte/gi, 'Requeijão de Corte')
     .replace(/doce de leite/gi, 'Doce de Leite');
@@ -937,7 +940,7 @@ export function resolveOrderVirtualBoxLabel(
     return `Caixa de ${normalizedParts[0].productName}`;
   }
 
-  return 'Caixa Sabores';
+  return 'Monte Sua Caixa';
 }
 
 export function deriveFlavorUnitsFromBoxCounts(boxCounts: Record<OrderBoxCode, number>) {

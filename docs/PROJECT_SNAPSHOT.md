@@ -4,6 +4,8 @@ Ultima atualizacao: 2026-03-27
 
 ## Estado atual
 
+- 2026-03-27: `/pedido` deixou de expor codigos de sabores ao cliente (`(T)`, `(G)` etc.). A caixa customizada foi renomeada de `Caixa Sabores` para `Monte Sua Caixa`, com subtitulo `Monte sua caixa com 7 broas como quiser!`, preco visivel no proprio bloco, resumo lateral e alertas/erros alinhados, sem mexer em `content IDs`, `legacyCode` ou nos calculos de subtotal/frete. O texto auxiliar do cupom sobre impacto no frete tambem foi removido.
+
 - 2026-03-27: `/pedidos` deixou de renderizar qualquer card intermediario entre o calendario e a secao `PEDIDOS`; o bloco de overflow do dia foi removido e o fluxo visual agora segue direto para `Resumo do dia` e lista. No mesmo ciclo, a paleta oficial do web foi levemente iluminada, com tons e gradientes mais brilhantes em `globals.css`, ícones, dashboard, `/pedido`, `/pedido/feito` e cards de caixas, preservando a mesma família cromática e hierarquia.
 
 - 2026-03-27: a identidade visual do web foi reancorada na paleta oficial da QUEROBROA para superficies internas e publicas. `globals.css` passou a centralizar tokens em creme, blush, sálvia, dourado, oliva e tostado; dashboard, pedidos, clientes, `/pedido`, `/pedido/feito`, cards de caixas e ícones foram harmonizados para operar na mesma família cromática, preservando contraste, hierarquia e gradientes suaves.
