@@ -231,6 +231,18 @@ export class OrdersService {
     return moneyFromMinorUnits(subtotalAfterDiscount + moneyToMinorUnits(deliveryFee));
   }
 
+  private resolveMarketingSponsoredDeliveryFee(input: {
+    quotedDeliveryFee: number;
+    discountPct: number;
+    fulfillmentMode: string | null | undefined;
+    allowSponsoredDelivery: boolean;
+  }) {
+    if (!input.allowSponsoredDelivery) return 0;
+    if (input.fulfillmentMode !== 'DELIVERY') return 0;
+    if (compareMoney(input.discountPct, 100) < 0) return 0;
+    return this.toMoney(Math.max(input.quotedDeliveryFee || 0, 0));
+  }
+
   private resolveOrderDiscountInput(
     subtotal: number,
     input: {
@@ -2325,7 +2337,7 @@ export class OrdersService {
               deliveryNotes: data.customer.deliveryNotes ?? customer.deliveryNotes
             });
       const { itemsData, subtotal } = pricedOrder;
-      const deliveryFee = this.toMoney(deliveryQuote.fee ?? 0);
+      const quotedDeliveryFee = this.toMoney(deliveryQuote.fee ?? 0);
       const appliedCoupon = normalizeCouponCode(data.order.couponCode);
       const resolvedCoupon = appliedCoupon
         ? await this.resolveCouponDiscount({
@@ -2338,6 +2350,13 @@ export class OrdersService {
         : null;
       const effectiveDiscount = resolvedCoupon ? resolvedCoupon.discountAmount : discount;
       const effectiveDiscountPct = resolvedCoupon ? resolvedCoupon.discountPct : discountPct;
+      const sponsoredDeliveryFee = this.resolveMarketingSponsoredDeliveryFee({
+        quotedDeliveryFee,
+        discountPct: effectiveDiscountPct,
+        fulfillmentMode: data.fulfillment.mode,
+        allowSponsoredDelivery: data.source.channel === 'INTERNAL_DASHBOARD'
+      });
+      const deliveryFee = compareMoney(sponsoredDeliveryFee, 0) > 0 ? 0 : quotedDeliveryFee;
       const total = this.computeOrderTotal(subtotal, effectiveDiscount, deliveryFee);
       let normalizedNotes = data.order.notes ?? null;
 
@@ -2349,7 +2368,10 @@ export class OrdersService {
       }
 
       if (data.source.channel === 'INTERNAL_DASHBOARD' && compareMoney(effectiveDiscountPct, 0) > 0) {
-        normalizedNotes = mergeMarketingSamplesIntoNotes(normalizedNotes, { discountPct: effectiveDiscountPct });
+        normalizedNotes = mergeMarketingSamplesIntoNotes(normalizedNotes, {
+          discountPct: effectiveDiscountPct,
+          sponsoredDeliveryFee
+        });
       }
 
       const createdOrder = await tx.order.create({
@@ -2775,7 +2797,14 @@ export class OrdersService {
           allowManualFallback: true
         }
       );
-      const deliveryFee = this.toMoney(deliveryQuote.fee ?? 0);
+      const quotedDeliveryFee = this.toMoney(deliveryQuote.fee ?? 0);
+      const sponsoredDeliveryFee = this.resolveMarketingSponsoredDeliveryFee({
+        quotedDeliveryFee,
+        discountPct,
+        fulfillmentMode: nextFulfillmentMode,
+        allowSponsoredDelivery: true
+      });
+      const deliveryFee = compareMoney(sponsoredDeliveryFee, 0) > 0 ? 0 : quotedDeliveryFee;
       const total = this.computeOrderTotal(subtotal, discount, deliveryFee);
       const amountPaid = this.getPaidAmount(existing.payments || []);
       this.ensureOrderTotalCoversPaid(total, amountPaid);
@@ -2791,7 +2820,12 @@ export class OrdersService {
       if (nextNotes !== undefined) {
         nextNotes = mergeMarketingSamplesIntoNotes(
           nextNotes,
-          compareMoney(discountPct, 0) > 0 ? { discountPct } : null
+          compareMoney(discountPct, 0) > 0
+            ? {
+                discountPct,
+                sponsoredDeliveryFee
+              }
+            : null
         );
       }
       const updated = await tx.order.update({

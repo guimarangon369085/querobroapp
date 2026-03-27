@@ -11,9 +11,11 @@ import {
   DeliveryQuoteDraftSchema,
   DeliveryQuoteResponseSchema,
   DeliveryQuoteSelectionSchema,
+  mergeMarketingSamplesIntoNotes,
   OrderFulfillmentModeEnum,
   moneyFromMinorUnits,
   moneyToMinorUnits,
+  parseMarketingSamplesDiscountPct,
   roundMoney
 } from '@querobroapp/shared';
 import { PrismaService } from '../../prisma.service.js';
@@ -185,9 +187,17 @@ export class DeliveriesService {
       }
     );
 
+    const marketingDiscountPct = parseMarketingSamplesDiscountPct(order.notes);
+    const sponsoredDeliveryFee =
+      order.fulfillmentMode === OrderFulfillmentModeEnum.enum.DELIVERY &&
+      marketingDiscountPct != null &&
+      Number(marketingDiscountPct) >= 100
+        ? this.toMoney(quote.fee ?? 0)
+        : 0;
+    const chargeableDeliveryFee = sponsoredDeliveryFee > 0 ? 0 : this.toMoney(quote.fee ?? 0);
     const subtotalMinorUnits = moneyToMinorUnits(order.subtotal ?? 0);
     const discountMinorUnits = moneyToMinorUnits(order.discount ?? 0);
-    const deliveryFeeMinorUnits = moneyToMinorUnits(quote.fee ?? 0);
+    const deliveryFeeMinorUnits = moneyToMinorUnits(chargeableDeliveryFee);
     const nextSubtotalAfterDiscount = Math.max(subtotalMinorUnits - discountMinorUnits, 0);
     const nextTotal = moneyFromMinorUnits(nextSubtotalAfterDiscount + deliveryFeeMinorUnits);
     const paidMinorUnits = payments.reduce((sum, payment) => {
@@ -204,13 +214,20 @@ export class DeliveriesService {
       await tx.order.update({
         where: { id: orderId },
         data: {
-          deliveryFee: this.toMoney(quote.fee ?? 0),
+          deliveryFee: chargeableDeliveryFee,
           deliveryProvider: quote.provider,
           deliveryFeeSource: quote.source,
           deliveryQuoteStatus: quote.status,
           deliveryQuoteRef: quote.quoteToken ?? null,
           deliveryQuoteExpiresAt: this.parseOptionalDateTime(quote.expiresAt ?? null),
-          total: nextTotal
+          total: nextTotal,
+          notes:
+            marketingDiscountPct != null
+              ? mergeMarketingSamplesIntoNotes(order.notes, {
+                  discountPct: marketingDiscountPct,
+                  sponsoredDeliveryFee
+                })
+              : order.notes
         }
       });
 

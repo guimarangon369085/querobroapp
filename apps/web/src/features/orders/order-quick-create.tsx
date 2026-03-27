@@ -289,7 +289,12 @@ export function OrderQuickCreate({
   );
   const draftCustomerLabel = customerSearch.trim() || 'Escolha um cliente';
   const requiresDeliveryQuote = fulfillmentMode === 'DELIVERY';
-  const deliveryFee = requiresDeliveryQuote ? deliveryQuote?.fee ?? 0 : 0;
+  const quotedDeliveryFee = requiresDeliveryQuote ? deliveryQuote?.fee ?? 0 : 0;
+  const sponsoredDeliveryFee = requiresDeliveryQuote && Number(draftDiscount) >= Number(draftSubtotal) && draftSubtotal > 0
+    ? quotedDeliveryFee
+    : 0;
+  const deliveryFee = sponsoredDeliveryFee > 0 ? 0 : quotedDeliveryFee;
+  const marketingInvestmentTotal = draftDiscount + sponsoredDeliveryFee;
   const draftGrandTotal = draftTotal + deliveryFee;
   const hasReadyDeliveryQuote = !requiresDeliveryQuote || Boolean(deliveryQuote?.quoteToken);
   const primaryActionLabel = isCreatingOrder
@@ -456,7 +461,9 @@ export function OrderQuickCreate({
               : isQuotingDelivery
               ? 'Cotando...'
               : deliveryQuote
-                ? formatCurrencyBR(deliveryFee)
+                ? sponsoredDeliveryFee > 0
+                  ? `Marketing • ${formatCurrencyBR(sponsoredDeliveryFee)}`
+                  : formatCurrencyBR(deliveryFee)
                 : 'A confirmar'}
           </p>
         </div>
@@ -795,7 +802,7 @@ export function OrderQuickCreate({
             <div className="flex items-center justify-between gap-3">
               <span>Investimento marketing</span>
               <strong className="text-[color:var(--ink-strong)]">
-                {`${newOrderDiscountPct && newOrderDiscountPct !== '0' ? `${newOrderDiscountPct}%` : '0%'} • ${formatCurrencyBR(draftDiscount)}`}
+                {`${newOrderDiscountPct && newOrderDiscountPct !== '0' ? `${newOrderDiscountPct}%` : '0%'} • ${formatCurrencyBR(marketingInvestmentTotal)}`}
               </strong>
             </div>
             <div className="flex items-center justify-between gap-3">
@@ -806,7 +813,9 @@ export function OrderQuickCreate({
                   : isQuotingDelivery
                   ? 'Calculando...'
                   : deliveryQuote
-                    ? formatCurrencyBR(deliveryFee)
+                    ? sponsoredDeliveryFee > 0
+                      ? `Marketing • ${formatCurrencyBR(sponsoredDeliveryFee)}`
+                      : formatCurrencyBR(deliveryFee)
                     : 'A confirmar'}
               </strong>
             </div>
@@ -817,7 +826,7 @@ export function OrderQuickCreate({
               </strong>
             </div>
             <p className="text-xs leading-5 text-[color:var(--ink-muted)]">
-              O percentual vira desconto do pedido e entra no financeiro como investimento de marketing em amostras.
+              O percentual vira investimento de marketing em amostras. Com 100% de desconto, o frete tambem zera para recebimento e entra como marketing.
             </p>
           </div>
 

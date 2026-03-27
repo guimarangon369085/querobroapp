@@ -148,6 +148,102 @@ test('desconto de 100% zera o pedido e nao deixa cobranca pix pendente', async (
   assert.equal(intake.intake.pixCharge, null);
 });
 
+test('desconto de 100% em entrega zera o frete a receber e contabiliza frete como marketing', async (t) => {
+  const { apiUrl, shutdown } = await ensureApiServer();
+  t.after(async () => {
+    await shutdown();
+  });
+
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const summaryBefore = await request(apiUrl, '/dashboard/summary?days=30');
+
+  const product = await request(apiUrl, '/inventory-products', {
+    method: 'POST',
+    body: {
+      name: `Broa Amostra Entrega ${suffix}`,
+      category: 'Teste',
+      unit: 'cx',
+      price: 40,
+      active: true
+    }
+  });
+
+  const scheduledAt = new Date(Date.UTC(2034, 0, 11, 15, 0, 0)).toISOString();
+  const draftQuote = await request(apiUrl, '/deliveries/quotes/internal', {
+    method: 'POST',
+    body: {
+      mode: 'DELIVERY',
+      scheduledAt,
+      customer: {
+        name: `Cliente Amostra Entrega ${suffix}`,
+        phone: '11999990009',
+        address: 'Rua das Amostras, 120'
+      },
+      manifest: {
+        items: [{ name: product.name, quantity: 1 }],
+        subtotal: 40,
+        totalUnits: 1
+      }
+    }
+  });
+
+  const intake = await request(apiUrl, '/orders/intake', {
+    method: 'POST',
+    body: {
+      version: 1,
+      intent: 'CONFIRMED',
+      customer: {
+        name: `Cliente Amostra Entrega ${suffix}`,
+        phone: '11999990009',
+        address: 'Rua das Amostras, 120'
+      },
+      fulfillment: {
+        mode: 'DELIVERY',
+        scheduledAt
+      },
+      order: {
+        items: [{ productId: product.id, quantity: 1 }],
+        discountPct: 100,
+        notes: 'Amostra integral com entrega'
+      },
+      payment: {
+        method: 'pix',
+        status: 'PENDENTE'
+      },
+      source: {
+        channel: 'INTERNAL_DASHBOARD',
+        originLabel: 'test.discount-pct.full-delivery'
+      }
+    }
+  });
+
+  assert.equal(approxEqual(intake.order.discount, intake.order.subtotal), true);
+  assert.equal(approxEqual(intake.order.deliveryFee, 0), true);
+  assert.equal(approxEqual(intake.order.total, 0), true);
+  assert.equal(approxEqual(intake.order.balanceDue, 0), true);
+  assert.equal(intake.order.paymentStatus, 'PAGO');
+  assert.equal(intake.intake.pixStatus, 'PAGO');
+  assert.equal(intake.intake.pixCharge, null);
+  assert.match(String(intake.order.notes || ''), /Investimento de marketing: AMOSTRAS \(100%, frete R\$/);
+
+  const summaryAfter = await request(apiUrl, '/dashboard/summary?days=30');
+  assert.equal(
+    approxEqual(
+      summaryAfter.business.kpis.marketingSamplesInvestmentInRange -
+        summaryBefore.business.kpis.marketingSamplesInvestmentInRange,
+      Number(intake.order.discount || 0) + Number(draftQuote.fee || 0)
+    ),
+    true
+  );
+  assert.equal(
+    approxEqual(
+      summaryAfter.business.kpis.outstandingBalance - summaryBefore.business.kpis.outstandingBalance,
+      0
+    ),
+    true
+  );
+});
+
 test('editar pedido interno permite incluir e remover desconto percentual de amostras', async (t) => {
   const { apiUrl, shutdown } = await ensureApiServer();
   t.after(async () => {

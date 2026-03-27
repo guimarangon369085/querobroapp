@@ -224,17 +224,25 @@ export function mergeAppliedCouponIntoNotes(
 
 export function mergeMarketingSamplesIntoNotes(
   currentNotes: string | null | undefined,
-  marketingSample: { discountPct: number } | null
+  marketingSample: { discountPct: number; sponsoredDeliveryFee?: number | null } | null
 ) {
   const { visibleLines, metadataLines } = splitOrderNoteLines(currentNotes);
   const preservedMetadata = metadataLines.filter((line) => !line.startsWith(MARKETING_SAMPLES_NOTE_PREFIX));
 
   if (marketingSample) {
+    const sponsoredDeliveryFee = Math.max(Number(marketingSample.sponsoredDeliveryFee || 0), 0);
+    const sponsoredDeliveryLabel =
+      sponsoredDeliveryFee > 0
+        ? `, frete ${sponsoredDeliveryFee.toLocaleString('pt-BR', {
+            style: 'currency',
+            currency: 'BRL'
+          })}`
+        : '';
     preservedMetadata.push(
       `${MARKETING_SAMPLES_NOTE_PREFIX} AMOSTRAS (${Number(marketingSample.discountPct).toLocaleString('pt-BR', {
         minimumFractionDigits: 0,
         maximumFractionDigits: 2
-      })}%)`
+      })}%${sponsoredDeliveryLabel})`
     );
   }
 
@@ -246,7 +254,19 @@ export function parseMarketingSamplesDiscountPct(notes?: string | null) {
   const line = metadataLines.find((entry) => entry.startsWith(MARKETING_SAMPLES_NOTE_PREFIX));
   if (!line) return null;
 
-  const match = line.match(/\(([\d.,]+)%\)\s*$/);
+  const match = line.match(/\(([\d.,]+)%(?:\)|,)/);
+  if (!match) return 0;
+  const normalized = match[1].replace(/\./g, '').replace(',', '.');
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export function parseMarketingSamplesSponsoredDeliveryFee(notes?: string | null) {
+  const { metadataLines } = splitOrderNoteLines(notes);
+  const line = metadataLines.find((entry) => entry.startsWith(MARKETING_SAMPLES_NOTE_PREFIX));
+  if (!line) return 0;
+
+  const match = line.match(/frete\s+R\$\s*([\d.,]+)/i);
   if (!match) return 0;
   const normalized = match[1].replace(/\./g, '').replace(',', '.');
   const parsed = Number.parseFloat(normalized);

@@ -12,6 +12,7 @@ import {
   CouponSchema,
   CouponUpsertSchema,
   parseMarketingSamplesDiscountPct,
+  parseMarketingSamplesSponsoredDeliveryFee,
   resolveDisplayNumber,
   roundMoney
 } from '@querobroapp/shared';
@@ -1702,7 +1703,9 @@ export class DashboardService {
     const deliveryRevenueTotal = sumBy(activeOrders, (order) => order.deliveryFee || 0);
     const discountTotal = sumBy(activeOrders, (order) => order.discount || 0);
     const marketingSamplesInvestmentTotal = sumBy(activeOrders, (order) =>
-      parseMarketingSamplesDiscountPct(order.notes) != null ? order.discount || 0 : 0
+      parseMarketingSamplesDiscountPct(order.notes) != null
+        ? round2((order.discount || 0) + parseMarketingSamplesSponsoredDeliveryFee(order.notes))
+        : 0
     );
     const outstandingBalance = sumBy(pendingReceivables, (entry) => entry.amount);
     const grossProfitTotal = round2(productNetRevenueTotal - totalOrderCost);
