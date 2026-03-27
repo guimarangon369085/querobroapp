@@ -75,6 +75,7 @@ type DashboardBusinessSummary = {
     outstandingBalance: number;
     avgTicketInRange: number;
     discountsInRange: number;
+    marketingSamplesInvestmentInRange: number;
     deliveryRevenueInRange: number;
     productNetRevenueInRange: number;
     estimatedCogsInRange: number;
@@ -1183,6 +1184,11 @@ export default function DashboardScreen() {
                   <MetricCard label="Lucro bruto" value={formatCurrencyBR(activeBusiness?.kpis.grossProfitInRange || 0)} tone="mint" />
                   <MetricCard label="Pos-frete" value={formatCurrencyBR(activeBusiness?.kpis.contributionAfterFreightInRange || 0)} tone="sky" />
                   <MetricCard label="Descontos" value={formatCurrencyBR(activeBusiness?.kpis.discountsInRange || 0)} tone="ink" />
+                  <MetricCard
+                    label="Marketing - amostras"
+                    value={formatCurrencyBR(activeBusiness?.kpis.marketingSamplesInvestmentInRange || 0)}
+                    tone="rose"
+                  />
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="grid gap-2">

@@ -42,7 +42,7 @@ type OrderQuickCreateProps = {
     referenceLabel: string;
   } | null;
   newOrderScheduledAt: string;
-  newOrderDiscount: string;
+  newOrderDiscountPct: string;
   newOrderNotes: string;
   newOrderItems: Array<{ productId: number; quantity: number }>;
   draftTotalUnits: number;
@@ -51,6 +51,8 @@ type OrderQuickCreateProps = {
   isCreatingOrder: boolean;
   isQuotingDelivery: boolean;
   orderError: string | null;
+  draftSubtotal: number;
+  draftDiscount: number;
   draftTotal: number;
   deliveryQuote: DeliveryQuote | null;
   deliveryQuoteError: string | null;
@@ -245,7 +247,7 @@ export function OrderQuickCreate({
   selectedCustomerId,
   restoredFromLastOrder,
   newOrderScheduledAt,
-  newOrderDiscount,
+  newOrderDiscountPct,
   newOrderNotes,
   newOrderItems,
   draftTotalUnits,
@@ -254,6 +256,8 @@ export function OrderQuickCreate({
   isCreatingOrder,
   isQuotingDelivery,
   orderError,
+  draftSubtotal,
+  draftDiscount,
   draftTotal,
   deliveryQuote,
   deliveryQuoteError,
@@ -554,11 +558,11 @@ export function OrderQuickCreate({
           </span>
         </summary>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
-          <FormField label="Desconto">
+          <FormField label="Desconto (%)">
             <input
               className="app-input"
-              placeholder="0,00"
-              value={newOrderDiscount}
+              placeholder="0"
+              value={newOrderDiscountPct}
               inputMode="decimal"
               onChange={(e) => onDiscountChange(e.target.value)}
               onBlur={onDiscountBlur}
@@ -751,7 +755,13 @@ export function OrderQuickCreate({
             </div>
             <div className="flex items-center justify-between gap-3">
               <span>Produtos</span>
-              <strong className="text-[color:var(--ink-strong)]">{formatCurrencyBR(draftTotal)}</strong>
+              <strong className="text-[color:var(--ink-strong)]">{formatCurrencyBR(draftSubtotal)}</strong>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span>Investimento marketing</span>
+              <strong className="text-[color:var(--ink-strong)]">
+                {`${newOrderDiscountPct && newOrderDiscountPct !== '0' ? `${newOrderDiscountPct}%` : '0%'} • ${formatCurrencyBR(draftDiscount)}`}
+              </strong>
             </div>
             <div className="flex items-center justify-between gap-3">
               <span>Frete estimado</span>
@@ -771,6 +781,9 @@ export function OrderQuickCreate({
                 {formatCurrencyBR(draftGrandTotal)}
               </strong>
             </div>
+            <p className="text-xs leading-5 text-[color:var(--ink-muted)]">
+              O percentual vira desconto do pedido e entra no financeiro como investimento de marketing em amostras.
+            </p>
           </div>
 
           {virtualBoxPartitions.boxes.length > 0 || virtualBoxPartitions.openBox.length > 0 ? (

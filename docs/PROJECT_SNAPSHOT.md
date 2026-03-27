@@ -242,6 +242,10 @@ Ultima atualizacao: 2026-03-26
 - Ciclo executado: `pnpm --filter @querobroapp/web build`, criacao de `apps/web/public/meta-catalog.csv`, inspeção do Commerce Manager autenticado e download do feed manual atual do catalogo da Meta.
 - Resultado: ficou confirmado que o item `Caixa Sabores` do WhatsApp Business nao consome a arte do site automaticamente; o catalogo depende de um feed CSV manual da Meta. O repositorio passou a carregar um `meta-catalog.csv` publico com `image_link` novo para `QUEROBROA-S`, usando a arte vertical atual de `sabores-caixa.jpg`.
 
+- Data: 2026-03-27
+- Ciclo executado: `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, `node --test tests/order-discount-pct-marketing.test.mjs`
+- Resultado: o novo pedido interno em `/pedidos` passou a aceitar desconto em percentual, o financeiro passou a tratar esse abatimento manual como investimento de marketing em amostras, o dashboard ganhou a metrica dedicada e pedidos com `100%` de desconto deixaram de gerar cobranca PIX pendente.
+
 ## Como religar e validar rapido
 
 1. `./scripts/stop-all.sh`

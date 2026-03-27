@@ -6,6 +6,7 @@ import {
   ExternalOrderScheduleAvailabilitySchema,
   ExternalOrderSubmissionPreviewSchema,
   ExternalOrderSubmissionSchema,
+  mergeMarketingSamplesIntoNotes,
   moneyFromMinorUnits,
   moneyToMinorUnits,
   OrderIntakeMetaSchema,
@@ -13,6 +14,7 @@ import {
   OrderItemSchema,
   OrderSchema,
   OrderStatusEnum,
+  preserveOrderNoteMetadata,
   PixChargeSchema,
   roundMoney
 } from '@querobroapp/shared';
@@ -196,6 +198,39 @@ export class OrdersService {
       0
     );
     return moneyFromMinorUnits(subtotalAfterDiscount + moneyToMinorUnits(deliveryFee));
+  }
+
+  private resolveOrderDiscountInput(
+    subtotal: number,
+    input: {
+      discount?: number | null;
+      discountPct?: number | null;
+    }
+  ) {
+    const hasDiscountAmount = typeof input.discount === 'number';
+    const hasDiscountPct = typeof input.discountPct === 'number';
+    const discountAmount = this.toMoney(Math.max(input.discount ?? 0, 0));
+    const discountPct = this.toMoney(Math.max(input.discountPct ?? 0, 0));
+    const discountAmountFromPct = this.toMoney((subtotal * discountPct) / 100);
+
+    if (hasDiscountAmount && hasDiscountPct && compareMoney(discountAmount, discountAmountFromPct) !== 0) {
+      throw new BadRequestException('Informe o desconto em reais ou em percentual, nao os dois com valores diferentes.');
+    }
+
+    if (hasDiscountPct) {
+      return {
+        discount: discountAmountFromPct,
+        discountPct
+      };
+    }
+
+    const derivedDiscountPct =
+      compareMoney(subtotal, 0) > 0 ? this.toMoney((discountAmount / subtotal) * 100) : 0;
+
+    return {
+      discount: discountAmount,
+      discountPct: derivedDiscountPct
+    };
   }
 
   private toQty(value: number) {
@@ -808,6 +843,7 @@ export class OrdersService {
   }
 
   private deriveOrderPaymentStatus(total: number, amountPaid: number) {
+    if (compareMoney(total, 0) <= 0) return 'PAGO';
     if (compareMoney(amountPaid, 0) <= 0) return 'PENDENTE';
     if (compareMoney(amountPaid, total) >= 0) return 'PAGO';
     return 'PARCIAL';
@@ -1724,7 +1760,7 @@ export class OrdersService {
     const isExternalIntakeChannel = data.source.channel === 'CUSTOMER_LINK';
     const quoteCustomer = await this.resolveDeliveryQuoteCustomer(data.customer);
     const pricedOrder = await this.priceOrderItems(this.prisma, data.order.items);
-    const discount = this.toMoney(data.order.discount ?? 0);
+    const { discount, discountPct } = this.resolveOrderDiscountInput(pricedOrder.subtotal, data.order);
     const quoteSubtotal = this.toMoney(Math.max(pricedOrder.subtotal - discount, 0));
     const scheduledAt = this.parseOptionalDateTime(data.fulfillment.scheduledAt);
     const deliveryQuote = await this.deliveriesService.resolveDeliverySelection(
@@ -1782,6 +1818,10 @@ export class OrdersService {
       const { itemsData, subtotal } = pricedOrder;
       const deliveryFee = this.toMoney(deliveryQuote.fee ?? 0);
       const total = this.computeOrderTotal(subtotal, discount, deliveryFee);
+      const normalizedNotes =
+        data.source.channel === 'INTERNAL_DASHBOARD' && compareMoney(discountPct, 0) > 0
+          ? mergeMarketingSamplesIntoNotes(data.order.notes ?? null, { discountPct })
+          : data.order.notes ?? null;
 
       if (isExternalIntakeChannel) {
         await this.ensureOrderScheduleCapacityAllowed(tx, scheduledAt, {
@@ -1795,7 +1835,7 @@ export class OrdersService {
           customerId: customer.id,
           status: 'ABERTO',
           fulfillmentMode: data.fulfillment.mode,
-          notes: data.order.notes ?? null,
+          notes: normalizedNotes,
           scheduledAt,
           subtotal,
           deliveryFee,
@@ -1825,15 +1865,16 @@ export class OrdersService {
       } | null = null;
 
       if (data.intent !== 'DRAFT' && data.payment) {
+        const normalizedPaymentStatus = compareMoney(total, 0) <= 0 ? 'PAGO' : data.payment.status;
         paymentRecord = await tx.payment.create({
           data: {
             orderId: createdOrder.id,
             amount: total,
             method: 'pix',
-            status: data.payment.status,
+            status: normalizedPaymentStatus,
             dueDate: data.payment.dueAt ? new Date(data.payment.dueAt) : scheduledAt,
             paidAt:
-              data.payment.status === 'PAGO'
+              normalizedPaymentStatus === 'PAGO'
                 ? data.payment.paidAt
                   ? new Date(data.payment.paidAt)
                   : new Date()
@@ -1889,7 +1930,11 @@ export class OrdersService {
           ? freshOrder.payments.find((entry) => entry.id === paymentRecord?.id) ?? paymentRecord
           : null;
       const pixCharge =
-        latestPayment && latestPayment.method === 'pix'
+        latestPayment &&
+        latestPayment.method === 'pix' &&
+        latestPayment.status !== 'PAGO' &&
+        !latestPayment.paidAt &&
+        compareMoney(latestPayment.amount, 0) > 0
           ? this.paymentsService.buildPixCharge(latestPayment)
           : null;
       const result = {
@@ -2035,9 +2080,15 @@ export class OrdersService {
   }
 
   async create(payload: unknown) {
-    const data = OrderSchema.pick({ customerId: true, notes: true, discount: true, scheduledAt: true, items: true, fulfillmentMode: true }).parse(
-      payload
-    );
+    const data = OrderSchema.pick({
+      customerId: true,
+      notes: true,
+      discount: true,
+      discountPct: true,
+      scheduledAt: true,
+      items: true,
+      fulfillmentMode: true
+    }).parse(payload);
     const items = data.items ?? [];
     if (items.length === 0) {
       throw new BadRequestException('Itens sao obrigatorios');
@@ -2055,6 +2106,7 @@ export class OrdersService {
       order: {
         items,
         discount: data.discount ?? 0,
+        discountPct: data.discountPct ?? undefined,
         notes: data.notes ?? undefined
       },
       payment: {
@@ -2093,15 +2145,26 @@ export class OrdersService {
           quantity: item.quantity
         }))
       );
-      const discount = this.toMoney(data.discount ?? existing.discount ?? 0);
+      const { discount } =
+        Object.prototype.hasOwnProperty.call(data, 'discount') || Object.prototype.hasOwnProperty.call(data, 'discountPct')
+          ? this.resolveOrderDiscountInput(subtotal, {
+              discount: data.discount,
+              discountPct: data.discountPct
+            })
+          : this.resolveOrderDiscountInput(subtotal, {
+              discount: existing.discount ?? 0
+            });
       const total = this.computeOrderTotal(subtotal, discount, this.toMoney(existing.deliveryFee ?? 0));
       const amountPaid = this.getPaidAmount(existing.payments || []);
       this.ensureOrderTotalCoversPaid(total, amountPaid);
+      const nextNotes = Object.prototype.hasOwnProperty.call(data, 'notes')
+        ? preserveOrderNoteMetadata(existing.notes ?? null, data.notes ?? null)
+        : undefined;
 
       const updated = await tx.order.update({
         where: { id },
         data: {
-          ...(Object.prototype.hasOwnProperty.call(data, 'notes') ? { notes: data.notes ?? null } : {}),
+          ...(nextNotes !== undefined ? { notes: nextNotes } : {}),
           discount,
           subtotal,
           total,

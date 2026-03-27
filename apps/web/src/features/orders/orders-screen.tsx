@@ -16,6 +16,7 @@ import {
 import {
   resolveDisplayNumber,
   roundMoney,
+  stripOrderNoteMetadata,
   type Customer,
   type OrderIntake,
   type Product
@@ -26,10 +27,10 @@ import { writeStoredOrderFinalized } from '@/lib/order-finalized-storage';
 import { useDialogA11y } from '@/lib/use-dialog-a11y';
 import {
   compactWhitespace,
+  formatDecimalInputBR,
   formatCurrencyBR,
-  formatMoneyInputBR,
   formatPhoneBR,
-  parseCurrencyBR
+  parseLocaleNumber
 } from '@/lib/format';
 import { consumeFocusQueryParam, scrollToLayoutSlot } from '@/lib/layout-scroll';
 import { useTutorialSpotlight } from '@/hooks/use-tutorial-spotlight';
@@ -83,7 +84,7 @@ type CustomerLastOrderDraft = {
   referenceTime: number;
   fulfillmentMode: 'DELIVERY' | 'PICKUP';
   items: DraftOrderItem[];
-  discount: number;
+  discountPct: number;
   notes: string;
 };
 
@@ -315,8 +316,15 @@ function normalizeDraftOrderItems(items?: Array<{ productId?: number; quantity?:
 }
 
 function formatOrderNoteLabel(value?: string | null) {
-  const normalized = compactWhitespace(value || '');
+  const normalized = compactWhitespace(stripOrderNoteMetadata(value) || '');
   return normalized ? `Obs: ${normalized}` : '';
+}
+
+function deriveDiscountPctFromOrder(order?: Pick<OrderView, 'subtotal' | 'discount'> | null) {
+  const subtotal = Math.max(Number(order?.subtotal || 0), 0);
+  const discount = Math.max(Number(order?.discount || 0), 0);
+  if (subtotal <= 0 || discount <= 0) return 0;
+  return roundMoney((discount / subtotal) * 100);
 }
 
 function containsTestDataTag(value?: string | null) {
@@ -1060,7 +1068,7 @@ function OrdersPageContent() {
   const [newOrderFulfillmentMode, setNewOrderFulfillmentMode] = useState<'DELIVERY' | 'PICKUP'>('DELIVERY');
   const [customerSearch, setCustomerSearch] = useState('');
   const [newOrderItems, setNewOrderItems] = useState<Array<{ productId: number; quantity: number }>>([]);
-  const [newOrderDiscount, setNewOrderDiscount] = useState<string>('0,00');
+  const [newOrderDiscountPct, setNewOrderDiscountPct] = useState<string>('0');
   const [newOrderNotes, setNewOrderNotes] = useState<string>('');
   const [newOrderScheduledAt, setNewOrderScheduledAt] = useState<string>(() => defaultOrderDateTimeInput());
   const [restoredLastOrderDraft, setRestoredLastOrderDraft] = useState<{
@@ -1219,7 +1227,7 @@ function OrdersPageContent() {
     setSelectedOrderEditScheduledAt(
       normalizeDateTimeLocalToAllowedQuarter(formatDateTimeLocalValue(referenceDate))
     );
-    setSelectedOrderEditNotes(selectedOrder.notes ?? '');
+    setSelectedOrderEditNotes(stripOrderNoteMetadata(selectedOrder.notes) || '');
     setSelectedOrderEditError(null);
   }, [isOrderDetailModalOpen, selectedOrder]);
 
@@ -1280,7 +1288,7 @@ function OrdersPageContent() {
     setNewOrderFulfillmentMode('DELIVERY');
     setCustomerSearch('');
     setNewOrderItems([]);
-    setNewOrderDiscount('0,00');
+    setNewOrderDiscountPct('0');
     setNewOrderNotes(tutorialMode ? withTestDataTag('', 'Pedido do momento') : '');
     setNewOrderScheduledAt(defaultOrderDateTimeInput());
     setRestoredLastOrderDraft(null);
@@ -1338,7 +1346,7 @@ function OrdersPageContent() {
           : {}),
         order: {
           items: newOrderItems,
-          discount: parseCurrencyBR(newOrderDiscount),
+          discountPct: draftDiscountPct,
           notes: tutorialMode
             ? withTestDataTag(newOrderNotes, 'Pedido do momento')
             : newOrderNotes || undefined
@@ -1361,7 +1369,7 @@ function OrdersPageContent() {
       setNewOrderFulfillmentMode('DELIVERY');
       setCustomerSearch('');
       setNewOrderItems([]);
-      setNewOrderDiscount('0,00');
+      setNewOrderDiscountPct('0');
       setNewOrderNotes(tutorialMode ? withTestDataTag('', 'Pedido do momento') : '');
       setNewOrderScheduledAt(defaultOrderDateTimeInput());
       setRestoredLastOrderDraft(null);
@@ -1637,8 +1645,8 @@ function OrdersPageContent() {
         referenceTime,
         fulfillmentMode: order.fulfillmentMode === 'PICKUP' ? 'PICKUP' : 'DELIVERY',
         items,
-        discount: typeof order.discount === 'number' ? order.discount : 0,
-        notes: order.notes || ''
+        discountPct: deriveDiscountPctFromOrder(order),
+        notes: stripOrderNoteMetadata(order.notes) || ''
       });
     }
 
@@ -2401,7 +2409,15 @@ function OrdersPageContent() {
     return calculateOrderSubtotalFromItems(newOrderItems, productMap);
   }, [newOrderItems, productMap]);
 
-  const draftDiscount = useMemo(() => Math.max(parseCurrencyBR(newOrderDiscount), 0), [newOrderDiscount]);
+  const draftDiscountPct = useMemo(() => {
+    const parsed = parseLocaleNumber(newOrderDiscountPct);
+    if (parsed == null) return 0;
+    return Math.min(Math.max(roundMoney(parsed), 0), 100);
+  }, [newOrderDiscountPct]);
+  const draftDiscount = useMemo(
+    () => roundMoney((draftSubtotal * draftDiscountPct) / 100),
+    [draftDiscountPct, draftSubtotal]
+  );
   const draftTotal = Math.max(draftSubtotal - draftDiscount, 0);
   const selectedNewOrderCustomer = useMemo(
     () =>
@@ -2531,7 +2547,7 @@ function OrdersPageContent() {
     selectedOrder?.status !== 'CANCELADO' && selectedOrder?.status !== 'ENTREGUE';
   const resetNewOrderDraftDetails = useCallback(() => {
     setNewOrderItems([]);
-    setNewOrderDiscount('0,00');
+    setNewOrderDiscountPct('0');
     setNewOrderNotes(tutorialMode ? withTestDataTag('', 'Pedido do momento') : '');
     setOrderError(null);
   }, [tutorialMode]);
@@ -2556,7 +2572,12 @@ function OrdersPageContent() {
 
       setNewOrderItems(lastOrderDraft.items);
       setNewOrderFulfillmentMode(lastOrderDraft.fulfillmentMode);
-      setNewOrderDiscount(formatMoneyInputBR(lastOrderDraft.discount) || '0,00');
+      setNewOrderDiscountPct(
+        formatDecimalInputBR(lastOrderDraft.discountPct, {
+          minFractionDigits: 0,
+          maxFractionDigits: 2
+        }) || '0'
+      );
       setNewOrderNotes(lastOrderDraft.notes);
       setOrderError(null);
       setRestoredLastOrderDraft({
@@ -3734,7 +3755,7 @@ function OrdersPageContent() {
                 selectedCustomerId={newOrderCustomerId}
                 restoredFromLastOrder={restoredLastOrderDraft}
                 newOrderScheduledAt={newOrderScheduledAt}
-                newOrderDiscount={newOrderDiscount}
+                newOrderDiscountPct={newOrderDiscountPct}
                 newOrderNotes={newOrderNotes}
                 newOrderItems={newOrderItems}
                 draftTotalUnits={draftTotalUnits}
@@ -3743,6 +3764,8 @@ function OrdersPageContent() {
                 isCreatingOrder={isCreatingOrder}
                 isQuotingDelivery={isQuotingNewOrderDelivery}
                 orderError={orderError}
+                draftSubtotal={draftSubtotal}
+                draftDiscount={draftDiscount}
                 draftTotal={draftTotal}
                 deliveryQuote={newOrderDeliveryQuote}
                 deliveryQuoteError={newOrderDeliveryQuoteError}
@@ -3754,9 +3777,14 @@ function OrdersPageContent() {
                   syncNewOrderCustomerSelection(option.label, customerOptions);
                 }}
                 onScheduledAtChange={setNewOrderScheduledAt}
-                onDiscountChange={setNewOrderDiscount}
+                onDiscountChange={setNewOrderDiscountPct}
                 onDiscountBlur={() =>
-                  setNewOrderDiscount(formatMoneyInputBR(newOrderDiscount || '0') || '0,00')
+                  setNewOrderDiscountPct(
+                    formatDecimalInputBR(newOrderDiscountPct || '0', {
+                      minFractionDigits: 0,
+                      maxFractionDigits: 2
+                    }) || '0'
+                  )
                 }
                 onNotesChange={setNewOrderNotes}
                 onCreateOrder={createOrder}

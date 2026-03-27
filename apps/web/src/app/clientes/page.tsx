@@ -7,7 +7,14 @@ import {
   useRef,
   useState
 } from 'react';
-import { resolveDisplayNumber, type Customer, type OrderIntake, type OrderItem, type Product } from '@querobroapp/shared';
+import {
+  resolveDisplayNumber,
+  stripOrderNoteMetadata,
+  type Customer,
+  type OrderIntake,
+  type OrderItem,
+  type Product
+} from '@querobroapp/shared';
 import { apiFetch } from '@/lib/api';
 import { useDialogA11y } from '@/lib/use-dialog-a11y';
 import {
@@ -734,7 +741,7 @@ function CustomersPageContent() {
         order: {
           items: nextItems,
           discount: typeof order.discount === 'number' ? order.discount : 0,
-          notes: order.notes || undefined
+          notes: stripOrderNoteMetadata(order.notes) || undefined
         },
         payment: {
           method: 'pix',

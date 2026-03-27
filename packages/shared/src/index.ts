@@ -123,6 +123,93 @@ export const CouponResolveResponseSchema = z.object({
   subtotalAfterDiscount: z.number().nonnegative()
 });
 
+export const APPLIED_COUPON_NOTE_PREFIX = 'Cupom aplicado:';
+export const MARKETING_SAMPLES_NOTE_PREFIX = 'Investimento de marketing:';
+
+const ORDER_NOTE_METADATA_PREFIXES = [APPLIED_COUPON_NOTE_PREFIX, MARKETING_SAMPLES_NOTE_PREFIX];
+
+function splitOrderNoteLines(value?: string | null) {
+  const visibleLines: string[] = [];
+  const metadataLines: string[] = [];
+
+  for (const line of String(value || '')
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)) {
+    if (ORDER_NOTE_METADATA_PREFIXES.some((prefix) => line.startsWith(prefix))) {
+      metadataLines.push(line);
+      continue;
+    }
+    visibleLines.push(line);
+  }
+
+  return {
+    visibleLines,
+    metadataLines
+  };
+}
+
+export function stripOrderNoteMetadata(value?: string | null) {
+  const { visibleLines } = splitOrderNoteLines(value);
+  return visibleLines.join('\n') || null;
+}
+
+export function preserveOrderNoteMetadata(previousNotes?: string | null, nextVisibleNotes?: string | null) {
+  const { metadataLines } = splitOrderNoteLines(previousNotes);
+  const visibleLines = splitOrderNoteLines(nextVisibleNotes).visibleLines;
+  return [...visibleLines, ...metadataLines].join('\n') || null;
+}
+
+export function mergeAppliedCouponIntoNotes(
+  currentNotes: string | null | undefined,
+  appliedCoupon: { code: string; discountPct: number } | null
+) {
+  const { visibleLines, metadataLines } = splitOrderNoteLines(currentNotes);
+  const preservedMetadata = metadataLines.filter((line) => !line.startsWith(APPLIED_COUPON_NOTE_PREFIX));
+
+  if (appliedCoupon) {
+    preservedMetadata.push(
+      `${APPLIED_COUPON_NOTE_PREFIX} ${appliedCoupon.code} (${Number(appliedCoupon.discountPct).toLocaleString('pt-BR', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2
+      })}%)`
+    );
+  }
+
+  return [...visibleLines, ...preservedMetadata].join('\n') || null;
+}
+
+export function mergeMarketingSamplesIntoNotes(
+  currentNotes: string | null | undefined,
+  marketingSample: { discountPct: number } | null
+) {
+  const { visibleLines, metadataLines } = splitOrderNoteLines(currentNotes);
+  const preservedMetadata = metadataLines.filter((line) => !line.startsWith(MARKETING_SAMPLES_NOTE_PREFIX));
+
+  if (marketingSample) {
+    preservedMetadata.push(
+      `${MARKETING_SAMPLES_NOTE_PREFIX} AMOSTRAS (${Number(marketingSample.discountPct).toLocaleString('pt-BR', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2
+      })}%)`
+    );
+  }
+
+  return [...visibleLines, ...preservedMetadata].join('\n') || null;
+}
+
+export function parseMarketingSamplesDiscountPct(notes?: string | null) {
+  const { metadataLines } = splitOrderNoteLines(notes);
+  const line = metadataLines.find((entry) => entry.startsWith(MARKETING_SAMPLES_NOTE_PREFIX));
+  if (!line) return null;
+
+  const match = line.match(/\(([\d.,]+)%\)\s*$/);
+  if (!match) return 0;
+  const normalized = match[1].replace(/\./g, '').replace(',', '.');
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 export const OrderItemSchema = z.object({
   id: z.number().int().positive().optional(),
   orderId: z.number().int().positive().optional(),
@@ -145,6 +232,7 @@ export const OrderSchema = z.object({
   deliveryQuoteStatus: DeliveryQuoteStatusEnum.optional(),
   deliveryQuoteExpiresAt: z.string().optional().nullable(),
   discount: z.number().nonnegative().optional(),
+  discountPct: z.number().nonnegative().max(100).optional(),
   total: z.number().nonnegative().optional(),
   amountPaid: z.number().nonnegative().optional(),
   balanceDue: z.number().nonnegative().optional(),
@@ -260,7 +348,8 @@ export const OrderIntakeSchema = z.object({
   delivery: DeliveryQuoteSelectionSchema.optional(),
   order: z.object({
     items: z.array(OrderIntakeItemSchema).min(1),
-    discount: z.number().nonnegative().default(0),
+    discount: z.number().nonnegative().optional(),
+    discountPct: z.number().nonnegative().max(100).optional(),
     notes: z.string().optional().nullable()
   }),
   payment: OrderIntakePaymentSchema.optional(),
