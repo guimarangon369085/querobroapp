@@ -389,9 +389,20 @@ function displayCustomerNumber(customer?: { id?: number | null; publicNumber?: n
   return resolveDisplayNumber(customer) ?? customer?.id ?? '-';
 }
 
+function stripPostalCodeFromAddressLabel(value?: string | null) {
+  return compactWhitespace(value || '')
+    .replace(/\bCEP[:\s-]*\d{5}-?\d{3}\b/gi, '')
+    .replace(/\b\d{5}-?\d{3}\b/g, '')
+    .replace(/\s*,\s*,+/g, ', ')
+    .replace(/\s+-\s+,/g, ', ')
+    .replace(/(?:\s*,\s*)+$/g, '')
+    .replace(/(?:\s+-\s*)+$/g, '')
+    .trim();
+}
+
 function formatCustomerFullAddress(customer?: Customer | null) {
   if (!customer) return '';
-  const normalizedAddress = (customer.address || '').trim();
+  const normalizedAddress = stripPostalCodeFromAddressLabel(customer.address);
   if (normalizedAddress) return normalizedAddress;
 
   const cityState = [customer.city, customer.state]
@@ -403,12 +414,11 @@ function formatCustomerFullAddress(customer?: Customer | null) {
     customer.addressLine2,
     customer.neighborhood,
     cityState,
-    customer.postalCode,
     customer.country
   ]
     .map((part) => (part || '').trim())
     .filter(Boolean);
-  return structuredParts.join(', ');
+  return stripPostalCodeFromAddressLabel(structuredParts.join(', '));
 }
 
 function normalizeOrderProductionDescriptor(value?: string | null) {

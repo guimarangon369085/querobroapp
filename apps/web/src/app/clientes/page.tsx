@@ -181,6 +181,17 @@ function formatOrderStatusLabel(status?: string | null) {
   return status.replace(/_/g, ' ');
 }
 
+function stripPostalCodeFromAddressLabel(value?: string | null) {
+  return compactWhitespace(value || '')
+    .replace(/\bCEP[:\s-]*\d{5}-?\d{3}\b/gi, '')
+    .replace(/\b\d{5}-?\d{3}\b/g, '')
+    .replace(/\s*,\s*,+/g, ', ')
+    .replace(/\s+-\s+,/g, ', ')
+    .replace(/(?:\s*,\s*)+$/g, '')
+    .replace(/(?:\s+-\s*)+$/g, '')
+    .trim();
+}
+
 function formatCustomerAddressLabel(
   customer: Partial<
     Pick<Customer, 'address' | 'addressLine1' | 'addressLine2' | 'neighborhood' | 'city' | 'state' | 'postalCode'>
@@ -193,9 +204,9 @@ function formatCustomerAddressLabel(
     neighborhood: safeNeighborhood,
     city: customer.city || '',
     state: customer.state || '',
-    postalCode: customer.postalCode || ''
+    postalCode: ''
   });
-  return structured || customer.address || 'Sem endereco';
+  return stripPostalCodeFromAddressLabel(structured || customer.address || '') || 'Sem endereco';
 }
 
 function normalizeLooseText(value?: string | null) {

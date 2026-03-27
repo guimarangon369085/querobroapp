@@ -262,6 +262,10 @@ Ultima atualizacao: 2026-03-26
 - Ciclo executado: `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, `node --test tests/order-schedule-capacity.test.mjs`
 - Resultado: o agendamento de pedidos passou a respeitar a capacidade real do forno em janelas de producao, usando `14 broas por hora` como limite operacional. Cada pedido agora ocupa no calendario uma faixa que comeca antes do horario pronto/entrega, com duracao calculada por `ceil(totalBroas / 14) * 60 min`, e novos agendamentos so entram quando nao colidem com essa janela de forno.
 
+- Data: 2026-03-27
+- Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`
+- Resultado: o CEP deixou de aparecer nos cards de clientes e pedidos, inclusive quando estava embutido no endereco bruto ja salvo. O campo continua existindo normalmente apenas no cadastro/edicao do cliente.
+
 ## Como religar e validar rapido
 
 1. `./scripts/stop-all.sh`
