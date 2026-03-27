@@ -589,16 +589,21 @@ function withTestDataTag(value?: string | null, fallback = '') {
 }
 
 function orderStatusBadgeClass(status: string) {
-  if (status === 'ENTREGUE') return 'bg-emerald-100 text-emerald-800 border-emerald-200';
-  if (status === 'CANCELADO') return 'bg-rose-100 text-rose-800 border-rose-200';
-  if (status === 'PRONTO') return 'bg-blue-100 text-blue-800 border-blue-200';
-  return 'bg-neutral-100 text-neutral-700 border-neutral-200';
+  if (status === 'ENTREGUE')
+    return 'border-[color:var(--tone-sage-line)] bg-[color:var(--tone-sage-surface)] text-[color:var(--tone-sage-ink)]';
+  if (status === 'CANCELADO')
+    return 'border-[color:var(--tone-roast-line)] bg-[color:var(--tone-roast-surface)] text-[color:var(--tone-roast-ink)]';
+  if (status === 'PRONTO')
+    return 'border-[color:var(--tone-olive-line)] bg-[color:var(--tone-olive-surface)] text-[color:var(--tone-olive-ink)]';
+  return 'border-[color:var(--tone-cream-line)] bg-[color:var(--tone-cream-surface)] text-[color:var(--tone-cream-ink)]';
 }
 
 function orderPaymentBadgeClass(status?: string | null) {
-  if (status === 'PAGO') return 'bg-violet-100 text-violet-800 border-violet-200';
-  if (status === 'PARCIAL') return 'bg-amber-100 text-amber-800 border-amber-200';
-  return 'bg-neutral-100 text-neutral-700 border-neutral-200';
+  if (status === 'PAGO')
+    return 'border-[color:var(--tone-sage-line)] bg-[color:var(--tone-sage-surface)] text-[color:var(--tone-sage-ink)]';
+  if (status === 'PARCIAL')
+    return 'border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)] text-[color:var(--tone-gold-ink)]';
+  return 'border-[color:var(--tone-cream-line)] bg-[color:var(--tone-cream-surface)] text-[color:var(--tone-cream-ink)]';
 }
 
 function formatDisplayedOrderStatus(status?: string | null) {
@@ -839,44 +844,50 @@ const orderWorkflowStatusMeta: Record<
   ABERTO: {
     label: 'Pedido',
     illustration: 'phone-check',
-    activeClassName: 'border-stone-300 bg-stone-100 text-stone-700',
-    passedDotClassName: 'bg-stone-500',
-    activeLineClassName: 'bg-stone-400'
+    activeClassName:
+      'border-[color:var(--tone-cream-line)] bg-[color:var(--tone-cream-surface)] text-[color:var(--tone-cream-ink)]',
+    passedDotClassName: 'bg-[color:var(--tone-cream-ink)]',
+    activeLineClassName: 'bg-[color:var(--tone-cream-line)]'
   },
   CONFIRMADO: {
     label: 'Massa',
     illustration: 'mixer',
-    activeClassName: 'border-amber-300 bg-amber-100 text-amber-800',
-    passedDotClassName: 'bg-amber-500',
-    activeLineClassName: 'bg-amber-400'
+    activeClassName:
+      'border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)] text-[color:var(--tone-gold-ink)]',
+    passedDotClassName: 'bg-[color:var(--tone-gold-ink)]',
+    activeLineClassName: 'bg-[color:var(--tone-gold-line)]'
   },
   EM_PREPARACAO: {
     label: 'Forno',
     illustration: 'oven',
-    activeClassName: 'border-orange-300 bg-orange-100 text-orange-800',
-    passedDotClassName: 'bg-orange-500',
-    activeLineClassName: 'bg-orange-400'
+    activeClassName:
+      'border-[color:var(--tone-roast-line)] bg-[color:var(--tone-roast-surface)] text-[color:var(--tone-roast-ink)]',
+    passedDotClassName: 'bg-[color:var(--tone-roast-ink)]',
+    activeLineClassName: 'bg-[color:var(--tone-roast-line)]'
   },
   PRONTO: {
     label: 'Pronto',
     illustration: 'bag-check',
-    activeClassName: 'border-sky-300 bg-sky-100 text-sky-800',
-    passedDotClassName: 'bg-sky-500',
-    activeLineClassName: 'bg-sky-400'
+    activeClassName:
+      'border-[color:var(--tone-olive-line)] bg-[color:var(--tone-olive-surface)] text-[color:var(--tone-olive-ink)]',
+    passedDotClassName: 'bg-[color:var(--tone-olive-ink)]',
+    activeLineClassName: 'bg-[color:var(--tone-olive-line)]'
   },
   ENTREGUE: {
     label: 'Entregue',
     illustration: 'scooter',
-    activeClassName: 'border-emerald-300 bg-emerald-100 text-emerald-800',
-    passedDotClassName: 'bg-emerald-500',
-    activeLineClassName: 'bg-emerald-400'
+    activeClassName:
+      'border-[color:var(--tone-sage-line)] bg-[color:var(--tone-sage-surface)] text-[color:var(--tone-sage-ink)]',
+    passedDotClassName: 'bg-[color:var(--tone-sage-ink)]',
+    activeLineClassName: 'bg-[color:var(--tone-sage-line)]'
   },
   PAGO: {
     label: 'Pago',
     illustration: 'pix',
-    activeClassName: 'border-violet-300 bg-violet-100 text-violet-800',
-    passedDotClassName: 'bg-violet-500',
-    activeLineClassName: 'bg-violet-400'
+    activeClassName:
+      'border-[color:var(--tone-blush-line)] bg-[color:var(--tone-blush-surface)] text-[color:var(--tone-blush-ink)]',
+    passedDotClassName: 'bg-[color:var(--tone-blush-ink)]',
+    activeLineClassName: 'bg-[color:var(--tone-blush-line)]'
   }
 };
 
@@ -1230,90 +1241,90 @@ function formatCalendarWeekdayLabel(date: Date) {
 }
 
 function calendarStatusDotClass(status: string) {
-  if (status === 'PRONTA') return 'bg-emerald-500';
-  if (status === 'NO_FORNO') return 'bg-amber-500';
-  if (status === 'PREPARO') return 'bg-orange-400';
-  if (status === 'INGREDIENTES') return 'bg-rose-500';
-  if (status === 'ENTREGUE') return 'bg-emerald-500';
-  if (status === 'CANCELADO') return 'bg-rose-500';
-  if (status === 'PRONTO') return 'bg-sky-500';
-  if (status === 'EM_PREPARACAO') return 'bg-orange-400';
-  if (status === 'CONFIRMADO') return 'bg-amber-400';
-  return 'bg-stone-400';
+  if (status === 'PRONTA') return 'bg-[color:var(--tone-sage-ink)]';
+  if (status === 'NO_FORNO') return 'bg-[color:var(--tone-gold-ink)]';
+  if (status === 'PREPARO') return 'bg-[color:var(--tone-roast-ink)]';
+  if (status === 'INGREDIENTES') return 'bg-[color:var(--tone-blush-ink)]';
+  if (status === 'ENTREGUE') return 'bg-[color:var(--tone-sage-ink)]';
+  if (status === 'CANCELADO') return 'bg-[color:var(--tone-roast-ink)]';
+  if (status === 'PRONTO') return 'bg-[color:var(--tone-olive-ink)]';
+  if (status === 'EM_PREPARACAO') return 'bg-[color:var(--tone-roast-ink)]';
+  if (status === 'CONFIRMADO') return 'bg-[color:var(--tone-gold-ink)]';
+  return 'bg-[color:var(--tone-cream-ink)]';
 }
 
 function calendarStatusEventSurfaceStyle(status: string): CSSProperties {
   if (status === 'PRONTA') {
     return {
-      borderColor: 'rgba(16, 185, 129, 0.36)',
-      backgroundColor: 'rgba(236, 253, 245, 0.9)'
+      borderColor: 'var(--tone-sage-line)',
+      backgroundColor: 'var(--tone-sage-surface)'
     };
   }
   if (status === 'NO_FORNO') {
     return {
-      borderColor: 'rgba(245, 158, 11, 0.34)',
-      backgroundColor: 'rgba(255, 251, 235, 0.9)'
+      borderColor: 'var(--tone-gold-line)',
+      backgroundColor: 'var(--tone-gold-surface)'
     };
   }
   if (status === 'PREPARO') {
     return {
-      borderColor: 'rgba(251, 146, 60, 0.36)',
-      backgroundColor: 'rgba(255, 247, 237, 0.9)'
+      borderColor: 'var(--tone-roast-line)',
+      backgroundColor: 'var(--tone-roast-surface)'
     };
   }
   if (status === 'INGREDIENTES') {
     return {
-      borderColor: 'rgba(244, 63, 94, 0.34)',
-      backgroundColor: 'rgba(255, 241, 242, 0.9)'
+      borderColor: 'var(--tone-blush-line)',
+      backgroundColor: 'var(--tone-blush-surface)'
     };
   }
   if (status === 'ENTREGUE') {
     return {
-      borderColor: 'rgba(16, 185, 129, 0.36)',
-      backgroundColor: 'rgba(236, 253, 245, 0.9)'
+      borderColor: 'var(--tone-sage-line)',
+      backgroundColor: 'var(--tone-sage-surface)'
     };
   }
   if (status === 'CANCELADO') {
     return {
-      borderColor: 'rgba(244, 63, 94, 0.34)',
-      backgroundColor: 'rgba(255, 241, 242, 0.9)'
+      borderColor: 'var(--tone-roast-line)',
+      backgroundColor: 'var(--tone-roast-surface)'
     };
   }
   if (status === 'PRONTO') {
     return {
-      borderColor: 'rgba(14, 165, 233, 0.34)',
-      backgroundColor: 'rgba(240, 249, 255, 0.9)'
+      borderColor: 'var(--tone-olive-line)',
+      backgroundColor: 'var(--tone-olive-surface)'
     };
   }
   if (status === 'EM_PREPARACAO') {
     return {
-      borderColor: 'rgba(251, 146, 60, 0.36)',
-      backgroundColor: 'rgba(255, 247, 237, 0.9)'
+      borderColor: 'var(--tone-roast-line)',
+      backgroundColor: 'var(--tone-roast-surface)'
     };
   }
   if (status === 'CONFIRMADO') {
     return {
-      borderColor: 'rgba(245, 158, 11, 0.34)',
-      backgroundColor: 'rgba(255, 251, 235, 0.9)'
+      borderColor: 'var(--tone-gold-line)',
+      backgroundColor: 'var(--tone-gold-surface)'
     };
   }
   return {
-    borderColor: 'rgba(120, 113, 108, 0.32)',
-    backgroundColor: 'rgba(250, 250, 249, 0.9)'
+    borderColor: 'var(--tone-cream-line)',
+    backgroundColor: 'var(--tone-cream-surface)'
   };
 }
 
 function calendarStatusRingClass(status: string) {
-  if (status === 'PRONTA') return 'ring-emerald-300';
-  if (status === 'NO_FORNO') return 'ring-amber-300';
-  if (status === 'PREPARO') return 'ring-orange-300';
-  if (status === 'INGREDIENTES') return 'ring-rose-300';
-  if (status === 'ENTREGUE') return 'ring-emerald-300';
-  if (status === 'CANCELADO') return 'ring-rose-300';
-  if (status === 'PRONTO') return 'ring-sky-300';
-  if (status === 'EM_PREPARACAO') return 'ring-orange-300';
-  if (status === 'CONFIRMADO') return 'ring-amber-300';
-  return 'ring-stone-300';
+  if (status === 'PRONTA') return 'ring-[color:var(--tone-sage-line)]';
+  if (status === 'NO_FORNO') return 'ring-[color:var(--tone-gold-line)]';
+  if (status === 'PREPARO') return 'ring-[color:var(--tone-roast-line)]';
+  if (status === 'INGREDIENTES') return 'ring-[color:var(--tone-blush-line)]';
+  if (status === 'ENTREGUE') return 'ring-[color:var(--tone-sage-line)]';
+  if (status === 'CANCELADO') return 'ring-[color:var(--tone-roast-line)]';
+  if (status === 'PRONTO') return 'ring-[color:var(--tone-olive-line)]';
+  if (status === 'EM_PREPARACAO') return 'ring-[color:var(--tone-roast-line)]';
+  if (status === 'CONFIRMADO') return 'ring-[color:var(--tone-gold-line)]';
+  return 'ring-[color:var(--tone-cream-line)]';
 }
 
 function minutesIntoDay(date: Date) {
@@ -4165,7 +4176,7 @@ function OrdersPageContent() {
                       <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
                         Resumo do dia
                       </p>
-                      <p className="text-xs text-neutral-500">{selectedCalendarDateTitle}</p>
+                      <p className="text-xs text-[color:var(--ink-muted)]">{selectedCalendarDateTitle}</p>
                     </div>
                     <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-strong)]">
                       {selectedDateProductionSummary.length} cliente(s)
@@ -4175,16 +4186,16 @@ function OrdersPageContent() {
                     {selectedDateProductionSummary.map((entry) => {
                       const toneClass =
                         entry.readyState === 'READY'
-                          ? 'border-emerald-200 bg-emerald-50/92'
+                          ? 'border-[color:var(--tone-sage-line)] bg-[color:var(--tone-sage-surface)]'
                           : entry.readyState === 'PARTIAL'
-                            ? 'border-sky-200 bg-sky-50/92'
-                            : 'border-amber-200 bg-amber-50/92';
+                            ? 'border-[color:var(--tone-olive-line)] bg-[color:var(--tone-olive-surface)]'
+                            : 'border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)]';
                       const badgeClass =
                         entry.readyState === 'READY'
-                          ? 'border-emerald-200 bg-white/90 text-emerald-900'
+                          ? 'border-[color:var(--tone-sage-line)] bg-white/90 text-[color:var(--tone-sage-ink)]'
                           : entry.readyState === 'PARTIAL'
-                            ? 'border-sky-200 bg-white/90 text-sky-900'
-                            : 'border-amber-200 bg-white/90 text-amber-900';
+                            ? 'border-[color:var(--tone-olive-line)] bg-white/90 text-[color:var(--tone-olive-ink)]'
+                            : 'border-[color:var(--tone-gold-line)] bg-white/90 text-[color:var(--tone-gold-ink)]';
                       const statusLabel =
                         entry.readyState === 'READY'
                           ? 'Pronto'
@@ -4205,13 +4216,13 @@ function OrdersPageContent() {
                           </span>
                         </div>
                         {entry.flavorLines.length > 0 ? (
-                          <div className="mt-1 grid gap-0.5 text-xs leading-5 text-neutral-600">
+                          <div className="mt-1 grid gap-0.5 text-xs leading-5 text-[color:var(--ink-muted)]">
                             {entry.flavorLines.map((line) => (
                               <p key={`${entry.customerKey}-${line}`}>{line}</p>
                             ))}
                           </div>
                         ) : (
-                          <p className="text-xs leading-5 text-neutral-600">Sem sabores mapeados</p>
+                          <p className="text-xs leading-5 text-[color:var(--ink-muted)]">Sem sabores mapeados</p>
                         )}
                         </div>
                       );
@@ -4281,7 +4292,7 @@ function OrdersPageContent() {
                                   {formatDisplayedPaymentStatus(paymentStatus)}
                                 </span>
                                 {isActive ? (
-                                  <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-100 px-1.5 py-0 text-[10px] font-semibold leading-4 text-amber-900">
+                                  <span className="inline-flex items-center rounded-full border border-[color:var(--tone-roast-line)] bg-[color:var(--tone-roast-surface)] px-1.5 py-0 text-[10px] font-semibold leading-4 text-[color:var(--tone-roast-ink)]">
                                     Em foco
                                   </span>
                                 ) : null}
@@ -4518,10 +4529,10 @@ function OrdersPageContent() {
                           <span
                             className={`mt-2 text-[10px] font-semibold uppercase tracking-[0.14em] ${
                               isCurrent
-                                ? 'text-neutral-800'
+                                ? 'text-[color:var(--ink-strong)]'
                                 : isPassed
-                                  ? 'text-neutral-600'
-                                  : 'text-neutral-400'
+                                  ? 'text-[color:var(--ink-muted)]'
+                                  : 'text-[color:color-mix(in_srgb,var(--ink-muted),white_34%)]'
                             }`}
                           >
                             {stageLabel}
@@ -4530,7 +4541,7 @@ function OrdersPageContent() {
                         {index < ORDER_WORKFLOW_STAGES.length - 1 ? (
                           <span
                             className={`order-workflow-strip__connector mx-2 mt-6 h-[2px] w-10 shrink-0 rounded-full ${
-                              isConnectorActive ? stageMeta.activeLineClassName : 'bg-neutral-200'
+                              isConnectorActive ? stageMeta.activeLineClassName : 'bg-[color:var(--line-soft)]'
                             }`}
                           />
                         ) : null}
@@ -4541,7 +4552,7 @@ function OrdersPageContent() {
               </div>
             </div>
             {selectedOrderIsCancelled ? (
-              <p className="mt-2 text-xs text-rose-600">
+              <p className="mt-2 text-xs text-[color:var(--tone-roast-ink)]">
                 Pedido cancelado. Etapas bloqueadas.
               </p>
             ) : null}
@@ -4550,7 +4561,7 @@ function OrdersPageContent() {
             <div className="min-w-0">
               <h3 className="text-xl font-semibold">Pedido #{displayOrderNumber(selectedOrder)}</h3>
               <div className="mt-1 flex flex-wrap items-center gap-2">
-                <p className="text-sm font-semibold text-neutral-900">{selectedCustomerNameLabel}</p>
+                <p className="text-sm font-semibold text-[color:var(--ink-strong)]">{selectedCustomerNameLabel}</p>
                 {selectedCustomer?.id ? (
                   <Link
                     href={`/clientes?editCustomerId=${selectedCustomer.id}`}
@@ -4560,9 +4571,9 @@ function OrdersPageContent() {
                   </Link>
                 ) : null}
               </div>
-              <p className="mt-0.5 break-words text-xs text-neutral-600">{selectedCustomerAddressLabel}</p>
-              <p className="mt-0.5 break-words text-xs text-neutral-600">{selectedCustomerPhoneLabel}</p>
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-neutral-500">
+              <p className="mt-0.5 break-words text-xs text-[color:var(--ink-muted)]">{selectedCustomerAddressLabel}</p>
+              <p className="mt-0.5 break-words text-xs text-[color:var(--ink-muted)]">{selectedCustomerPhoneLabel}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-[color:var(--ink-muted)]">
                 <span
                   className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${orderStatusBadgeClass(selectedOrder.status || '')}`}
                 >
@@ -4576,7 +4587,7 @@ function OrdersPageContent() {
                 <span>{formatCurrencyBR(selectedOrder.total ?? 0)}</span>
               </div>
               {selectedCustomer?.deletedAt ? (
-                <p className="mt-1 text-xs text-amber-600">
+                <p className="mt-1 text-xs text-[color:var(--tone-gold-ink)]">
                   Cliente excluido em {selectedCustomerDeletedAtLabel}. Pedido mantido.
                 </p>
               ) : null}
@@ -4591,7 +4602,7 @@ function OrdersPageContent() {
           </div>
           <div>
             <div className="mb-3 grid gap-3 rounded-2xl border border-white/70 bg-white/80 p-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_160px_auto] xl:items-end">
-              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
                 Data e hora
                 <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px]">
                   <input
@@ -4626,7 +4637,7 @@ function OrdersPageContent() {
                   />
                 </div>
               </label>
-              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
                 Desconto (%)
                 <input
                   className="app-input"
@@ -4637,11 +4648,11 @@ function OrdersPageContent() {
                   onChange={(event) => setSelectedOrderEditDiscountPct(event.target.value)}
                   onBlur={() => setSelectedOrderEditDiscountPct(normalizeDiscountPctInput(selectedOrderEditDiscountPct))}
                 />
-                <span className="text-[11px] normal-case tracking-normal text-neutral-500">
+                <span className="text-[11px] normal-case tracking-normal text-[color:var(--ink-muted)]">
                   Campo livre de 0% a 100% • {formatCurrencyBR(selectedOrderEditDiscountAmountPreview)}
                 </span>
               </label>
-              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
                 Obs.
                 <input
                   className="app-input"
@@ -4660,11 +4671,11 @@ function OrdersPageContent() {
                 {isSavingSelectedOrderEdit ? 'Salvando...' : 'Salvar'}
               </button>
               {selectedOrderEditError ? (
-                <p className="text-xs font-medium text-rose-700 md:col-span-3">{selectedOrderEditError}</p>
+                <p className="text-xs font-medium text-[color:var(--tone-roast-ink)] md:col-span-3">{selectedOrderEditError}</p>
               ) : null}
             </div>
             <div className="mb-3 grid gap-3 rounded-2xl border border-white/70 bg-white/80 p-3 lg:grid-cols-2 xl:grid-cols-3">
-              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
                 Nome
                 <input
                   className="app-input"
@@ -4674,7 +4685,7 @@ function OrdersPageContent() {
                   placeholder="Nome do cliente"
                 />
               </label>
-              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
                 Telefone
                 <input
                   className="app-input"
@@ -4685,10 +4696,10 @@ function OrdersPageContent() {
                 />
               </label>
               {selectedCustomerAddressOptions.length > 0 ? (
-                <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+                <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
                   Endereços salvos
                   <select
-                    className="app-input text-sm normal-case tracking-normal text-neutral-800"
+                    className="app-input text-sm normal-case tracking-normal text-[color:var(--ink-strong)]"
                     value={selectedOrderSavedAddressKey}
                     onChange={(event) => applySelectedOrderSavedAddress(event.target.value)}
                   >
@@ -4702,7 +4713,7 @@ function OrdersPageContent() {
               ) : (
                 <div className="hidden xl:block" aria-hidden="true" />
               )}
-              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500 lg:col-span-2 xl:col-span-3">
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)] lg:col-span-2 xl:col-span-3">
                 Endereço
                 <input
                   className="app-input"
@@ -4718,7 +4729,7 @@ function OrdersPageContent() {
                   placeholder="Rua, número, bairro, cidade"
                 />
               </label>
-              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
                 Complemento
                 <input
                   className="app-input"
@@ -4728,7 +4739,7 @@ function OrdersPageContent() {
                   placeholder="Apto, bloco, referência"
                 />
               </label>
-              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
                 Bairro
                 <input
                   className="app-input"
@@ -4743,7 +4754,7 @@ function OrdersPageContent() {
                   placeholder="Bairro"
                 />
               </label>
-              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
                 Cidade
                 <input
                   className="app-input"
@@ -4755,7 +4766,7 @@ function OrdersPageContent() {
                   placeholder="Cidade"
                 />
               </label>
-              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
                 UF
                 <input
                   className="app-input"
@@ -4771,7 +4782,7 @@ function OrdersPageContent() {
                   placeholder="UF"
                 />
               </label>
-              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
                 CEP
                 <input
                   className="app-input"
@@ -4788,7 +4799,7 @@ function OrdersPageContent() {
                   placeholder="00000-000"
                 />
               </label>
-              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500 lg:col-span-2 xl:col-span-3">
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)] lg:col-span-2 xl:col-span-3">
                 Obs. entrega
                 <input
                   className="app-input"
@@ -4832,12 +4843,12 @@ function OrdersPageContent() {
                   const isEditingBox = selectedOrderEditingBoxKey === box.key;
                   const boxToneClass =
                     box.tone === 'OPEN'
-                      ? 'border-amber-200 bg-amber-50'
-                      : 'border-emerald-200 bg-emerald-50';
+                      ? 'border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)]'
+                      : 'border-[color:var(--tone-sage-line)] bg-[color:var(--tone-sage-surface)]';
                   const boxLabelToneClass =
-                    box.tone === 'OPEN' ? 'text-amber-800' : 'text-emerald-800';
+                    box.tone === 'OPEN' ? 'text-[color:var(--tone-gold-ink)]' : 'text-[color:var(--tone-sage-ink)]';
                   const boxTextToneClass =
-                    box.tone === 'OPEN' ? 'text-amber-950' : 'text-emerald-950';
+                    box.tone === 'OPEN' ? 'text-[color:var(--tone-gold-ink)]' : 'text-[color:var(--tone-sage-ink)]';
 
                   return (
                     <div key={box.key} className={`rounded-2xl border px-3 py-2 ${boxToneClass}`}>
@@ -4870,7 +4881,7 @@ function OrdersPageContent() {
                       </p>
                       {isEditingBox ? (
                         <div className="mt-2 grid gap-2 rounded-xl border border-white/80 bg-white/90 p-2.5">
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
                             Itens • {selectedOrderEditingBoxDraftTotalUnits}/{box.targetUnits} un
                           </p>
                           <div className="grid gap-1.5">
@@ -4897,7 +4908,7 @@ function OrdersPageContent() {
                                   key={`selected-order-box-row-${box.key}-${row.productId}`}
                                   className="flex flex-col gap-2 rounded-lg border border-white/70 bg-white/80 px-2 py-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between"
                                 >
-                                  <span className="break-words text-xs font-medium text-neutral-700">
+                                  <span className="break-words text-xs font-medium text-[color:var(--ink-muted)]">
                                     {row.productName}
                                   </span>
                                   <div className="flex flex-wrap items-center gap-1 sm:justify-end">
@@ -4917,7 +4928,7 @@ function OrdersPageContent() {
                                     >
                                       -
                                     </button>
-                                    <span className="min-w-6 text-center text-xs font-semibold text-neutral-900">
+                                    <span className="min-w-6 text-center text-xs font-semibold text-[color:var(--ink-strong)]">
                                       {quantity}
                                     </span>
                                     <button
@@ -4971,7 +4982,7 @@ function OrdersPageContent() {
                           </div>
                           {box.targetUnits === ORDER_BOX_UNITS ? (
                             <div className="rounded-lg border border-white/70 bg-white/80 px-2 py-2">
-                              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
                                 Mistas
                               </p>
                               <div className="mt-1 flex flex-wrap gap-1.5">
@@ -5003,10 +5014,10 @@ function OrdersPageContent() {
                             </div>
                           ) : null}
                           {selectedOrderEditingBoxError ? (
-                            <p className="text-xs font-medium text-rose-700">{selectedOrderEditingBoxError}</p>
+                            <p className="text-xs font-medium text-[color:var(--tone-roast-ink)]">{selectedOrderEditingBoxError}</p>
                           ) : null}
                           {!selectedOrderAllowsBoxEdit ? (
-                            <p className="text-xs text-amber-700">
+                            <p className="text-xs text-[color:var(--tone-gold-ink)]">
                               Esse status bloqueia a edicao das caixas.
                             </p>
                           ) : null}

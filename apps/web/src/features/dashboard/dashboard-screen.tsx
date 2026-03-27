@@ -269,23 +269,23 @@ const DASHBOARD_PERIOD_OPTIONS: Array<{ value: DashboardPeriodSelection; label: 
 
 const PANEL_TONE_CLASSES: Record<DashboardTone, string> = {
   amber:
-    'border-[rgba(192,118,43,0.18)] bg-[linear-gradient(155deg,rgba(255,249,239,0.97),rgba(247,231,210,0.88))]',
+    'border-[color:var(--tone-gold-line)] bg-[linear-gradient(155deg,rgba(250,243,233,0.97),rgba(243,230,211,0.9))]',
   sky:
-    'border-[rgba(108,152,214,0.18)] bg-[linear-gradient(155deg,rgba(243,249,255,0.97),rgba(224,237,255,0.88))]',
+    'border-[color:var(--tone-sage-line)] bg-[linear-gradient(155deg,rgba(245,250,247,0.97),rgba(233,242,237,0.9))]',
   mint:
-    'border-[rgba(102,165,128,0.18)] bg-[linear-gradient(155deg,rgba(244,252,247,0.97),rgba(223,241,231,0.88))]',
+    'border-[color:var(--tone-olive-line)] bg-[linear-gradient(155deg,rgba(248,247,240,0.97),rgba(238,235,222,0.92))]',
   rose:
-    'border-[rgba(192,111,95,0.18)] bg-[linear-gradient(155deg,rgba(255,247,245,0.97),rgba(248,226,220,0.9))]',
+    'border-[color:var(--tone-blush-line)] bg-[linear-gradient(155deg,rgba(252,247,245,0.97),rgba(243,229,224,0.92))]',
   ink:
-    'border-[rgba(57,45,35,0.14)] bg-[linear-gradient(155deg,rgba(255,252,249,0.98),rgba(236,231,226,0.92))]'
+    'border-[rgba(57,45,35,0.14)] bg-[linear-gradient(155deg,rgba(255,252,249,0.98),rgba(238,233,226,0.92))]'
 };
 
 const BAR_TONE_CLASSES: Record<DashboardTone, string> = {
-  amber: 'bg-[linear-gradient(90deg,#7e4f2d,#d96f2a)]',
-  sky: 'bg-[linear-gradient(90deg,#4978b7,#8ec8ff)]',
-  mint: 'bg-[linear-gradient(90deg,#2d7b59,#8bd3ad)]',
-  rose: 'bg-[linear-gradient(90deg,#a25142,#f2a38a)]',
-  ink: 'bg-[linear-gradient(90deg,#5e4c3d,#c89f77)]'
+  amber: 'bg-[linear-gradient(90deg,var(--tone-gold-ink),var(--brand-gold))]',
+  sky: 'bg-[linear-gradient(90deg,var(--tone-sage-ink),var(--brand-sage))]',
+  mint: 'bg-[linear-gradient(90deg,var(--tone-olive-ink),var(--brand-olive))]',
+  rose: 'bg-[linear-gradient(90deg,var(--tone-roast-ink),var(--brand-blush))]',
+  ink: 'bg-[linear-gradient(90deg,var(--brand-cocoa),var(--brand-gold))]'
 };
 
 function formatNumber(value: number) {

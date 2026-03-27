@@ -1450,7 +1450,7 @@ export function PublicOrderPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(255,240,220,0.95),transparent_32%),radial-gradient(circle_at_top_right,rgba(219,234,222,0.9),transparent_28%),linear-gradient(180deg,#f8efe5_0%,#f4eadc_100%)]">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(227,212,181,0.42),transparent_32%),radial-gradient(circle_at_top_right,rgba(198,219,210,0.46),transparent_28%),linear-gradient(180deg,#f7efe4_0%,#f3e9dc_100%)]">
       <div className="mx-auto w-full max-w-[1720px] px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:py-8 xl:px-10 2xl:px-12">
         <section className="public-order-layout">
           <form
@@ -1800,9 +1800,9 @@ export function PublicOrderPage() {
                         key={box.id}
                         className={`public-order-custom-card rounded-[20px] border p-4 xl:p-5 ${
                           box.isComplete
-                            ? 'border-emerald-200 bg-emerald-50'
+                            ? 'border-[color:var(--tone-sage-line)] bg-[color:var(--tone-sage-surface)]'
                             : box.isActive
-                              ? 'border-amber-200 bg-amber-50'
+                              ? 'border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)]'
                               : 'border-white/80 bg-white'
                         }`}
                       >
@@ -1966,7 +1966,7 @@ export function PublicOrderPage() {
                   {couponError}
                 </div>
               ) : isCouponApplied && appliedCoupon ? (
-                <div className="mt-3 rounded-[20px] border border-[rgba(102,165,128,0.18)] bg-[rgb(243,251,246)] px-4 py-3 text-sm leading-6 text-[color:var(--ink-strong)]">
+                <div className="app-inline-notice app-inline-notice--success mt-3 rounded-[20px] px-4 py-3 text-sm leading-6 text-[color:var(--ink-strong)]">
                   Cupom <strong>{appliedCoupon.code}</strong> aplicado com{' '}
                   <strong>
                     {Number(appliedCoupon.discountPct).toLocaleString('pt-BR', {

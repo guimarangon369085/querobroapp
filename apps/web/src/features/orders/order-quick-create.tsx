@@ -573,7 +573,7 @@ export function OrderQuickCreate({
       </div>
 
       {restoredFromLastOrder ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+        <div className="rounded-2xl border border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)] px-4 py-3 text-sm text-[color:var(--tone-gold-ink)]">
           <div className="flex items-start gap-3">
             <AppIcon name="refresh" className="mt-0.5 h-5 w-5 shrink-0" />
             <div className="min-w-0">
@@ -624,10 +624,10 @@ export function OrderQuickCreate({
       <div
         className={`rounded-2xl border px-4 py-3 text-sm ${
           hasOpenVirtualBox
-            ? 'border-amber-200 bg-amber-50 text-amber-950'
+            ? 'border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)] text-[color:var(--tone-gold-ink)]'
             : draftTotalUnits > 0
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-950'
-              : 'border-neutral-200 bg-white text-neutral-700'
+              ? 'border-[color:var(--tone-sage-line)] bg-[color:var(--tone-sage-surface)] text-[color:var(--tone-sage-ink)]'
+              : 'border-[color:var(--tone-cream-line)] bg-white text-[color:var(--ink-muted)]'
         }`}
       >
         <p className="text-xs font-semibold uppercase tracking-[0.1em] opacity-70">Caixas</p>
@@ -654,7 +654,7 @@ export function OrderQuickCreate({
               data-quick-order-product-id={product.id}
               className={`order-quick-create__product-card rounded-2xl border p-3 transition ${
                 isSelected
-                  ? 'border-amber-200 bg-amber-50/80 shadow-[0_10px_26px_rgba(168,112,42,0.12)]'
+                  ? 'border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)] shadow-[0_10px_26px_rgba(168,112,42,0.12)]'
                   : 'border-white/80 bg-white/80'
               }`}
             >
@@ -727,7 +727,7 @@ export function OrderQuickCreate({
                     Fechar (+{remainingUnitsToCloseBox})
                   </button>
                 ) : displayTotalUnits > 0 ? (
-                  <div className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-center text-xs font-semibold text-emerald-800">
+                  <div className="rounded-full border border-[color:var(--tone-sage-line)] bg-[color:var(--tone-sage-surface)] px-3 py-2 text-center text-xs font-semibold text-[color:var(--tone-sage-ink)]">
                     Fechada
                   </div>
                 ) : null}
@@ -741,7 +741,7 @@ export function OrderQuickCreate({
         data-quick-order-product-id="mista"
         className={`order-quick-create__product-card rounded-2xl border p-4 transition ${
           mistaShortcutStack.length > 0
-            ? 'border-amber-200 bg-amber-50/80 shadow-[0_10px_26px_rgba(168,112,42,0.12)]'
+            ? 'border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)] shadow-[0_10px_26px_rgba(168,112,42,0.12)]'
             : 'border-white/80 bg-white/80'
         }`}
       >
@@ -838,35 +838,35 @@ export function OrderQuickCreate({
               {virtualBoxPartitions.boxes.map((box, index) => (
                 <div
                   key={`virtual-box-${index + 1}`}
-                  className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2"
+                  className="rounded-2xl border border-[color:var(--tone-sage-line)] bg-[color:var(--tone-sage-surface)] px-3 py-2"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-2">
-                      <span className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-800">
+                      <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--tone-sage-ink)]">
                         #{index + 1}
                       </span>
-                      <span className="truncate text-xs font-semibold text-emerald-900">
+                      <span className="truncate text-xs font-semibold text-[color:var(--tone-sage-ink)]">
                         {resolveVirtualBoxOfficialName(box)}
                       </span>
                     </div>
-                    <span className="text-xs font-semibold text-emerald-800">1 cx</span>
+                    <span className="text-xs font-semibold text-[color:var(--tone-sage-ink)]">1 cx</span>
                   </div>
-                  <p className="mt-1 text-sm font-medium text-emerald-950">
+                  <p className="mt-1 text-sm font-medium text-[color:var(--tone-sage-ink)]">
                     {formatVirtualBoxParts(box)}
                   </p>
                 </div>
               ))}
               {virtualBoxPartitions.openBox.length > 0 ? (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2">
+                <div className="rounded-2xl border border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)] px-3 py-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-800">
+                    <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--tone-gold-ink)]">
                       Aberta
                     </span>
-                    <span className="text-xs font-semibold text-amber-800">
+                    <span className="text-xs font-semibold text-[color:var(--tone-gold-ink)]">
                       {virtualBoxPartitions.openBoxUnits}/7 cx
                     </span>
                   </div>
-                  <p className="mt-1 text-sm font-medium text-amber-950">
+                  <p className="mt-1 text-sm font-medium text-[color:var(--tone-gold-ink)]">
                     {formatVirtualBoxParts(virtualBoxPartitions.openBox)}
                   </p>
                 </div>
@@ -903,7 +903,7 @@ export function OrderQuickCreate({
           {primaryActionLabel}
         </button>
       </div>
-      {orderError ? <p className="text-xs text-red-600">{orderError}</p> : null}
+      {orderError ? <p className="text-xs text-[color:var(--tone-roast-ink)]">{orderError}</p> : null}
       {!canCreateOrder && !orderError && !tutorialMode ? (
         <p className="text-xs text-neutral-500">
           {!selectedCustomerId
