@@ -147,3 +147,81 @@ test('desconto de 100% zera o pedido e nao deixa cobranca pix pendente', async (
   assert.equal(intake.intake.pixStatus, 'PAGO');
   assert.equal(intake.intake.pixCharge, null);
 });
+
+test('editar pedido interno permite incluir e remover desconto percentual de amostras', async (t) => {
+  const { apiUrl, shutdown } = await ensureApiServer();
+  t.after(async () => {
+    await shutdown();
+  });
+
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const product = await request(apiUrl, '/inventory-products', {
+    method: 'POST',
+    body: {
+      name: `Broa Edicao Desconto ${suffix}`,
+      category: 'Teste',
+      unit: 'cx',
+      price: 40,
+      active: true
+    }
+  });
+
+  const intake = await request(apiUrl, '/orders/intake', {
+    method: 'POST',
+    body: {
+      version: 1,
+      intent: 'CONFIRMED',
+      customer: {
+        name: `Cliente Edicao ${suffix}`,
+        phone: '11999990002',
+        address: 'Rua da Edicao, 200'
+      },
+      fulfillment: {
+        mode: 'PICKUP',
+        scheduledAt: new Date(Date.UTC(2034, 0, 12, 15, 0, 0)).toISOString()
+      },
+      order: {
+        items: [{ productId: product.id, quantity: 2 }],
+        notes: 'Pedido interno sem desconto'
+      },
+      payment: {
+        method: 'pix',
+        status: 'PENDENTE'
+      },
+      source: {
+        channel: 'INTERNAL_DASHBOARD',
+        originLabel: 'test.discount-pct.edit'
+      }
+    }
+  });
+
+  assert.equal(approxEqual(intake.order.discount, 0), true);
+  assert.doesNotMatch(String(intake.order.notes || ''), /Investimento de marketing: AMOSTRAS/);
+
+  const discounted = await request(apiUrl, `/orders/${intake.order.id}`, {
+    method: 'PUT',
+    body: {
+      discountPct: 25,
+      notes: 'Pedido interno com desconto'
+    }
+  });
+
+  assert.equal(
+    approxEqual(discounted.discount, Math.round(Number(discounted.subtotal || 0) * 25) / 100),
+    true
+  );
+  assert.match(String(discounted.notes || ''), /Pedido interno com desconto/);
+  assert.match(String(discounted.notes || ''), /Investimento de marketing: AMOSTRAS \(25%\)/);
+
+  const restored = await request(apiUrl, `/orders/${intake.order.id}`, {
+    method: 'PUT',
+    body: {
+      discountPct: 0,
+      notes: 'Pedido interno sem desconto novamente'
+    }
+  });
+
+  assert.equal(approxEqual(restored.discount, 0), true);
+  assert.match(String(restored.notes || ''), /Pedido interno sem desconto novamente/);
+  assert.doesNotMatch(String(restored.notes || ''), /Investimento de marketing: AMOSTRAS/);
+});

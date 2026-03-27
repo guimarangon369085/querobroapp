@@ -16,7 +16,8 @@ import {
   OrderStatusEnum,
   preserveOrderNoteMetadata,
   PixChargeSchema,
-  roundMoney
+  roundMoney,
+  stripOrderNoteMetadata
 } from '@querobroapp/shared';
 import { z } from 'zod';
 import {
@@ -2302,7 +2303,10 @@ export class OrdersService {
           quantity: item.quantity
         }))
       );
-      const { discount } =
+      const shouldUpdateDiscount =
+        Object.prototype.hasOwnProperty.call(data, 'discount') ||
+        Object.prototype.hasOwnProperty.call(data, 'discountPct');
+      const { discount, discountPct } =
         Object.prototype.hasOwnProperty.call(data, 'discount') || Object.prototype.hasOwnProperty.call(data, 'discountPct')
           ? this.resolveOrderDiscountInput(subtotal, {
               discount: data.discount,
@@ -2314,9 +2318,21 @@ export class OrdersService {
       const total = this.computeOrderTotal(subtotal, discount, this.toMoney(existing.deliveryFee ?? 0));
       const amountPaid = this.getPaidAmount(existing.payments || []);
       this.ensureOrderTotalCoversPaid(total, amountPaid);
-      const nextNotes = Object.prototype.hasOwnProperty.call(data, 'notes')
-        ? preserveOrderNoteMetadata(existing.notes ?? null, data.notes ?? null)
+      const shouldUpdateNotes = Object.prototype.hasOwnProperty.call(data, 'notes') || shouldUpdateDiscount;
+      let nextNotes = shouldUpdateNotes
+        ? preserveOrderNoteMetadata(
+            existing.notes ?? null,
+            Object.prototype.hasOwnProperty.call(data, 'notes')
+              ? data.notes ?? null
+              : stripOrderNoteMetadata(existing.notes ?? null)
+          )
         : undefined;
+      if (nextNotes !== undefined) {
+        nextNotes = mergeMarketingSamplesIntoNotes(
+          nextNotes,
+          compareMoney(discountPct, 0) > 0 ? { discountPct } : null
+        );
+      }
       const updated = await tx.order.update({
         where: { id },
         data: {

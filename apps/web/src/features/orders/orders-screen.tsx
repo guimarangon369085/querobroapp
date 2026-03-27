@@ -1190,6 +1190,7 @@ function OrdersPageContent() {
   const weekGridCanvasByDateKeyRef = useRef(new Map<string, HTMLDivElement>());
   const [isStatusUpdatePending, setIsStatusUpdatePending] = useState(false);
   const [selectedOrderEditScheduledAt, setSelectedOrderEditScheduledAt] = useState<string>('');
+  const [selectedOrderEditDiscountPct, setSelectedOrderEditDiscountPct] = useState<string>('0');
   const [selectedOrderEditNotes, setSelectedOrderEditNotes] = useState<string>('');
   const [selectedOrderEditError, setSelectedOrderEditError] = useState<string | null>(null);
   const [isSavingSelectedOrderEdit, setIsSavingSelectedOrderEdit] = useState(false);
@@ -1313,6 +1314,7 @@ function OrdersPageContent() {
     setSelectedOrderEditScheduledAt(
       normalizeDateTimeLocalToAllowedQuarter(formatDateTimeLocalValue(referenceDate))
     );
+    setSelectedOrderEditDiscountPct(normalizeDiscountPctInput(deriveDiscountPctFromOrder(selectedOrder)));
     setSelectedOrderEditNotes(stripOrderNoteMetadata(selectedOrder.notes) || '');
     setSelectedOrderEditError(null);
   }, [isOrderDetailModalOpen, selectedOrder]);
@@ -2645,6 +2647,15 @@ function OrdersPageContent() {
       ),
     [selectedOrderEditScheduledAt]
   );
+  const selectedOrderEditDiscountPctNumber = useMemo(() => {
+    const parsed = parseLocaleNumber(selectedOrderEditDiscountPct);
+    return parsed == null ? 0 : Math.min(Math.max(roundMoney(parsed), 0), 100);
+  }, [selectedOrderEditDiscountPct]);
+  const selectedOrderEditDiscountAmountPreview = useMemo(() => {
+    const subtotal = Math.max(Number(selectedOrder?.subtotal ?? 0), 0);
+    if (subtotal <= 0 || selectedOrderEditDiscountPctNumber <= 0) return 0;
+    return roundMoney((subtotal * selectedOrderEditDiscountPctNumber) / 100);
+  }, [selectedOrder?.subtotal, selectedOrderEditDiscountPctNumber]);
   const selectedCustomer = selectedOrder
     ? selectedOrder.customer || customers.find((customer) => customer.id === selectedOrder.customerId) || null
     : null;
@@ -2894,6 +2905,7 @@ function OrdersPageContent() {
         method: 'PUT',
         body: JSON.stringify({
           scheduledAt: parsedScheduledAt.toISOString(),
+          discountPct: selectedOrderEditDiscountPctNumber,
           notes: selectedOrderEditNotes.trim() ? selectedOrderEditNotes.trim() : null
         })
       });
@@ -4089,7 +4101,7 @@ function OrdersPageContent() {
             </button>
           </div>
           <div>
-            <div className="mb-3 grid gap-3 rounded-2xl border border-white/70 bg-white/80 p-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
+            <div className="mb-3 grid gap-3 rounded-2xl border border-white/70 bg-white/80 p-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_160px_auto] xl:items-end">
               <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
                 Data e hora
                 <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px]">
@@ -4124,6 +4136,21 @@ function OrdersPageContent() {
                     }
                   />
                 </div>
+              </label>
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+                Desconto (%)
+                <input
+                  className="app-input"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="0 a 100"
+                  value={selectedOrderEditDiscountPct}
+                  onChange={(event) => setSelectedOrderEditDiscountPct(event.target.value)}
+                  onBlur={() => setSelectedOrderEditDiscountPct(normalizeDiscountPctInput(selectedOrderEditDiscountPct))}
+                />
+                <span className="text-[11px] normal-case tracking-normal text-neutral-500">
+                  Campo livre de 0% a 100% • {formatCurrencyBR(selectedOrderEditDiscountAmountPreview)}
+                </span>
               </label>
               <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
                 Obs.

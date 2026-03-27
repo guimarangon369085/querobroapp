@@ -274,6 +274,10 @@ Ultima atualizacao: 2026-03-26
 - Ciclo executado: `pnpm --filter @querobroapp/api build`, `node --test tests/order-schedule-capacity.test.mjs`
 - Resultado: a trava de capacidade do forno foi isolada ao fluxo publico de `/pedido` e ao endpoint publico de disponibilidade. O fluxo interno de `/pedidos` voltou a permitir criar, mover e editar pedidos em horarios sobrepostos, sem perder o calculo visual de duracao no calendario.
 
+- Data: 2026-03-27
+- Ciclo executado: `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, `node --test tests/order-discount-pct-marketing.test.mjs`
+- Resultado: o modal de edicao de pedido em `/pedidos` passou a permitir incluir, alterar e remover desconto percentual, usando o mesmo padrao do novo pedido. O update do backend passou a recalcular o total e a sincronizar a metadata de `Investimento de marketing: AMOSTRAS` quando o desconto e ajustado no fluxo interno.
+
 ## Como religar e validar rapido
 
 1. `./scripts/stop-all.sh`
