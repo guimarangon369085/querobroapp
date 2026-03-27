@@ -258,6 +258,10 @@ Ultima atualizacao: 2026-03-26
 - Ciclo executado: `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`
 - Resultado: o sabor `Romeu e Julieta (RJ)` passou a ser reconhecido no catalogo publico do `/pedido`, no prefill por `catalog=RJ`, nas contagens operacionais de estoque e no consumo automatico de recheios (`goiabada + requeijao de corte`). O feed unico `apps/web/public/meta-catalog.csv` ganhou a linha `QUEROBROA-RJ`, `sabores-caixa.jpg` foi recomposta com 6 colunas e entrou a arte publica nova `romeu-e-julieta.jpg`. A origem do gargalo de deploy tambem ficou estabilizada usando assets versionados do proprio repositorio, sem depender de upload efemero de `/uploads/products`.
 
+- Data: 2026-03-27
+- Ciclo executado: `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, `node --test tests/order-schedule-capacity.test.mjs`
+- Resultado: o agendamento de pedidos passou a respeitar a capacidade real do forno em janelas de producao, usando `14 broas por hora` como limite operacional. Cada pedido agora ocupa no calendario uma faixa que comeca antes do horario pronto/entrega, com duracao calculada por `ceil(totalBroas / 14) * 60 min`, e novos agendamentos so entram quando nao colidem com essa janela de forno.
+
 ## Como religar e validar rapido
 
 1. `./scripts/stop-all.sh`

@@ -4,8 +4,15 @@ export const EXTERNAL_ORDER_FIRST_SLOT_HOUR = 9;
 export const EXTERNAL_ORDER_FIRST_SLOT_MINUTE = 0;
 export const EXTERNAL_ORDER_SLOT_MINUTES = 15;
 export const EXTERNAL_ORDER_MAX_ORDERS_PER_DAY = 15;
+export const EXTERNAL_ORDER_OVEN_CAPACITY_BROAS = 14;
+export const EXTERNAL_ORDER_OVEN_BATCH_MINUTES = 60;
 
 type ExternalOrderScheduleAvailabilityReason = 'AVAILABLE' | 'BEFORE_MINIMUM' | 'SLOT_TAKEN' | 'DAY_FULL';
+
+type ExternalOrderScheduleEntryInput = {
+  scheduledAt: Date | string | null | undefined;
+  totalBroas?: number | null | undefined;
+};
 
 type ZonedDateParts = {
   year: number;
@@ -73,6 +80,49 @@ function zonedDateTimeToUtc(
 function normalizeQuarterMinute(minute: number, slotMinutes = EXTERNAL_ORDER_SLOT_MINUTES) {
   const normalizedSlotMinutes = Math.max(Math.floor(slotMinutes), 1);
   return Math.ceil(minute / normalizedSlotMinutes) * normalizedSlotMinutes;
+}
+
+function normalizeExternalOrderBroaCount(value: number | null | undefined) {
+  const parsed = Number(value ?? 0);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(Math.floor(parsed), 0);
+}
+
+export function resolveExternalOrderProductionBatchCount(totalBroas: number | null | undefined) {
+  const normalizedTotalBroas = normalizeExternalOrderBroaCount(totalBroas);
+  if (normalizedTotalBroas <= 0) return 0;
+  return Math.ceil(normalizedTotalBroas / EXTERNAL_ORDER_OVEN_CAPACITY_BROAS);
+}
+
+export function resolveExternalOrderProductionDurationMinutes(totalBroas: number | null | undefined) {
+  return resolveExternalOrderProductionBatchCount(totalBroas) * EXTERNAL_ORDER_OVEN_BATCH_MINUTES;
+}
+
+export function resolveExternalOrderProductionWindow(
+  scheduledAt: Date | string | null | undefined,
+  totalBroas: number | null | undefined
+) {
+  const parsedScheduledAt = scheduledAt instanceof Date ? new Date(scheduledAt) : new Date(scheduledAt ?? Number.NaN);
+  if (Number.isNaN(parsedScheduledAt.getTime())) {
+    return {
+      scheduledAt: new Date(Number.NaN),
+      productionStartAt: new Date(Number.NaN),
+      totalBroas: 0,
+      durationMinutes: 0,
+      batchCount: 0
+    };
+  }
+
+  const normalizedTotalBroas = normalizeExternalOrderBroaCount(totalBroas);
+  const durationMinutes = resolveExternalOrderProductionDurationMinutes(normalizedTotalBroas);
+
+  return {
+    scheduledAt: parsedScheduledAt,
+    productionStartAt: new Date(parsedScheduledAt.getTime() - durationMinutes * 60_000),
+    totalBroas: normalizedTotalBroas,
+    durationMinutes,
+    batchCount: resolveExternalOrderProductionBatchCount(normalizedTotalBroas)
+  };
 }
 
 export function formatExternalOrderDayKey(date: Date, timeZone = EXTERNAL_ORDER_TIME_ZONE) {
@@ -173,8 +223,9 @@ export function formatExternalOrderMinimumSchedule(
 }
 
 export function resolveExternalOrderScheduleAvailability(input: {
-  scheduledOrders: Array<Date | string | null | undefined>;
+  scheduledOrders: ExternalOrderScheduleEntryInput[];
   requestedAt?: Date | string | null;
+  requestedTotalBroas?: number | null;
   reference?: Date;
   timeZone?: string;
   dailyLimit?: number;
@@ -188,16 +239,21 @@ export function resolveExternalOrderScheduleAvailability(input: {
   const minimumAllowedAt = resolveExternalOrderMinimumSchedule(reference, timeZone);
 
   const dayCounts = new Map<string, number>();
-  const occupiedSlots = new Set<string>();
+  const occupiedWindows: Array<{ startAt: Date; endAt: Date }> = [];
 
   for (const value of input.scheduledOrders) {
-    if (!value) continue;
-    const parsed = value instanceof Date ? value : new Date(value);
+    if (!value?.scheduledAt) continue;
+    const window = resolveExternalOrderProductionWindow(value.scheduledAt, value.totalBroas);
+    const parsed = window.scheduledAt;
     if (Number.isNaN(parsed.getTime())) continue;
     const dayKey = formatExternalOrderDayKey(parsed, timeZone);
-    const slotKey = formatExternalOrderSlotKey(parsed, timeZone);
     dayCounts.set(dayKey, (dayCounts.get(dayKey) || 0) + 1);
-    occupiedSlots.add(slotKey);
+    if (window.durationMinutes > 0) {
+      occupiedWindows.push({
+        startAt: window.productionStartAt,
+        endAt: window.scheduledAt
+      });
+    }
   }
 
   const requestedDate =
@@ -208,6 +264,8 @@ export function resolveExternalOrderScheduleAvailability(input: {
         : new Date(input.requestedAt);
   const requestedAt =
     requestedDate && !Number.isNaN(requestedDate.getTime()) ? resolveExternalOrderSlotStart(requestedDate, timeZone) : null;
+  const requestedTotalBroas = normalizeExternalOrderBroaCount(input.requestedTotalBroas);
+  const requestedDurationMinutes = resolveExternalOrderProductionDurationMinutes(requestedTotalBroas);
 
   let reason: ExternalOrderScheduleAvailabilityReason = 'AVAILABLE';
   let requestedAvailable = true;
@@ -216,9 +274,11 @@ export function resolveExternalOrderScheduleAvailability(input: {
 
   if (requestedAt) {
     const requestedDayKey = formatExternalOrderDayKey(requestedAt, timeZone);
-    const requestedSlotKey = formatExternalOrderSlotKey(requestedAt, timeZone);
     dayOrderCount = dayCounts.get(requestedDayKey) || 0;
-    slotTaken = occupiedSlots.has(requestedSlotKey);
+    const requestedStartAt = new Date(requestedAt.getTime() - requestedDurationMinutes * 60_000);
+    slotTaken = occupiedWindows.some(
+      (window) => requestedStartAt.getTime() < window.endAt.getTime() && requestedAt.getTime() > window.startAt.getTime()
+    );
 
     if (requestedAt.getTime() < minimumAllowedAt.getTime()) {
       reason = 'BEFORE_MINIMUM';
@@ -237,7 +297,6 @@ export function resolveExternalOrderScheduleAvailability(input: {
 
   while (true) {
     const candidateDayKey = formatExternalOrderDayKey(nextAvailableAt, timeZone);
-    const candidateSlotKey = formatExternalOrderSlotKey(nextAvailableAt, timeZone);
     const candidateDayCount = dayCounts.get(candidateDayKey) || 0;
 
     if (candidateDayCount >= dailyLimit) {
@@ -245,7 +304,14 @@ export function resolveExternalOrderScheduleAvailability(input: {
       continue;
     }
 
-    if (occupiedSlots.has(candidateSlotKey)) {
+    const candidateStartAt = new Date(nextAvailableAt.getTime() - requestedDurationMinutes * 60_000);
+    const overlapsExistingWindow = occupiedWindows.some(
+      (window) =>
+        candidateStartAt.getTime() < window.endAt.getTime() &&
+        nextAvailableAt.getTime() > window.startAt.getTime()
+    );
+
+    if (overlapsExistingWindow) {
       nextAvailableAt = new Date(nextAvailableAt.getTime() + EXTERNAL_ORDER_SLOT_MINUTES * 60_000);
       continue;
     }
@@ -260,6 +326,8 @@ export function resolveExternalOrderScheduleAvailability(input: {
     requestedAvailable,
     reason,
     dailyLimit,
+    requestedTotalBroas,
+    requestedDurationMinutes,
     slotMinutes: EXTERNAL_ORDER_SLOT_MINUTES,
     dayOrderCount,
     slotTaken

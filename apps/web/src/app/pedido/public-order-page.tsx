@@ -99,6 +99,8 @@ type PublicOrderScheduleAvailability = {
   requestedAvailable: boolean;
   reason: 'AVAILABLE' | 'BEFORE_MINIMUM' | 'SLOT_TAKEN' | 'DAY_FULL';
   dailyLimit: number;
+  requestedTotalBroas: number;
+  requestedDurationMinutes: number;
   slotMinutes: number;
   dayOrderCount: number;
   slotTaken: boolean;
@@ -803,8 +805,15 @@ export function PublicOrderPage() {
     });
   }, []);
 
-  const fetchPublicScheduleAvailability = useCallback(async (requestedAt?: string | null) => {
-    const query = requestedAt ? `?scheduledAt=${encodeURIComponent(requestedAt)}` : '';
+  const fetchPublicScheduleAvailability = useCallback(async (requestedAt?: string | null, requestedTotalBroas?: number) => {
+    const params = new URLSearchParams();
+    if (requestedAt) {
+      params.set('scheduledAt', requestedAt);
+    }
+    if (typeof requestedTotalBroas === 'number' && Number.isFinite(requestedTotalBroas) && requestedTotalBroas > 0) {
+      params.set('totalBroas', String(Math.max(Math.floor(requestedTotalBroas), 0)));
+    }
+    const query = params.size > 0 ? `?${params.toString()}` : '';
     const response = await fetch(`/api/order-schedule${query}`, {
       method: 'GET',
       cache: 'no-store'
@@ -820,9 +829,12 @@ export function PublicOrderPage() {
     return data;
   }, []);
 
-  const syncMinimumSchedule = useCallback(async () => {
+  const syncMinimumSchedule = useCallback(async (requestedAt?: string | null) => {
     try {
-      const availability = await fetchPublicScheduleAvailability();
+      const availability = await fetchPublicScheduleAvailability(
+        requestedAt,
+        Math.max(totalBroas, ORDER_BOX_UNITS)
+      );
       const nextMinimum = new Date(availability.nextAvailableAt);
       if (Number.isNaN(nextMinimum.getTime())) {
         throw new Error('Horario publico invalido.');
@@ -831,7 +843,7 @@ export function PublicOrderPage() {
     } catch {
       applyScheduleToForm(resolveExternalOrderMinimumSchedule());
     }
-  }, [applyScheduleToForm, fetchPublicScheduleAvailability]);
+  }, [applyScheduleToForm, fetchPublicScheduleAvailability, totalBroas]);
 
   useEffect(() => {
     void syncMinimumSchedule();
@@ -849,6 +861,11 @@ export function PublicOrderPage() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [syncMinimumSchedule]);
+
+  useEffect(() => {
+    if (!scheduledAtIso) return;
+    void syncMinimumSchedule(scheduledAtIso);
+  }, [scheduledAtIso, syncMinimumSchedule, totalBroas]);
 
   const applyCoupon = useCallback(
     async (forcedCode?: string | null) => {

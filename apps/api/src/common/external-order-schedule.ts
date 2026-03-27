@@ -3,10 +3,13 @@ import {
   EXTERNAL_ORDER_FIRST_SLOT_MINUTE,
   EXTERNAL_ORDER_MAX_ORDERS_PER_DAY,
   EXTERNAL_ORDER_NEXT_DAY_CUTOFF_HOUR,
+  EXTERNAL_ORDER_OVEN_BATCH_MINUTES,
+  EXTERNAL_ORDER_OVEN_CAPACITY_BROAS,
   EXTERNAL_ORDER_SLOT_MINUTES,
   ExternalOrderScheduleAvailabilitySchema,
   formatExternalOrderMinimumSchedule,
   isExternalOrderScheduleAllowed,
+  resolveExternalOrderProductionDurationMinutes,
   resolveExternalOrderScheduleAvailability,
   resolveExternalOrderMinimumSchedule
 } from '@querobroapp/shared';
@@ -17,8 +20,11 @@ export {
   EXTERNAL_ORDER_FIRST_SLOT_MINUTE,
   EXTERNAL_ORDER_MAX_ORDERS_PER_DAY,
   EXTERNAL_ORDER_NEXT_DAY_CUTOFF_HOUR,
+  EXTERNAL_ORDER_OVEN_BATCH_MINUTES,
+  EXTERNAL_ORDER_OVEN_CAPACITY_BROAS,
   EXTERNAL_ORDER_SLOT_MINUTES,
   isExternalOrderScheduleAllowed,
+  resolveExternalOrderProductionDurationMinutes,
   resolveExternalOrderScheduleAvailability,
   resolveExternalOrderMinimumSchedule
 };
@@ -37,7 +43,7 @@ export function externalOrderScheduleAvailabilityErrorMessage(availability: Exte
   }
 
   if (availability.reason === 'SLOT_TAKEN') {
-    return `Esse horário ja esta ocupado. Próximo horário: ${nextLabel}.`;
+    return `Esse horário nao comporta o tempo de forno necessario. Próximo horário: ${nextLabel}.`;
   }
 
   return `Próximo horário: ${nextLabel}.`;

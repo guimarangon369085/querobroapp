@@ -399,6 +399,8 @@ export const ExternalOrderScheduleAvailabilitySchema = z.object({
   requestedAvailable: z.boolean(),
   reason: ExternalOrderScheduleAvailabilityReasonEnum,
   dailyLimit: z.number().int().positive(),
+  requestedTotalBroas: z.number().int().nonnegative(),
+  requestedDurationMinutes: z.number().int().nonnegative(),
   slotMinutes: z.number().int().positive(),
   dayOrderCount: z.number().int().nonnegative(),
   slotTaken: z.boolean()

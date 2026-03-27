@@ -14,6 +14,7 @@ import {
   type MouseEvent
 } from 'react';
 import {
+  resolveExternalOrderProductionDurationMinutes,
   resolveDisplayNumber,
   roundMoney,
   stripOrderNoteMetadata,
@@ -410,6 +411,41 @@ function formatCustomerFullAddress(customer?: Customer | null) {
   return structuredParts.join(', ');
 }
 
+function normalizeOrderProductionDescriptor(value?: string | null) {
+  return (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function resolveCalendarOrderTotalBroas(order: OrderView, productMap: Map<number, Product>) {
+  return (order.items || []).reduce((sum, item) => {
+    const quantity = Math.max(Math.floor(item.quantity || 0), 0);
+    if (quantity <= 0) return sum;
+
+    const product = productMap.get(item.productId);
+    const productName = normalizeOrderProductionDescriptor(product?.name);
+    const productUnit = normalizeOrderProductionDescriptor(product?.unit);
+    const looksLikeOfficialBroa =
+      productName.includes('tradicional') ||
+      productName.includes('goiabada') ||
+      productName.includes('doce') ||
+      productName.includes('romeu') ||
+      productName.includes('julieta') ||
+      productName.includes('queijo') ||
+      productName.includes('requeij');
+    const looksLikeBox =
+      productUnit === 'cx' ||
+      productUnit === 'caixa' ||
+      productUnit === 'caixas' ||
+      productName.includes('caixa');
+
+    return sum + quantity * (looksLikeOfficialBroa ? 1 : looksLikeBox ? ORDER_BOX_UNITS : 1);
+  }, 0);
+}
+
 function normalizeTextForSort(value?: string | null) {
   return (value || '')
     .normalize('NFD')
@@ -636,6 +672,9 @@ const calendarViewLabels: Record<CalendarViewMode, string> = {
 type CalendarOrderEntry = {
   order: OrderView;
   createdAt: Date;
+  productionStartAt: Date;
+  durationMinutes: number;
+  totalBroas: number;
   dateKey: string;
 };
 
@@ -788,14 +827,14 @@ function buildWeekTimelineMetrics(
     forcedOrderId
   } = options;
   const pixelsPerMinute = weekGridHeight / dayGridDurationMinutes;
-  const baseDuration = dayGridSnapMinutes;
 
   const entriesInsideGrid = entries
     .filter((entry) => {
-      const minutes = minutesIntoDay(entry.createdAt);
-      return minutes >= dayGridStartMinutes && minutes < dayGridEndMinutes;
+      const startMinutes = minutesIntoDay(entry.productionStartAt);
+      const endMinutes = startMinutes + entry.durationMinutes;
+      return endMinutes > dayGridStartMinutes && startMinutes < dayGridEndMinutes;
     })
-    .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
+    .sort((left, right) => left.productionStartAt.getTime() - right.productionStartAt.getTime());
 
   let timelineSourceEntries = entriesInsideGrid.slice(0, WEEK_TIMELINE_MAX_VISIBLE_EVENTS);
   if (typeof forcedOrderId === 'number' && forcedOrderId > 0) {
@@ -806,25 +845,29 @@ function buildWeekTimelineMetrics(
         timelineSourceEntries = [
           ...timelineSourceEntries.filter((entry) => !isMatchingOrderEntry(entry, forcedOrderId)).slice(0, Math.max(WEEK_TIMELINE_MAX_VISIBLE_EVENTS - 1, 0)),
           forcedEntry
-        ].sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
+        ].sort((left, right) => left.productionStartAt.getTime() - right.productionStartAt.getTime());
       }
     }
   }
 
   const timelineEvents = buildTimelineLaneLayout(
     timelineSourceEntries.map((entry) => {
-      const startMinutes = clampNumber(
-        Math.round(minutesIntoDay(entry.createdAt) / dayGridSnapMinutes) * dayGridSnapMinutes,
-        dayGridStartMinutes,
-        dayGridEndMinutes - dayGridSnapMinutes
+      const rawStartMinutes = minutesIntoDay(entry.productionStartAt);
+      const rawEndMinutes = rawStartMinutes + entry.durationMinutes;
+      const startMinutes = clampNumber(rawStartMinutes, dayGridStartMinutes, dayGridEndMinutes - dayGridSnapMinutes);
+      const endMinutes = clampNumber(
+        rawEndMinutes,
+        startMinutes + dayGridSnapMinutes,
+        dayGridEndMinutes
       );
+      const durationMinutes = Math.max(endMinutes - startMinutes, dayGridSnapMinutes);
 
       return {
         entry,
         startMinutes,
-        endMinutes: startMinutes + baseDuration,
+        endMinutes,
         top: Math.round((startMinutes - dayGridStartMinutes) * pixelsPerMinute),
-        height: weekGridMinEventHeight
+        height: Math.max(Math.round(durationMinutes * pixelsPerMinute), weekGridMinEventHeight)
       };
     })
   );
@@ -1059,6 +1102,27 @@ function dateWithMinutes(date: Date, minutes: number) {
   const normalized = startOfLocalDay(date);
   normalized.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
   return normalized;
+}
+
+function resolveCalendarEntryTimeRange(entry: CalendarOrderEntry, readyMinutes?: number | null) {
+  const readyAt =
+    typeof readyMinutes === 'number' ? dateWithMinutes(entry.createdAt, readyMinutes) : entry.createdAt;
+  return {
+    startAt: new Date(readyAt.getTime() - entry.durationMinutes * 60_000),
+    endAt: readyAt
+  };
+}
+
+function formatCalendarEntryTimeRangeLabel(entry: CalendarOrderEntry, readyMinutes?: number | null) {
+  const range = resolveCalendarEntryTimeRange(entry, readyMinutes);
+  const formatOptions = {
+    hour: '2-digit',
+    minute: '2-digit'
+  } as const;
+  return `${range.startAt.toLocaleTimeString('pt-BR', formatOptions)}-${range.endAt.toLocaleTimeString(
+    'pt-BR',
+    formatOptions
+  )}`;
 }
 
 function calendarEntryBaseKey(entry: CalendarOrderEntry) {
@@ -1706,14 +1770,19 @@ function OrdersPageContent() {
     return visibleOrders
       .map((order) => {
         const createdAt = resolveOrderDate(order) || new Date();
+        const totalBroas = resolveCalendarOrderTotalBroas(order, productMap);
+        const durationMinutes = Math.max(resolveExternalOrderProductionDurationMinutes(totalBroas), 30);
         return {
           order,
           createdAt,
+          productionStartAt: new Date(createdAt.getTime() - durationMinutes * 60_000),
+          durationMinutes,
+          totalBroas,
           dateKey: dateKeyFromDate(startOfLocalDay(createdAt))
         };
       })
-      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-  }, [visibleOrders]);
+      .sort((a, b) => a.productionStartAt.getTime() - b.productionStartAt.getTime());
+  }, [productMap, visibleOrders]);
 
   const calendarOrdersByDate = useMemo(() => {
     const grouped = new Map<string, CalendarOrderEntry[]>();
@@ -1746,7 +1815,7 @@ function OrdersPageContent() {
 
   const selectedDateEntries = useMemo(() => {
     const entries = calendarOrdersByDate.get(selectedCalendarDateKey) || [];
-    return [...entries].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    return [...entries].sort((a, b) => a.productionStartAt.getTime() - b.productionStartAt.getTime());
   }, [calendarOrdersByDate, selectedCalendarDateKey]);
   const selectedDateProductionSummary = useMemo(() => {
     const byCustomer = new Map<
@@ -1867,34 +1936,39 @@ function OrdersPageContent() {
   );
   const selectedDateEntriesInsideGrid = useMemo(() => {
     return selectedDateEntries.filter((entry) => {
-      const minutes = minutesIntoDay(entry.createdAt);
-      return minutes >= dayGridStartMinutes && minutes < dayGridEndMinutes;
+      const startMinutes = minutesIntoDay(entry.productionStartAt);
+      const endMinutes = startMinutes + entry.durationMinutes;
+      return endMinutes > dayGridStartMinutes && startMinutes < dayGridEndMinutes;
     });
   }, [dayGridEndMinutes, dayGridStartMinutes, selectedDateEntries]);
   const selectedDateOverflowEntries = useMemo(() => {
     return selectedDateEntries.filter((entry) => {
-      const minutes = minutesIntoDay(entry.createdAt);
-      return minutes < dayGridStartMinutes || minutes >= dayGridEndMinutes;
+      const startMinutes = minutesIntoDay(entry.productionStartAt);
+      const endMinutes = startMinutes + entry.durationMinutes;
+      return !(endMinutes > dayGridStartMinutes && startMinutes < dayGridEndMinutes);
     });
   }, [dayGridEndMinutes, dayGridStartMinutes, selectedDateEntries]);
   const selectedDateTimelineEvents = useMemo(() => {
     const pixelsPerMinute = dayGridHeight / dayGridDurationMinutes;
-    const baseDuration = dayGridSnapMinutes;
-    const minCardHeight = Math.max(Math.round(baseDuration * pixelsPerMinute), 42);
+    const minCardHeight = Math.max(Math.round(dayGridSnapMinutes * pixelsPerMinute), 42);
 
     const timelineItems = selectedDateEntriesInsideGrid.map((entry) => {
-      const startMinutes = clampNumber(
-        Math.round(minutesIntoDay(entry.createdAt) / dayGridSnapMinutes) * dayGridSnapMinutes,
-        dayGridStartMinutes,
-        dayGridEndMinutes - dayGridSnapMinutes
+      const rawStartMinutes = minutesIntoDay(entry.productionStartAt);
+      const rawEndMinutes = rawStartMinutes + entry.durationMinutes;
+      const startMinutes = clampNumber(rawStartMinutes, dayGridStartMinutes, dayGridEndMinutes - dayGridSnapMinutes);
+      const endMinutes = clampNumber(
+        rawEndMinutes,
+        startMinutes + dayGridSnapMinutes,
+        dayGridEndMinutes
       );
+      const durationMinutes = Math.max(endMinutes - startMinutes, dayGridSnapMinutes);
 
       return {
         entry,
         startMinutes,
-        endMinutes: startMinutes + baseDuration,
+        endMinutes,
         top: Math.round((startMinutes - dayGridStartMinutes) * pixelsPerMinute),
-        height: minCardHeight
+        height: Math.max(Math.round(durationMinutes * pixelsPerMinute), minCardHeight)
       };
     });
 
@@ -3227,9 +3301,16 @@ function OrdersPageContent() {
                         const eventLabel = resolveCalendarEntryGridLabel(item.entry);
                         const eventNote = formatOrderNoteLabel(item.entry.order.notes);
                         const activeDrag = dayGridDragState?.eventKey === eventKey ? dayGridDragState : null;
+                        const previewReadyMinutes = activeDrag ? activeDrag.previewMinutes : null;
+                        const displayRange = resolveCalendarEntryTimeRange(item.entry, previewReadyMinutes);
                         const displayTop = activeDrag
                           ? Math.round(
-                              ((activeDrag.previewMinutes - dayGridStartMinutes) /
+                              ((clampNumber(
+                                minutesIntoDay(displayRange.startAt),
+                                dayGridStartMinutes,
+                                dayGridEndMinutes - dayGridSnapMinutes
+                              ) -
+                                dayGridStartMinutes) /
                                 dayGridDurationMinutes) *
                                 dayGridHeight
                             )
@@ -3267,13 +3348,7 @@ function OrdersPageContent() {
                                 aria-hidden="true"
                               />
                               <span className="orders-day-grid__event-time">
-                                {dateWithMinutes(
-                                  item.entry.createdAt,
-                                  activeDrag ? activeDrag.previewMinutes : minutesIntoDay(item.entry.createdAt)
-                                ).toLocaleTimeString('pt-BR', {
-                                  hour: '2-digit',
-                                  minute: '2-digit'
-                                })}
+                                {formatCalendarEntryTimeRangeLabel(item.entry, previewReadyMinutes)}
                               </span>
                               <span className="orders-day-grid__event-title">{eventLabel}</span>
                             </span>
@@ -3316,10 +3391,7 @@ function OrdersPageContent() {
                               <span className="orders-day-timeline__event-note">{entryNote}</span>
                             ) : null}
                             <span className="orders-day-timeline__event-meta">
-                              {entry.createdAt.toLocaleTimeString('pt-BR', {
-                                hour: '2-digit',
-                                minute: '2-digit'
-                              })}
+                              {formatCalendarEntryTimeRangeLabel(entry)}
                             </span>
                           </button>
                         );
@@ -3341,9 +3413,13 @@ function OrdersPageContent() {
                     );
                     const previewDate = weekDateByKey.get(activeWeekDrag.previewDateKey);
                     if (previewDate) {
+                      const previewReadyAt = dateWithMinutes(previewDate, activeWeekDrag.previewMinutes);
                       filteredEntries.push({
                         ...activeWeekDrag.entry,
-                        createdAt: dateWithMinutes(previewDate, activeWeekDrag.previewMinutes),
+                        createdAt: previewReadyAt,
+                        productionStartAt: new Date(
+                          previewReadyAt.getTime() - activeWeekDrag.entry.durationMinutes * 60_000
+                        ),
                         dateKey: activeWeekDrag.previewDateKey
                       });
                     }
@@ -3461,10 +3537,7 @@ function OrdersPageContent() {
                                   aria-hidden="true"
                                 />
                                 <span className="orders-week-grid__event-time">
-                                  {item.entry.createdAt.toLocaleTimeString('pt-BR', {
-                                    hour: '2-digit',
-                                    minute: '2-digit'
-                                  })}
+                                  {formatCalendarEntryTimeRangeLabel(item.entry)}
                                 </span>
                                 <span className="orders-week-grid__event-name">{eventLabel}</span>
                                 {eventNote ? (
@@ -3522,10 +3595,7 @@ function OrdersPageContent() {
                         {previewEntries.map((entry) => {
                           const status = resolveCalendarEntryStatus(entry);
                           const isActiveEntry = selectedOrder?.id === entry.order.id;
-                          const timeLabel = entry.createdAt.toLocaleTimeString('pt-BR', {
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          });
+                          const timeLabel = formatCalendarEntryTimeRangeLabel(entry);
                           const entryLabel = resolveCalendarEntryCompactName(entry);
                           const entryNote = formatOrderNoteLabel(entry.order.notes);
 

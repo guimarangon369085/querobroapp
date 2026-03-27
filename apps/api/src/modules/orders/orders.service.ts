@@ -289,12 +289,17 @@ export class OrdersService {
     return `${ORDER_FORMULA_SOURCE_LABEL_PREFIX}${orderId}`;
   }
 
-  private resolveOrderFlavorCodeFromProductName(value?: string | null): OrderFlavorCode | null {
-    const normalized = (value || '')
+  private normalizeOrderProductDescriptor(value?: string | null) {
+    return (value || '')
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
       .trim()
       .toLowerCase();
+  }
+
+  private resolveOrderFlavorCodeFromProductName(value?: string | null): OrderFlavorCode | null {
+    const normalized = this.normalizeOrderProductDescriptor(value);
     if (!normalized) return null;
     if (normalized.includes('tradicional')) return 'T';
     if (normalized.includes('goiabada')) return 'G';
@@ -317,6 +322,50 @@ export class OrdersService {
     productNameById: Map<number, string>
   ) {
     return buildOfficialBroaFlavorSummary(items, productNameById);
+  }
+
+  private resolveOrderProductionBroaCount(
+    items: Array<{
+      quantity: number;
+      productName?: string | null;
+      productUnit?: string | null;
+    }>
+  ) {
+    return items.reduce((sum, item) => {
+      const quantity = Math.max(Math.floor(item.quantity || 0), 0);
+      if (quantity <= 0) return sum;
+
+      const productName = this.normalizeOrderProductDescriptor(item.productName);
+      const productUnit = this.normalizeOrderProductDescriptor(item.productUnit);
+      const looksLikeOfficialBroa = Boolean(this.resolveOrderFlavorCodeFromProductName(productName));
+      const looksLikeBox =
+        productUnit === 'cx' ||
+        productUnit === 'caixa' ||
+        productUnit === 'caixas' ||
+        productName.includes('caixa');
+
+      return sum + quantity * (looksLikeOfficialBroa ? 1 : looksLikeBox ? ORDER_BOX_UNITS : 1);
+    }, 0);
+  }
+
+  private async resolveOrderProductionBroaCountForItems(
+    tx: TransactionClient | PrismaService,
+    items: Array<{ productId: number; quantity: number }>
+  ) {
+    const productIds = Array.from(new Set(items.map((item) => item.productId))).filter((id) => Number.isFinite(id));
+    if (productIds.length <= 0) return 0;
+    const products = await tx.product.findMany({
+      where: { id: { in: productIds } },
+      select: { id: true, name: true, unit: true }
+    });
+    const productMetaById = new Map(products.map((product) => [product.id, product] as const));
+    return this.resolveOrderProductionBroaCount(
+      items.map((item) => ({
+        quantity: item.quantity,
+        productName: productMetaById.get(item.productId)?.name ?? null,
+        productUnit: productMetaById.get(item.productId)?.unit ?? null
+      }))
+    );
   }
 
   private sumTripletsByCounts(counts: number[]) {
@@ -874,6 +923,7 @@ export class OrdersService {
     client: OrderScheduleQueryClient,
     options: {
       requestedAt?: Date | null;
+      requestedTotalBroas?: number | null;
       excludeOrderId?: number | null;
       reference?: Date;
     }
@@ -884,12 +934,35 @@ export class OrdersService {
         status: { not: 'CANCELADO' },
         ...(options.excludeOrderId ? { id: { not: options.excludeOrderId } } : {})
       },
-      select: { scheduledAt: true }
+      select: {
+        scheduledAt: true,
+        items: {
+          select: {
+            quantity: true,
+            product: {
+              select: {
+                name: true,
+                unit: true
+              }
+            }
+          }
+        }
+      }
     });
 
     const availability = resolveExternalOrderScheduleAvailability({
-      scheduledOrders: scheduledOrders.map((entry) => entry.scheduledAt),
+      scheduledOrders: scheduledOrders.map((entry) => ({
+        scheduledAt: entry.scheduledAt,
+        totalBroas: this.resolveOrderProductionBroaCount(
+          entry.items.map((item) => ({
+            quantity: item.quantity,
+            productName: item.product?.name ?? null,
+            productUnit: item.product?.unit ?? null
+          }))
+        )
+      })),
       requestedAt: options.requestedAt ?? null,
+      requestedTotalBroas: options.requestedTotalBroas ?? null,
       reference: options.reference
     });
 
@@ -900,6 +973,8 @@ export class OrdersService {
       requestedAvailable: availability.requestedAvailable,
       reason: availability.reason,
       dailyLimit: availability.dailyLimit,
+      requestedTotalBroas: availability.requestedTotalBroas,
+      requestedDurationMinutes: availability.requestedDurationMinutes,
       slotMinutes: availability.slotMinutes,
       dayOrderCount: availability.dayOrderCount,
       slotTaken: availability.slotTaken
@@ -910,6 +985,7 @@ export class OrdersService {
     client: OrderScheduleQueryClient,
     scheduledAt: Date | null,
     options: {
+      requestedTotalBroas?: number | null;
       excludeOrderId?: number | null;
       reference?: Date;
     } = {}
@@ -919,6 +995,7 @@ export class OrdersService {
     }
     const availability = await this.buildExternalOrderScheduleAvailability(client, {
       requestedAt: scheduledAt,
+      requestedTotalBroas: options.requestedTotalBroas ?? null,
       excludeOrderId: options.excludeOrderId,
       reference: options.reference
     });
@@ -934,6 +1011,7 @@ export class OrdersService {
   private async ensurePublicOrderScheduleAllowed(
     scheduledAt: Date | null,
     options: {
+      requestedTotalBroas?: number | null;
       excludeOrderId?: number | null;
       reference?: Date;
     } = {}
@@ -944,13 +1022,17 @@ export class OrdersService {
     if (!isExternalOrderScheduleAllowed(scheduledAt, options.reference)) {
       throw new BadRequestException(externalOrderScheduleErrorMessage(options.reference));
     }
-    return this.ensureOrderScheduleCapacityAllowed(this.prisma, scheduledAt, options);
+    return this.ensureOrderScheduleCapacityAllowed(this.prisma, scheduledAt, {
+      ...options,
+      requestedTotalBroas: options.requestedTotalBroas ?? null
+    });
   }
 
-  async getPublicScheduleAvailability(requestedAt?: string | null) {
+  async getPublicScheduleAvailability(requestedAt?: string | null, requestedTotalBroas?: number | null) {
     const parsedRequestedAt = this.parseOptionalDateTime(requestedAt ?? null);
     return this.buildExternalOrderScheduleAvailability(this.prisma, {
-      requestedAt: parsedRequestedAt
+      requestedAt: parsedRequestedAt,
+      requestedTotalBroas: requestedTotalBroas ?? ORDER_BOX_UNITS
     });
   }
 
@@ -1195,9 +1277,11 @@ export class OrdersService {
       intakeChannel: 'CUSTOMER_LINK';
     }
   ) {
-    await this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt));
     const items = await this.resolveExternalSubmissionItems(data);
     const pricedOrder = await this.priceOrderItems(this.prisma, items);
+    await this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt), {
+      requestedTotalBroas: pricedOrder.productionTotalBroas
+    });
     const coupon = await this.resolveCouponDiscount({
       couponCode: data.couponCode ?? null,
       subtotal: pricedOrder.subtotal,
@@ -1256,10 +1340,11 @@ export class OrdersService {
       intakeChannel: 'CUSTOMER_LINK';
     }
   ): Promise<ExternalOrderSubmissionPreview> {
-    await this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt));
-
     const items = await this.resolveExternalSubmissionItems(data);
     const pricedOrder = await this.priceOrderItems(this.prisma, items);
+    await this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt), {
+      requestedTotalBroas: pricedOrder.productionTotalBroas
+    });
     const coupon = await this.resolveCouponDiscount({
       couponCode: data.couponCode ?? null,
       subtotal: pricedOrder.subtotal,
@@ -1647,6 +1732,7 @@ export class OrdersService {
 
     const itemsData: Array<{ productId: number; quantity: number; unitPrice: number; total: number }> = [];
     const manifestItems: Array<{ productId: number; quantity: number; name: string }> = [];
+    const productionItems: Array<{ quantity: number; productName: string; productUnit: string | null }> = [];
     for (const item of parsedItems) {
       const product = productMap.get(item.productId);
       if (!product) throw new NotFoundException('Produto nao encontrado');
@@ -1658,10 +1744,21 @@ export class OrdersService {
         quantity: item.quantity,
         name: product.name
       });
+      productionItems.push({
+        quantity: item.quantity,
+        productName: product.name,
+        productUnit: product.unit ?? null
+      });
     }
 
     const subtotal = await this.calculateOrderSubtotalFromItems(tx, parsedItems);
-    return { parsedItems, itemsData, subtotal, manifestItems };
+    return {
+      parsedItems,
+      itemsData,
+      subtotal,
+      manifestItems,
+      productionTotalBroas: this.resolveOrderProductionBroaCount(productionItems)
+    };
   }
 
   private intakeStageFrom(
@@ -1888,8 +1985,9 @@ export class OrdersService {
         normalizedNotes = mergeMarketingSamplesIntoNotes(normalizedNotes, { discountPct: effectiveDiscountPct });
       }
 
-      if (isExternalIntakeChannel) {
+      if (scheduledAt && pricedOrder.productionTotalBroas > 0) {
         await this.ensureOrderScheduleCapacityAllowed(tx, scheduledAt, {
+          requestedTotalBroas: pricedOrder.productionTotalBroas,
           reference: new Date()
         });
       }
@@ -2226,6 +2324,22 @@ export class OrdersService {
       const nextNotes = Object.prototype.hasOwnProperty.call(data, 'notes')
         ? preserveOrderNoteMetadata(existing.notes ?? null, data.notes ?? null)
         : undefined;
+      const effectiveScheduledAt = nextScheduledAt !== undefined ? nextScheduledAt : existing.scheduledAt;
+      if (effectiveScheduledAt) {
+        const requestedTotalBroas = await this.resolveOrderProductionBroaCountForItems(
+          tx,
+          existing.items.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity
+          }))
+        );
+        if (requestedTotalBroas > 0) {
+          await this.ensureOrderScheduleCapacityAllowed(tx, effectiveScheduledAt, {
+            excludeOrderId: id,
+            requestedTotalBroas
+          });
+        }
+      }
 
       const updated = await tx.order.update({
         where: { id },
@@ -2300,6 +2414,15 @@ export class OrdersService {
           quantity: data.quantity
         }
       ];
+      if (order.scheduledAt) {
+        const requestedTotalBroas = await this.resolveOrderProductionBroaCountForItems(tx, nextSubtotalItems);
+        if (requestedTotalBroas > 0) {
+          await this.ensureOrderScheduleCapacityAllowed(tx, order.scheduledAt, {
+            excludeOrderId: orderId,
+            requestedTotalBroas
+          });
+        }
+      }
       const newSubtotal = await this.calculateOrderSubtotalFromItems(tx, nextSubtotalItems);
       const newTotal = this.computeOrderTotal(newSubtotal, order.discount, this.toMoney(order.deliveryFee ?? 0));
       await tx.order.update({ where: { id: orderId }, data: { subtotal: newSubtotal, total: newTotal } });
@@ -2335,6 +2458,16 @@ export class OrdersService {
         .filter((item) => item.quantity > 0);
       if (normalizedItems.length === 0) {
         throw new BadRequestException('Itens sao obrigatorios');
+      }
+
+      if (order.scheduledAt) {
+        const requestedTotalBroas = await this.resolveOrderProductionBroaCountForItems(tx, normalizedItems);
+        if (requestedTotalBroas > 0) {
+          await this.ensureOrderScheduleCapacityAllowed(tx, order.scheduledAt, {
+            excludeOrderId: orderId,
+            requestedTotalBroas
+          });
+        }
       }
 
       const productIds = normalizedItems.map((item) => item.productId);

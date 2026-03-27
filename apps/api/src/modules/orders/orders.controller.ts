@@ -108,8 +108,15 @@ export class OrdersController {
 
   @Public()
   @Get('public-schedule')
-  getPublicScheduleAvailability(@Query('scheduledAt') scheduledAt?: string) {
-    return this.service.getPublicScheduleAvailability(scheduledAt ?? null);
+  getPublicScheduleAvailability(
+    @Query('scheduledAt') scheduledAt?: string,
+    @Query('totalBroas') totalBroas?: string
+  ) {
+    const parsedTotalBroas = totalBroas == null || totalBroas === '' ? null : Number(totalBroas);
+    return this.service.getPublicScheduleAvailability(
+      scheduledAt ?? null,
+      Number.isFinite(parsedTotalBroas) ? parsedTotalBroas : null
+    );
   }
 
   @Get(':id(\\d+)/pix-charge')
