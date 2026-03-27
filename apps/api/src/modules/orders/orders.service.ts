@@ -40,7 +40,7 @@ import {
   isExternalOrderScheduleAllowed,
   resolveExternalOrderScheduleAvailability
 } from '../../common/external-order-schedule.js';
-import { mergeAppliedCouponIntoNotes, normalizeCouponCode } from '../../common/coupons.js';
+import { countCouponUsageForCustomer, mergeAppliedCouponIntoNotes, normalizeCouponCode } from '../../common/coupons.js';
 import { allocateNextPublicNumber } from '../../common/public-sequence.js';
 import { PaymentsService } from '../payments/payments.service.js';
 import { DeliveriesService } from '../deliveries/deliveries.service.js';
@@ -1109,7 +1109,11 @@ export class OrdersService {
   private async resolveCouponDiscount(input: {
     couponCode?: string | null;
     subtotal: number;
+    customerId?: number | null;
+    customerPhone?: string | null;
+    client?: PrismaService | TransactionClient;
   }) {
+    const client = input.client ?? this.prisma;
     const normalizedCode = normalizeCouponCode(input.couponCode);
     const subtotal = this.toMoney(input.subtotal);
 
@@ -1122,19 +1126,55 @@ export class OrdersService {
       };
     }
 
-    const coupon = await this.prisma.coupon.findFirst({
+    const coupon = await client.coupon.findFirst({
       where: {
-        code: normalizedCode,
-        active: true
+        code: normalizedCode
       },
       select: {
         code: true,
-        discountPct: true
+        discountPct: true,
+        active: true,
+        usageLimitPerCustomer: true
       }
     });
 
     if (!coupon) {
-      throw new BadRequestException('Cupom invalido ou inativo.');
+      const activeCouponsCount = await client.coupon.count({
+        where: {
+          active: true
+        }
+      });
+      throw new BadRequestException(
+        activeCouponsCount > 0
+          ? `Cupom ${normalizedCode} nao encontrado entre os cupons ativos.`
+          : 'Nenhum cupom ativo cadastrado no momento.'
+      );
+    }
+
+    if (!coupon.active) {
+      throw new BadRequestException(`Cupom ${coupon.code} esta inativo.`);
+    }
+
+    const usageLimitPerCustomer =
+      typeof coupon.usageLimitPerCustomer === 'number' && coupon.usageLimitPerCustomer > 0
+        ? Math.floor(coupon.usageLimitPerCustomer)
+        : null;
+    if (usageLimitPerCustomer) {
+      if (!(input.customerId || String(input.customerPhone || '').trim())) {
+        throw new BadRequestException(`Informe um telefone valido para usar o cupom ${coupon.code}.`);
+      }
+
+      const customerUsageCount = await countCouponUsageForCustomer(client, {
+        couponCode: coupon.code,
+        customerId: input.customerId ?? null,
+        customerPhone: input.customerPhone ?? null
+      });
+
+      if (customerUsageCount >= usageLimitPerCustomer) {
+        throw new BadRequestException(
+          `Cupom ${coupon.code} ja atingiu o limite de ${usageLimitPerCustomer} uso(s) para este cliente.`
+        );
+      }
     }
 
     const discountPct = this.toMoney(coupon.discountPct);
@@ -1158,7 +1198,8 @@ export class OrdersService {
     const pricedOrder = await this.priceOrderItems(this.prisma, items);
     const coupon = await this.resolveCouponDiscount({
       couponCode: data.couponCode ?? null,
-      subtotal: pricedOrder.subtotal
+      subtotal: pricedOrder.subtotal,
+      customerPhone: data.customer.phone ?? null
     });
 
     return this.intake({
@@ -1180,6 +1221,7 @@ export class OrdersService {
       delivery: data.delivery,
       order: {
         items,
+        couponCode: coupon.code,
         discount: coupon.discountAmount,
         notes:
           mergeAppliedCouponIntoNotes(
@@ -1218,7 +1260,8 @@ export class OrdersService {
     const pricedOrder = await this.priceOrderItems(this.prisma, items);
     const coupon = await this.resolveCouponDiscount({
       couponCode: data.couponCode ?? null,
-      subtotal: pricedOrder.subtotal
+      subtotal: pricedOrder.subtotal,
+      customerPhone: data.customer.phone ?? null
     });
     const scheduledAt = this.parseOptionalDateTime(data.fulfillment.scheduledAt);
     const deliveryQuote = await this.deliveriesService.resolveDeliverySelection(
@@ -1817,11 +1860,31 @@ export class OrdersService {
       const customer = await this.resolveIntakeCustomer(tx, data.customer);
       const { itemsData, subtotal } = pricedOrder;
       const deliveryFee = this.toMoney(deliveryQuote.fee ?? 0);
-      const total = this.computeOrderTotal(subtotal, discount, deliveryFee);
-      const normalizedNotes =
-        data.source.channel === 'INTERNAL_DASHBOARD' && compareMoney(discountPct, 0) > 0
-          ? mergeMarketingSamplesIntoNotes(data.order.notes ?? null, { discountPct })
-          : data.order.notes ?? null;
+      const appliedCoupon = normalizeCouponCode(data.order.couponCode);
+      const resolvedCoupon = appliedCoupon
+        ? await this.resolveCouponDiscount({
+            couponCode: appliedCoupon,
+            subtotal,
+            customerId: customer.id,
+            customerPhone: customer.phone ?? null,
+            client: tx
+          })
+        : null;
+      const effectiveDiscount = resolvedCoupon ? resolvedCoupon.discountAmount : discount;
+      const effectiveDiscountPct = resolvedCoupon ? resolvedCoupon.discountPct : discountPct;
+      const total = this.computeOrderTotal(subtotal, effectiveDiscount, deliveryFee);
+      let normalizedNotes = data.order.notes ?? null;
+
+      if (resolvedCoupon?.code) {
+        normalizedNotes = mergeAppliedCouponIntoNotes(normalizedNotes, {
+          code: resolvedCoupon.code,
+          discountPct: resolvedCoupon.discountPct
+        });
+      }
+
+      if (data.source.channel === 'INTERNAL_DASHBOARD' && compareMoney(effectiveDiscountPct, 0) > 0) {
+        normalizedNotes = mergeMarketingSamplesIntoNotes(normalizedNotes, { discountPct: effectiveDiscountPct });
+      }
 
       if (isExternalIntakeChannel) {
         await this.ensureOrderScheduleCapacityAllowed(tx, scheduledAt, {
@@ -1844,7 +1907,8 @@ export class OrdersService {
           deliveryQuoteStatus: deliveryQuote.status,
           deliveryQuoteRef: deliveryQuote.quoteToken ?? null,
           deliveryQuoteExpiresAt: this.parseOptionalDateTime(deliveryQuote.expiresAt ?? null),
-          discount,
+          discount: effectiveDiscount,
+          couponCode: resolvedCoupon?.code ?? null,
           total,
           items: {
             create: itemsData

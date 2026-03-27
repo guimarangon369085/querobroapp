@@ -253,6 +253,8 @@ type DashboardPeriodSelection = 'all' | DashboardPeriodDays;
 type CouponDraft = {
   code: string;
   discountPct: string;
+  hasUsageLimit: boolean;
+  usageLimitPerCustomer: string;
   active: boolean;
 };
 
@@ -329,15 +331,28 @@ function normalizeCouponCodeInput(value: string) {
   return value.replace(/\s+/g, ' ').trim().toUpperCase();
 }
 
-function buildCouponDraft(coupon?: Pick<Coupon, 'code' | 'discountPct' | 'active'> | null): CouponDraft {
+function buildCouponDraft(
+  coupon?: Pick<Coupon, 'code' | 'discountPct' | 'active' | 'usageLimitPerCustomer'> | null
+): CouponDraft {
   return {
     code: coupon?.code || '',
     discountPct: formatDecimalInputBR(coupon?.discountPct ?? '', {
       minFractionDigits: 0,
       maxFractionDigits: 2
     }),
+    hasUsageLimit: typeof coupon?.usageLimitPerCustomer === 'number' && (coupon.usageLimitPerCustomer || 0) > 0,
+    usageLimitPerCustomer:
+      typeof coupon?.usageLimitPerCustomer === 'number' && (coupon.usageLimitPerCustomer || 0) > 0
+        ? String(Math.floor(coupon.usageLimitPerCustomer || 0))
+        : '',
     active: coupon?.active ?? true
   };
+}
+
+function parseCouponUsageLimit(value: string) {
+  const parsed = Number.parseInt(String(value || '').replace(/\D/g, ''), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
 }
 
 function MetricCard({
@@ -759,7 +774,7 @@ export default function DashboardScreen() {
           [field]:
             field === 'code'
               ? normalizeCouponCodeInput(String(value))
-              : field === 'discountPct'
+              : field === 'discountPct' || field === 'usageLimitPerCustomer'
                 ? String(value)
                 : Boolean(value)
         }
@@ -774,7 +789,7 @@ export default function DashboardScreen() {
       [field]:
         field === 'code'
           ? normalizeCouponCodeInput(String(value))
-          : field === 'discountPct'
+          : field === 'discountPct' || field === 'usageLimitPerCustomer'
             ? String(value)
             : Boolean(value)
     }));
@@ -791,12 +806,19 @@ export default function DashboardScreen() {
       if (discountPct == null || discountPct < 0 || discountPct > 100) {
         throw new Error('Informe um desconto entre 0 e 100.');
       }
+      const usageLimitPerCustomer = input.draft.hasUsageLimit
+        ? parseCouponUsageLimit(input.draft.usageLimitPerCustomer)
+        : null;
+      if (input.draft.hasUsageLimit && !usageLimitPerCustomer) {
+        throw new Error('Informe um limite por cliente maior que zero.');
+      }
 
       return apiFetch<Coupon>(input.id ? `/dashboard/coupons/${input.id}` : '/dashboard/coupons', {
         method: input.id ? 'PUT' : 'POST',
         body: JSON.stringify({
           code,
           discountPct,
+          usageLimitPerCustomer,
           active: Boolean(input.draft.active)
         })
       });
@@ -968,7 +990,7 @@ export default function DashboardScreen() {
 
               <div className="grid gap-3 rounded-[24px] border border-white/80 bg-white/82 p-4 shadow-[0_10px_24px_rgba(57,39,24,0.06)]">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">Adicionar novo</p>
-                <div className="grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(140px,180px)_130px_auto] lg:items-end">
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(140px,180px)_150px_minmax(120px,150px)_130px_auto] lg:items-end">
                   <label className="grid gap-1.5 text-sm text-neutral-600">
                     <span>Codigo</span>
                     <input
@@ -986,6 +1008,25 @@ export default function DashboardScreen() {
                       value={newCouponDraft.discountPct}
                       onChange={(event) => setNewCouponField('discountPct', event.target.value)}
                       placeholder="10"
+                    />
+                  </label>
+                  <label className="flex h-12 items-center gap-2 rounded-[16px] border border-white/80 bg-white px-4 text-sm font-medium text-[color:var(--ink-strong)]">
+                    <input
+                      checked={newCouponDraft.hasUsageLimit}
+                      onChange={(event) => setNewCouponField('hasUsageLimit', event.target.checked)}
+                      type="checkbox"
+                    />
+                    Limite
+                  </label>
+                  <label className="grid gap-1.5 text-sm text-neutral-600">
+                    <span>Usos por cliente</span>
+                    <input
+                      className="app-input"
+                      inputMode="numeric"
+                      disabled={!newCouponDraft.hasUsageLimit}
+                      value={newCouponDraft.usageLimitPerCustomer}
+                      onChange={(event) => setNewCouponField('usageLimitPerCustomer', event.target.value)}
+                      placeholder="1"
                     />
                   </label>
                   <label className="flex h-12 items-center gap-2 rounded-[16px] border border-white/80 bg-white px-4 text-sm font-medium text-[color:var(--ink-strong)]">
@@ -1026,12 +1067,17 @@ export default function DashboardScreen() {
                             <span className="rounded-full border border-white/70 bg-white px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-strong)]">
                               {coupon.active ? 'Ativo' : 'Inativo'}
                             </span>
+                            {typeof coupon.usageLimitPerCustomer === 'number' && coupon.usageLimitPerCustomer > 0 ? (
+                              <span className="rounded-full border border-white/70 bg-white px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-strong)]">
+                                Limite {formatNumber(coupon.usageLimitPerCustomer)} / cliente
+                              </span>
+                            ) : null}
                           </div>
                           <span className="text-xs text-neutral-500">
                             Atualizado em {coupon.updatedAt ? new Date(coupon.updatedAt).toLocaleString('pt-BR') : 'agora'}
                           </span>
                         </div>
-                        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(140px,180px)_130px_auto_auto] lg:items-end">
+                        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(140px,180px)_150px_minmax(120px,150px)_130px_auto_auto] lg:items-end">
                           <label className="grid gap-1.5 text-sm text-neutral-600">
                             <span>Codigo</span>
                             <input
@@ -1049,6 +1095,29 @@ export default function DashboardScreen() {
                               onChange={(event) =>
                                 setCouponDraftField(coupon.id || 0, 'discountPct', event.target.value)
                               }
+                            />
+                          </label>
+                          <label className="flex h-12 items-center gap-2 rounded-[16px] border border-white/80 bg-white px-4 text-sm font-medium text-[color:var(--ink-strong)]">
+                            <input
+                              checked={draft.hasUsageLimit}
+                              onChange={(event) =>
+                                setCouponDraftField(coupon.id || 0, 'hasUsageLimit', event.target.checked)
+                              }
+                              type="checkbox"
+                            />
+                            Limite
+                          </label>
+                          <label className="grid gap-1.5 text-sm text-neutral-600">
+                            <span>Usos por cliente</span>
+                            <input
+                              className="app-input"
+                              inputMode="numeric"
+                              disabled={!draft.hasUsageLimit}
+                              value={draft.usageLimitPerCustomer}
+                              onChange={(event) =>
+                                setCouponDraftField(coupon.id || 0, 'usageLimitPerCustomer', event.target.value)
+                              }
+                              placeholder="1"
                             />
                           </label>
                           <label className="flex h-12 items-center gap-2 rounded-[16px] border border-white/80 bg-white px-4 text-sm font-medium text-[color:var(--ink-strong)]">

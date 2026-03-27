@@ -13,6 +13,7 @@ import { FormField } from '@/components/form/FormField';
 import { useFeedback } from '@/components/feedback-provider';
 import { resolveAnalyticsSessionId, trackAnalyticsEvent } from '@/lib/analytics';
 import { apiFetch } from '@/lib/api';
+import { normalizePhone } from '@/lib/format';
 import { OrderCardArtwork } from '@/features/orders/order-card-artwork';
 import {
   ORDER_BOX_UNITS,
@@ -872,7 +873,9 @@ export function PublicOrderPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             code,
-            subtotal: estimatedTotal
+            subtotal: estimatedTotal,
+            customerPhone: normalizePhone(form.phone || ''),
+            customerName: form.name.trim() || null
           })
         });
         const raw = await response.text();
@@ -895,7 +898,7 @@ export function PublicOrderPage() {
         setIsResolvingCoupon(false);
       }
     },
-    [couponInput, estimatedTotal]
+    [couponInput, estimatedTotal, form.name, form.phone]
   );
 
   useEffect(() => {

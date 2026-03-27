@@ -45,6 +45,14 @@ import {
 import { submitOrderIntake } from '@/features/orders/orders-api';
 
 type CustomerRecord = Customer;
+type CustomerCouponUsage = {
+  code: string;
+  uses: number;
+  lastUsedAt?: string | null;
+};
+type CustomerRecordWithUsage = CustomerRecord & {
+  couponUsage?: CustomerCouponUsage[];
+};
 type CustomerFormState = Partial<CustomerRecord>;
 
 const emptyCustomer: CustomerFormState = {
@@ -173,6 +181,23 @@ function formatOrderStatusLabel(status?: string | null) {
   return status.replace(/_/g, ' ');
 }
 
+function formatCustomerAddressLabel(
+  customer: Partial<
+    Pick<Customer, 'address' | 'addressLine1' | 'addressLine2' | 'neighborhood' | 'city' | 'state' | 'postalCode'>
+  >
+) {
+  const safeNeighborhood = /\d/.test(customer.neighborhood || '') ? '' : customer.neighborhood || '';
+  const structured = buildCustomerAddressSummary({
+    addressLine1: customer.addressLine1 || '',
+    addressLine2: customer.addressLine2 || '',
+    neighborhood: safeNeighborhood,
+    city: customer.city || '',
+    state: customer.state || '',
+    postalCode: customer.postalCode || ''
+  });
+  return structured || customer.address || 'Sem endereco';
+}
+
 function normalizeLooseText(value?: string | null) {
   return compactWhitespace(value || '');
 }
@@ -207,7 +232,7 @@ function CustomersPageContent() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [selectedCustomer, setSelectedCustomer] = useState<CustomerRecord | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerRecordWithUsage | null>(null);
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const [customerRecentOrders, setCustomerRecentOrders] = useState<CustomerOrderPreview[]>([]);
   const [customerOrdersError, setCustomerOrdersError] = useState<string | null>(null);
@@ -461,6 +486,7 @@ function CustomersPageContent() {
     const promotedLastName = pickPromotedValue(form.lastName, inferredNamePatch.lastName || fallbackLast);
     const promotedAddressLine1 = pickPromotedValue(form.addressLine1, inferredAddressPatch.addressLine1);
     const promotedNeighborhood = pickPromotedValue(form.neighborhood, inferredAddressPatch.neighborhood);
+    const sanitizedNeighborhood = /\d/.test(promotedNeighborhood) ? '' : promotedNeighborhood;
     const promotedCity = pickPromotedValue(form.city, inferredAddressPatch.city);
     const promotedState = pickPromotedValue(form.state, inferredAddressPatch.state).toUpperCase();
     const promotedPostalCode = formatPostalCodeBR(
@@ -476,7 +502,7 @@ function CustomersPageContent() {
       address: normalizeAddress(form.address || ''),
       addressLine1: normalizeAddress(promotedAddressLine1),
       addressLine2: normalizeAddress(form.addressLine2 || ''),
-      neighborhood: normalizeAddress(promotedNeighborhood),
+      neighborhood: normalizeAddress(sanitizedNeighborhood),
       city: normalizeAddress(promotedCity),
       state: promotedState || undefined,
       postalCode: promotedPostalCode || undefined,
@@ -531,6 +557,7 @@ function CustomersPageContent() {
     const promotedLastName = pickPromotedValue(customer.lastName, inferredNamePatch.lastName);
     const promotedAddressLine1 = pickPromotedValue(customer.addressLine1, inferredAddressPatch.addressLine1);
     const promotedNeighborhood = pickPromotedValue(customer.neighborhood, inferredAddressPatch.neighborhood);
+    const sanitizedNeighborhood = /\d/.test(promotedNeighborhood) ? '' : promotedNeighborhood;
     const promotedCity = pickPromotedValue(customer.city, inferredAddressPatch.city);
     const promotedState = pickPromotedValue(customer.state, inferredAddressPatch.state).toUpperCase();
     const promotedPostalCode = formatPostalCodeBR(
@@ -546,7 +573,7 @@ function CustomersPageContent() {
       address: customer.address ?? '',
       addressLine1: promotedAddressLine1,
       addressLine2: customer.addressLine2 ?? '',
-      neighborhood: promotedNeighborhood,
+      neighborhood: sanitizedNeighborhood,
       city: promotedCity,
       state: promotedState,
       postalCode: promotedPostalCode,
@@ -642,7 +669,19 @@ function CustomersPageContent() {
     setIsCustomerInfoEditing(false);
     setRepeatDraftOrderId(null);
     setRepeatDraftError(null);
-    const recentOrders = await loadCustomerRecentOrders(customer.id!);
+    let recentOrders: CustomerOrderPreview[] = [];
+    try {
+      const [detail, loadedRecentOrders] = await Promise.all([
+        apiFetch<CustomerRecordWithUsage>(`/customers/${customer.id}`),
+        loadCustomerRecentOrders(customer.id!)
+      ]);
+      recentOrders = loadedRecentOrders;
+      setSelectedCustomer(detail);
+      startEdit(detail, { focusForm: false });
+    } catch (modalError) {
+      notifyError(modalError instanceof Error ? modalError.message : 'Nao foi possivel carregar os dados do cliente.');
+      recentOrders = [];
+    }
     const targetOrderId = options?.preselectRepeatOrderId;
     if (!targetOrderId) return;
     const targetOrder = recentOrders.find((order) => order.id === targetOrderId);
@@ -1075,8 +1114,7 @@ function CustomersPageContent() {
                       Cliente #{resolveDisplayNumber(customer) ?? customer.id}
                     </span>
                     <span className="min-w-0 truncate text-xs font-semibold tracking-[0.12em] text-neutral-500">
-                      {customer.address || 'Sem endereco'}
-                      {customer.neighborhood ? ` • ${customer.neighborhood}` : ''}
+                      {formatCustomerAddressLabel(customer)}
                     </span>
                   </div>
                   <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-neutral-500">
@@ -1265,15 +1303,22 @@ function CustomersPageContent() {
                     </p>
                     <p className="mt-1">
                       <span className="font-semibold text-neutral-900">Endereço:</span>{' '}
-                      {[
-                        form.address || form.addressLine1 || '',
-                        form.addressLine2 || '',
-                        form.neighborhood || '',
-                        [form.city || '', form.state || ''].filter(Boolean).join(' - '),
-                        form.postalCode || ''
-                      ]
-                        .filter(Boolean)
-                        .join(', ') || 'Sem endereço'}
+                      {formatCustomerAddressLabel(form)}
+                    </p>
+                    <p className="mt-1">
+                      <span className="font-semibold text-neutral-900">Cupons utilizados:</span>{' '}
+                      {selectedCustomer.couponUsage?.length ? (
+                        selectedCustomer.couponUsage
+                          .map((entry) => {
+                            const lastUsedLabel = entry.lastUsedAt
+                              ? new Date(entry.lastUsedAt).toLocaleDateString('pt-BR')
+                              : null;
+                            return `${entry.code} (${entry.uses}x${lastUsedLabel ? ` • ${lastUsedLabel}` : ''})`;
+                          })
+                          .join(' • ')
+                      ) : (
+                        'Nenhum cupom utilizado'
+                      )}
                     </p>
                     <p className="mt-1">
                       <span className="font-semibold text-neutral-900">Entrega:</span>{' '}

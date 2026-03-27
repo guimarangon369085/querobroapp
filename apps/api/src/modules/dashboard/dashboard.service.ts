@@ -17,7 +17,7 @@ import {
 } from '@querobroapp/shared';
 import { PrismaService } from '../../prisma.service.js';
 import { readBusinessRuntimeProfile } from '../../common/business-profile.js';
-import { normalizeCouponCode } from '../../common/coupons.js';
+import { countCouponUsageForCustomer, normalizeCouponCode } from '../../common/coupons.js';
 import {
   OFFICIAL_BROA_FLAVOR_CODES,
   ORDER_BOX_UNITS,
@@ -654,6 +654,7 @@ export class DashboardService {
     id: number;
     code: string;
     discountPct: number;
+    usageLimitPerCustomer: number | null;
     active: boolean;
     createdAt: Date;
     updatedAt: Date;
@@ -662,6 +663,10 @@ export class DashboardService {
       id: coupon.id,
       code: coupon.code,
       discountPct: round2(coupon.discountPct),
+      usageLimitPerCustomer:
+        typeof coupon.usageLimitPerCustomer === 'number' && coupon.usageLimitPerCustomer > 0
+          ? Math.floor(coupon.usageLimitPerCustomer)
+          : null,
       active: coupon.active,
       createdAt: coupon.createdAt.toISOString(),
       updatedAt: coupon.updatedAt.toISOString()
@@ -698,6 +703,10 @@ export class DashboardService {
         data: {
           code,
           discountPct: round2(data.discountPct),
+          usageLimitPerCustomer:
+            typeof data.usageLimitPerCustomer === 'number' && data.usageLimitPerCustomer > 0
+              ? Math.floor(data.usageLimitPerCustomer)
+              : null,
           active: data.active
         }
       });
@@ -732,6 +741,10 @@ export class DashboardService {
         data: {
           code,
           discountPct: round2(data.discountPct),
+          usageLimitPerCustomer:
+            typeof data.usageLimitPerCustomer === 'number' && data.usageLimitPerCustomer > 0
+              ? Math.floor(data.usageLimitPerCustomer)
+              : null,
           active: data.active
         }
       });
@@ -770,6 +783,12 @@ export class DashboardService {
     const coupon = await this.prisma.coupon.findFirst({
       where: {
         code
+      },
+      select: {
+        code: true,
+        discountPct: true,
+        active: true,
+        usageLimitPerCustomer: true
       }
     });
     const activeCouponsCount = await this.prisma.coupon.count({
@@ -806,6 +825,41 @@ export class DashboardService {
       throw new BadRequestException(`Cupom ${code} esta inativo.`);
     }
     const subtotal = round2(data.subtotal);
+    const usageLimitPerCustomer =
+      typeof coupon.usageLimitPerCustomer === 'number' && coupon.usageLimitPerCustomer > 0
+        ? Math.floor(coupon.usageLimitPerCustomer)
+        : null;
+    if (usageLimitPerCustomer) {
+      if (!(data.customerId || String(data.customerPhone || '').trim())) {
+        throw new BadRequestException(`Informe um telefone valido para usar o cupom ${coupon.code}.`);
+      }
+
+      const customerUsageCount = await countCouponUsageForCustomer(this.prisma, {
+        couponCode: coupon.code,
+        customerId: data.customerId ?? null,
+        customerPhone: data.customerPhone ?? null
+      });
+
+      if (customerUsageCount >= usageLimitPerCustomer) {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'coupon_resolve_failed',
+            reason: 'CUSTOMER_LIMIT_REACHED',
+            code,
+            subtotal,
+            usageLimitPerCustomer,
+            customerUsageCount,
+            customerId: data.customerId ?? null,
+            customerPhone: data.customerPhone ?? null,
+            activeCouponsCount
+          })
+        );
+        throw new BadRequestException(
+          `Cupom ${coupon.code} ja atingiu o limite de ${usageLimitPerCustomer} uso(s) para este cliente.`
+        );
+      }
+    }
+
     const discountAmount = round2((subtotal * round2(coupon.discountPct)) / 100);
     return CouponResolveResponseSchema.parse({
       code: coupon.code,

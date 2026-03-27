@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma.service.js';
 import { CustomerSchema, resolveDisplayNumber } from '@querobroapp/shared';
 import { normalizePhone, normalizeTitle, normalizeText } from '../../common/normalize.js';
 import { allocateNextPublicNumber } from '../../common/public-sequence.js';
+import { resolveStoredCouponCode } from '../../common/coupons.js';
 
 type CustomerPayload = ReturnType<typeof CustomerSchema.parse>;
 type CustomerCreatePayload = Omit<CustomerPayload, 'id' | 'createdAt'>;
@@ -40,6 +41,12 @@ export class CustomersService {
     return normalizeTitle(inferred ?? undefined);
   }
 
+  private normalizeNeighborhood(value?: string | null) {
+    const normalized = normalizeTitle(value ?? undefined);
+    if (!normalized) return null;
+    return /\d/.test(normalized) ? null : normalized;
+  }
+
   private shouldPromoteAutofillValue(currentValue?: string | null, inferredValue?: string | null) {
     const current = normalizeText(currentValue ?? undefined) ?? '';
     const inferred = normalizeText(inferredValue ?? undefined) ?? '';
@@ -73,6 +80,46 @@ export class CustomersService {
     };
   }
 
+  private async buildCustomerCouponUsage(customerId: number) {
+    const orders = await this.prisma.order.findMany({
+      where: {
+        customerId,
+        status: {
+          not: 'CANCELADO'
+        }
+      },
+      select: {
+        couponCode: true,
+        notes: true,
+        createdAt: true
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
+    });
+
+    const usageByCode = new Map<string, { code: string; uses: number; lastUsedAt: string | null }>();
+    for (const order of orders) {
+      const code = resolveStoredCouponCode(order.couponCode, order.notes);
+      if (!code) continue;
+      const current = usageByCode.get(code) || {
+        code,
+        uses: 0,
+        lastUsedAt: null
+      };
+      current.uses += 1;
+      const createdAtIso = order.createdAt?.toISOString?.() || null;
+      if (!current.lastUsedAt || (createdAtIso && createdAtIso > current.lastUsedAt)) {
+        current.lastUsedAt = createdAtIso;
+      }
+      usageByCode.set(code, current);
+    }
+
+    return Array.from(usageByCode.values()).sort(
+      (left, right) =>
+        String(right.lastUsedAt || '').localeCompare(String(left.lastUsedAt || '')) ||
+        left.code.localeCompare(right.code, 'pt-BR')
+    );
+  }
+
   list() {
     return this.prisma.customer
       .findMany({
@@ -85,7 +132,10 @@ export class CustomersService {
   async get(id: number) {
     const customer = await this.prisma.customer.findUnique({ where: { id } });
     if (!customer) throw new NotFoundException('Cliente nao encontrado');
-    return this.normalizeCustomerAutofillView(customer);
+    return {
+      ...this.normalizeCustomerAutofillView(customer),
+      couponUsage: await this.buildCustomerCouponUsage(customer.id)
+    };
   }
 
   create(payload: unknown) {
@@ -99,7 +149,7 @@ export class CustomersService {
     const inferredAddressLine1 = this.inferAddressLine1(normalizedAddress);
     const addressLine1 = this.pickPromotedTitle(data.addressLine1, inferredAddressLine1) ?? inferredAddressLine1;
     const normalizedAddressLine2 = normalizeTitle(data.addressLine2 ?? undefined);
-    const normalizedNeighborhood = normalizeTitle(data.neighborhood ?? undefined);
+    const normalizedNeighborhood = this.normalizeNeighborhood(data.neighborhood ?? undefined);
     const normalizedCity = normalizeTitle(data.city ?? undefined);
     const normalizedState = normalizeText(data.state ?? undefined)?.toUpperCase() ?? null;
     const normalizedPostalCode = normalizeText(data.postalCode ?? undefined);
@@ -230,7 +280,7 @@ export class CustomersService {
         address: data.address !== undefined ? normalizeTitle(data.address) ?? null : undefined,
         addressLine1,
         addressLine2: data.addressLine2 !== undefined ? normalizeTitle(data.addressLine2) ?? null : undefined,
-        neighborhood: data.neighborhood !== undefined ? normalizeTitle(data.neighborhood) ?? null : undefined,
+        neighborhood: data.neighborhood !== undefined ? this.normalizeNeighborhood(data.neighborhood) : undefined,
         city: data.city !== undefined ? normalizeTitle(data.city) ?? null : undefined,
         state: data.state !== undefined ? normalizeText(data.state)?.toUpperCase() ?? null : undefined,
         postalCode: data.postalCode !== undefined ? normalizeText(data.postalCode) ?? null : undefined,

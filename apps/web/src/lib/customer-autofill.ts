@@ -71,6 +71,12 @@ function normalizeSegment(value?: string | null) {
   return titleCase(normalized);
 }
 
+function normalizeNeighborhoodSegment(value?: string | null) {
+  const normalized = normalizeSegment(value);
+  if (!normalized) return '';
+  return /\d/.test(normalized) ? '' : normalized;
+}
+
 function looksLikeComplement(value?: string | null) {
   const normalized = compactWhitespace(value || '');
   if (!normalized) return false;
@@ -148,9 +154,11 @@ export function buildCustomerAddressAutofill(address?: string | null): CustomerA
 
   let neighborhood = '';
   if (cityIndex > 1) {
-    const candidate = normalizedSegments[cityIndex - 1];
-    if (!looksLikeComplement(candidate)) {
-      neighborhood = normalizeSegment(candidate);
+    for (let index = cityIndex - 1; index >= 1; index -= 1) {
+      const candidate = normalizedSegments[index];
+      if (looksLikeComplement(candidate)) continue;
+      neighborhood = normalizeNeighborhoodSegment(candidate);
+      if (neighborhood) break;
     }
   }
 
@@ -193,7 +201,9 @@ export function buildCustomerAddressAutofillFromGooglePlace(
   const components = place.address_components || place.addressComponents || [];
   const street = normalizeGoogleAddressComponent(components, ['route']);
   const streetNumber = normalizeGoogleAddressComponent(components, ['street_number'], 'short');
-  const neighborhood = normalizeGoogleAddressComponent(components, ['sublocality_level_1', 'neighborhood']);
+  const neighborhood = normalizeNeighborhoodSegment(
+    normalizeGoogleAddressComponent(components, ['sublocality_level_1', 'neighborhood'])
+  );
   const city = normalizeGoogleAddressComponent(components, ['locality', 'administrative_area_level_2']);
   const state = normalizeGoogleAddressComponent(components, ['administrative_area_level_1'], 'short').toUpperCase();
   const postalCode = formatPostalCodeBR(
@@ -260,7 +270,7 @@ export async function lookupPostalCodeAutofill(
 
   const patch: CustomerAutofillPatch = {
     addressLine1: normalizeSegment(payload.logradouro),
-    neighborhood: normalizeSegment(payload.bairro),
+    neighborhood: normalizeNeighborhoodSegment(payload.bairro),
     city: normalizeSegment(payload.localidade),
     state: payload.uf ? payload.uf.toUpperCase() : '',
     postalCode: formatPostalCodeBR(payload.cep || digits),

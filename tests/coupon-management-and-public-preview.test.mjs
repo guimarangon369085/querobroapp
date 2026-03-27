@@ -17,12 +17,14 @@ test('coupon management: CRUD interno e resolve publico', async (t) => {
     body: {
       code: `broa ${suffix}`,
       discountPct: 12.5,
+      usageLimitPerCustomer: 1,
       active: true
     }
   });
 
   assert.equal(created.code, `BROA ${suffix}`.toUpperCase());
   assert.equal(created.discountPct, 12.5);
+  assert.equal(created.usageLimitPerCustomer, 1);
   assert.equal(created.active, true);
 
   const resolved = await request(apiUrl, '/dashboard/coupons/resolve', {
@@ -30,7 +32,8 @@ test('coupon management: CRUD interno e resolve publico', async (t) => {
     headers: formToken ? { Authorization: `Bearer ${formToken}` } : undefined,
     body: {
       code: created.code.toLowerCase(),
-      subtotal: 80
+      subtotal: 80,
+      customerPhone: '31999999998'
     }
   });
 
@@ -45,11 +48,13 @@ test('coupon management: CRUD interno e resolve publico', async (t) => {
     body: {
       code: created.code,
       discountPct: 15,
+      usageLimitPerCustomer: 2,
       active: false
     }
   });
 
   assert.equal(updated.discountPct, 15);
+  assert.equal(updated.usageLimitPerCustomer, 2);
   assert.equal(updated.active, false);
 
   const invalidResolve = await requestExpectError(apiUrl, '/dashboard/coupons/resolve', 400, {
@@ -80,6 +85,86 @@ test('coupon management: CRUD interno e resolve publico', async (t) => {
   });
 
   assert.equal(noActiveCoupons.message, 'Nenhum cupom ativo cadastrado no momento.');
+});
+
+test('coupon limit por cliente bloqueia nova utilizacao e aparece no detalhe do cliente', async (t) => {
+  const formToken = String(process.env.ORDER_FORM_BRIDGE_TOKEN || '').trim();
+  const { apiUrl, shutdown } = await ensureApiServer();
+
+  t.after(async () => {
+    await shutdown();
+  });
+
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const coupon = await request(apiUrl, '/dashboard/coupons', {
+    method: 'POST',
+    headers: formToken ? { Authorization: `Bearer ${formToken}` } : undefined,
+    body: {
+      code: `BROASVINDAS-${suffix}`,
+      discountPct: 10,
+      usageLimitPerCustomer: 1,
+      active: true
+    }
+  });
+
+  const scheduledAt = new Date(Date.UTC(2030, 2, 18, 15, 0, 0)).toISOString();
+  const first = await request(apiUrl, '/orders/intake/customer-form', {
+    method: 'POST',
+    headers: formToken ? { Authorization: `Bearer ${formToken}` } : undefined,
+    body: {
+      version: 1,
+      customer: {
+        name: `Cliente Boas Vindas ${suffix}`,
+        phone: '31999999999'
+      },
+      fulfillment: {
+        mode: 'PICKUP',
+        scheduledAt
+      },
+      flavors: {
+        T: 7,
+        G: 0,
+        D: 0,
+        Q: 0,
+        R: 0
+      },
+      couponCode: coupon.code,
+      source: {
+        externalId: `customer-form-coupon-intake-${suffix}`
+      }
+    }
+  });
+
+  assert.equal(first.order.couponCode, coupon.code);
+  assert.equal(first.order.discount, 4);
+
+  const secondResolve = await requestExpectError(apiUrl, '/dashboard/coupons/resolve', 400, {
+    method: 'POST',
+    headers: formToken ? { Authorization: `Bearer ${formToken}` } : undefined,
+    body: {
+      code: coupon.code,
+      subtotal: 40,
+      customerPhone: '31999999999'
+    }
+  });
+
+  assert.equal(
+    secondResolve.message,
+    `Cupom ${coupon.code} ja atingiu o limite de 1 uso(s) para este cliente.`
+  );
+
+  const customer = await request(apiUrl, `/customers/${first.order.customerId}`, {
+    headers: formToken ? { Authorization: `Bearer ${formToken}` } : undefined
+  });
+
+  assert.deepEqual(customer.couponUsage, [
+    {
+      code: coupon.code,
+      uses: 1,
+      lastUsedAt: customer.couponUsage[0].lastUsedAt
+    }
+  ]);
+  assert.ok(customer.couponUsage[0].lastUsedAt);
 });
 
 test('customer-form preview aplica desconto do cupom no total e nas notas', async (t) => {

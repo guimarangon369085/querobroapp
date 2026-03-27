@@ -3,6 +3,7 @@ import { resolveServerBridgeApiBaseUrl } from '@/lib/server-bridge-api-base-url'
 import { isTrustedSameOriginBridgeRequest } from '@/lib/server-bridge-access';
 
 export const dynamic = 'force-dynamic';
+const PUBLIC_COUPON_REJECTION_MESSAGE = 'CUPOM NÃO VÁLIDO / JÁ UTILIZADO';
 
 function buildErrorResponse(status: number, payload: unknown) {
   return NextResponse.json(payload, { status });
@@ -48,6 +49,12 @@ export async function POST(request: Request) {
       payload = raw ? JSON.parse(raw) : null;
     } catch {
       payload = raw ? { message: raw } : null;
+    }
+    if (!response.ok && response.status === 400) {
+      payload = {
+        ...(payload && typeof payload === 'object' ? payload : {}),
+        message: PUBLIC_COUPON_REJECTION_MESSAGE
+      };
     }
     return new NextResponse(JSON.stringify(payload), {
       status: response.status,

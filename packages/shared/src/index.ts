@@ -99,6 +99,7 @@ export const CouponSchema = z.object({
   id: z.number().int().positive().optional(),
   code: z.string().trim().min(1).max(80),
   discountPct: z.number().nonnegative().max(100),
+  usageLimitPerCustomer: z.number().int().positive().optional().nullable(),
   active: z.boolean().default(true),
   createdAt: z.string().optional().nullable(),
   updatedAt: z.string().optional().nullable()
@@ -107,12 +108,16 @@ export const CouponSchema = z.object({
 export const CouponUpsertSchema = CouponSchema.pick({
   code: true,
   discountPct: true,
+  usageLimitPerCustomer: true,
   active: true
 });
 
 export const CouponResolveRequestSchema = z.object({
   code: z.string().trim().min(1).max(80),
-  subtotal: z.number().nonnegative().default(0)
+  subtotal: z.number().nonnegative().default(0),
+  customerId: z.number().int().positive().optional().nullable(),
+  customerPhone: z.string().trim().min(1).max(40).optional().nullable(),
+  customerName: z.string().trim().min(1).max(160).optional().nullable()
 });
 
 export const CouponResolveResponseSchema = z.object({
@@ -233,6 +238,7 @@ export const OrderSchema = z.object({
   deliveryQuoteExpiresAt: z.string().optional().nullable(),
   discount: z.number().nonnegative().optional(),
   discountPct: z.number().nonnegative().max(100).optional(),
+  couponCode: z.string().trim().min(1).max(80).optional().nullable(),
   total: z.number().nonnegative().optional(),
   amountPaid: z.number().nonnegative().optional(),
   balanceDue: z.number().nonnegative().optional(),
@@ -350,6 +356,7 @@ export const OrderIntakeSchema = z.object({
     items: z.array(OrderIntakeItemSchema).min(1),
     discount: z.number().nonnegative().optional(),
     discountPct: z.number().nonnegative().max(100).optional(),
+    couponCode: z.string().trim().min(1).max(80).optional().nullable(),
     notes: z.string().optional().nullable()
   }),
   payment: OrderIntakePaymentSchema.optional(),
