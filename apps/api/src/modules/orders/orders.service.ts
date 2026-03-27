@@ -153,7 +153,7 @@ type OrderIntakeMeta = z.infer<typeof OrderIntakeMetaSchema>;
 type PixCharge = z.infer<typeof PixChargeSchema>;
 type ExternalOrderSubmissionPayload = z.infer<typeof ExternalOrderSubmissionSchema>;
 type ExternalOrderSubmissionPreview = z.infer<typeof ExternalOrderSubmissionPreviewSchema>;
-type OrderFlavorCode = 'T' | 'G' | 'D' | 'Q' | 'R';
+type OrderFlavorCode = 'T' | 'G' | 'D' | 'Q' | 'R' | 'RJ';
 type FillingFlavorCode = Exclude<OrderFlavorCode, 'T'>;
 type OrderPricingFlavorKind = 'TRADITIONAL' | 'GOIABADA' | 'PREMIUM';
 type InventoryLookupItem = {
@@ -299,6 +299,7 @@ export class OrdersService {
     if (normalized.includes('tradicional')) return 'T';
     if (normalized.includes('goiabada')) return 'G';
     if (normalized.includes('doce')) return 'D';
+    if (normalized.includes('romeu') || normalized.includes('julieta')) return 'RJ';
     if (normalized.includes('queijo') && !normalized.includes('requeij')) return 'Q';
     if (normalized.includes('requeij')) return 'R';
     return null;
@@ -535,7 +536,7 @@ export class OrdersService {
     tx: TransactionClient,
     items: Array<{ productId: number; quantity: number }>
   ) {
-    const byFlavorCode: Record<FillingFlavorCode, number> = { G: 0, D: 0, Q: 0, R: 0 };
+    const byFlavorCode: Record<FillingFlavorCode, number> = { G: 0, D: 0, Q: 0, R: 0, RJ: 0 };
     if (items.length === 0) return byFlavorCode;
 
     const productIds = Array.from(new Set(items.map((item) => item.productId)));
@@ -546,7 +547,7 @@ export class OrdersService {
     const productNameById = new Map(products.map((product) => [product.id, product.name]));
     const summary = this.buildOfficialBroaSummaryFromItems(items, productNameById);
 
-    for (const code of ['G', 'D', 'Q', 'R'] as const) {
+    for (const code of ['G', 'D', 'Q', 'R', 'RJ'] as const) {
       byFlavorCode[code] = summary.flavorCounts[code] || 0;
     }
 
@@ -737,30 +738,31 @@ export class OrdersService {
     }
 
     for (const [code, broasQty] of Object.entries(fillingBroasByCode) as Array<[FillingFlavorCode, number]>) {
-      const definition = orderFillingIngredientsByFlavorCode[code];
-      const fillingQty = this.toQty(Math.max(broasQty, 0) * (definition.qtyPerUnit ?? 0));
-      if (fillingQty <= 0) continue;
+      for (const definition of orderFillingIngredientsByFlavorCode[code]) {
+        const fillingQty = this.toQty(Math.max(broasQty, 0) * (definition.qtyPerUnit ?? 0));
+        if (fillingQty <= 0) continue;
 
-      const item = await this.ensureInventoryItemByAliases(tx, inventoryByLookup, {
-        canonicalName: definition.canonicalName,
-        aliases: definition.aliases,
-        category: definition.category,
-        unit: definition.unit,
-        purchasePackSize: definition.purchasePackSize,
-        purchasePackCost: definition.purchasePackCost
-      });
+        const item = await this.ensureInventoryItemByAliases(tx, inventoryByLookup, {
+          canonicalName: definition.canonicalName,
+          aliases: definition.aliases,
+          category: definition.category,
+          unit: definition.unit,
+          purchasePackSize: definition.purchasePackSize,
+          purchasePackCost: definition.purchasePackCost
+        });
 
-      await tx.inventoryMovement.create({
-        data: {
-          itemId: item.id,
-          orderId: order.id,
-          type: 'OUT',
-          quantity: fillingQty,
-          reason: `Consumo de recheio por pedido (${definition.canonicalName})`,
-          source: ORDER_FORMULA_SOURCE_FILLING,
-          sourceLabel
-        }
-      });
+        await tx.inventoryMovement.create({
+          data: {
+            itemId: item.id,
+            orderId: order.id,
+            type: 'OUT',
+            quantity: fillingQty,
+            reason: `Consumo de recheio por pedido (${definition.canonicalName})`,
+            source: ORDER_FORMULA_SOURCE_FILLING,
+            sourceLabel
+          }
+        });
+      }
     }
 
     const plasticBoxDefinition = resolveInventoryDefinition('CAIXA DE PLÁSTICO');
@@ -1063,7 +1065,7 @@ export class OrdersService {
     flavorCounts: ExternalOrderSubmissionPayload['flavors'],
     productIdByCode: Map<OrderFlavorCode, number>
   ) {
-    return (['T', 'G', 'D', 'Q', 'R'] as const)
+    return (['T', 'G', 'D', 'Q', 'R', 'RJ'] as const)
       .map((code) => {
         const quantity = Math.max(Math.floor(flavorCounts[code] || 0), 0);
         if (quantity <= 0) return null;

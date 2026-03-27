@@ -771,7 +771,8 @@ export function PublicOrderPage() {
       G: computedOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.G?.id)?.quantity || 0,
       D: computedOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.D?.id)?.quantity || 0,
       Q: computedOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.Q?.id)?.quantity || 0,
-      R: computedOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.R?.id)?.quantity || 0
+      R: computedOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.R?.id)?.quantity || 0,
+      RJ: computedOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.RJ?.id)?.quantity || 0
     }),
     [computedOrderItems, runtimeOrderCatalog.flavorProductByLegacyCode]
   );

@@ -672,20 +672,21 @@ export class ProductionService {
           });
         }
 
-        for (const code of ['G', 'D', 'Q', 'R'] as const) {
+        for (const code of ['G', 'D', 'Q', 'R', 'RJ'] as const) {
           const broasQty = remainingBroaSummary.flavorCounts[code] || 0;
           if (broasQty <= 0) continue;
-          const definition = orderFillingIngredientsByFlavorCode[code];
-          const fillingItem =
-            itemByFamilyKey.get(resolveInventoryFamilyKey(definition.canonicalName)) || null;
-          if (!fillingItem) continue;
+          for (const definition of orderFillingIngredientsByFlavorCode[code]) {
+            const fillingItem =
+              itemByFamilyKey.get(resolveInventoryFamilyKey(definition.canonicalName)) || null;
+            if (!fillingItem) continue;
 
-          this.appendRequirementRow(byIngredient, {
-            ingredientId: fillingItem.id,
-            name: fillingItem.name,
-            unit: fillingItem.unit,
-            requiredQty: this.toQty(broasQty * (definition.qtyPerUnit ?? 0))
-          });
+            this.appendRequirementRow(byIngredient, {
+              ingredientId: fillingItem.id,
+              name: fillingItem.name,
+              unit: fillingItem.unit,
+              requiredQty: this.toQty(broasQty * (definition.qtyPerUnit ?? 0))
+            });
+          }
         }
       }
 

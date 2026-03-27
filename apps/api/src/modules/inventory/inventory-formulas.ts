@@ -31,7 +31,7 @@ const DEFAULT_PURCHASE_PACKS = {
   BUTTER_PAPER: { size: 750, cost: 7.87 }
 } as const;
 
-export const OFFICIAL_BROA_FLAVOR_CODES = ['T', 'G', 'D', 'Q', 'R'] as const;
+export const OFFICIAL_BROA_FLAVOR_CODES = ['T', 'G', 'D', 'Q', 'R', 'RJ'] as const;
 export type OfficialBroaFlavorCode = (typeof OFFICIAL_BROA_FLAVOR_CODES)[number];
 
 export type InventoryCategory =
@@ -299,43 +299,71 @@ export const massPrepRecipeIngredients = [
 ] as const satisfies readonly InventoryRecipeDefinition[];
 
 export const orderFillingIngredientsByFlavorCode = {
-  G: {
-    canonicalName: 'GOIABADA',
-    aliases: ['GOIABADA'],
-    category: 'INGREDIENTE',
-    unit: 'g',
-    purchasePackSize: DEFAULT_PURCHASE_PACKS.GOIABADA.size,
-    purchasePackCost: DEFAULT_PURCHASE_PACKS.GOIABADA.cost,
-    qtyPerUnit: OFFICIAL_BROA_FILLING_QTY_PER_UNIT
-  },
-  D: {
-    canonicalName: 'DOCE DE LEITE',
-    aliases: ['DOCE DE LEITE'],
-    category: 'INGREDIENTE',
-    unit: 'g',
-    purchasePackSize: DEFAULT_PURCHASE_PACKS.DOCE_DE_LEITE.size,
-    purchasePackCost: DEFAULT_PURCHASE_PACKS.DOCE_DE_LEITE.cost,
-    qtyPerUnit: OFFICIAL_BROA_FILLING_QTY_PER_UNIT
-  },
-  Q: {
-    canonicalName: 'QUEIJO DO SERRO',
-    aliases: ['QUEIJO DO SERRO', 'QUEIJO'],
-    category: 'INGREDIENTE',
-    unit: 'g',
-    purchasePackSize: DEFAULT_PURCHASE_PACKS.QUEIJO_DO_SERRO.size,
-    purchasePackCost: DEFAULT_PURCHASE_PACKS.QUEIJO_DO_SERRO.cost,
-    qtyPerUnit: OFFICIAL_BROA_FILLING_QTY_PER_UNIT
-  },
-  R: {
-    canonicalName: 'REQUEIJÃO DE CORTE',
-    aliases: ['REQUEIJÃO DE CORTE', 'REQUEIJAO DE CORTE'],
-    category: 'INGREDIENTE',
-    unit: 'g',
-    purchasePackSize: DEFAULT_PURCHASE_PACKS.REQUEIJAO_DE_CORTE.size,
-    purchasePackCost: DEFAULT_PURCHASE_PACKS.REQUEIJAO_DE_CORTE.cost,
-    qtyPerUnit: OFFICIAL_BROA_FILLING_QTY_PER_UNIT
-  }
-} as const satisfies Record<string, InventoryAliasDefinition>;
+  G: [
+    {
+      canonicalName: 'GOIABADA',
+      aliases: ['GOIABADA'],
+      category: 'INGREDIENTE',
+      unit: 'g',
+      purchasePackSize: DEFAULT_PURCHASE_PACKS.GOIABADA.size,
+      purchasePackCost: DEFAULT_PURCHASE_PACKS.GOIABADA.cost,
+      qtyPerUnit: OFFICIAL_BROA_FILLING_QTY_PER_UNIT
+    }
+  ],
+  D: [
+    {
+      canonicalName: 'DOCE DE LEITE',
+      aliases: ['DOCE DE LEITE'],
+      category: 'INGREDIENTE',
+      unit: 'g',
+      purchasePackSize: DEFAULT_PURCHASE_PACKS.DOCE_DE_LEITE.size,
+      purchasePackCost: DEFAULT_PURCHASE_PACKS.DOCE_DE_LEITE.cost,
+      qtyPerUnit: OFFICIAL_BROA_FILLING_QTY_PER_UNIT
+    }
+  ],
+  Q: [
+    {
+      canonicalName: 'QUEIJO DO SERRO',
+      aliases: ['QUEIJO DO SERRO', 'QUEIJO'],
+      category: 'INGREDIENTE',
+      unit: 'g',
+      purchasePackSize: DEFAULT_PURCHASE_PACKS.QUEIJO_DO_SERRO.size,
+      purchasePackCost: DEFAULT_PURCHASE_PACKS.QUEIJO_DO_SERRO.cost,
+      qtyPerUnit: OFFICIAL_BROA_FILLING_QTY_PER_UNIT
+    }
+  ],
+  R: [
+    {
+      canonicalName: 'REQUEIJÃO DE CORTE',
+      aliases: ['REQUEIJÃO DE CORTE', 'REQUEIJAO DE CORTE'],
+      category: 'INGREDIENTE',
+      unit: 'g',
+      purchasePackSize: DEFAULT_PURCHASE_PACKS.REQUEIJAO_DE_CORTE.size,
+      purchasePackCost: DEFAULT_PURCHASE_PACKS.REQUEIJAO_DE_CORTE.cost,
+      qtyPerUnit: OFFICIAL_BROA_FILLING_QTY_PER_UNIT
+    }
+  ],
+  RJ: [
+    {
+      canonicalName: 'GOIABADA',
+      aliases: ['GOIABADA'],
+      category: 'INGREDIENTE',
+      unit: 'g',
+      purchasePackSize: DEFAULT_PURCHASE_PACKS.GOIABADA.size,
+      purchasePackCost: DEFAULT_PURCHASE_PACKS.GOIABADA.cost,
+      qtyPerUnit: OFFICIAL_BROA_FILLING_QTY_PER_UNIT / 2
+    },
+    {
+      canonicalName: 'REQUEIJÃO DE CORTE',
+      aliases: ['REQUEIJÃO DE CORTE', 'REQUEIJAO DE CORTE'],
+      category: 'INGREDIENTE',
+      unit: 'g',
+      purchasePackSize: DEFAULT_PURCHASE_PACKS.REQUEIJAO_DE_CORTE.size,
+      purchasePackCost: DEFAULT_PURCHASE_PACKS.REQUEIJAO_DE_CORTE.cost,
+      qtyPerUnit: OFFICIAL_BROA_FILLING_QTY_PER_UNIT / 2
+    }
+  ]
+} as const satisfies Record<string, readonly InventoryAliasDefinition[]>;
 
 const canonicalDefinitionByLookup = new Map<string, InventoryAliasDefinition>();
 for (const definition of canonicalInventoryItemDefinitions) {
@@ -376,13 +404,14 @@ export function resolveOfficialBroaFlavorCodeFromProductName(
   if (normalized.includes('tradicional')) return 'T';
   if (normalized.includes('goiabada')) return 'G';
   if (normalized.includes('doce')) return 'D';
+  if (normalized.includes('romeu') || normalized.includes('julieta')) return 'RJ';
   if (normalized.includes('queijo') && !normalized.includes('requeij')) return 'Q';
   if (normalized.includes('requeij')) return 'R';
   return null;
 }
 
 export function emptyOfficialBroaFlavorCounts(): Record<OfficialBroaFlavorCode, number> {
-  return { T: 0, G: 0, D: 0, Q: 0, R: 0 };
+  return { T: 0, G: 0, D: 0, Q: 0, R: 0, RJ: 0 };
 }
 
 export function buildOfficialBroaFlavorSummary(
@@ -521,8 +550,10 @@ const massPrepIngredientLookups = new Set(
 );
 
 const orderFillingIngredientLookups = new Set(
-  Object.values(orderFillingIngredientsByFlavorCode).flatMap((ingredient) =>
-    [ingredient.canonicalName, ...ingredient.aliases].map((value) => normalizeInventoryLookup(value))
+  Object.values(orderFillingIngredientsByFlavorCode).flatMap((ingredients) =>
+    ingredients.flatMap((ingredient) =>
+      [ingredient.canonicalName, ...ingredient.aliases].map((value) => normalizeInventoryLookup(value))
+    )
   )
 );
 

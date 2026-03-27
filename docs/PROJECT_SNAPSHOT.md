@@ -254,6 +254,10 @@ Ultima atualizacao: 2026-03-26
 - Ciclo executado: `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api exec prisma generate`, `pnpm --filter @querobroapp/api exec prisma generate --schema prisma/schema.prod.prisma`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, `node --test tests/coupon-management-and-public-preview.test.mjs`
 - Resultado: cupons passaram a suportar limite de uso por cliente com trava efetiva no resolve publico e no intake final, os pedidos passaram a persistir `couponCode`, o detalhe de `/clientes` passou a mostrar `Cupons utilizados`, o endereco do cliente passou a incluir `Complemento` nas exibicoes relevantes e o autofill/salvamento deixou de aceitar `bairro` com numeros. O aviso publico do `/pedido` para cupom rejeitado foi padronizado para `CUPOM NÃO VÁLIDO / JÁ UTILIZADO`.
 
+- Data: 2026-03-27
+- Ciclo executado: `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`
+- Resultado: o sabor `Romeu e Julieta (RJ)` passou a ser reconhecido no catalogo publico do `/pedido`, no prefill por `catalog=RJ`, nas contagens operacionais de estoque e no consumo automatico de recheios (`goiabada + requeijao de corte`). O feed unico `apps/web/public/meta-catalog.csv` ganhou a linha `QUEROBROA-RJ`, `sabores-caixa.jpg` foi recomposta com 6 colunas e entrou a arte publica nova `romeu-e-julieta.jpg`. A origem do gargalo de deploy tambem ficou estabilizada usando assets versionados do proprio repositorio, sem depender de upload efemero de `/uploads/products`.
+
 ## Como religar e validar rapido
 
 1. `./scripts/stop-all.sh`

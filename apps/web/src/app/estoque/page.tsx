@@ -45,7 +45,8 @@ const OFFICIAL_BROAS = [
   { code: 'G', name: 'Broa Goiabada (G)', boxPrice: 50 },
   { code: 'D', name: 'Broa Doce de Leite (D)', boxPrice: 52 },
   { code: 'Q', name: 'Broa Queijo do Serro (Q)', boxPrice: 52 },
-  { code: 'R', name: 'Broa Requeijão de corte (R)', boxPrice: 52 }
+  { code: 'R', name: 'Broa Requeijão de corte (R)', boxPrice: 52 },
+  { code: 'RJ', name: 'Broa Romeu E Julieta (RJ)', boxPrice: 52 }
 ] as const;
 
 const EMPTY_PRODUCT_FORM: Pick<Product, 'name' | 'category' | 'unit' | 'active' | 'imageUrl'> = {

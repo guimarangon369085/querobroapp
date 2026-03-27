@@ -76,7 +76,7 @@ const ORDER_BOX_PRICE_MIXED_OTHER_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRIC
 const ORDER_BOX_PRICE_GOIABADA_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRICE_GOIABADA);
 
 export const ORDER_MISTA_SHORTCUT_CODES = ['G', 'D', 'Q', 'R'] as const;
-export const ORDER_FLAVOR_CODES = ['T', 'G', 'D', 'Q', 'R'] as const;
+export const ORDER_FLAVOR_CODES = ['T', 'G', 'D', 'Q', 'R', 'RJ'] as const;
 
 export type OrderMistaShortcutCode = (typeof ORDER_MISTA_SHORTCUT_CODES)[number];
 export type OrderFlavorCode = (typeof ORDER_FLAVOR_CODES)[number];
@@ -89,7 +89,8 @@ export const ORDER_FLAVOR_OFFICIAL_BOX_NAME_BY_CODE: Record<OrderFlavorCode, str
   G: 'Caixa de Goiabada (G)',
   D: 'Caixa de Doce de Leite (D)',
   Q: 'Caixa de Queijo (Q)',
-  R: 'Caixa de Requeijão de Corte (R)'
+  R: 'Caixa de Requeijão de Corte (R)',
+  RJ: 'Caixa Romeu e Julieta (RJ)'
 };
 
 export const ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE: Record<OrderMistaShortcutCode, string> = {
@@ -105,6 +106,7 @@ const ORDER_CARDAPIO_IMAGE_PATHS = {
   doceDeLeite: '/querobroa-brand/cardapio/doce-de-leite.jpg',
   queijoDoSerro: '/querobroa-brand/cardapio/queijo-do-serro-camadas.jpg',
   requeijaoDeCorte: '/querobroa-brand/cardapio/requeijao-de-corte.jpg',
+  romeuEJulieta: '/querobroa-brand/cardapio/romeu-e-julieta.jpg',
   mistaGoiabada: '/querobroa-brand/cardapio/mista-goiabada.jpg',
   mistaDoceDeLeite: '/querobroa-brand/cardapio/mista-doce-de-leite.jpg',
   mistaQueijoDoSerro: '/querobroa-brand/cardapio/mista-queijo-do-serro.jpg',
@@ -141,6 +143,11 @@ export const ORDER_FLAVOR_CARD_ART_BY_CODE: Record<
   R: {
     mode: 'single',
     src: ORDER_CARDAPIO_IMAGE_PATHS.requeijaoDeCorte,
+    objectPosition: 'center center'
+  },
+  RJ: {
+    mode: 'single',
+    src: ORDER_CARDAPIO_IMAGE_PATHS.romeuEJulieta,
     objectPosition: 'center center'
   }
 };
@@ -203,7 +210,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 7 broas tradicionais',
     art: ORDER_FLAVOR_CARD_ART_BY_CODE.T,
     accentClassName: 'border-[rgb(228,202,171)] bg-[linear-gradient(165deg,#fff9f1,#f7e8d5)]',
-    units: { T: 7, G: 0, D: 0, Q: 0, R: 0 },
+    units: { T: 7, G: 0, D: 0, Q: 0, R: 0, RJ: 0 },
     priceEstimate: 40
   },
   G: {
@@ -212,7 +219,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 7 broas de goiabada',
     art: ORDER_FLAVOR_CARD_ART_BY_CODE.G,
     accentClassName: 'border-[rgb(233,199,208)] bg-[linear-gradient(165deg,#fff6f8,#f9e4ea)]',
-    units: { T: 0, G: 7, D: 0, Q: 0, R: 0 },
+    units: { T: 0, G: 7, D: 0, Q: 0, R: 0, RJ: 0 },
     priceEstimate: 50
   },
   D: {
@@ -221,7 +228,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 7 broas de doce de leite',
     art: ORDER_FLAVOR_CARD_ART_BY_CODE.D,
     accentClassName: 'border-[rgb(224,196,165)] bg-[linear-gradient(165deg,#fff8f1,#f7ece0)]',
-    units: { T: 0, G: 0, D: 7, Q: 0, R: 0 },
+    units: { T: 0, G: 0, D: 7, Q: 0, R: 0, RJ: 0 },
     priceEstimate: 52
   },
   Q: {
@@ -230,7 +237,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 7 broas de queijo do serro',
     art: ORDER_FLAVOR_CARD_ART_BY_CODE.Q,
     accentClassName: 'border-[rgb(211,201,188)] bg-[linear-gradient(165deg,#fbf7f2,#f0e6da)]',
-    units: { T: 0, G: 0, D: 0, Q: 7, R: 0 },
+    units: { T: 0, G: 0, D: 0, Q: 7, R: 0, RJ: 0 },
     priceEstimate: 52
   },
   R: {
@@ -239,7 +246,16 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 7 broas de requeijão de corte',
     art: ORDER_FLAVOR_CARD_ART_BY_CODE.R,
     accentClassName: 'border-[rgb(220,207,187)] bg-[linear-gradient(165deg,#fffaf2,#f7eedf)]',
-    units: { T: 0, G: 0, D: 0, Q: 0, R: 7 },
+    units: { T: 0, G: 0, D: 0, Q: 0, R: 7, RJ: 0 },
+    priceEstimate: 52
+  },
+  RJ: {
+    label: 'Romeu e Julieta',
+    codeLabel: 'RJ',
+    detail: '1 caixa = 7 broas de romeu e julieta',
+    art: ORDER_FLAVOR_CARD_ART_BY_CODE.RJ,
+    accentClassName: 'border-[rgb(225,197,190)] bg-[linear-gradient(165deg,#fff7f2,#f5e8df)]',
+    units: { T: 0, G: 0, D: 0, Q: 0, R: 0, RJ: 7 },
     priceEstimate: 52
   },
   MG: {
@@ -248,7 +264,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 4 tradicionais + 3 goiabada',
     art: ORDER_MISTA_CARD_ART_BY_CODE.G,
     accentClassName: 'border-[rgb(233,199,208)] bg-[linear-gradient(165deg,#fff7f3,#fbe8e4)]',
-    units: { T: 4, G: 3, D: 0, Q: 0, R: 0 },
+    units: { T: 4, G: 3, D: 0, Q: 0, R: 0, RJ: 0 },
     priceEstimate: 45
   },
   MD: {
@@ -257,7 +273,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 4 tradicionais + 3 doce de leite',
     art: ORDER_MISTA_CARD_ART_BY_CODE.D,
     accentClassName: 'border-[rgb(224,196,165)] bg-[linear-gradient(165deg,#fff8f3,#f7ebe1)]',
-    units: { T: 4, G: 0, D: 3, Q: 0, R: 0 },
+    units: { T: 4, G: 0, D: 3, Q: 0, R: 0, RJ: 0 },
     priceEstimate: 47
   },
   MQ: {
@@ -266,7 +282,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 4 tradicionais + 3 queijo do serro',
     art: ORDER_MISTA_CARD_ART_BY_CODE.Q,
     accentClassName: 'border-[rgb(211,201,188)] bg-[linear-gradient(165deg,#fcf8f4,#f2e9df)]',
-    units: { T: 4, G: 0, D: 0, Q: 3, R: 0 },
+    units: { T: 4, G: 0, D: 0, Q: 3, R: 0, RJ: 0 },
     priceEstimate: 47
   },
   MR: {
@@ -275,7 +291,7 @@ export const ORDER_BOX_CATALOG = {
     detail: '1 caixa = 4 tradicionais + 3 requeijão de corte',
     art: ORDER_MISTA_CARD_ART_BY_CODE.R,
     accentClassName: 'border-[rgb(220,207,187)] bg-[linear-gradient(165deg,#fffaf3,#f5ecdf)]',
-    units: { T: 4, G: 0, D: 0, Q: 0, R: 3 },
+    units: { T: 4, G: 0, D: 0, Q: 0, R: 3, RJ: 0 },
     priceEstimate: 47
   }
 } as const;
@@ -390,6 +406,7 @@ export function resolveOrderFlavorCodeFromName(value?: string | null): OrderFlav
   if (normalized.includes('tradicional')) return 'T';
   if (normalized.includes('goiabada')) return 'G';
   if (normalized.includes('doce')) return 'D';
+  if (normalized.includes('romeu') || normalized.includes('julieta')) return 'RJ';
   if (normalized.includes('queijo') && !normalized.includes('requeij')) return 'Q';
   if (normalized.includes('requeij')) return 'R';
   return null;
@@ -424,6 +441,9 @@ function applyProductImageToSingleArt(
   imageUrl?: string | null
 ) {
   const normalizedImageUrl = String(imageUrl || '').trim();
+  if (normalizedImageUrl.startsWith('/uploads/')) {
+    return art;
+  }
   return normalizedImageUrl ? { ...art, src: normalizedImageUrl } : art;
 }
 
@@ -475,6 +495,7 @@ export function buildRuntimeOrderBoxCatalog(products?: ReadonlyArray<OrderProduc
     D: { ...ORDER_BOX_CATALOG.D, art: resolveOrderFlavorCardArt('D', products) },
     Q: { ...ORDER_BOX_CATALOG.Q, art: resolveOrderFlavorCardArt('Q', products) },
     R: { ...ORDER_BOX_CATALOG.R, art: resolveOrderFlavorCardArt('R', products) },
+    RJ: { ...ORDER_BOX_CATALOG.RJ, art: resolveOrderFlavorCardArt('RJ', products) },
     MG: { ...ORDER_BOX_CATALOG.MG, art: resolveOrderMistaCardArt('G', products) },
     MD: { ...ORDER_BOX_CATALOG.MD, art: resolveOrderMistaCardArt('D', products) },
     MQ: { ...ORDER_BOX_CATALOG.MQ, art: resolveOrderMistaCardArt('Q', products) },
@@ -484,7 +505,10 @@ export function buildRuntimeOrderBoxCatalog(products?: ReadonlyArray<OrderProduc
 
 export function resolveOrderCardImage(product?: OrderProductArtSource | string | null) {
   const productName = typeof product === 'string' ? product : product?.name;
-  const explicitImageUrl = typeof product === 'string' ? null : product?.imageUrl;
+  const explicitImageUrl =
+    typeof product === 'string' || String(product?.imageUrl || '').trim().startsWith('/uploads/')
+      ? null
+      : product?.imageUrl;
   if (explicitImageUrl) return explicitImageUrl;
   const code = resolveOrderFlavorCodeFromName(productName);
   if (!code) return ORDER_SABORES_REFERENCE_IMAGE;
@@ -494,7 +518,10 @@ export function resolveOrderCardImage(product?: OrderProductArtSource | string |
 
 export function resolveOrderCardArt(product?: OrderProductArtSource | string | null) {
   const productName = typeof product === 'string' ? product : product?.name;
-  const explicitImageUrl = typeof product === 'string' ? null : product?.imageUrl;
+  const explicitImageUrl =
+    typeof product === 'string' || String(product?.imageUrl || '').trim().startsWith('/uploads/')
+      ? null
+      : product?.imageUrl;
   if (explicitImageUrl) {
     return {
       mode: 'single',
@@ -554,7 +581,8 @@ function resolveRuntimeOrderAccentClass(kind: RuntimeOrderFlavorKind, mode: 'SIN
 function buildRuntimeOrderLegacyBoxCode(product: RuntimeOrderFlavorProduct, mode: 'SINGLE' | 'MIXED'): OrderBoxCode | null {
   if (!product.legacyCode) return null;
   if (mode === 'SINGLE') return product.legacyCode;
-  return product.legacyCode === 'T' ? null : (`M${product.legacyCode}` as OrderBoxCode);
+  if (product.legacyCode === 'T' || product.legacyCode.length > 1) return null;
+  return `M${product.legacyCode}` as OrderBoxCode;
 }
 
 export function buildRuntimeOrderCatalog(
@@ -591,7 +619,7 @@ export function buildRuntimeOrderCatalog(
     })
     .sort((left, right) => {
       const kindWeight = { TRADITIONAL: 0, GOIABADA: 1, PREMIUM: 2 } satisfies Record<RuntimeOrderFlavorKind, number>;
-      const legacyWeight = { T: 0, G: 1, D: 2, Q: 3, R: 4 } satisfies Record<OrderFlavorCode, number>;
+      const legacyWeight = { T: 0, G: 1, D: 2, Q: 3, R: 4, RJ: 5 } satisfies Record<OrderFlavorCode, number>;
       const leftKindWeight = kindWeight[left.kind];
       const rightKindWeight = kindWeight[right.kind];
       if (leftKindWeight !== rightKindWeight) return leftKindWeight - rightKindWeight;
@@ -903,7 +931,7 @@ export function resolveOrderVirtualBoxLabel(
 }
 
 export function deriveFlavorUnitsFromBoxCounts(boxCounts: Record<OrderBoxCode, number>) {
-  const result: Record<OrderFlavorCode, number> = { T: 0, G: 0, D: 0, Q: 0, R: 0 };
+  const result: Record<OrderFlavorCode, number> = { T: 0, G: 0, D: 0, Q: 0, R: 0, RJ: 0 };
   for (const code of Object.keys(ORDER_BOX_CATALOG) as OrderBoxCode[]) {
     const count = boxCounts[code] || 0;
     if (count <= 0) continue;
@@ -913,6 +941,7 @@ export function deriveFlavorUnitsFromBoxCounts(boxCounts: Record<OrderBoxCode, n
     result.D += unitMap.D * count;
     result.Q += unitMap.Q * count;
     result.R += unitMap.R * count;
+    result.RJ += unitMap.RJ * count;
   }
   return result;
 }
@@ -939,10 +968,14 @@ export function calculateOrderSubtotalFromFlavorSummary(params: {
   const countDoce = Math.max(Math.floor(flavorCounts.D || 0), 0);
   const countQueijo = Math.max(Math.floor(flavorCounts.Q || 0), 0);
   const countRequeijao = Math.max(Math.floor(flavorCounts.R || 0), 0);
+  const countRomeuEJulieta = Math.max(Math.floor(flavorCounts.RJ || 0), 0);
 
   const goiabadaTriplets = Math.floor(countGoiabada / 3);
   const otherTriplets =
-    Math.floor(countDoce / 3) + Math.floor(countQueijo / 3) + Math.floor(countRequeijao / 3);
+    Math.floor(countDoce / 3) +
+    Math.floor(countQueijo / 3) +
+    Math.floor(countRequeijao / 3) +
+    Math.floor(countRomeuEJulieta / 3);
 
   const discountTraditional = ORDER_BOX_PRICE_CUSTOM_MINOR_UNITS - ORDER_BOX_PRICE_TRADITIONAL_MINOR_UNITS;
   const discountMixedGoiabada =
@@ -1005,7 +1038,8 @@ export function buildOrderFlavorSummaryFromItems(
     G: 0,
     D: 0,
     Q: 0,
-    R: 0
+    R: 0,
+    RJ: 0
   };
   let totalUnits = 0;
 

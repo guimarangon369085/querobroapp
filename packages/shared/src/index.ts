@@ -412,7 +412,8 @@ export const ExternalOrderFlavorCountsSchema = z
     G: z.coerce.number().int().nonnegative().default(0),
     D: z.coerce.number().int().nonnegative().default(0),
     Q: z.coerce.number().int().nonnegative().default(0),
-    R: z.coerce.number().int().nonnegative().default(0)
+    R: z.coerce.number().int().nonnegative().default(0),
+    RJ: z.coerce.number().int().nonnegative().default(0)
   })
   .default({});
 
@@ -457,7 +458,8 @@ export const ExternalOrderSubmissionSchema = z
       (value.flavors.G || 0) +
       (value.flavors.D || 0) +
       (value.flavors.Q || 0) +
-      (value.flavors.R || 0);
+      (value.flavors.R || 0) +
+      (value.flavors.RJ || 0);
     const itemTotal = (value.items || []).reduce(
       (sum, item) => sum + Math.max(Math.floor(item.quantity || 0), 0),
       0
