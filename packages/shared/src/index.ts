@@ -61,6 +61,26 @@ export const PixChargeSchema = z.object({
   payable: z.boolean().default(false)
 });
 
+export const CustomerAddressSchema = z.object({
+  id: z.number().int().positive().optional(),
+  customerId: z.number().int().positive().optional(),
+  address: z.string().optional().nullable(),
+  addressLine1: z.string().optional().nullable(),
+  addressLine2: z.string().optional().nullable(),
+  neighborhood: z.string().optional().nullable(),
+  city: z.string().optional().nullable(),
+  state: z.string().optional().nullable(),
+  postalCode: z.string().optional().nullable(),
+  country: z.string().optional().nullable(),
+  placeId: z.string().optional().nullable(),
+  lat: z.number().optional().nullable(),
+  lng: z.number().optional().nullable(),
+  deliveryNotes: z.string().optional().nullable(),
+  isPrimary: z.boolean().default(false),
+  createdAt: z.string().optional().nullable(),
+  updatedAt: z.string().optional().nullable()
+});
+
 export const CustomerSchema = z.object({
   id: z.number().int().positive().optional(),
   publicNumber: z.number().int().positive().optional().nullable(),
@@ -81,7 +101,25 @@ export const CustomerSchema = z.object({
   lng: z.number().optional().nullable(),
   deliveryNotes: z.string().optional().nullable(),
   deletedAt: z.string().optional().nullable(),
-  createdAt: z.string().optional().nullable()
+  createdAt: z.string().optional().nullable(),
+  addresses: z.array(CustomerAddressSchema).optional()
+});
+
+export const OrderCustomerSnapshotSchema = z.object({
+  name: z.string().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  address: z.string().optional().nullable(),
+  addressLine1: z.string().optional().nullable(),
+  addressLine2: z.string().optional().nullable(),
+  neighborhood: z.string().optional().nullable(),
+  city: z.string().optional().nullable(),
+  state: z.string().optional().nullable(),
+  postalCode: z.string().optional().nullable(),
+  country: z.string().optional().nullable(),
+  placeId: z.string().optional().nullable(),
+  lat: z.number().optional().nullable(),
+  lng: z.number().optional().nullable(),
+  deliveryNotes: z.string().optional().nullable()
 });
 
 export const ProductSchema = z.object({
@@ -228,6 +266,7 @@ export const OrderSchema = z.object({
   id: z.number().int().positive().optional(),
   publicNumber: z.number().int().positive().optional().nullable(),
   customerId: z.number().int().positive(),
+  customerSnapshot: OrderCustomerSnapshotSchema.optional().nullable(),
   status: OrderStatusEnum.default('ABERTO'),
   fulfillmentMode: OrderFulfillmentModeEnum.default('DELIVERY'),
   subtotal: z.number().nonnegative().optional(),
@@ -299,12 +338,31 @@ export const PixChargeStatusEnum = z.enum(['PENDENTE', 'PAGO']);
 
 export const OrderIntakeCustomerRefSchema = z.union([
   z.object({
-    customerId: z.number().int().positive()
+    customerId: z.number().int().positive(),
+    address: z.string().optional().nullable(),
+    addressLine1: z.string().optional().nullable(),
+    addressLine2: z.string().optional().nullable(),
+    neighborhood: z.string().optional().nullable(),
+    city: z.string().optional().nullable(),
+    state: z.string().optional().nullable(),
+    postalCode: z.string().optional().nullable(),
+    country: z.string().optional().nullable(),
+    placeId: z.string().optional().nullable(),
+    lat: z.number().optional().nullable(),
+    lng: z.number().optional().nullable(),
+    deliveryNotes: z.string().optional().nullable()
   }),
   z.object({
     name: z.string().min(1),
     phone: z.string().optional().nullable(),
     address: z.string().optional().nullable(),
+    addressLine1: z.string().optional().nullable(),
+    addressLine2: z.string().optional().nullable(),
+    neighborhood: z.string().optional().nullable(),
+    city: z.string().optional().nullable(),
+    state: z.string().optional().nullable(),
+    postalCode: z.string().optional().nullable(),
+    country: z.string().optional().nullable(),
     placeId: z.string().optional().nullable(),
     lat: z.number().optional().nullable(),
     lng: z.number().optional().nullable(),
@@ -431,6 +489,13 @@ export const ExternalOrderSubmissionSchema = z
       name: z.string().min(1),
       phone: z.string().optional().nullable(),
       address: z.string().optional().nullable(),
+      addressLine1: z.string().optional().nullable(),
+      addressLine2: z.string().optional().nullable(),
+      neighborhood: z.string().optional().nullable(),
+      city: z.string().optional().nullable(),
+      state: z.string().optional().nullable(),
+      postalCode: z.string().optional().nullable(),
+      country: z.string().optional().nullable(),
       placeId: z.string().optional().nullable(),
       lat: z.number().optional().nullable(),
       lng: z.number().optional().nullable(),
@@ -482,6 +547,13 @@ export const DeliveryQuoteDraftSchema = z.object({
     name: z.string().min(1).optional().nullable(),
     phone: z.string().optional().nullable(),
     address: z.string().optional().nullable(),
+    addressLine1: z.string().optional().nullable(),
+    addressLine2: z.string().optional().nullable(),
+    neighborhood: z.string().optional().nullable(),
+    city: z.string().optional().nullable(),
+    state: z.string().optional().nullable(),
+    postalCode: z.string().optional().nullable(),
+    country: z.string().optional().nullable(),
     placeId: z.string().optional().nullable(),
     lat: z.number().optional().nullable(),
     lng: z.number().optional().nullable(),
@@ -886,9 +958,11 @@ export type CouponResolveRequest = z.infer<typeof CouponResolveRequestSchema>;
 export type CouponResolveResponse = z.infer<typeof CouponResolveResponseSchema>;
 
 export type Customer = z.infer<typeof CustomerSchema>;
+export type CustomerAddress = z.infer<typeof CustomerAddressSchema>;
 export type Product = z.infer<typeof ProductSchema>;
 export type OrderItem = z.infer<typeof OrderItemSchema>;
 export type Order = z.infer<typeof OrderSchema>;
+export type OrderCustomerSnapshot = z.infer<typeof OrderCustomerSnapshotSchema>;
 export type Payment = z.infer<typeof PaymentSchema>;
 export type PixSettlementWebhook = z.infer<typeof PixSettlementWebhookSchema>;
 export type PixReconciliationWebhook = z.infer<typeof PixReconciliationWebhookSchema>;

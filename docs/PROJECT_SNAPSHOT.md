@@ -1,8 +1,10 @@
 # PROJECT_SNAPSHOT
 
-Ultima atualizacao: 2026-03-26
+Ultima atualizacao: 2026-03-27
 
 ## Estado atual
+
+- 2026-03-27: `/pedidos` passou a editar os dados completos do cliente diretamente no pedido em qualquer status, usando um snapshot proprio do pedido (`nome`, `telefone`, `endereco`, `complemento`, `bairro`, `cidade`, `UF`, `CEP`, observacoes de entrega) sem depender do cadastro principal. O backend ganhou snapshot persistido no `Order`, tabela `CustomerAddress` para multiplos enderecos por cliente, endpoint `POST /customers/:id/addresses` e seletor de enderecos salvos no novo pedido interno sem perder o vinculo com o `customerId`.
 
 - Monorepo ativo com API, Web, Mobile e contratos compartilhados.
 - Web consolidado em 3 telas operacionais reais: `Pedidos`, `Clientes` e `Estoque`, com captura publica em `/pedido`.

@@ -30,9 +30,35 @@ model Customer {
   createdAt    DateTime @default(now())
   deletedAt    DateTime?
   orders       Order[]
+  addresses    CustomerAddress[]
 
   @@index([name])
   @@index([phone])
+}
+
+model CustomerAddress {
+  id            Int      @id @default(autoincrement())
+  customerId     Int
+  address       String?
+  addressLine1  String?
+  addressLine2  String?
+  neighborhood  String?
+  city          String?
+  state         String?
+  postalCode    String?
+  country       String?
+  placeId       String?
+  lat           Float?
+  lng           Float?
+  deliveryNotes String?
+  isPrimary     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, isPrimary])
+  @@index([customerId, createdAt])
+  @@index([placeId])
 }
 
 model Product {
@@ -68,6 +94,20 @@ model Order {
   id                 Int                 @id @default(autoincrement())
   publicNumber       Int?                @unique
   customerId         Int
+  customerName       String?
+  customerPhone      String?
+  customerAddress    String?
+  customerAddressLine1 String?
+  customerAddressLine2 String?
+  customerNeighborhood String?
+  customerCity       String?
+  customerState      String?
+  customerPostalCode String?
+  customerCountry    String?
+  customerPlaceId    String?
+  customerLat        Float?
+  customerLng        Float?
+  customerDeliveryNotes String?
   status             String              @default("ABERTO")
   fulfillmentMode    String              @default("DELIVERY")
   subtotal           Float               @default(0)

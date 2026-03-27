@@ -154,13 +154,20 @@ export class DeliveriesService {
         mode: order.fulfillmentMode === OrderFulfillmentModeEnum.enum.DELIVERY ? 'DELIVERY' : 'PICKUP',
         scheduledAt: order.scheduledAt?.toISOString() || new Date().toISOString(),
         customer: {
-          name: order.customer?.name ?? null,
-          phone: order.customer?.phone ?? null,
+          name: this.resolveOrderCustomerProfile(order).name || null,
+          phone: this.resolveOrderCustomerProfile(order).phone || null,
           address: draft.dropoffAddress,
+          addressLine1: this.resolveOrderCustomerProfile(order).addressLine1,
+          addressLine2: this.resolveOrderCustomerProfile(order).addressLine2,
+          neighborhood: this.resolveOrderCustomerProfile(order).neighborhood,
+          city: this.resolveOrderCustomerProfile(order).city,
+          state: this.resolveOrderCustomerProfile(order).state,
+          postalCode: this.resolveOrderCustomerProfile(order).postalCode,
+          country: this.resolveOrderCustomerProfile(order).country,
           placeId: draft.dropoffPlaceId,
           lat: draft.dropoffLat,
           lng: draft.dropoffLng,
-          deliveryNotes: order.customer?.deliveryNotes ?? null
+          deliveryNotes: this.resolveOrderCustomerProfile(order).deliveryNotes
         },
         manifest: {
           items: draft.items.map((item) => ({
@@ -785,23 +792,51 @@ export class DeliveriesService {
     return order;
   }
 
+  private resolveOrderCustomerProfile(order: OrderWithDeliveryContext) {
+    return {
+      name: String(order.customerName ?? order.customer?.name ?? '').trim(),
+      phone: String(order.customerPhone ?? order.customer?.phone ?? '').trim(),
+      address: this.normalizeText(order.customerAddress ?? order.customer?.address) || null,
+      addressLine1: this.normalizeText(order.customerAddressLine1 ?? order.customer?.addressLine1) || null,
+      addressLine2: this.normalizeText(order.customerAddressLine2 ?? order.customer?.addressLine2) || null,
+      neighborhood: this.normalizeText(order.customerNeighborhood ?? order.customer?.neighborhood) || null,
+      city: this.normalizeText(order.customerCity ?? order.customer?.city) || null,
+      state: this.normalizeText(order.customerState ?? order.customer?.state) || null,
+      postalCode: this.normalizeText(order.customerPostalCode ?? order.customer?.postalCode) || null,
+      country: this.normalizeText(order.customerCountry ?? order.customer?.country) || null,
+      placeId: this.normalizeText(order.customerPlaceId ?? order.customer?.placeId) || null,
+      lat:
+        typeof order.customerLat === 'number' && Number.isFinite(order.customerLat)
+          ? order.customerLat
+          : typeof order.customer?.lat === 'number' && Number.isFinite(order.customer.lat)
+            ? order.customer.lat
+            : null,
+      lng:
+        typeof order.customerLng === 'number' && Number.isFinite(order.customerLng)
+          ? order.customerLng
+          : typeof order.customer?.lng === 'number' && Number.isFinite(order.customer.lng)
+            ? order.customer.lng
+            : null,
+      deliveryNotes: this.normalizeText(order.customerDeliveryNotes ?? order.customer?.deliveryNotes) || null
+    };
+  }
+
   private buildOrderDraft(order: OrderWithDeliveryContext): DeliveryDraft {
     const items = (order.items || []).map((item) => ({
       productId: item.productId,
       name: item.product?.name || `Produto ${item.productId}`,
       quantity: item.quantity
     }));
+    const customer = this.resolveOrderCustomerProfile(order);
 
     return {
       orderId: order.id,
-      customerName: (order.customer?.name || '').trim(),
-      customerPhone: (order.customer?.phone || '').trim(),
-      dropoffAddress: this.buildCustomerAddress(order.customer),
-      dropoffPlaceId: this.normalizeText(order.customer?.placeId) || null,
-      dropoffLat:
-        typeof order.customer?.lat === 'number' && Number.isFinite(order.customer.lat) ? order.customer.lat : null,
-      dropoffLng:
-        typeof order.customer?.lng === 'number' && Number.isFinite(order.customer.lng) ? order.customer.lng : null,
+      customerName: customer.name,
+      customerPhone: customer.phone,
+      dropoffAddress: this.buildCustomerAddress(order),
+      dropoffPlaceId: customer.placeId,
+      dropoffLat: customer.lat,
+      dropoffLng: customer.lng,
       orderTotal: this.toMoney(order.total ?? 0),
       totalUnits: items.reduce((sum, item) => sum + Math.max(Math.floor(item.quantity || 0), 0), 0),
       scheduledAt: order.scheduledAt?.toISOString() || '',
@@ -811,10 +846,11 @@ export class DeliveriesService {
   }
 
   private collectMissingRequirements(order: OrderWithDeliveryContext, draft: DeliveryDraft) {
+    const customer = this.resolveOrderCustomerProfile(order);
     return [
       ...(!this.hasPickupOriginConfigured() ? ['origem de coleta sem endereco configurado'] : []),
-      ...(!order.customer?.name?.trim() ? ['cliente sem nome'] : []),
-      ...(!order.customer?.phone?.trim() ? ['cliente sem telefone'] : []),
+      ...(!customer.name ? ['cliente sem nome'] : []),
+      ...(!customer.phone ? ['cliente sem telefone'] : []),
       ...(!draft.dropoffAddress ? ['cliente sem endereco completo para entrega'] : []),
       ...((order.items || []).length === 0 ? ['pedido sem itens'] : [])
     ];
@@ -824,8 +860,8 @@ export class DeliveriesService {
     return roundMoney(value);
   }
 
-  private buildCustomerAddress(customer?: OrderWithDeliveryContext['customer'] | null) {
-    if (!customer) return '';
+  private buildCustomerAddress(order: OrderWithDeliveryContext) {
+    const customer = this.resolveOrderCustomerProfile(order);
 
     const normalizedFallback = (customer.address || '').trim();
     const cityState = [customer.city, customer.state].filter(Boolean).join(' - ');

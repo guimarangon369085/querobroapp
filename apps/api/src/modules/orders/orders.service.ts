@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException, Inject } from '@nestjs/common';
-import type { Customer as PrismaCustomer, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import type { Customer as PrismaCustomer } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
 import {
   compareMoney,
@@ -11,6 +12,7 @@ import {
   moneyToMinorUnits,
   OrderIntakeMetaSchema,
   OrderIntakeSchema,
+  OrderCustomerSnapshotSchema,
   OrderItemSchema,
   OrderSchema,
   OrderStatusEnum,
@@ -36,6 +38,12 @@ import {
 } from '../inventory/inventory-formulas.js';
 import { normalizePhone, normalizeText, normalizeTitle } from '../../common/normalize.js';
 import {
+  customerAddressIdentityKey,
+  inferAddressLine1,
+  normalizeCustomerAddressPayload,
+  normalizeNeighborhood
+} from '../../common/customer-profile.js';
+import {
   externalOrderScheduleAvailabilityErrorMessage,
   externalOrderScheduleErrorMessage,
   isExternalOrderScheduleAllowed,
@@ -47,7 +55,16 @@ import { PaymentsService } from '../payments/payments.service.js';
 import { DeliveriesService } from '../deliveries/deliveries.service.js';
 import { OrderNotificationsService } from './order-notifications.service.js';
 
-const updateSchema = OrderSchema.partial().omit({ id: true, publicNumber: true, createdAt: true, items: true });
+const updateSchema = z
+  .object({
+    scheduledAt: OrderSchema.shape.scheduledAt.optional(),
+    notes: OrderSchema.shape.notes.optional(),
+    discount: OrderSchema.shape.discount.optional(),
+    discountPct: OrderSchema.shape.discountPct.optional(),
+    fulfillmentMode: OrderSchema.shape.fulfillmentMode.optional(),
+    customerSnapshot: OrderCustomerSnapshotSchema.partial().optional().nullable()
+  })
+  .strict();
 const replaceItemsSchema = z.object({
   items: z.array(OrderItemSchema.pick({ productId: true, quantity: true })).min(1)
 });
@@ -144,8 +161,20 @@ const ORDER_FORMULA_SOURCES = [
   ORDER_FORMULA_SOURCE_PACKAGING
 ] as const;
 
+const orderWithRelationsInclude = Prisma.validator<Prisma.OrderInclude>()({
+  items: true,
+  customer: {
+    include: {
+      addresses: {
+        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }]
+      }
+    }
+  },
+  payments: true
+});
+
 type OrderWithRelations = Prisma.OrderGetPayload<{
-  include: { items: true; customer: true; payments: true };
+  include: typeof orderWithRelationsInclude;
 }>;
 type TransactionClient = Prisma.TransactionClient;
 type OrderScheduleQueryClient = Pick<PrismaService | TransactionClient, 'order'>;
@@ -154,6 +183,7 @@ type OrderIntakeMeta = z.infer<typeof OrderIntakeMetaSchema>;
 type PixCharge = z.infer<typeof PixChargeSchema>;
 type ExternalOrderSubmissionPayload = z.infer<typeof ExternalOrderSubmissionSchema>;
 type ExternalOrderSubmissionPreview = z.infer<typeof ExternalOrderSubmissionPreviewSchema>;
+type OrderCustomerSnapshotPayload = z.infer<typeof OrderCustomerSnapshotSchema>;
 type OrderFlavorCode = 'T' | 'G' | 'D' | 'Q' | 'R' | 'RJ';
 type FillingFlavorCode = Exclude<OrderFlavorCode, 'T'>;
 type OrderPricingFlavorKind = 'TRADITIONAL' | 'GOIABADA' | 'PREMIUM';
@@ -1047,6 +1077,7 @@ export class OrdersService {
       deliveryProvider: this.normalizeDeliveryProvider(order.deliveryProvider),
       deliveryFeeSource: this.normalizeDeliveryFeeSource(order.deliveryFeeSource),
       deliveryQuoteStatus: this.normalizeDeliveryQuoteStatus(order.deliveryQuoteStatus),
+      customerSnapshot: this.extractOrderCustomerSnapshot(order),
       amountPaid,
       balanceDue,
       paymentStatus
@@ -1081,10 +1112,55 @@ export class OrdersService {
     return 'NOT_REQUIRED';
   }
 
+  private async syncPendingPixPaymentsForOrderTotal(tx: TransactionClient, orderId: number, total: number) {
+    const pendingPayments = await tx.payment.findMany({
+      where: {
+        orderId,
+        method: 'pix',
+        paidAt: null,
+        status: {
+          not: 'PAGO'
+        }
+      },
+      orderBy: [{ id: 'desc' }]
+    });
+
+    if (pendingPayments.length === 0) {
+      return;
+    }
+
+    if (compareMoney(total, 0) <= 0) {
+      await tx.payment.updateMany({
+        where: {
+          id: {
+            in: pendingPayments.map((payment) => payment.id)
+          }
+        },
+        data: {
+          amount: 0,
+          status: 'PAGO',
+          paidAt: new Date()
+        }
+      });
+      return;
+    }
+
+    await tx.payment.updateMany({
+      where: {
+        id: {
+          in: pendingPayments.map((payment) => payment.id)
+        }
+      },
+      data: {
+        amount: total
+      }
+    });
+  }
+
   private async getRaw(id: number) {
     const order = await this.prisma.order.findUnique({
       where: { id },
-      include: { items: true, customer: true, payments: true }
+      include: orderWithRelationsInclude
     });
     if (!order) throw new NotFoundException('Pedido nao encontrado');
     return order;
@@ -1360,6 +1436,13 @@ export class OrdersService {
         customerName: data.customer.name,
         customerPhone: data.customer.phone ?? null,
         customerAddress: data.customer.address ?? null,
+        customerAddressLine1: data.customer.addressLine1 ?? null,
+        customerAddressLine2: data.customer.addressLine2 ?? null,
+        customerNeighborhood: data.customer.neighborhood ?? null,
+        customerCity: data.customer.city ?? null,
+        customerState: data.customer.state ?? null,
+        customerPostalCode: data.customer.postalCode ?? null,
+        customerCountry: data.customer.country ?? null,
         customerPlaceId: data.customer.placeId ?? null,
         customerLat: data.customer.lat ?? null,
         customerLng: data.customer.lng ?? null,
@@ -1434,6 +1517,13 @@ export class OrdersService {
     customerName?: string | null;
     customerPhone?: string | null;
     customerAddress?: string | null;
+    customerAddressLine1?: string | null;
+    customerAddressLine2?: string | null;
+    customerNeighborhood?: string | null;
+    customerCity?: string | null;
+    customerState?: string | null;
+    customerPostalCode?: string | null;
+    customerCountry?: string | null;
     customerPlaceId?: string | null;
     customerLat?: number | null;
     customerLng?: number | null;
@@ -1448,6 +1538,13 @@ export class OrdersService {
         name: input.customerName ?? null,
         phone: input.customerPhone ?? null,
         address: input.customerAddress ?? null,
+        addressLine1: input.customerAddressLine1 ?? null,
+        addressLine2: input.customerAddressLine2 ?? null,
+        neighborhood: input.customerNeighborhood ?? null,
+        city: input.customerCity ?? null,
+        state: input.customerState ?? null,
+        postalCode: input.customerPostalCode ?? null,
+        country: input.customerCountry ?? null,
         placeId: input.customerPlaceId ?? null,
         lat: input.customerLat ?? null,
         lng: input.customerLng ?? null,
@@ -1466,6 +1563,183 @@ export class OrdersService {
 
   private normalizeCustomerName(value?: string | null) {
     return normalizeTitle(value ?? undefined) ?? normalizeText(value ?? undefined) ?? null;
+  }
+
+  private buildOrderCustomerSnapshot(input: {
+    name?: string | null;
+    phone?: string | null;
+    address?: string | null;
+    addressLine1?: string | null;
+    addressLine2?: string | null;
+    neighborhood?: string | null;
+    city?: string | null;
+    state?: string | null;
+    postalCode?: string | null;
+    country?: string | null;
+    placeId?: string | null;
+    lat?: number | null;
+    lng?: number | null;
+    deliveryNotes?: string | null;
+  }): OrderCustomerSnapshotPayload {
+    const normalizedName = this.normalizeCustomerName(input.name);
+    const normalizedPhone = normalizePhone(input.phone);
+    const normalizedAddress = normalizeCustomerAddressPayload({
+      address: input.address ?? null,
+      addressLine1: input.addressLine1 ?? null,
+      addressLine2: input.addressLine2 ?? null,
+      neighborhood: input.neighborhood ?? null,
+      city: input.city ?? null,
+      state: input.state ?? null,
+      postalCode: input.postalCode ?? null,
+      country: input.country ?? null,
+      placeId: input.placeId ?? null,
+      lat: input.lat ?? null,
+      lng: input.lng ?? null,
+      deliveryNotes: input.deliveryNotes ?? null
+    });
+
+    return {
+      name: normalizedName,
+      phone: normalizedPhone,
+      address: normalizedAddress.address,
+      addressLine1: normalizedAddress.addressLine1,
+      addressLine2: normalizedAddress.addressLine2,
+      neighborhood: normalizedAddress.neighborhood,
+      city: normalizedAddress.city,
+      state: normalizedAddress.state,
+      postalCode: normalizedAddress.postalCode,
+      country: normalizedAddress.country,
+      placeId: normalizedAddress.placeId,
+      lat: normalizedAddress.lat,
+      lng: normalizedAddress.lng,
+      deliveryNotes: normalizedAddress.deliveryNotes
+    };
+  }
+
+  private extractOrderCustomerSnapshot(order: {
+    customer?: {
+      name?: string | null;
+      phone?: string | null;
+      address?: string | null;
+      addressLine1?: string | null;
+      addressLine2?: string | null;
+      neighborhood?: string | null;
+      city?: string | null;
+      state?: string | null;
+      postalCode?: string | null;
+      country?: string | null;
+      placeId?: string | null;
+      lat?: number | null;
+      lng?: number | null;
+      deliveryNotes?: string | null;
+    } | null;
+    customerName?: string | null;
+    customerPhone?: string | null;
+    customerAddress?: string | null;
+    customerAddressLine1?: string | null;
+    customerAddressLine2?: string | null;
+    customerNeighborhood?: string | null;
+    customerCity?: string | null;
+    customerState?: string | null;
+    customerPostalCode?: string | null;
+    customerCountry?: string | null;
+    customerPlaceId?: string | null;
+    customerLat?: number | null;
+    customerLng?: number | null;
+    customerDeliveryNotes?: string | null;
+  }) {
+    const customer = order.customer;
+    return this.buildOrderCustomerSnapshot({
+      name: order.customerName ?? customer?.name ?? null,
+      phone: order.customerPhone ?? customer?.phone ?? null,
+      address: order.customerAddress ?? customer?.address ?? null,
+      addressLine1: order.customerAddressLine1 ?? customer?.addressLine1 ?? null,
+      addressLine2: order.customerAddressLine2 ?? customer?.addressLine2 ?? null,
+      neighborhood: order.customerNeighborhood ?? customer?.neighborhood ?? null,
+      city: order.customerCity ?? customer?.city ?? null,
+      state: order.customerState ?? customer?.state ?? null,
+      postalCode: order.customerPostalCode ?? customer?.postalCode ?? null,
+      country: order.customerCountry ?? customer?.country ?? null,
+      placeId: order.customerPlaceId ?? customer?.placeId ?? null,
+      lat: order.customerLat ?? customer?.lat ?? null,
+      lng: order.customerLng ?? customer?.lng ?? null,
+      deliveryNotes: order.customerDeliveryNotes ?? customer?.deliveryNotes ?? null
+    });
+  }
+
+  private flattenOrderCustomerSnapshot(snapshot: OrderCustomerSnapshotPayload) {
+    return {
+      customerName: snapshot.name ?? null,
+      customerPhone: snapshot.phone ?? null,
+      customerAddress: snapshot.address ?? null,
+      customerAddressLine1: snapshot.addressLine1 ?? null,
+      customerAddressLine2: snapshot.addressLine2 ?? null,
+      customerNeighborhood: snapshot.neighborhood ?? null,
+      customerCity: snapshot.city ?? null,
+      customerState: snapshot.state ?? null,
+      customerPostalCode: snapshot.postalCode ?? null,
+      customerCountry: snapshot.country ?? null,
+      customerPlaceId: snapshot.placeId ?? null,
+      customerLat: snapshot.lat ?? null,
+      customerLng: snapshot.lng ?? null,
+      customerDeliveryNotes: snapshot.deliveryNotes ?? null
+    };
+  }
+
+  private async saveCustomerAdditionalAddress(
+    tx: TransactionClient,
+    customerId: number,
+    snapshot: OrderCustomerSnapshotPayload,
+    options?: { primary?: boolean }
+  ) {
+    const normalized = normalizeCustomerAddressPayload({
+      address: snapshot.address ?? null,
+      addressLine1: snapshot.addressLine1 ?? null,
+      addressLine2: snapshot.addressLine2 ?? null,
+      neighborhood: snapshot.neighborhood ?? null,
+      city: snapshot.city ?? null,
+      state: snapshot.state ?? null,
+      postalCode: snapshot.postalCode ?? null,
+      country: snapshot.country ?? null,
+      placeId: snapshot.placeId ?? null,
+      lat: snapshot.lat ?? null,
+      lng: snapshot.lng ?? null,
+      deliveryNotes: snapshot.deliveryNotes ?? null
+    });
+    const addressKey = customerAddressIdentityKey(normalized);
+    if (!addressKey) return null;
+
+    const existing = await tx.customerAddress.findMany({
+      where: { customerId },
+      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }]
+    });
+    const matched = existing.find((entry) => customerAddressIdentityKey(entry) === addressKey) || null;
+    const shouldBePrimary = options?.primary === true;
+
+    if (shouldBePrimary) {
+      await tx.customerAddress.updateMany({
+        where: { customerId, isPrimary: true, ...(matched ? { id: { not: matched.id } } : {}) },
+        data: { isPrimary: false }
+      });
+    }
+
+    if (matched) {
+      return tx.customerAddress.update({
+        where: { id: matched.id },
+        data: {
+          ...normalized,
+          isPrimary: shouldBePrimary ? true : matched.isPrimary
+        }
+      });
+    }
+
+    return tx.customerAddress.create({
+      data: {
+        customerId,
+        ...normalized,
+        isPrimary: shouldBePrimary
+      }
+    });
   }
 
   private async ensureCustomerPublicNumber(tx: TransactionClient, customer: PrismaCustomer) {
@@ -1602,15 +1876,25 @@ export class OrdersService {
     if (!normalizedName) {
       throw new BadRequestException('Nome do cliente e obrigatorio.');
     }
-
-    const normalizedPhone = normalizePhone(customer.phone);
-    const normalizedAddress = normalizeTitle(customer.address ?? undefined) ?? null;
-    const normalizedPlaceId = normalizeText(('placeId' in customer ? customer.placeId : null) ?? undefined);
-    const normalizedLat =
-      'lat' in customer && typeof customer.lat === 'number' && Number.isFinite(customer.lat) ? customer.lat : null;
-    const normalizedLng =
-      'lng' in customer && typeof customer.lng === 'number' && Number.isFinite(customer.lng) ? customer.lng : null;
-    const normalizedDeliveryNotes = normalizeText(customer.deliveryNotes ?? undefined);
+    const snapshot = this.buildOrderCustomerSnapshot({
+      name: normalizedName,
+      phone: customer.phone ?? null,
+      address: customer.address ?? null,
+      addressLine1: 'addressLine1' in customer ? customer.addressLine1 ?? null : null,
+      addressLine2: 'addressLine2' in customer ? customer.addressLine2 ?? null : null,
+      neighborhood: 'neighborhood' in customer ? customer.neighborhood ?? null : null,
+      city: 'city' in customer ? customer.city ?? null : null,
+      state: 'state' in customer ? customer.state ?? null : null,
+      postalCode: 'postalCode' in customer ? customer.postalCode ?? null : null,
+      country: 'country' in customer ? customer.country ?? null : null,
+      placeId: 'placeId' in customer ? customer.placeId ?? null : null,
+      lat: 'lat' in customer ? customer.lat ?? null : null,
+      lng: 'lng' in customer ? customer.lng ?? null : null,
+      deliveryNotes: customer.deliveryNotes ?? null
+    });
+    const normalizedPhone = snapshot.phone;
+    const normalizedPlaceId = snapshot.placeId;
+    const normalizedAddress = snapshot.address;
 
     let existing = normalizedPhone
       ? await tx.customer
@@ -1647,51 +1931,69 @@ export class OrdersService {
 
     if (existing) {
       const shouldUpdate =
-        (normalizedPhone && !existing.phone) ||
-        (normalizedAddress && !existing.address) ||
-        (normalizedPlaceId && !existing.placeId) ||
-        (normalizedLat !== null && existing.lat === null) ||
-        (normalizedLng !== null && existing.lng === null) ||
-        (normalizedDeliveryNotes && !existing.deliveryNotes);
-      if (!shouldUpdate) return existing;
-
-      return tx.customer.update({
-        where: { id: existing.id },
-        data: {
-          publicNumber: existing.publicNumber ?? (await allocateNextPublicNumber(tx, 'CUSTOMER')),
-          activePhoneKey: existing.activePhoneKey || normalizedPhone,
-          phone: existing.phone || normalizedPhone,
-          address: existing.address || normalizedAddress,
-          placeId: existing.placeId || normalizedPlaceId,
-          lat: existing.lat ?? normalizedLat,
-          lng: existing.lng ?? normalizedLng,
-          deliveryNotes: existing.deliveryNotes || normalizedDeliveryNotes
-        }
-      });
+        (snapshot.phone && !existing.phone) ||
+        (snapshot.address && !existing.address) ||
+        (snapshot.addressLine1 && !existing.addressLine1) ||
+        (snapshot.addressLine2 && !existing.addressLine2) ||
+        (snapshot.neighborhood && !existing.neighborhood) ||
+        (snapshot.city && !existing.city) ||
+        (snapshot.state && !existing.state) ||
+        (snapshot.postalCode && !existing.postalCode) ||
+        (snapshot.country && !existing.country) ||
+        (snapshot.placeId && !existing.placeId) ||
+        (snapshot.lat !== null && existing.lat === null) ||
+        (snapshot.lng !== null && existing.lng === null) ||
+        (snapshot.deliveryNotes && !existing.deliveryNotes);
+      const resolvedCustomer = shouldUpdate
+        ? await tx.customer.update({
+            where: { id: existing.id },
+            data: {
+              publicNumber: existing.publicNumber ?? (await allocateNextPublicNumber(tx, 'CUSTOMER')),
+              activePhoneKey: existing.activePhoneKey || snapshot.phone,
+              phone: existing.phone || snapshot.phone,
+              address: existing.address || snapshot.address,
+              addressLine1: existing.addressLine1 || snapshot.addressLine1 || inferAddressLine1(snapshot.address),
+              addressLine2: existing.addressLine2 || snapshot.addressLine2,
+              neighborhood: existing.neighborhood || normalizeNeighborhood(snapshot.neighborhood),
+              city: existing.city || snapshot.city,
+              state: existing.state || snapshot.state,
+              postalCode: existing.postalCode || snapshot.postalCode,
+              country: existing.country || snapshot.country,
+              placeId: existing.placeId || snapshot.placeId,
+              lat: existing.lat ?? snapshot.lat,
+              lng: existing.lng ?? snapshot.lng,
+              deliveryNotes: existing.deliveryNotes || snapshot.deliveryNotes
+            }
+          })
+        : existing;
+      await this.saveCustomerAdditionalAddress(tx, resolvedCustomer.id, snapshot, { primary: false });
+      return resolvedCustomer;
     }
 
-    return tx.customer.create({
+    const created = await tx.customer.create({
       data: {
         publicNumber: await allocateNextPublicNumber(tx, 'CUSTOMER'),
         name: normalizedName,
         firstName: normalizedName.split(' ')[0] || null,
         lastName: normalizedName.includes(' ') ? normalizedName.split(' ').slice(1).join(' ') : null,
-        activePhoneKey: normalizedPhone,
-        phone: normalizedPhone,
-        address: normalizedAddress,
-        addressLine1: normalizedAddress,
-        addressLine2: null,
-        neighborhood: null,
-        city: null,
-        state: null,
-        postalCode: null,
-        country: null,
-        placeId: normalizedPlaceId,
-        lat: normalizedLat,
-        lng: normalizedLng,
-        deliveryNotes: normalizedDeliveryNotes
+        activePhoneKey: snapshot.phone,
+        phone: snapshot.phone,
+        address: snapshot.address,
+        addressLine1: snapshot.addressLine1 || inferAddressLine1(snapshot.address),
+        addressLine2: snapshot.addressLine2,
+        neighborhood: snapshot.neighborhood,
+        city: snapshot.city,
+        state: snapshot.state,
+        postalCode: snapshot.postalCode,
+        country: snapshot.country,
+        placeId: snapshot.placeId,
+        lat: snapshot.lat,
+        lng: snapshot.lng,
+        deliveryNotes: snapshot.deliveryNotes
       }
     });
+    await this.saveCustomerAdditionalAddress(tx, created.id, snapshot, { primary: true });
+    return created;
   }
 
   private async resolveDeliveryQuoteCustomer(customer: OrderIntakePayload['customer']) {
@@ -1701,11 +2003,18 @@ export class OrdersService {
       return {
         name: existing.name,
         phone: existing.phone ?? null,
-        address: existing.address ?? null,
-        placeId: existing.placeId ?? null,
-        lat: existing.lat ?? null,
-        lng: existing.lng ?? null,
-        deliveryNotes: existing.deliveryNotes ?? null
+        address: ('address' in customer ? customer.address : null) ?? existing.address ?? null,
+        addressLine1: ('addressLine1' in customer ? customer.addressLine1 : null) ?? existing.addressLine1 ?? null,
+        addressLine2: ('addressLine2' in customer ? customer.addressLine2 : null) ?? existing.addressLine2 ?? null,
+        neighborhood: ('neighborhood' in customer ? customer.neighborhood : null) ?? existing.neighborhood ?? null,
+        city: ('city' in customer ? customer.city : null) ?? existing.city ?? null,
+        state: ('state' in customer ? customer.state : null) ?? existing.state ?? null,
+        postalCode: ('postalCode' in customer ? customer.postalCode : null) ?? existing.postalCode ?? null,
+        country: ('country' in customer ? customer.country : null) ?? existing.country ?? null,
+        placeId: ('placeId' in customer ? customer.placeId : null) ?? existing.placeId ?? null,
+        lat: ('lat' in customer ? customer.lat : null) ?? existing.lat ?? null,
+        lng: ('lng' in customer ? customer.lng : null) ?? existing.lng ?? null,
+        deliveryNotes: ('deliveryNotes' in customer ? customer.deliveryNotes : null) ?? existing.deliveryNotes ?? null
       };
     }
 
@@ -1713,6 +2022,13 @@ export class OrdersService {
       name: customer.name,
       phone: customer.phone ?? null,
       address: customer.address ?? null,
+      addressLine1: 'addressLine1' in customer ? customer.addressLine1 ?? null : null,
+      addressLine2: 'addressLine2' in customer ? customer.addressLine2 ?? null : null,
+      neighborhood: 'neighborhood' in customer ? customer.neighborhood ?? null : null,
+      city: 'city' in customer ? customer.city ?? null : null,
+      state: 'state' in customer ? customer.state ?? null : null,
+      postalCode: 'postalCode' in customer ? customer.postalCode ?? null : null,
+      country: 'country' in customer ? customer.country ?? null : null,
       placeId: 'placeId' in customer ? customer.placeId ?? null : null,
       lat: 'lat' in customer ? customer.lat ?? null : null,
       lng: 'lng' in customer ? customer.lng ?? null : null,
@@ -1842,7 +2158,7 @@ export class OrdersService {
       if (!parsed.orderId || !parsed.intake) return null;
       const order = await tx.order.findUnique({
         where: { id: parsed.orderId },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
       if (!order) return null;
       const intakePayload =
@@ -1914,6 +2230,13 @@ export class OrdersService {
         customerName: quoteCustomer.name,
         customerPhone: quoteCustomer.phone,
         customerAddress: quoteCustomer.address,
+        customerAddressLine1: quoteCustomer.addressLine1,
+        customerAddressLine2: quoteCustomer.addressLine2,
+        customerNeighborhood: quoteCustomer.neighborhood,
+        customerCity: quoteCustomer.city,
+        customerState: quoteCustomer.state,
+        customerPostalCode: quoteCustomer.postalCode,
+        customerCountry: quoteCustomer.country,
         customerPlaceId: quoteCustomer.placeId,
         customerLat: quoteCustomer.lat,
         customerLng: quoteCustomer.lng,
@@ -1958,6 +2281,49 @@ export class OrdersService {
       }
 
       const customer = await this.resolveIntakeCustomer(tx, data.customer);
+      const orderCustomerSnapshot =
+        'customerId' in data.customer
+          ? this.buildOrderCustomerSnapshot({
+              name: customer.name,
+              phone: customer.phone,
+              address: ('address' in data.customer ? data.customer.address : null) ?? customer.address,
+              addressLine1:
+                ('addressLine1' in data.customer ? data.customer.addressLine1 : null) ?? customer.addressLine1,
+              addressLine2:
+                ('addressLine2' in data.customer ? data.customer.addressLine2 : null) ?? customer.addressLine2,
+              neighborhood:
+                ('neighborhood' in data.customer ? data.customer.neighborhood : null) ?? customer.neighborhood,
+              city: ('city' in data.customer ? data.customer.city : null) ?? customer.city,
+              state: ('state' in data.customer ? data.customer.state : null) ?? customer.state,
+              postalCode:
+                ('postalCode' in data.customer ? data.customer.postalCode : null) ?? customer.postalCode,
+              country: ('country' in data.customer ? data.customer.country : null) ?? customer.country,
+              placeId: ('placeId' in data.customer ? data.customer.placeId : null) ?? customer.placeId,
+              lat: ('lat' in data.customer ? data.customer.lat : null) ?? customer.lat,
+              lng: ('lng' in data.customer ? data.customer.lng : null) ?? customer.lng,
+              deliveryNotes:
+                ('deliveryNotes' in data.customer ? data.customer.deliveryNotes : null) ?? customer.deliveryNotes
+            })
+          : this.buildOrderCustomerSnapshot({
+              name: data.customer.name ?? customer.name,
+              phone: data.customer.phone ?? customer.phone,
+              address: data.customer.address ?? customer.address,
+              addressLine1:
+                ('addressLine1' in data.customer ? data.customer.addressLine1 : null) ?? customer.addressLine1,
+              addressLine2:
+                ('addressLine2' in data.customer ? data.customer.addressLine2 : null) ?? customer.addressLine2,
+              neighborhood:
+                ('neighborhood' in data.customer ? data.customer.neighborhood : null) ?? customer.neighborhood,
+              city: ('city' in data.customer ? data.customer.city : null) ?? customer.city,
+              state: ('state' in data.customer ? data.customer.state : null) ?? customer.state,
+              postalCode:
+                ('postalCode' in data.customer ? data.customer.postalCode : null) ?? customer.postalCode,
+              country: ('country' in data.customer ? data.customer.country : null) ?? customer.country,
+              placeId: ('placeId' in data.customer ? data.customer.placeId : null) ?? customer.placeId,
+              lat: ('lat' in data.customer ? data.customer.lat : null) ?? customer.lat,
+              lng: ('lng' in data.customer ? data.customer.lng : null) ?? customer.lng,
+              deliveryNotes: data.customer.deliveryNotes ?? customer.deliveryNotes
+            });
       const { itemsData, subtotal } = pricedOrder;
       const deliveryFee = this.toMoney(deliveryQuote.fee ?? 0);
       const appliedCoupon = normalizeCouponCode(data.order.couponCode);
@@ -1990,6 +2356,7 @@ export class OrdersService {
         data: {
           publicNumber: await allocateNextPublicNumber(tx, 'ORDER'),
           customerId: customer.id,
+          ...this.flattenOrderCustomerSnapshot(orderCustomerSnapshot),
           status: 'ABERTO',
           fulfillmentMode: data.fulfillment.mode,
           notes: normalizedNotes,
@@ -2008,7 +2375,7 @@ export class OrdersService {
             create: itemsData
           }
         },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
 
       let paymentRecord: {
@@ -2048,7 +2415,7 @@ export class OrdersService {
 
       const hydratedOrder = await tx.order.findUnique({
         where: { id: createdOrder.id },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
       if (!hydratedOrder) throw new NotFoundException('Pedido nao encontrado');
 
@@ -2056,7 +2423,7 @@ export class OrdersService {
 
       const freshOrder = await tx.order.findUnique({
         where: { id: createdOrder.id },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
       if (!freshOrder) throw new NotFoundException('Pedido nao encontrado');
 
@@ -2167,7 +2534,7 @@ export class OrdersService {
 
   async list() {
     const orders = await this.prisma.order.findMany({
-      include: { items: true, customer: true, payments: true },
+      include: orderWithRelationsInclude,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
     });
     return orders.map((order) => this.withFinancial(order));
@@ -2287,7 +2654,7 @@ export class OrdersService {
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.order.findUnique({
         where: { id },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
       if (!existing) throw new NotFoundException('Pedido nao encontrado');
       const previousTargetDate = this.orderTargetDate(existing).date;
@@ -2295,14 +2662,15 @@ export class OrdersService {
       const nextScheduledAt = Object.prototype.hasOwnProperty.call(data, 'scheduledAt')
         ? this.parseOptionalDateTime(data.scheduledAt)
         : undefined;
-
-      const subtotal = await this.calculateOrderSubtotalFromItems(
+      const nextFulfillmentMode = data.fulfillmentMode ?? existing.fulfillmentMode ?? 'DELIVERY';
+      const pricedOrder = await this.priceOrderItems(
         tx,
         existing.items.map((item) => ({
           productId: item.productId,
           quantity: item.quantity
         }))
       );
+      const subtotal = pricedOrder.subtotal;
       const shouldUpdateDiscount =
         Object.prototype.hasOwnProperty.call(data, 'discount') ||
         Object.prototype.hasOwnProperty.call(data, 'discountPct');
@@ -2315,7 +2683,100 @@ export class OrdersService {
           : this.resolveOrderDiscountInput(subtotal, {
               discount: existing.discount ?? 0
             });
-      const total = this.computeOrderTotal(subtotal, discount, this.toMoney(existing.deliveryFee ?? 0));
+      const currentSnapshot = this.extractOrderCustomerSnapshot(existing);
+      const nextCustomerSnapshot = data.customerSnapshot
+        ? this.buildOrderCustomerSnapshot({
+            name:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'name')
+                ? data.customerSnapshot.name ?? null
+                : currentSnapshot.name,
+            phone:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'phone')
+                ? data.customerSnapshot.phone ?? null
+                : currentSnapshot.phone,
+            address:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'address')
+                ? data.customerSnapshot.address ?? null
+                : currentSnapshot.address,
+            addressLine1:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'addressLine1')
+                ? data.customerSnapshot.addressLine1 ?? null
+                : currentSnapshot.addressLine1,
+            addressLine2:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'addressLine2')
+                ? data.customerSnapshot.addressLine2 ?? null
+                : currentSnapshot.addressLine2,
+            neighborhood:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'neighborhood')
+                ? data.customerSnapshot.neighborhood ?? null
+                : currentSnapshot.neighborhood,
+            city:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'city')
+                ? data.customerSnapshot.city ?? null
+                : currentSnapshot.city,
+            state:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'state')
+                ? data.customerSnapshot.state ?? null
+                : currentSnapshot.state,
+            postalCode:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'postalCode')
+                ? data.customerSnapshot.postalCode ?? null
+                : currentSnapshot.postalCode,
+            country:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'country')
+                ? data.customerSnapshot.country ?? null
+                : currentSnapshot.country,
+            placeId:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'placeId')
+                ? data.customerSnapshot.placeId ?? null
+                : currentSnapshot.placeId,
+            lat:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'lat')
+                ? data.customerSnapshot.lat ?? null
+                : currentSnapshot.lat,
+            lng:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'lng')
+                ? data.customerSnapshot.lng ?? null
+                : currentSnapshot.lng,
+            deliveryNotes:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'deliveryNotes')
+                ? data.customerSnapshot.deliveryNotes ?? null
+                : currentSnapshot.deliveryNotes
+          })
+        : currentSnapshot;
+      if (!nextCustomerSnapshot.name) {
+        throw new BadRequestException('Nome do cliente e obrigatorio.');
+      }
+      const quoteScheduledAt = nextScheduledAt ?? existing.scheduledAt;
+      const deliveryQuote = await this.deliveriesService.resolveDeliverySelection(
+        undefined,
+        this.buildDeliveryQuoteDraft({
+          fulfillmentMode: nextFulfillmentMode === 'PICKUP' ? 'PICKUP' : 'DELIVERY',
+          scheduledAt: quoteScheduledAt?.toISOString() ?? new Date().toISOString(),
+          customerName: nextCustomerSnapshot.name,
+          customerPhone: nextCustomerSnapshot.phone,
+          customerAddress: nextCustomerSnapshot.address,
+          customerAddressLine1: nextCustomerSnapshot.addressLine1,
+          customerAddressLine2: nextCustomerSnapshot.addressLine2,
+          customerNeighborhood: nextCustomerSnapshot.neighborhood,
+          customerCity: nextCustomerSnapshot.city,
+          customerState: nextCustomerSnapshot.state,
+          customerPostalCode: nextCustomerSnapshot.postalCode,
+          customerCountry: nextCustomerSnapshot.country,
+          customerPlaceId: nextCustomerSnapshot.placeId,
+          customerLat: nextCustomerSnapshot.lat,
+          customerLng: nextCustomerSnapshot.lng,
+          customerDeliveryNotes: nextCustomerSnapshot.deliveryNotes,
+          items: pricedOrder.manifestItems,
+          subtotal: this.toMoney(Math.max(subtotal - discount, 0))
+        }),
+        {
+          enforceExternalSchedule: false,
+          allowManualFallback: true
+        }
+      );
+      const deliveryFee = this.toMoney(deliveryQuote.fee ?? 0);
+      const total = this.computeOrderTotal(subtotal, discount, deliveryFee);
       const amountPaid = this.getPaidAmount(existing.payments || []);
       this.ensureOrderTotalCoversPaid(total, amountPaid);
       const shouldUpdateNotes = Object.prototype.hasOwnProperty.call(data, 'notes') || shouldUpdateDiscount;
@@ -2337,23 +2798,39 @@ export class OrdersService {
         where: { id },
         data: {
           ...(nextNotes !== undefined ? { notes: nextNotes } : {}),
+          ...this.flattenOrderCustomerSnapshot(nextCustomerSnapshot),
           discount,
           subtotal,
+          fulfillmentMode: nextFulfillmentMode,
+          deliveryFee,
+          deliveryProvider: deliveryQuote.provider,
+          deliveryFeeSource: deliveryQuote.source,
+          deliveryQuoteStatus: deliveryQuote.status,
+          deliveryQuoteRef: deliveryQuote.quoteToken ?? null,
+          deliveryQuoteExpiresAt: this.parseOptionalDateTime(deliveryQuote.expiresAt ?? null),
           total,
           ...(nextScheduledAt !== undefined ? { scheduledAt: nextScheduledAt } : {})
         },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
+      await this.syncPendingPixPaymentsForOrderTotal(tx, updated.id, total);
+      const refreshedUpdated = await tx.order.findUnique({
+        where: { id: updated.id },
+        include: orderWithRelationsInclude
+      });
+      if (!refreshedUpdated) {
+        throw new NotFoundException('Pedido nao encontrado');
+      }
 
-      await this.syncOrderInventoryArtifacts(tx, updated);
-      const nextTargetDate = this.orderTargetDate(updated).date;
+      await this.syncOrderInventoryArtifacts(tx, refreshedUpdated);
+      const nextTargetDate = this.orderTargetDate(refreshedUpdated).date;
       if (nextTargetDate !== previousTargetDate) {
         await this.syncPaperBagReservationsForCustomerDateGroup(tx, {
-          customerId: updated.customerId,
+          customerId: refreshedUpdated.customerId,
           targetDate: previousTargetDate
         });
       }
-      return this.withFinancial(updated);
+      return this.withFinancial(refreshedUpdated);
     });
   }
 
@@ -2412,7 +2889,7 @@ export class OrdersService {
 
       const updatedOrder = await tx.order.findUnique({
         where: { id: orderId },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
       if (!updatedOrder) throw new NotFoundException('Pedido nao encontrado');
       await this.syncOrderInventoryArtifacts(tx, updatedOrder);
@@ -2472,7 +2949,7 @@ export class OrdersService {
       const updatedOrder = await tx.order.update({
         where: { id: orderId },
         data: { subtotal, total },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
 
       await this.syncOrderInventoryArtifacts(tx, updatedOrder);
@@ -2510,7 +2987,7 @@ export class OrdersService {
 
       const updatedOrder = await tx.order.findUnique({
         where: { id: orderId },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
       if (!updatedOrder) throw new NotFoundException('Pedido nao encontrado');
       await this.syncOrderInventoryArtifacts(tx, updatedOrder);
@@ -2524,7 +3001,7 @@ export class OrdersService {
     return this.prisma.$transaction(async (tx) => {
       const existingOrder = await tx.order.findUnique({
         where: { id: orderId },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
       if (!existingOrder) {
         throw new NotFoundException('Pedido nao encontrado');
@@ -2541,7 +3018,7 @@ export class OrdersService {
         updatedOrder = await tx.order.update({
           where: { id: orderId },
           data: { status: stepStatus },
-          include: { items: true, customer: true, payments: true }
+          include: orderWithRelationsInclude
         });
         if (stepStatus === 'CANCELADO') {
           await this.clearOrderFormulaArtifacts(tx, orderId);
@@ -2562,7 +3039,7 @@ export class OrdersService {
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({
         where: { id: orderId },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
       if (!order) throw new NotFoundException('Pedido nao encontrado');
       if (order.status === 'CANCELADO') {
@@ -2590,7 +3067,7 @@ export class OrdersService {
 
         const updated = await tx.order.findUnique({
           where: { id: orderId },
-          include: { items: true, customer: true, payments: true }
+          include: orderWithRelationsInclude
         });
         if (!updated) throw new NotFoundException('Pedido nao encontrado');
         return this.withFinancial(updated);
@@ -2643,7 +3120,7 @@ export class OrdersService {
 
       const updated = await tx.order.findUnique({
         where: { id: orderId },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
       if (!updated) throw new NotFoundException('Pedido nao encontrado');
       return this.withFinancial(updated);

@@ -32,10 +32,13 @@ type VirtualBoxPart = {
 type OrderQuickCreateProps = {
   tutorialMode: boolean;
   customerOptions: SelectOption[];
+  customerAddressOptions: Array<{ key: string; label: string }>;
   productsForCards: Product[];
   fulfillmentMode: 'DELIVERY' | 'PICKUP';
   customerSearch: string;
   selectedCustomerId: number | '';
+  selectedCustomerAddressKey: string;
+  selectedCustomerAddressLabel: string;
   restoredFromLastOrder?: {
     orderId: number;
     customerName: string;
@@ -60,6 +63,7 @@ type OrderQuickCreateProps = {
   onFulfillmentModeChange: (value: 'DELIVERY' | 'PICKUP') => void;
   onCustomerSearchChange: (value: string) => void;
   onCustomerOptionPick: (option: SelectOption) => void;
+  onCustomerAddressKeyChange: (value: string) => void;
   onScheduledAtChange: (value: string) => void;
   onDiscountChange: (value: string) => void;
   onDiscountBlur: () => void;
@@ -241,10 +245,13 @@ function formatVirtualBoxParts(parts: VirtualBoxPart[]) {
 export function OrderQuickCreate({
   tutorialMode,
   customerOptions,
+  customerAddressOptions,
   productsForCards,
   customerSearch,
   fulfillmentMode,
   selectedCustomerId,
+  selectedCustomerAddressKey,
+  selectedCustomerAddressLabel,
   restoredFromLastOrder,
   newOrderScheduledAt,
   newOrderDiscountPct,
@@ -265,6 +272,7 @@ export function OrderQuickCreate({
   onFulfillmentModeChange,
   onCustomerSearchChange,
   onCustomerOptionPick,
+  onCustomerAddressKeyChange,
   onScheduledAtChange,
   onDiscountChange,
   onDiscountBlur,
@@ -496,6 +504,29 @@ export function OrderQuickCreate({
             <p className="text-xs text-neutral-500">
               Selecione um cliente da lista para vincular o pedido corretamente.
             </p>
+          ) : null}
+          {selectedCustomerId ? (
+            <div className="grid gap-2">
+              {customerAddressOptions.length > 0 ? (
+                <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+                  Endereço do pedido
+                  <select
+                    className="app-input text-sm normal-case tracking-normal text-neutral-800"
+                    value={selectedCustomerAddressKey}
+                    onChange={(event) => onCustomerAddressKeyChange(event.target.value)}
+                  >
+                    {customerAddressOptions.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              <p className="text-xs text-neutral-500">
+                {selectedCustomerAddressLabel || 'Endereco nao informado.'}
+              </p>
+            </div>
           ) : null}
         </div>
         <FormField label="Data">

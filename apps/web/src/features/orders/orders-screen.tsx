@@ -20,10 +20,16 @@ import {
   stripOrderNoteMetadata,
   type Customer,
   type OrderIntake,
+  type OrderCustomerSnapshot,
   type Product
 } from '@querobroapp/shared';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import {
+  buildCustomerAddressAutofill,
+  buildCustomerAddressSummary,
+  lookupPostalCodeAutofill
+} from '@/lib/customer-autofill';
 import { writeStoredOrderFinalized } from '@/lib/order-finalized-storage';
 import { useDialogA11y } from '@/lib/use-dialog-a11y';
 import {
@@ -88,6 +94,237 @@ type CustomerLastOrderDraft = {
   discountPct: number;
   notes: string;
 };
+
+type CustomerAddressLike = {
+  name?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  neighborhood?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+  placeId?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  deliveryNotes?: string | null;
+  deletedAt?: string | null | Date;
+};
+
+type EditableOrderCustomerDraft = {
+  name: string;
+  phone: string;
+  address: string;
+  addressLine2: string;
+  neighborhood: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: string;
+  placeId: string;
+  lat: number | null;
+  lng: number | null;
+  deliveryNotes: string;
+};
+
+type CustomerAddressOption = {
+  key: string;
+  label: string;
+  value: CustomerAddressLike;
+  isPrimary: boolean;
+};
+
+const EMPTY_EDITABLE_ORDER_CUSTOMER_DRAFT: EditableOrderCustomerDraft = {
+  name: '',
+  phone: '',
+  address: '',
+  addressLine2: '',
+  neighborhood: '',
+  city: '',
+  state: '',
+  postalCode: '',
+  country: 'Brasil',
+  placeId: '',
+  lat: null,
+  lng: null,
+  deliveryNotes: ''
+};
+
+function hasCustomerAddressData(value?: CustomerAddressLike | null) {
+  if (!value) return false;
+  return Boolean(
+    compactWhitespace(value.address || '') ||
+      compactWhitespace(value.addressLine1 || '') ||
+      compactWhitespace(value.addressLine2 || '') ||
+      compactWhitespace(value.neighborhood || '') ||
+      compactWhitespace(value.city || '') ||
+      compactWhitespace(value.state || '') ||
+      compactWhitespace(value.postalCode || '')
+  );
+}
+
+function mergeCustomerProfile(
+  fallback?: CustomerAddressLike | null,
+  override?: CustomerAddressLike | null
+): CustomerAddressLike {
+  return {
+    name: compactWhitespace(override?.name || '') || compactWhitespace(fallback?.name || '') || null,
+    phone: compactWhitespace(override?.phone || '') || compactWhitespace(fallback?.phone || '') || null,
+    address: compactWhitespace(override?.address || '') || compactWhitespace(fallback?.address || '') || null,
+    addressLine1:
+      compactWhitespace(override?.addressLine1 || '') || compactWhitespace(fallback?.addressLine1 || '') || null,
+    addressLine2:
+      compactWhitespace(override?.addressLine2 || '') || compactWhitespace(fallback?.addressLine2 || '') || null,
+    neighborhood:
+      compactWhitespace(override?.neighborhood || '') || compactWhitespace(fallback?.neighborhood || '') || null,
+    city: compactWhitespace(override?.city || '') || compactWhitespace(fallback?.city || '') || null,
+    state: compactWhitespace(override?.state || '') || compactWhitespace(fallback?.state || '') || null,
+    postalCode:
+      compactWhitespace(override?.postalCode || '') || compactWhitespace(fallback?.postalCode || '') || null,
+    country: compactWhitespace(override?.country || '') || compactWhitespace(fallback?.country || '') || null,
+    placeId: compactWhitespace(override?.placeId || '') || compactWhitespace(fallback?.placeId || '') || null,
+    lat: typeof override?.lat === 'number' ? override.lat : typeof fallback?.lat === 'number' ? fallback.lat : null,
+    lng: typeof override?.lng === 'number' ? override.lng : typeof fallback?.lng === 'number' ? fallback.lng : null,
+    deliveryNotes:
+      compactWhitespace(override?.deliveryNotes || '') ||
+      compactWhitespace(fallback?.deliveryNotes || '') ||
+      null,
+    deletedAt: fallback?.deletedAt ?? null
+  };
+}
+
+function formatCustomerFullAddress(customer?: CustomerAddressLike | null) {
+  if (!customer) return '';
+  const normalizedAddress = stripPostalCodeFromAddressLabel(customer.address);
+  if (normalizedAddress) return normalizedAddress;
+
+  const cityState = [customer.city, customer.state]
+    .map((part) => (part || '').trim())
+    .filter(Boolean)
+    .join(' - ');
+  const structuredParts = [
+    customer.addressLine1,
+    customer.addressLine2,
+    customer.neighborhood,
+    cityState,
+    customer.country
+  ]
+    .map((part) => (part || '').trim())
+    .filter(Boolean);
+  return stripPostalCodeFromAddressLabel(structuredParts.join(', '));
+}
+
+function buildEditableOrderCustomerDraft(source?: CustomerAddressLike | null): EditableOrderCustomerDraft {
+  const inferred = buildCustomerAddressAutofill(source?.address || '');
+  const structuredAddress =
+    buildCustomerAddressSummary({
+      addressLine1: source?.addressLine1 || inferred.addressLine1 || '',
+      addressLine2: source?.addressLine2 || '',
+      neighborhood: source?.neighborhood || inferred.neighborhood || '',
+      city: source?.city || inferred.city || '',
+      state: source?.state || inferred.state || '',
+      postalCode: source?.postalCode || inferred.postalCode || ''
+    }) || '';
+
+  return {
+    name: source?.name || '',
+    phone: source?.phone || '',
+    address: source?.address || structuredAddress,
+    addressLine2: source?.addressLine2 || '',
+    neighborhood: source?.neighborhood || inferred.neighborhood || '',
+    city: source?.city || inferred.city || '',
+    state: source?.state || inferred.state || '',
+    postalCode: source?.postalCode || inferred.postalCode || '',
+    country: source?.country || 'Brasil',
+    placeId: source?.placeId || '',
+    lat: typeof source?.lat === 'number' ? source.lat : null,
+    lng: typeof source?.lng === 'number' ? source.lng : null,
+    deliveryNotes: source?.deliveryNotes || ''
+  };
+}
+
+function draftToOrderCustomerSnapshot(draft: EditableOrderCustomerDraft): OrderCustomerSnapshot {
+  const name = compactWhitespace(draft.name);
+  const address = compactWhitespace(draft.address);
+  const state = compactWhitespace(draft.state).toUpperCase();
+  const country = compactWhitespace(draft.country);
+  return {
+    name,
+    phone: compactWhitespace(draft.phone) || null,
+    address: address || null,
+    addressLine1: buildCustomerAddressAutofill(address).addressLine1 || null,
+    addressLine2: compactWhitespace(draft.addressLine2) || null,
+    neighborhood: compactWhitespace(draft.neighborhood) || null,
+    city: compactWhitespace(draft.city) || null,
+    state: state || null,
+    postalCode: compactWhitespace(draft.postalCode) || null,
+    country: country || null,
+    placeId: compactWhitespace(draft.placeId) || null,
+    lat: typeof draft.lat === 'number' ? draft.lat : null,
+    lng: typeof draft.lng === 'number' ? draft.lng : null,
+    deliveryNotes: compactWhitespace(draft.deliveryNotes) || null
+  };
+}
+
+function buildCustomerAddressOptions(customer?: Customer | null): CustomerAddressOption[] {
+  if (!customer) return [];
+
+  const options: CustomerAddressOption[] = [];
+  const seen = new Set<string>();
+  const pushOption = (key: string, value: CustomerAddressLike, isPrimary: boolean, prefix: string) => {
+    if (!hasCustomerAddressData(value)) return;
+    const identity = [
+      compactWhitespace(value.placeId || '').toLowerCase(),
+      compactWhitespace(value.address || value.addressLine1 || '').toLowerCase(),
+      compactWhitespace(value.addressLine2 || '').toLowerCase(),
+      compactWhitespace(value.neighborhood || '').toLowerCase(),
+      compactWhitespace(value.city || '').toLowerCase(),
+      compactWhitespace(value.state || '').toLowerCase(),
+      compactWhitespace(value.postalCode || '').toLowerCase()
+    ].join('|');
+    if (seen.has(identity)) return;
+    seen.add(identity);
+    options.push({
+      key,
+      label: `${prefix} • ${formatCustomerFullAddress(value) || 'Endereco sem resumo'}`,
+      value,
+      isPrimary
+    });
+  };
+
+  pushOption(
+    'primary',
+    {
+      address: customer.address,
+      addressLine1: customer.addressLine1,
+      addressLine2: customer.addressLine2,
+      neighborhood: customer.neighborhood,
+      city: customer.city,
+      state: customer.state,
+      postalCode: customer.postalCode,
+      country: customer.country,
+      placeId: customer.placeId,
+      lat: customer.lat,
+      lng: customer.lng,
+      deliveryNotes: customer.deliveryNotes
+    },
+    true,
+    'Principal'
+  );
+
+  for (const address of customer.addresses || []) {
+    pushOption(
+      `saved-${address.id ?? options.length + 1}`,
+      address,
+      Boolean(address.isPrimary),
+      address.isPrimary ? 'Principal' : 'Salvo'
+    );
+  }
+
+  return options;
+}
 
 function unitsToCloseOrderBox(quantity: number) {
   const normalized = Math.max(Math.floor(quantity), 0);
@@ -398,27 +635,6 @@ function stripPostalCodeFromAddressLabel(value?: string | null) {
     .replace(/(?:\s*,\s*)+$/g, '')
     .replace(/(?:\s+-\s*)+$/g, '')
     .trim();
-}
-
-function formatCustomerFullAddress(customer?: Customer | null) {
-  if (!customer) return '';
-  const normalizedAddress = stripPostalCodeFromAddressLabel(customer.address);
-  if (normalizedAddress) return normalizedAddress;
-
-  const cityState = [customer.city, customer.state]
-    .map((part) => (part || '').trim())
-    .filter(Boolean)
-    .join(' - ');
-  const structuredParts = [
-    customer.addressLine1,
-    customer.addressLine2,
-    customer.neighborhood,
-    cityState,
-    customer.country
-  ]
-    .map((part) => (part || '').trim())
-    .filter(Boolean);
-  return stripPostalCodeFromAddressLabel(structuredParts.join(', '));
 }
 
 function normalizeOrderProductionDescriptor(value?: string | null) {
@@ -1150,6 +1366,7 @@ function OrdersPageContent() {
   const [isOrderDetailModalOpen, setIsOrderDetailModalOpen] = useState(false);
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
   const [newOrderCustomerId, setNewOrderCustomerId] = useState<number | ''>('');
+  const [newOrderSelectedAddressKey, setNewOrderSelectedAddressKey] = useState<string>('primary');
   const [newOrderFulfillmentMode, setNewOrderFulfillmentMode] = useState<'DELIVERY' | 'PICKUP'>('DELIVERY');
   const [customerSearch, setCustomerSearch] = useState('');
   const [newOrderItems, setNewOrderItems] = useState<Array<{ productId: number; quantity: number }>>([]);
@@ -1192,8 +1409,13 @@ function OrdersPageContent() {
   const [selectedOrderEditScheduledAt, setSelectedOrderEditScheduledAt] = useState<string>('');
   const [selectedOrderEditDiscountPct, setSelectedOrderEditDiscountPct] = useState<string>('0');
   const [selectedOrderEditNotes, setSelectedOrderEditNotes] = useState<string>('');
+  const [selectedOrderEditCustomerDraft, setSelectedOrderEditCustomerDraft] = useState<EditableOrderCustomerDraft>(
+    EMPTY_EDITABLE_ORDER_CUSTOMER_DRAFT
+  );
+  const [selectedOrderSavedAddressKey, setSelectedOrderSavedAddressKey] = useState<string>('primary');
   const [selectedOrderEditError, setSelectedOrderEditError] = useState<string | null>(null);
   const [isSavingSelectedOrderEdit, setIsSavingSelectedOrderEdit] = useState(false);
+  const [isSavingSelectedOrderCustomerAddress, setIsSavingSelectedOrderCustomerAddress] = useState(false);
   const [selectedOrderEditingBoxKey, setSelectedOrderEditingBoxKey] = useState<string | null>(null);
   const [selectedOrderEditingBoxDraftByProductId, setSelectedOrderEditingBoxDraftByProductId] = useState<
     Record<number, number>
@@ -1320,6 +1542,10 @@ function OrdersPageContent() {
   }, [isOrderDetailModalOpen, selectedOrder]);
 
   useEffect(() => {
+    setNewOrderSelectedAddressKey('primary');
+  }, [newOrderCustomerId]);
+
+  useEffect(() => {
     if (!tutorialMode) return;
     setNewOrderNotes((prev) => withTestDataTag(prev, 'Pedido do momento'));
   }, [tutorialMode]);
@@ -1373,6 +1599,7 @@ function OrdersPageContent() {
   const clearDraft = () => {
     newOrderQuoteRequestIdRef.current += 1;
     setNewOrderCustomerId('');
+    setNewOrderSelectedAddressKey('primary');
     setNewOrderFulfillmentMode('DELIVERY');
     setCustomerSearch('');
     setNewOrderItems([]);
@@ -1413,9 +1640,23 @@ function OrdersPageContent() {
       const payload: OrderIntake = {
         version: 1,
         intent: 'CONFIRMED',
-        customer: {
-          customerId: Number(newOrderCustomerId)
-        },
+        customer: isUsingAlternateNewOrderAddress
+          ? {
+              customerId: Number(newOrderCustomerId),
+              address: selectedNewOrderCustomerSnapshot.address ?? null,
+              addressLine1: selectedNewOrderCustomerSnapshot.addressLine1 ?? null,
+              addressLine2: selectedNewOrderCustomerSnapshot.addressLine2 ?? null,
+              neighborhood: selectedNewOrderCustomerSnapshot.neighborhood ?? null,
+              city: selectedNewOrderCustomerSnapshot.city ?? null,
+              state: selectedNewOrderCustomerSnapshot.state ?? null,
+              postalCode: selectedNewOrderCustomerSnapshot.postalCode ?? null,
+              country: selectedNewOrderCustomerSnapshot.country ?? null,
+              placeId: selectedNewOrderCustomerSnapshot.placeId ?? null,
+              lat: selectedNewOrderCustomerSnapshot.lat ?? null,
+              lng: selectedNewOrderCustomerSnapshot.lng ?? null,
+              deliveryNotes: selectedNewOrderCustomerSnapshot.deliveryNotes ?? null
+            }
+          : { customerId: Number(newOrderCustomerId) },
         fulfillment: {
           mode: newOrderFulfillmentMode,
           scheduledAt: newOrderScheduledAtDate.toISOString()
@@ -1454,6 +1695,7 @@ function OrdersPageContent() {
         throw new Error('Pedido criado sem identificador valido.');
       }
       setNewOrderCustomerId('');
+      setNewOrderSelectedAddressKey('primary');
       setNewOrderFulfillmentMode('DELIVERY');
       setCustomerSearch('');
       setNewOrderItems([]);
@@ -1690,15 +1932,31 @@ function OrdersPageContent() {
     return map;
   }, [customers, orders]);
 
-  const resolveCustomerName = useCallback(
-    (order: OrderView) => {
-      const candidate = customerMap.get(order.customerId) ?? order.customer;
-      if (!candidate) return 'Sem cliente';
-      const baseName = candidate.name || 'Cliente';
-      return candidate.deletedAt ? `${baseName} (excluído)` : baseName;
+  const resolveOrderCustomerProfile = useCallback(
+    (order?: OrderView | null) => {
+      if (!order) return mergeCustomerProfile(null, null);
+      const fallbackCustomer = customerMap.get(order.customerId) ?? order.customer ?? null;
+      return mergeCustomerProfile(fallbackCustomer, order.customerSnapshot ?? null);
     },
     [customerMap]
   );
+
+  const resolveCustomerName = useCallback(
+    (order: OrderView) => {
+      const candidate = resolveOrderCustomerProfile(order);
+      const fallbackCustomer = customerMap.get(order.customerId) ?? order.customer ?? null;
+      if (!candidate.name) return 'Sem cliente';
+      return fallbackCustomer?.deletedAt ? `${candidate.name} (excluído)` : candidate.name;
+    },
+    [customerMap, resolveOrderCustomerProfile]
+  );
+
+  useEffect(() => {
+    if (!selectedOrder || !isOrderDetailModalOpen) return;
+    setSelectedOrderEditCustomerDraft(buildEditableOrderCustomerDraft(resolveOrderCustomerProfile(selectedOrder)));
+    setSelectedOrderSavedAddressKey('primary');
+  }, [isOrderDetailModalOpen, resolveOrderCustomerProfile, selectedOrder]);
+
   const latestOrderDraftByCustomerId = useMemo(() => {
     const map = new Map<number, CustomerLastOrderDraft>();
 
@@ -1721,7 +1979,9 @@ function OrdersPageContent() {
       }
 
       const fallbackCustomer = customerMap.get(customerId) || order.customer || null;
+      const orderCustomerProfile = resolveOrderCustomerProfile(order);
       const customerName =
+        orderCustomerProfile.name ||
         customerMap.get(customerId)?.name ||
         order.customer?.name ||
         `Cliente #${displayCustomerNumber(fallbackCustomer)}`;
@@ -1739,7 +1999,7 @@ function OrdersPageContent() {
     }
 
     return map;
-  }, [customerMap, orders]);
+  }, [customerMap, orders, resolveOrderCustomerProfile]);
 
   const resolveCalendarEntryCompactName = useCallback(
     (entry: CalendarOrderEntry) => compactCustomerLabelForCalendar(resolveCustomerName(entry.order)),
@@ -1747,13 +2007,13 @@ function OrdersPageContent() {
   );
   const resolveCalendarEntryGridLabel = useCallback(
     (entry: CalendarOrderEntry) => {
-      const customer = customerMap.get(entry.order.customerId) ?? entry.order.customer ?? null;
+      const customer = resolveOrderCustomerProfile(entry.order);
       const customerName = resolveCustomerName(entry.order);
       const customerAddress = formatCustomerFullAddress(customer) || 'Endereco nao informado';
 
       return `${customerName} • ${customerAddress}`;
     },
-    [customerMap, resolveCustomerName]
+    [resolveCustomerName, resolveOrderCustomerProfile]
   );
 
   const resolveCalendarEntryStatus = useCallback((entry: CalendarOrderEntry) => entry.order.status || '', []);
@@ -2552,9 +2812,31 @@ function OrdersPageContent() {
         : null,
     [customers, newOrderCustomerId]
   );
-  const newOrderCustomerAddress = useMemo(
-    () => formatCustomerFullAddress(selectedNewOrderCustomer),
+  const newOrderCustomerAddressOptions = useMemo(
+    () => buildCustomerAddressOptions(selectedNewOrderCustomer),
     [selectedNewOrderCustomer]
+  );
+  const selectedNewOrderAddressOption = useMemo(
+    () =>
+      newOrderCustomerAddressOptions.find((option) => option.key === newOrderSelectedAddressKey) ||
+      newOrderCustomerAddressOptions[0] ||
+      null,
+    [newOrderCustomerAddressOptions, newOrderSelectedAddressKey]
+  );
+  const selectedNewOrderCustomerProfile = useMemo(
+    () => mergeCustomerProfile(selectedNewOrderCustomer, selectedNewOrderAddressOption?.value ?? null),
+    [selectedNewOrderAddressOption?.value, selectedNewOrderCustomer]
+  );
+  const selectedNewOrderCustomerSnapshot = useMemo(
+    () => draftToOrderCustomerSnapshot(buildEditableOrderCustomerDraft(selectedNewOrderCustomerProfile)),
+    [selectedNewOrderCustomerProfile]
+  );
+  const isUsingAlternateNewOrderAddress = Boolean(
+    selectedNewOrderAddressOption && selectedNewOrderAddressOption.key !== 'primary'
+  );
+  const newOrderCustomerAddress = useMemo(
+    () => formatCustomerFullAddress(selectedNewOrderCustomerProfile),
+    [selectedNewOrderCustomerProfile]
   );
   const newOrderScheduledAtDate = useMemo(
     () => parseDateTimeLocalInput(newOrderScheduledAt),
@@ -2659,10 +2941,21 @@ function OrdersPageContent() {
   const selectedCustomer = selectedOrder
     ? selectedOrder.customer || customers.find((customer) => customer.id === selectedOrder.customerId) || null
     : null;
+  const selectedCustomerAddressOptions = useMemo(
+    () => buildCustomerAddressOptions(selectedCustomer),
+    [selectedCustomer]
+  );
+  const selectedOrderCustomerProfile = useMemo(
+    () => resolveOrderCustomerProfile(selectedOrder),
+    [resolveOrderCustomerProfile, selectedOrder]
+  );
   const selectedCustomerNameLabel = selectedOrder ? resolveCustomerName(selectedOrder) : 'Sem cliente';
-  const selectedCustomerAddressLabel = formatCustomerFullAddress(selectedCustomer) || 'Endereco nao informado';
+  const selectedCustomerAddressLabel =
+    formatCustomerFullAddress(selectedOrderCustomerProfile) || 'Endereco nao informado';
   const selectedCustomerPhoneLabel =
-    formatPhoneBR(selectedCustomer?.phone) || (selectedCustomer?.phone || '').trim() || 'Telefone nao informado';
+    formatPhoneBR(selectedOrderCustomerProfile.phone) ||
+    (selectedOrderCustomerProfile.phone || '').trim() ||
+    'Telefone nao informado';
   const selectedOrderDeliveryFee = toMoney(Math.max(selectedOrder?.deliveryFee ?? 0, 0));
   const selectedOrderProductSubtotal = toMoney(
     Math.max(roundMoney((selectedOrder?.total ?? 0) - selectedOrderDeliveryFee), 0)
@@ -2780,13 +3073,13 @@ function OrdersPageContent() {
           mode: 'DELIVERY',
           scheduledAt: newOrderScheduledAtIso,
           customer: {
-            name: selectedNewOrderCustomer.name,
-            phone: selectedNewOrderCustomer.phone ?? null,
-            address: newOrderCustomerAddress,
-            placeId: selectedNewOrderCustomer.placeId ?? null,
-            lat: typeof selectedNewOrderCustomer.lat === 'number' ? selectedNewOrderCustomer.lat : null,
-            lng: typeof selectedNewOrderCustomer.lng === 'number' ? selectedNewOrderCustomer.lng : null,
-            deliveryNotes: selectedNewOrderCustomer.deliveryNotes ?? null
+            name: selectedNewOrderCustomerSnapshot.name,
+            phone: selectedNewOrderCustomerSnapshot.phone ?? null,
+            address: selectedNewOrderCustomerSnapshot.address ?? newOrderCustomerAddress,
+            placeId: selectedNewOrderCustomerSnapshot.placeId ?? null,
+            lat: typeof selectedNewOrderCustomerSnapshot.lat === 'number' ? selectedNewOrderCustomerSnapshot.lat : null,
+            lng: typeof selectedNewOrderCustomerSnapshot.lng === 'number' ? selectedNewOrderCustomerSnapshot.lng : null,
+            deliveryNotes: selectedNewOrderCustomerSnapshot.deliveryNotes ?? null
           },
           manifest: {
             items: newOrderQuoteManifestItems,
@@ -2822,7 +3115,8 @@ function OrdersPageContent() {
       newOrderQuoteManifestItems,
       newOrderScheduledAtIso,
       newOrderQuoteRequestIdRef,
-      selectedNewOrderCustomer
+      selectedNewOrderCustomer,
+      selectedNewOrderCustomerSnapshot
     ]
   );
 
@@ -2890,11 +3184,138 @@ function OrdersPageContent() {
     await updateStatus(selectedOrder.id, targetStatus);
   };
 
+  const updateSelectedOrderCustomerDraft = useCallback(
+    (patch: Partial<EditableOrderCustomerDraft>, options?: { clearGeocode?: boolean }) => {
+      setSelectedOrderEditCustomerDraft((current) => ({
+        ...current,
+        ...patch,
+        ...(options?.clearGeocode ? { placeId: '', lat: null, lng: null } : {})
+      }));
+    },
+    []
+  );
+
+  const applySelectedOrderSavedAddress = useCallback(
+    (addressKey: string) => {
+      setSelectedOrderSavedAddressKey(addressKey);
+      const selectedOption =
+        selectedCustomerAddressOptions.find((option) => option.key === addressKey) ||
+        selectedCustomerAddressOptions[0] ||
+        null;
+      if (!selectedOption) return;
+      const merged = mergeCustomerProfile(selectedCustomer, selectedOption.value);
+      setSelectedOrderEditCustomerDraft((current) => ({
+        ...current,
+        address: merged.address || buildCustomerAddressSummary(merged) || '',
+        addressLine2: merged.addressLine2 || '',
+        neighborhood: merged.neighborhood || '',
+        city: merged.city || '',
+        state: merged.state || '',
+        postalCode: merged.postalCode || '',
+        country: merged.country || current.country || 'Brasil',
+        placeId: merged.placeId || '',
+        lat: typeof merged.lat === 'number' ? merged.lat : null,
+        lng: typeof merged.lng === 'number' ? merged.lng : null,
+        deliveryNotes: merged.deliveryNotes || current.deliveryNotes
+      }));
+    },
+    [selectedCustomer, selectedCustomerAddressOptions]
+  );
+
+  const handleSelectedOrderAddressBlur = useCallback(() => {
+    setSelectedOrderEditCustomerDraft((current) => {
+      const inferred = buildCustomerAddressAutofill(current.address);
+      return {
+        ...current,
+        neighborhood: current.neighborhood || inferred.neighborhood || '',
+        city: current.city || inferred.city || '',
+        state: current.state || inferred.state || '',
+        postalCode: current.postalCode || inferred.postalCode || ''
+      };
+    });
+  }, []);
+
+  const handleSelectedOrderPostalCodeBlur = useCallback(async () => {
+    if (!selectedOrderEditCustomerDraft.postalCode.trim()) return;
+    try {
+      const patch = await lookupPostalCodeAutofill(selectedOrderEditCustomerDraft.postalCode);
+      if (!patch) return;
+      setSelectedOrderEditCustomerDraft((current) => ({
+        ...current,
+        address: current.address || patch.address || '',
+        neighborhood: current.neighborhood || patch.neighborhood || '',
+        city: current.city || patch.city || '',
+        state: current.state || patch.state || '',
+        postalCode: current.postalCode || patch.postalCode || ''
+      }));
+    } catch {
+      // falha silenciosa de apoio; o usuario pode seguir editando manualmente
+    }
+  }, [selectedOrderEditCustomerDraft.postalCode]);
+
+  const saveSelectedOrderCustomerAddress = async () => {
+    if (!selectedCustomer?.id) {
+      setSelectedOrderEditError('Pedido sem cliente vinculado para salvar endereco.');
+      return;
+    }
+
+    const snapshot = draftToOrderCustomerSnapshot(selectedOrderEditCustomerDraft);
+    if (!snapshot.address) {
+      setSelectedOrderEditError('Informe o endereco antes de salvar no cliente.');
+      return;
+    }
+
+    setSelectedOrderEditError(null);
+    setIsSavingSelectedOrderCustomerAddress(true);
+    try {
+      await apiFetch(`/customers/${selectedCustomer.id}/addresses`, {
+        method: 'POST',
+        body: JSON.stringify({
+          address: snapshot.address,
+          addressLine1: snapshot.addressLine1,
+          addressLine2: snapshot.addressLine2,
+          neighborhood: snapshot.neighborhood,
+          city: snapshot.city,
+          state: snapshot.state,
+          postalCode: snapshot.postalCode,
+          country: snapshot.country,
+          placeId: snapshot.placeId,
+          lat: snapshot.lat,
+          lng: snapshot.lng,
+          deliveryNotes: snapshot.deliveryNotes
+        })
+      });
+      const refreshedOrders = await loadAll();
+      const freshSelected = selectedOrder?.id
+        ? refreshedOrders.find((entry) => entry.id === selectedOrder.id) || null
+        : null;
+      if (freshSelected) {
+        setSelectedOrder(freshSelected);
+      }
+      notifySuccess('Endereco salvo no cliente.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Nao foi possivel salvar o endereco no cliente.';
+      setSelectedOrderEditError(message);
+      notifyError(message);
+    } finally {
+      setIsSavingSelectedOrderCustomerAddress(false);
+    }
+  };
+
   const saveSelectedOrderEdit = async () => {
     if (!selectedOrder?.id) return;
     const parsedScheduledAt = parseDateTimeLocalInput(selectedOrderEditScheduledAt);
     if (!parsedScheduledAt) {
       setSelectedOrderEditError('Informe data e hora.');
+      return;
+    }
+    const customerSnapshot = draftToOrderCustomerSnapshot(selectedOrderEditCustomerDraft);
+    if (!customerSnapshot.name) {
+      setSelectedOrderEditError('Informe o nome do cliente.');
+      return;
+    }
+    if (selectedOrder.fulfillmentMode === 'DELIVERY' && !customerSnapshot.address) {
+      setSelectedOrderEditError('Informe o endereco deste pedido.');
       return;
     }
 
@@ -2906,7 +3327,8 @@ function OrdersPageContent() {
         body: JSON.stringify({
           scheduledAt: parsedScheduledAt.toISOString(),
           discountPct: selectedOrderEditDiscountPctNumber,
-          notes: selectedOrderEditNotes.trim() ? selectedOrderEditNotes.trim() : null
+          notes: selectedOrderEditNotes.trim() ? selectedOrderEditNotes.trim() : null,
+          customerSnapshot
         })
       });
       const refreshedOrders = await loadAll();
@@ -3749,12 +4171,12 @@ function OrdersPageContent() {
                         resolveOrderDate(order) ?? safeDateFromIso(order.createdAt ?? null)
                       ) || 'Sem data';
                     const customerName = resolveCustomerName(order);
-                    const historyCustomer = customerMap.get(order.customerId) ?? order.customer ?? null;
+                    const historyCustomer = resolveOrderCustomerProfile(order);
                     const historyCustomerAddress =
                       formatCustomerFullAddress(historyCustomer) || 'Endereco nao informado';
                     const historyCustomerPhone =
-                      formatPhoneBR(historyCustomer?.phone) ||
-                      (historyCustomer?.phone || '').trim() ||
+                      formatPhoneBR(historyCustomer.phone) ||
+                      (historyCustomer.phone || '').trim() ||
                       'Telefone nao informado';
                     const statusDotClass = calendarStatusDotClass(order.status || '');
                     const isActive = selectedOrder?.id === order.id;
@@ -3894,10 +4316,16 @@ function OrdersPageContent() {
               <OrderQuickCreate
                 tutorialMode={tutorialMode}
                 customerOptions={customerOptions}
+                customerAddressOptions={newOrderCustomerAddressOptions.map((option) => ({
+                  key: option.key,
+                  label: option.label
+                }))}
                 productsForCards={orderableProducts}
                 fulfillmentMode={newOrderFulfillmentMode}
                 customerSearch={customerSearch}
                 selectedCustomerId={newOrderCustomerId}
+                selectedCustomerAddressKey={newOrderSelectedAddressKey}
+                selectedCustomerAddressLabel={newOrderCustomerAddress}
                 restoredFromLastOrder={restoredLastOrderDraft}
                 newOrderScheduledAt={newOrderScheduledAt}
                 newOrderDiscountPct={newOrderDiscountPct}
@@ -3921,6 +4349,7 @@ function OrdersPageContent() {
                   setCustomerSearch(option.label);
                   syncNewOrderCustomerSelection(option.label, customerOptions);
                 }}
+                onCustomerAddressKeyChange={setNewOrderSelectedAddressKey}
                 onScheduledAtChange={setNewOrderScheduledAt}
                 onDiscountChange={setNewOrderDiscountPct}
                 onDiscountBlur={() => setNewOrderDiscountPct(normalizeDiscountPctInput(newOrderDiscountPct))}
@@ -4172,6 +4601,154 @@ function OrdersPageContent() {
               </button>
               {selectedOrderEditError ? (
                 <p className="text-xs font-medium text-rose-700 md:col-span-3">{selectedOrderEditError}</p>
+              ) : null}
+            </div>
+            <div className="mb-3 grid gap-3 rounded-2xl border border-white/70 bg-white/80 p-3 lg:grid-cols-2 xl:grid-cols-3">
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+                Nome
+                <input
+                  className="app-input"
+                  type="text"
+                  value={selectedOrderEditCustomerDraft.name}
+                  onChange={(event) => updateSelectedOrderCustomerDraft({ name: event.target.value })}
+                  placeholder="Nome do cliente"
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+                Telefone
+                <input
+                  className="app-input"
+                  type="tel"
+                  value={selectedOrderEditCustomerDraft.phone}
+                  onChange={(event) => updateSelectedOrderCustomerDraft({ phone: event.target.value })}
+                  placeholder="Telefone"
+                />
+              </label>
+              {selectedCustomerAddressOptions.length > 0 ? (
+                <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+                  Endereços salvos
+                  <select
+                    className="app-input text-sm normal-case tracking-normal text-neutral-800"
+                    value={selectedOrderSavedAddressKey}
+                    onChange={(event) => applySelectedOrderSavedAddress(event.target.value)}
+                  >
+                    {selectedCustomerAddressOptions.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <div className="hidden xl:block" aria-hidden="true" />
+              )}
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500 lg:col-span-2 xl:col-span-3">
+                Endereço
+                <input
+                  className="app-input"
+                  type="text"
+                  value={selectedOrderEditCustomerDraft.address}
+                  onChange={(event) =>
+                    updateSelectedOrderCustomerDraft(
+                      { address: event.target.value },
+                      { clearGeocode: true }
+                    )
+                  }
+                  onBlur={handleSelectedOrderAddressBlur}
+                  placeholder="Rua, número, bairro, cidade"
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+                Complemento
+                <input
+                  className="app-input"
+                  type="text"
+                  value={selectedOrderEditCustomerDraft.addressLine2}
+                  onChange={(event) => updateSelectedOrderCustomerDraft({ addressLine2: event.target.value })}
+                  placeholder="Apto, bloco, referência"
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+                Bairro
+                <input
+                  className="app-input"
+                  type="text"
+                  value={selectedOrderEditCustomerDraft.neighborhood}
+                  onChange={(event) =>
+                    updateSelectedOrderCustomerDraft(
+                      { neighborhood: event.target.value },
+                      { clearGeocode: true }
+                    )
+                  }
+                  placeholder="Bairro"
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+                Cidade
+                <input
+                  className="app-input"
+                  type="text"
+                  value={selectedOrderEditCustomerDraft.city}
+                  onChange={(event) =>
+                    updateSelectedOrderCustomerDraft({ city: event.target.value }, { clearGeocode: true })
+                  }
+                  placeholder="Cidade"
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+                UF
+                <input
+                  className="app-input"
+                  type="text"
+                  maxLength={2}
+                  value={selectedOrderEditCustomerDraft.state}
+                  onChange={(event) =>
+                    updateSelectedOrderCustomerDraft(
+                      { state: event.target.value.toUpperCase() },
+                      { clearGeocode: true }
+                    )
+                  }
+                  placeholder="UF"
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
+                CEP
+                <input
+                  className="app-input"
+                  type="text"
+                  inputMode="numeric"
+                  value={selectedOrderEditCustomerDraft.postalCode}
+                  onChange={(event) =>
+                    updateSelectedOrderCustomerDraft(
+                      { postalCode: event.target.value },
+                      { clearGeocode: true }
+                    )
+                  }
+                  onBlur={handleSelectedOrderPostalCodeBlur}
+                  placeholder="00000-000"
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500 lg:col-span-2 xl:col-span-3">
+                Obs. entrega
+                <input
+                  className="app-input"
+                  type="text"
+                  value={selectedOrderEditCustomerDraft.deliveryNotes}
+                  onChange={(event) => updateSelectedOrderCustomerDraft({ deliveryNotes: event.target.value })}
+                  placeholder="Portão, referência, instruções"
+                />
+              </label>
+              {selectedCustomer?.id && !selectedCustomer?.deletedAt ? (
+                <div className="flex items-center justify-start lg:col-span-2 xl:col-span-3">
+                  <button
+                    type="button"
+                    className="app-button app-button-ghost w-full text-xs sm:w-auto"
+                    onClick={saveSelectedOrderCustomerAddress}
+                    disabled={isSavingSelectedOrderCustomerAddress}
+                  >
+                    {isSavingSelectedOrderCustomerAddress ? 'Salvando endereço...' : 'Salvar endereço no cliente'}
+                  </button>
+                </div>
               ) : null}
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">

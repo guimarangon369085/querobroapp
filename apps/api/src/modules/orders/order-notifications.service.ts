@@ -13,6 +13,12 @@ type OrderAlertOrder = {
   paymentStatus?: string | null;
   scheduledAt?: Date | string | null;
   notes?: string | null;
+  customerSnapshot?: {
+    name?: string | null;
+    phone?: string | null;
+    address?: string | null;
+    deliveryNotes?: string | null;
+  } | null;
   items?: Array<{
     productId: number;
     quantity: number;
@@ -119,6 +125,15 @@ export class OrderNotificationsService {
     return parts[0] || 'Cliente';
   }
 
+  private resolveOrderCustomerIdentity(order: OrderAlertOrder) {
+    return {
+      name: order.customerSnapshot?.name || order.customer.name,
+      phone: order.customerSnapshot?.phone || order.customer.phone || null,
+      address: order.customerSnapshot?.address || order.customer.address || null,
+      deliveryNotes: order.customerSnapshot?.deliveryNotes || order.customer.deliveryNotes || null
+    };
+  }
+
   private formatDeliveryLabel(order: OrderAlertOrder) {
     if (order.fulfillmentMode === 'PICKUP') return 'Frete: retirado no local';
     const provider = String(order.deliveryProvider || '').trim();
@@ -163,10 +178,11 @@ export class OrderNotificationsService {
     const { order, intake } = input;
     const orderNumber = resolveDisplayNumber(order) ?? order.id;
     const flavorSummary = this.buildFlavorSummary(order);
+    const customer = this.resolveOrderCustomerIdentity(order);
     const lines = [
       `Novo pedido #${orderNumber}`,
       `${this.formatChannel(intake.channel)} | ${this.formatMode(order.fulfillmentMode)}`,
-      `Cliente: ${this.compactCustomerName(order.customer.name)}`,
+      `Cliente: ${this.compactCustomerName(customer.name)}`,
       flavorSummary ? `Sabores: ${flavorSummary}` : null,
       `Agendamento: ${this.formatScheduledAt(order.scheduledAt)}`,
       order.fulfillmentMode === 'DELIVERY' ? 'Modo: entrega' : 'Modo: retirada',
@@ -183,6 +199,7 @@ export class OrderNotificationsService {
   private buildWebhookPayload(input: OrderAlertInput, operationsUrl: string, message: string) {
     const { order, intake } = input;
     const flavorSummary = this.buildFlavorSummary(order);
+    const customer = this.resolveOrderCustomerIdentity(order);
     return {
       event: 'order.created',
       createdAt: new Date().toISOString(),
@@ -214,10 +231,10 @@ export class OrderNotificationsService {
       customer: {
         id: Number(order.customer.id || intake.customerId || 0) || null,
         publicNumber: resolveDisplayNumber(order.customer),
-        name: order.customer.name,
-        phone: order.customer.phone || null,
-        address: order.customer.address || null,
-        deliveryNotes: order.customer.deliveryNotes || null
+        name: customer.name,
+        phone: customer.phone,
+        address: customer.address,
+        deliveryNotes: customer.deliveryNotes
       },
       intake: {
         channel: intake.channel,

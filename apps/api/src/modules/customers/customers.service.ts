@@ -1,51 +1,30 @@
 import { BadRequestException, Injectable, NotFoundException, Inject } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
-import { CustomerSchema, resolveDisplayNumber } from '@querobroapp/shared';
+import { CustomerAddressSchema, CustomerSchema, resolveDisplayNumber } from '@querobroapp/shared';
 import { normalizePhone, normalizeTitle, normalizeText } from '../../common/normalize.js';
 import { allocateNextPublicNumber } from '../../common/public-sequence.js';
 import { resolveStoredCouponCode } from '../../common/coupons.js';
+import {
+  customerAddressIdentityKey,
+  inferAddressLine1,
+  inferCustomerNameParts,
+  normalizeCustomerAddressPayload,
+  normalizeNeighborhood
+} from '../../common/customer-profile.js';
 
 type CustomerPayload = ReturnType<typeof CustomerSchema.parse>;
-type CustomerCreatePayload = Omit<CustomerPayload, 'id' | 'createdAt'>;
+type CustomerCreatePayload = Omit<CustomerPayload, 'id' | 'createdAt' | 'addresses'>;
 type CustomerUpdatePayload = Partial<CustomerCreatePayload>;
+type CustomerAddressCreatePayload = Omit<
+  ReturnType<typeof CustomerAddressSchema.parse>,
+  'id' | 'customerId' | 'createdAt' | 'updatedAt' | 'isPrimary'
+>;
+type TransactionClient = Prisma.TransactionClient;
 
 @Injectable()
 export class CustomersService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
-
-  private inferNameParts(fullName?: string | null) {
-    const normalizedFullName = normalizeTitle(fullName ?? undefined) ?? '';
-    const parts = normalizedFullName.split(' ').filter(Boolean);
-    return {
-      fullName: normalizedFullName,
-      firstName: parts[0] || null,
-      lastName: parts.length > 1 ? parts.slice(1).join(' ') : null
-    };
-  }
-
-  private inferAddressLine1(address?: string | null) {
-    const normalizedAddress = normalizeText(address ?? undefined) ?? '';
-    if (!normalizedAddress) return null;
-
-    const segments = normalizedAddress
-      .split(',')
-      .map((segment) => normalizeText(segment) || '')
-      .filter(Boolean);
-    if (segments.length === 0) return null;
-
-    const numberSegment = segments[1] || '';
-    const hasStreetNumber = /^(?:(?:n(?:[.o]|o|umero)?\s*)?\d+[a-z]?(?:[-/]\d+[a-z]?)?|s\/?n|sem numero)$/i.test(
-      numberSegment
-    );
-    const inferred = hasStreetNumber ? `${segments[0]}, ${numberSegment}` : segments[0];
-    return normalizeTitle(inferred ?? undefined);
-  }
-
-  private normalizeNeighborhood(value?: string | null) {
-    const normalized = normalizeTitle(value ?? undefined);
-    if (!normalized) return null;
-    return /\d/.test(normalized) ? null : normalized;
-  }
 
   private shouldPromoteAutofillValue(currentValue?: string | null, inferredValue?: string | null) {
     const current = normalizeText(currentValue ?? undefined) ?? '';
@@ -68,8 +47,8 @@ export class CustomersService {
   private normalizeCustomerAutofillView<T extends { name: string; firstName: string | null; lastName: string | null; address: string | null; addressLine1: string | null }>(
     customer: T
   ): T {
-    const inferredName = this.inferNameParts(customer.name);
-    const inferredAddressLine1 = this.inferAddressLine1(customer.address);
+    const inferredName = inferCustomerNameParts(customer.name);
+    const inferredAddressLine1 = inferAddressLine1(customer.address);
 
     return {
       ...customer,
@@ -78,6 +57,57 @@ export class CustomersService {
       addressLine1:
         this.pickPromotedTitle(customer.addressLine1, inferredAddressLine1) ?? inferredAddressLine1
     };
+  }
+
+  private customerAddressInclude(): Prisma.CustomerInclude {
+    return {
+      addresses: {
+        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }]
+      }
+    };
+  }
+
+  private async saveCustomerAddress(
+    tx: TransactionClient,
+    customerId: number,
+    payload: CustomerAddressCreatePayload,
+    options?: { primary?: boolean }
+  ) {
+    const normalized = normalizeCustomerAddressPayload(payload);
+    const addressKey = customerAddressIdentityKey(normalized);
+    if (!addressKey) return null;
+
+    const existing = await tx.customerAddress.findMany({
+      where: { customerId },
+      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }]
+    });
+    const matched = existing.find((entry) => customerAddressIdentityKey(entry) === addressKey) || null;
+    const shouldBePrimary = options?.primary === true;
+
+    if (shouldBePrimary) {
+      await tx.customerAddress.updateMany({
+        where: { customerId, isPrimary: true, ...(matched ? { id: { not: matched.id } } : {}) },
+        data: { isPrimary: false }
+      });
+    }
+
+    if (matched) {
+      return tx.customerAddress.update({
+        where: { id: matched.id },
+        data: {
+          ...normalized,
+          isPrimary: shouldBePrimary ? true : matched.isPrimary
+        }
+      });
+    }
+
+    return tx.customerAddress.create({
+      data: {
+        customerId,
+        ...normalized,
+        isPrimary: shouldBePrimary
+      }
+    });
   }
 
   private async buildCustomerCouponUsage(customerId: number) {
@@ -124,13 +154,17 @@ export class CustomersService {
     return this.prisma.customer
       .findMany({
       where: { deletedAt: null },
+      include: this.customerAddressInclude(),
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
       })
       .then((customers) => customers.map((customer) => this.normalizeCustomerAutofillView(customer)));
   }
 
   async get(id: number) {
-    const customer = await this.prisma.customer.findUnique({ where: { id } });
+    const customer = await this.prisma.customer.findUnique({
+      where: { id },
+      include: this.customerAddressInclude()
+    });
     if (!customer) throw new NotFoundException('Cliente nao encontrado');
     return {
       ...this.normalizeCustomerAutofillView(customer),
@@ -139,23 +173,14 @@ export class CustomersService {
   }
 
   create(payload: unknown) {
-    const data = CustomerSchema.omit({ id: true, publicNumber: true, createdAt: true }).parse(payload) as CustomerCreatePayload;
-    const inferredName = this.inferNameParts(data.name);
+    const data = CustomerSchema.omit({ id: true, publicNumber: true, createdAt: true, addresses: true }).parse(payload) as CustomerCreatePayload;
+    const inferredName = inferCustomerNameParts(data.name);
     const fullName = inferredName.fullName || data.name;
     const firstName = this.pickPromotedTitle(data.firstName, inferredName.firstName) ?? inferredName.firstName;
     const lastName = this.pickPromotedTitle(data.lastName, inferredName.lastName) ?? inferredName.lastName;
     const normalizedPhone = normalizePhone(data.phone);
-    const normalizedAddress = normalizeTitle(data.address ?? undefined);
-    const inferredAddressLine1 = this.inferAddressLine1(normalizedAddress);
-    const addressLine1 = this.pickPromotedTitle(data.addressLine1, inferredAddressLine1) ?? inferredAddressLine1;
-    const normalizedAddressLine2 = normalizeTitle(data.addressLine2 ?? undefined);
-    const normalizedNeighborhood = this.normalizeNeighborhood(data.neighborhood ?? undefined);
-    const normalizedCity = normalizeTitle(data.city ?? undefined);
-    const normalizedState = normalizeText(data.state ?? undefined)?.toUpperCase() ?? null;
-    const normalizedPostalCode = normalizeText(data.postalCode ?? undefined);
-    const normalizedCountry = normalizeTitle(data.country ?? undefined);
-    const normalizedPlaceId = normalizeText(data.placeId ?? undefined);
-    const normalizedDeliveryNotes = normalizeText(data.deliveryNotes ?? undefined);
+    const normalizedAddressPayload = normalizeCustomerAddressPayload(data);
+    const addressLine1 = this.pickPromotedTitle(data.addressLine1, normalizedAddressPayload.addressLine1) ?? normalizedAddressPayload.addressLine1;
 
     return this.prisma.$transaction(async (tx) => {
       const existingByPhone = normalizedPhone
@@ -167,7 +192,7 @@ export class CustomersService {
       const reusableCustomer = existingByPhone;
 
       if (reusableCustomer) {
-        return tx.customer.update({
+        const updated = await tx.customer.update({
           where: { id: reusableCustomer.id },
           data: {
             publicNumber: reusableCustomer.publicNumber ?? (await allocateNextPublicNumber(tx, 'CUSTOMER')),
@@ -176,23 +201,46 @@ export class CustomersService {
             lastName: reusableCustomer.lastName || lastName,
             activePhoneKey: reusableCustomer.activePhoneKey || normalizedPhone,
             phone: reusableCustomer.phone || normalizedPhone,
-            address: reusableCustomer.address || normalizedAddress,
+            address: reusableCustomer.address || normalizedAddressPayload.address,
             addressLine1: reusableCustomer.addressLine1 || addressLine1,
-            addressLine2: reusableCustomer.addressLine2 || normalizedAddressLine2,
-            neighborhood: reusableCustomer.neighborhood || normalizedNeighborhood,
-            city: reusableCustomer.city || normalizedCity,
-            state: reusableCustomer.state || normalizedState,
-            postalCode: reusableCustomer.postalCode || normalizedPostalCode,
-            country: reusableCustomer.country || normalizedCountry,
-            placeId: reusableCustomer.placeId || normalizedPlaceId,
-            lat: reusableCustomer.lat ?? data.lat ?? null,
-            lng: reusableCustomer.lng ?? data.lng ?? null,
-            deliveryNotes: reusableCustomer.deliveryNotes || normalizedDeliveryNotes
+            addressLine2: reusableCustomer.addressLine2 || normalizedAddressPayload.addressLine2,
+            neighborhood: reusableCustomer.neighborhood || normalizedAddressPayload.neighborhood,
+            city: reusableCustomer.city || normalizedAddressPayload.city,
+            state: reusableCustomer.state || normalizedAddressPayload.state,
+            postalCode: reusableCustomer.postalCode || normalizedAddressPayload.postalCode,
+            country: reusableCustomer.country || normalizedAddressPayload.country,
+            placeId: reusableCustomer.placeId || normalizedAddressPayload.placeId,
+            lat: reusableCustomer.lat ?? normalizedAddressPayload.lat,
+            lng: reusableCustomer.lng ?? normalizedAddressPayload.lng,
+            deliveryNotes: reusableCustomer.deliveryNotes || normalizedAddressPayload.deliveryNotes
           }
+        });
+        await this.saveCustomerAddress(
+          tx,
+          updated.id,
+          {
+            address: updated.address,
+            addressLine1: updated.addressLine1,
+            addressLine2: updated.addressLine2,
+            neighborhood: updated.neighborhood,
+            city: updated.city,
+            state: updated.state,
+            postalCode: updated.postalCode,
+            country: updated.country,
+            placeId: updated.placeId,
+            lat: updated.lat,
+            lng: updated.lng,
+            deliveryNotes: updated.deliveryNotes
+          },
+          { primary: true }
+        );
+        return tx.customer.findUniqueOrThrow({
+          where: { id: reusableCustomer.id },
+          include: this.customerAddressInclude()
         });
       }
 
-      return tx.customer.create({
+      const created = await tx.customer.create({
         data: {
           ...data,
           publicNumber: await allocateNextPublicNumber(tx, 'CUSTOMER'),
@@ -201,19 +249,24 @@ export class CustomersService {
           lastName,
           activePhoneKey: normalizedPhone,
           phone: normalizedPhone,
-          address: normalizedAddress,
+          address: normalizedAddressPayload.address,
           addressLine1,
-          addressLine2: normalizedAddressLine2,
-          neighborhood: normalizedNeighborhood,
-          city: normalizedCity,
-          state: normalizedState,
-          postalCode: normalizedPostalCode,
-          country: normalizedCountry,
-          placeId: normalizedPlaceId,
-          lat: data.lat ?? null,
-          lng: data.lng ?? null,
-          deliveryNotes: normalizedDeliveryNotes
+          addressLine2: normalizedAddressPayload.addressLine2,
+          neighborhood: normalizedAddressPayload.neighborhood,
+          city: normalizedAddressPayload.city,
+          state: normalizedAddressPayload.state,
+          postalCode: normalizedAddressPayload.postalCode,
+          country: normalizedAddressPayload.country,
+          placeId: normalizedAddressPayload.placeId,
+          lat: normalizedAddressPayload.lat,
+          lng: normalizedAddressPayload.lng,
+          deliveryNotes: normalizedAddressPayload.deliveryNotes
         }
+      });
+      await this.saveCustomerAddress(tx, created.id, normalizedAddressPayload, { primary: true });
+      return tx.customer.findUniqueOrThrow({
+        where: { id: created.id },
+        include: this.customerAddressInclude()
       });
     });
   }
@@ -221,11 +274,11 @@ export class CustomersService {
   async update(id: number, payload: unknown) {
     const existing = await this.get(id);
     const data = CustomerSchema.partial()
-      .omit({ id: true, publicNumber: true, createdAt: true })
+      .omit({ id: true, publicNumber: true, createdAt: true, addresses: true })
       .parse(payload) as CustomerUpdatePayload;
 
     const nextName = data.name !== undefined ? normalizeTitle(data.name) ?? data.name : existing.name;
-    const inferredName = this.inferNameParts(nextName);
+    const inferredName = inferCustomerNameParts(nextName);
     const shouldRecomputeName =
       data.name !== undefined || data.firstName !== undefined || data.lastName !== undefined;
     const firstName = shouldRecomputeName
@@ -243,7 +296,7 @@ export class CustomersService {
 
     const nextAddress = data.address !== undefined ? normalizeTitle(data.address) ?? null : existing.address;
     const shouldRecomputeAddressLine1 = data.address !== undefined || data.addressLine1 !== undefined;
-    const inferredAddressLine1 = this.inferAddressLine1(nextAddress);
+    const inferredAddressLine1 = inferAddressLine1(nextAddress);
     const addressLine1 = shouldRecomputeAddressLine1
       ? this.pickPromotedTitle(
           data.addressLine1 !== undefined ? data.addressLine1 : existing.addressLine1,
@@ -268,28 +321,78 @@ export class CustomersService {
       }
     }
 
-    return this.prisma.customer.update({
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.customer.update({
+        where: { id },
+        data: {
+          ...data,
+          name: data.name ? normalizeTitle(data.name) ?? data.name : undefined,
+          firstName,
+          lastName,
+          activePhoneKey: normalizedPhone,
+          phone: normalizedPhone,
+          address: data.address !== undefined ? normalizeTitle(data.address) ?? null : undefined,
+          addressLine1,
+          addressLine2: data.addressLine2 !== undefined ? normalizeTitle(data.addressLine2) ?? null : undefined,
+          neighborhood: data.neighborhood !== undefined ? normalizeNeighborhood(data.neighborhood) : undefined,
+          city: data.city !== undefined ? normalizeTitle(data.city) ?? null : undefined,
+          state: data.state !== undefined ? normalizeText(data.state)?.toUpperCase() ?? null : undefined,
+          postalCode: data.postalCode !== undefined ? normalizeText(data.postalCode) ?? null : undefined,
+          country: data.country !== undefined ? normalizeTitle(data.country) ?? null : undefined,
+          placeId: data.placeId !== undefined ? normalizeText(data.placeId) ?? null : undefined,
+          lat: data.lat !== undefined ? data.lat ?? null : undefined,
+          lng: data.lng !== undefined ? data.lng ?? null : undefined,
+          deliveryNotes: data.deliveryNotes !== undefined ? normalizeText(data.deliveryNotes) ?? null : undefined
+        }
+      });
+      await this.saveCustomerAddress(
+        tx,
+        updated.id,
+        {
+          address: updated.address,
+          addressLine1: updated.addressLine1,
+          addressLine2: updated.addressLine2,
+          neighborhood: updated.neighborhood,
+          city: updated.city,
+          state: updated.state,
+          postalCode: updated.postalCode,
+          country: updated.country,
+          placeId: updated.placeId,
+          lat: updated.lat,
+          lng: updated.lng,
+          deliveryNotes: updated.deliveryNotes
+        },
+        { primary: true }
+      );
+      return tx.customer.findUniqueOrThrow({
+        where: { id: updated.id },
+        include: this.customerAddressInclude()
+      });
+    });
+  }
+
+  async addAddress(id: number, payload: unknown) {
+    const existing = await this.prisma.customer.findUnique({
       where: { id },
-      data: {
-        ...data,
-        name: data.name ? normalizeTitle(data.name) ?? data.name : undefined,
-        firstName,
-        lastName,
-        activePhoneKey: normalizedPhone,
-        phone: normalizedPhone,
-        address: data.address !== undefined ? normalizeTitle(data.address) ?? null : undefined,
-        addressLine1,
-        addressLine2: data.addressLine2 !== undefined ? normalizeTitle(data.addressLine2) ?? null : undefined,
-        neighborhood: data.neighborhood !== undefined ? this.normalizeNeighborhood(data.neighborhood) : undefined,
-        city: data.city !== undefined ? normalizeTitle(data.city) ?? null : undefined,
-        state: data.state !== undefined ? normalizeText(data.state)?.toUpperCase() ?? null : undefined,
-        postalCode: data.postalCode !== undefined ? normalizeText(data.postalCode) ?? null : undefined,
-        country: data.country !== undefined ? normalizeTitle(data.country) ?? null : undefined,
-        placeId: data.placeId !== undefined ? normalizeText(data.placeId) ?? null : undefined,
-        lat: data.lat !== undefined ? data.lat ?? null : undefined,
-        lng: data.lng !== undefined ? data.lng ?? null : undefined,
-        deliveryNotes: data.deliveryNotes !== undefined ? normalizeText(data.deliveryNotes) ?? null : undefined
-      }
+      include: this.customerAddressInclude()
+    });
+    if (!existing || existing.deletedAt) {
+      throw new NotFoundException('Cliente nao encontrado');
+    }
+
+    const data = CustomerAddressSchema.omit({
+      id: true,
+      customerId: true,
+      createdAt: true,
+      updatedAt: true
+    }).parse(payload) as CustomerAddressCreatePayload;
+
+    return this.prisma.$transaction(async (tx) => {
+      await this.saveCustomerAddress(tx, id, data, { primary: false });
+      return tx.customer.findUniqueOrThrow({
+        where: { id },
+        include: this.customerAddressInclude()
+      });
     });
   }
 
