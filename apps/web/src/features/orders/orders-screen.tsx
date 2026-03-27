@@ -2117,19 +2117,29 @@ function OrdersPageContent() {
         customerKey: string;
         customerLabel: string;
         flavorCounts: Map<number, { label: string; quantity: number }>;
+        totalOrders: number;
+        readyOrders: number;
+        earliestProductionAt: number;
       }
     >();
 
     for (const entry of selectedDateEntries) {
       const customerName = resolveCustomerName(entry.order);
+      const isReady = entry.order.status === 'PRONTO' || entry.order.status === 'ENTREGUE';
       const customerKey = entry.order.customerId
         ? `customer:${entry.order.customerId}`
         : `name:${normalizeTextForSort(customerName) || 'sem-cliente'}`;
       const current = byCustomer.get(customerKey) || {
         customerKey,
         customerLabel: compactCustomerLabelForCalendar(customerName),
-        flavorCounts: new Map<number, { label: string; quantity: number }>()
+        flavorCounts: new Map<number, { label: string; quantity: number }>(),
+        totalOrders: 0,
+        readyOrders: 0,
+        earliestProductionAt: entry.productionStartAt.getTime()
       };
+      current.totalOrders += 1;
+      if (isReady) current.readyOrders += 1;
+      current.earliestProductionAt = Math.min(current.earliestProductionAt, entry.productionStartAt.getTime());
 
       for (const item of entry.order.items || []) {
         const quantity = Math.max(Math.floor(item.quantity || 0), 0);
@@ -2147,28 +2157,55 @@ function OrdersPageContent() {
       byCustomer.set(customerKey, current);
     }
 
-    return Array.from(byCustomer.values()).map((entry) => ({
-      customerKey: entry.customerKey,
-      customerLabel: entry.customerLabel,
-      flavorLines:
-        Array.from(entry.flavorCounts.entries())
-          .map(([productId, flavor]) => ({
-            productId,
-            label: flavor.label.replace(/\s+\([^)]+\)\s*$/u, '').trim(),
-            quantity: flavor.quantity,
-            product: productMap.get(productId) || null
-          }))
-          .sort((left, right) => {
-            const leftProduct = left.product;
-            const rightProduct = right.product;
-            if (leftProduct && rightProduct) {
-              const rankDiff = quickCreateProductRank(leftProduct) - quickCreateProductRank(rightProduct);
-              if (rankDiff !== 0) return rankDiff;
-            }
-            return left.label.localeCompare(right.label, 'pt-BR');
-          })
-          .map((flavor) => `${flavor.quantity.toLocaleString('pt-BR')} ${flavor.label}`)
-    }));
+    return Array.from(byCustomer.values())
+      .map((entry) => {
+        const hasPending = entry.readyOrders < entry.totalOrders;
+        const readyState =
+          entry.readyOrders <= 0
+            ? 'PENDING'
+            : hasPending
+              ? 'PARTIAL'
+              : 'READY';
+        return {
+          customerKey: entry.customerKey,
+          customerLabel: entry.customerLabel,
+          totalOrders: entry.totalOrders,
+          readyOrders: entry.readyOrders,
+          hasPending,
+          readyState,
+          earliestProductionAt: entry.earliestProductionAt,
+          flavorLines:
+            Array.from(entry.flavorCounts.entries())
+              .map(([productId, flavor]) => ({
+                productId,
+                label: flavor.label.replace(/\s+\([^)]+\)\s*$/u, '').trim(),
+                quantity: flavor.quantity,
+                product: productMap.get(productId) || null
+              }))
+              .sort((left, right) => {
+                const leftProduct = left.product;
+                const rightProduct = right.product;
+                if (leftProduct && rightProduct) {
+                  const rankDiff = quickCreateProductRank(leftProduct) - quickCreateProductRank(rightProduct);
+                  if (rankDiff !== 0) return rankDiff;
+                }
+                return left.label.localeCompare(right.label, 'pt-BR');
+              })
+              .map((flavor) => `${flavor.quantity.toLocaleString('pt-BR')} ${flavor.label}`)
+        };
+      })
+      .sort((left, right) => {
+        if (left.hasPending !== right.hasPending) {
+          return left.hasPending ? -1 : 1;
+        }
+        if (left.readyOrders !== right.readyOrders) {
+          return left.readyOrders - right.readyOrders;
+        }
+        if (left.earliestProductionAt !== right.earliestProductionAt) {
+          return left.earliestProductionAt - right.earliestProductionAt;
+        }
+        return left.customerLabel.localeCompare(right.customerLabel, 'pt-BR');
+      });
   }, [productMap, resolveCustomerName, selectedDateEntries]);
 
   const monthCells = useMemo(() => {
@@ -3675,19 +3712,6 @@ function OrdersPageContent() {
         <OrdersBoard
           filters={null}
           helperText={null}
-          summary={
-            <div className="xl:hidden">
-              <div className="rounded-[20px] border border-[rgba(126,79,45,0.08)] bg-white/82 p-3 shadow-[0_14px_30px_rgba(70,44,26,0.06)]">
-                <button
-                  type="button"
-                  className="app-button app-button-primary w-full"
-                  onClick={openNewOrderModal}
-                >
-                  Novo pedido
-                </button>
-              </div>
-            </div>
-          }
           toolbar={
             <div className="orders-calendar-toolbar">
               <div className="orders-calendar-toolbar__controls">
@@ -3702,6 +3726,15 @@ function OrdersPageContent() {
                       {calendarViewLabels[view]}
                     </button>
                   ))}
+                </div>
+                <div className="orders-calendar-toolbar__cta xl:hidden">
+                  <button
+                    type="button"
+                    className="app-button app-button-primary w-full sm:w-auto"
+                    onClick={openNewOrderModal}
+                  >
+                    Novo pedido
+                  </button>
                 </div>
               </div>
               <div className="orders-calendar-nav">
@@ -4139,12 +4172,38 @@ function OrdersPageContent() {
                     </span>
                   </div>
                   <div className="mt-3 grid gap-2">
-                    {selectedDateProductionSummary.map((entry) => (
-                      <div
-                        key={entry.customerKey}
-                        className="rounded-[18px] border border-white/80 bg-white/82 px-3 py-2 shadow-[0_8px_20px_rgba(57,39,24,0.04)]"
-                      >
-                        <p className="text-sm font-semibold text-[color:var(--ink-strong)]">{entry.customerLabel}</p>
+                    {selectedDateProductionSummary.map((entry) => {
+                      const toneClass =
+                        entry.readyState === 'READY'
+                          ? 'border-emerald-200 bg-emerald-50/92'
+                          : entry.readyState === 'PARTIAL'
+                            ? 'border-sky-200 bg-sky-50/92'
+                            : 'border-amber-200 bg-amber-50/92';
+                      const badgeClass =
+                        entry.readyState === 'READY'
+                          ? 'border-emerald-200 bg-white/90 text-emerald-900'
+                          : entry.readyState === 'PARTIAL'
+                            ? 'border-sky-200 bg-white/90 text-sky-900'
+                            : 'border-amber-200 bg-white/90 text-amber-900';
+                      const statusLabel =
+                        entry.readyState === 'READY'
+                          ? 'Pronto'
+                          : entry.readyState === 'PARTIAL'
+                            ? `${entry.readyOrders}/${entry.totalOrders} prontos`
+                            : 'A fazer';
+                      return (
+                        <div
+                          key={entry.customerKey}
+                          className={`rounded-[18px] border px-3 py-2 shadow-[0_8px_20px_rgba(57,39,24,0.04)] ${toneClass}`}
+                        >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-sm font-semibold text-[color:var(--ink-strong)]">{entry.customerLabel}</p>
+                          <span
+                            className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] ${badgeClass}`}
+                          >
+                            {statusLabel}
+                          </span>
+                        </div>
                         {entry.flavorLines.length > 0 ? (
                           <div className="mt-1 grid gap-0.5 text-xs leading-5 text-neutral-600">
                             {entry.flavorLines.map((line) => (
@@ -4154,8 +4213,9 @@ function OrdersPageContent() {
                         ) : (
                           <p className="text-xs leading-5 text-neutral-600">Sem sabores mapeados</p>
                         )}
-                      </div>
-                    ))}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ) : null}

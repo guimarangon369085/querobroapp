@@ -4,6 +4,8 @@ Ultima atualizacao: 2026-03-27
 
 ## Estado atual
 
+- 2026-03-27: `/pedidos` removeu o card solto acima do calendario e levou o `Novo pedido` para o toolbar em mobile. O `Resumo do dia` agora reordena clientes com pedidos pendentes no topo e muda o tom do card conforme o progresso (`a fazer`, `parcial`, `pronto`).
+
 - 2026-03-27: pedidos internos com `100%` de desconto passaram a zerar tambem o frete no valor a receber. O frete continua sendo cotado para operacao, mas entra como `Investimento de marketing: AMOSTRAS` no backend/KPI, sem gerar cobranca residual para o cliente.
 
 - 2026-03-27: `/pedidos` passou a editar os dados completos do cliente diretamente no pedido em qualquer status, usando um snapshot proprio do pedido (`nome`, `telefone`, `endereco`, `complemento`, `bairro`, `cidade`, `UF`, `CEP`, observacoes de entrega) sem depender do cadastro principal. O backend ganhou snapshot persistido no `Order`, tabela `CustomerAddress` para multiplos enderecos por cliente, endpoint `POST /customers/:id/addresses` e seletor de enderecos salvos no novo pedido interno sem perder o vinculo com o `customerId`.
