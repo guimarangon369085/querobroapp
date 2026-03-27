@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ensureApiServer, request, requestExpectError } from './lib/api-server.mjs';
+import { ensureApiServer, request } from './lib/api-server.mjs';
 
 function resolveScheduleDate(seed = Date.now()) {
   const baseDate = new Date(Date.UTC(2030, 0, 1, 0, 0, 0, 0));
@@ -171,7 +171,7 @@ test('public schedule expands the occupied window to two hours for 21 broas', as
   assert.equal(availability.nextAvailableAt, localScheduleIso(scheduleDate, 12, 0));
 });
 
-test('internal dashboard updates also respect the occupied oven window', async (t) => {
+test('internal dashboard orders can overlap even when public schedule is blocked', async (t) => {
   const { apiUrl, shutdown } = await ensureApiServer();
   const created = {
     productId: null,
@@ -204,20 +204,29 @@ test('internal dashboard updates also respect the occupied oven window', async (
   created.productId = product.id;
 
   const firstSchedule = localScheduleIso(scheduleDate, 10, 0);
-  const secondSchedule = localScheduleIso(scheduleDate, 11, 0);
+  const secondSchedule = localScheduleIso(scheduleDate, 10, 30);
   const first = await createIntakeOrder(apiUrl, product.id, `${suffix}-first`, firstSchedule, 14, 'INTERNAL_DASHBOARD');
   const second = await createIntakeOrder(apiUrl, product.id, `${suffix}-second`, secondSchedule, 14, 'INTERNAL_DASHBOARD');
 
   created.orderIds.push(first.order.id, second.order.id);
   created.customerIds.push(first.intake.customerId, second.intake.customerId);
 
-  const body = await requestExpectError(apiUrl, `/orders/${second.order.id}`, 400, {
+  const publicAvailability = await request(
+    apiUrl,
+    `/orders/public-schedule?scheduledAt=${encodeURIComponent(firstSchedule)}&totalBroas=14`
+  );
+
+  assert.equal(publicAvailability.requestedAvailable, false);
+  assert.equal(publicAvailability.reason, 'SLOT_TAKEN');
+  assert.equal(publicAvailability.nextAvailableAt, localScheduleIso(scheduleDate, 11, 30));
+
+  const updated = await request(apiUrl, `/orders/${second.order.id}`, {
     method: 'PUT',
     body: {
       scheduledAt: firstSchedule
     }
   });
 
-  assert.equal(body.reason, 'SLOT_TAKEN');
-  assert.equal(body.nextAvailableAt, localScheduleIso(scheduleDate, 11, 0));
+  assert.equal(updated.id, second.order.id);
+  assert.equal(updated.scheduledAt, firstSchedule);
 });

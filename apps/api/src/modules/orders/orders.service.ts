@@ -1985,13 +1985,6 @@ export class OrdersService {
         normalizedNotes = mergeMarketingSamplesIntoNotes(normalizedNotes, { discountPct: effectiveDiscountPct });
       }
 
-      if (scheduledAt && pricedOrder.productionTotalBroas > 0) {
-        await this.ensureOrderScheduleCapacityAllowed(tx, scheduledAt, {
-          requestedTotalBroas: pricedOrder.productionTotalBroas,
-          reference: new Date()
-        });
-      }
-
       const createdOrder = await tx.order.create({
         data: {
           publicNumber: await allocateNextPublicNumber(tx, 'ORDER'),
@@ -2324,23 +2317,6 @@ export class OrdersService {
       const nextNotes = Object.prototype.hasOwnProperty.call(data, 'notes')
         ? preserveOrderNoteMetadata(existing.notes ?? null, data.notes ?? null)
         : undefined;
-      const effectiveScheduledAt = nextScheduledAt !== undefined ? nextScheduledAt : existing.scheduledAt;
-      if (effectiveScheduledAt) {
-        const requestedTotalBroas = await this.resolveOrderProductionBroaCountForItems(
-          tx,
-          existing.items.map((item) => ({
-            productId: item.productId,
-            quantity: item.quantity
-          }))
-        );
-        if (requestedTotalBroas > 0) {
-          await this.ensureOrderScheduleCapacityAllowed(tx, effectiveScheduledAt, {
-            excludeOrderId: id,
-            requestedTotalBroas
-          });
-        }
-      }
-
       const updated = await tx.order.update({
         where: { id },
         data: {
@@ -2414,15 +2390,6 @@ export class OrdersService {
           quantity: data.quantity
         }
       ];
-      if (order.scheduledAt) {
-        const requestedTotalBroas = await this.resolveOrderProductionBroaCountForItems(tx, nextSubtotalItems);
-        if (requestedTotalBroas > 0) {
-          await this.ensureOrderScheduleCapacityAllowed(tx, order.scheduledAt, {
-            excludeOrderId: orderId,
-            requestedTotalBroas
-          });
-        }
-      }
       const newSubtotal = await this.calculateOrderSubtotalFromItems(tx, nextSubtotalItems);
       const newTotal = this.computeOrderTotal(newSubtotal, order.discount, this.toMoney(order.deliveryFee ?? 0));
       await tx.order.update({ where: { id: orderId }, data: { subtotal: newSubtotal, total: newTotal } });
@@ -2458,16 +2425,6 @@ export class OrdersService {
         .filter((item) => item.quantity > 0);
       if (normalizedItems.length === 0) {
         throw new BadRequestException('Itens sao obrigatorios');
-      }
-
-      if (order.scheduledAt) {
-        const requestedTotalBroas = await this.resolveOrderProductionBroaCountForItems(tx, normalizedItems);
-        if (requestedTotalBroas > 0) {
-          await this.ensureOrderScheduleCapacityAllowed(tx, order.scheduledAt, {
-            excludeOrderId: orderId,
-            requestedTotalBroas
-          });
-        }
       }
 
       const productIds = normalizedItems.map((item) => item.productId);
