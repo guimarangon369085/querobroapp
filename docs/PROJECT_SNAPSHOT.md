@@ -266,6 +266,10 @@ Ultima atualizacao: 2026-03-26
 - Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`
 - Resultado: o CEP deixou de aparecer nos cards de clientes e pedidos, inclusive quando estava embutido no endereco bruto ja salvo. O campo continua existindo normalmente apenas no cadastro/edicao do cliente.
 
+- Data: 2026-03-27
+- Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`
+- Resultado: o calendario de `/pedidos` passou a exibir uma linha vermelha do horario atual nas visoes `DIA` e `SEMANA`, atualizada automaticamente como nos apps de agenda, sem interferir nos cards de pedido nem na visao mensal.
+
 ## Como religar e validar rapido
 
 1. `./scripts/stop-all.sh`

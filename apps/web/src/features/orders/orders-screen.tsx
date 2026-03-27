@@ -1172,6 +1172,7 @@ function OrdersPageContent() {
   const [calendarView, setCalendarView] = useState<CalendarViewMode>('DAY');
   const [calendarAnchorDate, setCalendarAnchorDate] = useState<Date>(() => startOfLocalDay(new Date()));
   const [selectedCalendarDateKey, setSelectedCalendarDateKey] = useState(() => dateKeyFromDate(new Date()));
+  const [calendarNow, setCalendarNow] = useState(() => new Date());
   const isOperationMode = true;
   const [dayGridDragState, setDayGridDragState] = useState<DayGridDragState | null>(null);
   const [weekGridDragState, setWeekGridDragState] = useState<WeekGridDragState | null>(null);
@@ -1804,7 +1805,27 @@ function OrdersPageContent() {
     return grouped;
   }, [calendarEntries]);
 
-  const todayDateKey = dateKeyFromDate(new Date());
+  useEffect(() => {
+    let intervalId: number | null = null;
+    let timeoutId: number | null = null;
+
+    const tick = () => setCalendarNow(new Date());
+    const armInterval = () => {
+      tick();
+      intervalId = window.setInterval(tick, 60_000);
+    };
+
+    const now = new Date();
+    const msUntilNextMinute = 60_000 - (now.getSeconds() * 1000 + now.getMilliseconds());
+    timeoutId = window.setTimeout(armInterval, msUntilNextMinute);
+
+    return () => {
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      if (intervalId !== null) window.clearInterval(intervalId);
+    };
+  }, []);
+
+  const todayDateKey = dateKeyFromDate(calendarNow);
   const selectedCalendarDate = useMemo(
     () => startOfLocalDay(dateFromDateKey(selectedCalendarDateKey)),
     [selectedCalendarDateKey]
@@ -2008,6 +2029,14 @@ function OrdersPageContent() {
       ),
     [dayGridDurationMinutes, dayGridLineSlots, dayGridStartMinutes, weekGridHeight]
   );
+  const currentTimeMarkerTop = useMemo(() => {
+    const currentMinutes =
+      calendarNow.getHours() * 60 + calendarNow.getMinutes() + calendarNow.getSeconds() / 60;
+    if (currentMinutes < dayGridStartMinutes || currentMinutes > dayGridEndMinutes) return null;
+    return ((currentMinutes - dayGridStartMinutes) / dayGridDurationMinutes) * dayGridHeight;
+  }, [calendarNow, dayGridDurationMinutes, dayGridEndMinutes, dayGridHeight, dayGridStartMinutes]);
+  const selectedDateCurrentTimeMarkerTop =
+    selectedCalendarDateKey === todayDateKey ? currentTimeMarkerTop : null;
   const weekTimelineCells = useMemo(() => {
     return weekCells.map((cell) => {
       const { overflowCount, timelineLaneCount, timelineEvents } = buildWeekTimelineMetrics(
@@ -3300,6 +3329,15 @@ function OrdersPageContent() {
                         />
                       );
                     })}
+                    {selectedDateCurrentTimeMarkerTop !== null ? (
+                      <div
+                        className="orders-calendar-now"
+                        style={{ top: `${selectedDateCurrentTimeMarkerTop}px` }}
+                        aria-hidden="true"
+                      >
+                        <span className="orders-calendar-now__dot" />
+                      </div>
+                    ) : null}
                     {selectedDateTimelineEvents.length === 0 ? (
                       <div className="orders-day-grid__empty">sem pedidos no horario</div>
                     ) : (
@@ -3492,6 +3530,15 @@ function OrdersPageContent() {
                             aria-hidden="true"
                           />
                         ))}
+                        {cell.isToday && currentTimeMarkerTop !== null ? (
+                          <div
+                            className="orders-calendar-now"
+                            style={{ top: `${currentTimeMarkerTop}px` }}
+                            aria-hidden="true"
+                          >
+                            <span className="orders-calendar-now__dot" />
+                          </div>
+                        ) : null}
                         {displayTimelineEvents.length === 0 ? (
                           <div className="orders-week-grid__empty">sem pedidos</div>
                         ) : (
