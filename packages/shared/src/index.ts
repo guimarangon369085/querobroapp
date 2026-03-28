@@ -470,6 +470,18 @@ export const ExternalOrderScheduleAvailabilityReasonEnum = z.enum([
   'DAY_FULL'
 ]);
 
+export const ExternalOrderDeliveryWindowKeyEnum = z.enum(['MORNING', 'AFTERNOON', 'EVENING']);
+
+export const ExternalOrderDeliveryWindowAvailabilitySchema = z.object({
+  key: ExternalOrderDeliveryWindowKeyEnum,
+  label: z.string().min(1),
+  startLabel: z.string().min(1),
+  endLabel: z.string().min(1),
+  available: z.boolean(),
+  scheduledAt: z.string().datetime().nullable(),
+  reason: ExternalOrderScheduleAvailabilityReasonEnum
+});
+
 export const ExternalOrderScheduleAvailabilitySchema = z.object({
   minimumAllowedAt: z.string().datetime(),
   nextAvailableAt: z.string().datetime(),
@@ -481,7 +493,15 @@ export const ExternalOrderScheduleAvailabilitySchema = z.object({
   requestedDurationMinutes: z.number().int().nonnegative(),
   slotMinutes: z.number().int().positive(),
   dayOrderCount: z.number().int().nonnegative(),
-  slotTaken: z.boolean()
+  slotTaken: z.boolean(),
+  requestedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  requestedWindowKey: ExternalOrderDeliveryWindowKeyEnum.nullable(),
+  requestedWindowLabel: z.string().nullable(),
+  requestedWindowAvailable: z.boolean(),
+  requestedWindowReason: ExternalOrderScheduleAvailabilityReasonEnum.nullable(),
+  requestedWindowScheduledAt: z.string().datetime().nullable(),
+  requestedWindowNextAvailableAt: z.string().datetime().nullable(),
+  windows: z.array(ExternalOrderDeliveryWindowAvailabilitySchema)
 });
 
 export const ExternalOrderSubmissionChannelEnum = z.enum(['GOOGLE_FORM', 'PUBLIC_FORM']);
@@ -523,7 +543,9 @@ export const ExternalOrderSubmissionSchema = z
     }),
     fulfillment: z.object({
       mode: OrderFulfillmentModeEnum.default('DELIVERY'),
-      scheduledAt: z.string().datetime()
+      scheduledAt: z.string().datetime().optional().nullable(),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+      timeWindow: ExternalOrderDeliveryWindowKeyEnum.optional().nullable()
     }),
     delivery: DeliveryQuoteSelectionSchema.optional(),
     flavors: ExternalOrderFlavorCountsSchema,
@@ -540,6 +562,16 @@ export const ExternalOrderSubmissionSchema = z
       .default({})
   })
   .superRefine((value, ctx) => {
+    const hasScheduledAt = Boolean(value.fulfillment.scheduledAt);
+    const hasDate = Boolean(value.fulfillment.date);
+    const hasTimeWindow = Boolean(value.fulfillment.timeWindow);
+    if (!hasScheduledAt && !(hasDate && hasTimeWindow)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Informe a data e a faixa de horario do pedido.',
+        path: ['fulfillment', 'timeWindow']
+      });
+    }
     const flavorTotal =
       (value.flavors.T || 0) +
       (value.flavors.G || 0) +

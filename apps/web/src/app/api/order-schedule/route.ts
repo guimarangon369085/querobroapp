@@ -9,12 +9,20 @@ function buildErrorResponse(status: number, payload: unknown) {
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
+  const requestedDate = requestUrl.searchParams.get('date');
+  const timeWindow = requestUrl.searchParams.get('timeWindow');
   const scheduledAt = requestUrl.searchParams.get('scheduledAt');
   const totalBroas = requestUrl.searchParams.get('totalBroas');
   const upstreamUrl = new URL(
     `${resolveServerBridgeApiBaseUrl(request, process.env.ORDER_FORM_API_URL)}/orders/public-schedule`
   );
 
+  if (requestedDate) {
+    upstreamUrl.searchParams.set('date', requestedDate);
+  }
+  if (timeWindow) {
+    upstreamUrl.searchParams.set('timeWindow', timeWindow);
+  }
   if (scheduledAt) {
     upstreamUrl.searchParams.set('scheduledAt', scheduledAt);
   }

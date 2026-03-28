@@ -120,13 +120,14 @@ export class DeliveriesService {
 
   async quoteDelivery(
     payload: unknown,
-    options?: { enforceExternalSchedule?: boolean; allowManualFallback?: boolean }
+    options?: { enforceExternalSchedule?: boolean; allowManualFallback?: boolean; persistQuoteRecord?: boolean }
   ) {
     const draft = DeliveryQuoteDraftSchema.parse(payload);
     try {
       return await this.quoteForDraft(draft, {
         enforceExternalSchedule: options?.enforceExternalSchedule ?? true,
-        allowManualFallback: options?.allowManualFallback ?? false
+        allowManualFallback: options?.allowManualFallback ?? false,
+        persistQuoteRecord: options?.persistQuoteRecord ?? true
       });
     } catch (error) {
       if (error instanceof BadRequestException || error instanceof BadGatewayException || error instanceof NotFoundException) {
@@ -252,7 +253,7 @@ export class DeliveriesService {
   async resolveDeliverySelection(
     selectionPayload: unknown,
     draftPayload: DeliveryQuoteDraft,
-    options?: { enforceExternalSchedule?: boolean; allowManualFallback?: boolean }
+    options?: { enforceExternalSchedule?: boolean; allowManualFallback?: boolean; persistQuoteRecord?: boolean }
   ) {
     const draft = DeliveryQuoteDraftSchema.parse(draftPayload);
     if (draft.mode !== OrderFulfillmentModeEnum.enum.DELIVERY) {
@@ -270,7 +271,8 @@ export class DeliveriesService {
       return this.quoteForDraft(draft, {
         forceRefresh: true,
         enforceExternalSchedule: options?.enforceExternalSchedule,
-        allowManualFallback: options?.allowManualFallback
+        allowManualFallback: options?.allowManualFallback,
+        persistQuoteRecord: options?.persistQuoteRecord ?? true
       });
     }
 
@@ -287,7 +289,8 @@ export class DeliveriesService {
     const refreshed = await this.quoteForDraft(draft, {
       forceRefresh: true,
       enforceExternalSchedule: options?.enforceExternalSchedule,
-      allowManualFallback: options?.allowManualFallback
+      allowManualFallback: options?.allowManualFallback,
+      persistQuoteRecord: options?.persistQuoteRecord ?? true
     });
     throw new BadRequestException({
       code: 'DELIVERY_QUOTE_REFRESH_REQUIRED',
@@ -477,7 +480,12 @@ export class DeliveriesService {
 
   private async quoteForDraft(
     draftPayload: DeliveryQuoteDraft,
-    options?: { forceRefresh?: boolean; enforceExternalSchedule?: boolean; allowManualFallback?: boolean }
+    options?: {
+      forceRefresh?: boolean;
+      enforceExternalSchedule?: boolean;
+      allowManualFallback?: boolean;
+      persistQuoteRecord?: boolean;
+    }
   ) {
     const draft = DeliveryQuoteDraftSchema.parse(draftPayload);
     if (draft.mode !== OrderFulfillmentModeEnum.enum.DELIVERY) {
@@ -516,6 +524,15 @@ export class DeliveriesService {
       fallbackReason: null,
       breakdownLabel: null
     });
+
+    if (options?.persistQuoteRecord === false) {
+      return DeliveryQuoteResponseSchema.parse({
+        ...normalized,
+        quoteToken: null,
+        providerQuoteId: null,
+        expiresAt: null
+      });
+    }
 
     await this.saveQuoteRecord(quoteToken, requestHash, normalized);
     return normalized;

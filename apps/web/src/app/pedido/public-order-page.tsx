@@ -2,8 +2,11 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  EXTERNAL_ORDER_DELIVERY_WINDOWS,
   formatExternalOrderMinimumSchedule,
+  resolveExternalOrderDeliveryWindowKeyForDate,
   resolveExternalOrderMinimumSchedule,
+  type ExternalOrderDeliveryWindowKey,
   type ExternalOrderSubmission,
   type CouponResolveResponse,
   type Product
@@ -41,8 +44,6 @@ import {
 import { writeStoredOrderFinalized } from '@/lib/order-finalized-storage';
 
 const GOOGLE_MAPS_API_KEY = (process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '').trim();
-const PUBLIC_ORDER_HOUR_OPTIONS = Array.from({ length: 24 }, (_, index) => `${index}`.padStart(2, '0'));
-const PUBLIC_ORDER_MINUTE_OPTIONS = ['00', '15', '30', '45'] as const;
 
 type SelectedBoxSummary = {
   key: string;
@@ -66,7 +67,7 @@ type PublicOrderFormState = {
   lng: number | null;
   deliveryNotes: string;
   date: string;
-  time: string;
+  timeWindow: ExternalOrderDeliveryWindowKey | '';
   notes: string;
   boxes: Record<string, string>;
 };
@@ -96,6 +97,13 @@ type AppliedCoupon = CouponResolveResponse;
 type PublicOrderScheduleAvailability = {
   minimumAllowedAt: string;
   nextAvailableAt: string;
+  requestedDate: string;
+  requestedWindowKey: ExternalOrderDeliveryWindowKey | null;
+  requestedWindowLabel: string | null;
+  requestedWindowAvailable: boolean;
+  requestedWindowReason: 'AVAILABLE' | 'BEFORE_MINIMUM' | 'SLOT_TAKEN' | 'DAY_FULL' | null;
+  requestedWindowScheduledAt: string | null;
+  requestedWindowNextAvailableAt: string | null;
   requestedAt: string | null;
   requestedAvailable: boolean;
   reason: 'AVAILABLE' | 'BEFORE_MINIMUM' | 'SLOT_TAKEN' | 'DAY_FULL';
@@ -105,9 +113,16 @@ type PublicOrderScheduleAvailability = {
   slotMinutes: number;
   dayOrderCount: number;
   slotTaken: boolean;
+  windows: Array<{
+    key: ExternalOrderDeliveryWindowKey;
+    label: string;
+    startLabel: string;
+    endLabel: string;
+    available: boolean;
+    scheduledAt: string | null;
+    reason: 'AVAILABLE' | 'BEFORE_MINIMUM' | 'SLOT_TAKEN' | 'DAY_FULL';
+  }>;
 };
-
-type PublicOrderMinuteOption = (typeof PUBLIC_ORDER_MINUTE_OPTIONS)[number];
 
 const initialFormState: PublicOrderFormState = {
   name: '',
@@ -119,7 +134,7 @@ const initialFormState: PublicOrderFormState = {
   lng: null,
   deliveryNotes: '',
   date: '',
-  time: '',
+  timeWindow: '',
   notes: '',
   boxes: {}
 };
@@ -200,34 +215,10 @@ function formatDateInputValue(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function formatTimeInputValue(date: Date) {
-  const hours = `${date.getHours()}`.padStart(2, '0');
-  const minutes = `${date.getMinutes()}`.padStart(2, '0');
-  return `${hours}:${minutes}`;
-}
-
-function parseTimeValueParts(value?: string | null) {
-  const [hour = '', minute = ''] = String(value || '').split(':');
-  if (!/^\d{2}$/.test(hour) || !/^\d{2}$/.test(minute)) return null;
-  return { hour, minute };
-}
-
-function buildTimeValue(hour: string, minute: string) {
-  if (!/^\d{2}$/.test(hour) || !/^\d{2}$/.test(minute)) return '';
-  return `${hour}:${minute}`;
-}
-
-function parseLocalDateTime(date: string, time: string) {
-  if (!date || !time) return null;
-  const [year, month, day] = date.split('-').map((entry) => Number(entry));
-  const [hour, minute] = time.split(':').map((entry) => Number(entry));
-  if (![year, month, day, hour, minute].every(Number.isFinite)) return null;
-  const parsed = new Date(year, month - 1, day, hour, minute, 0, 0);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
 function buildPublicOrderScheduleErrorMessage(minimum: Date) {
-  return `Próximo horário: ${formatExternalOrderMinimumSchedule(minimum)}.`;
+  const windowKey = resolveExternalOrderDeliveryWindowKeyForDate(minimum);
+  const windowLabel = EXTERNAL_ORDER_DELIVERY_WINDOWS.find((entry) => entry.key === windowKey)?.label;
+  return windowLabel ? `Próxima faixa: ${windowLabel}.` : `Próxima faixa: ${formatExternalOrderMinimumSchedule(minimum)}.`;
 }
 
 function extractErrorMessage(body: unknown) {
@@ -263,6 +254,8 @@ function isPublicOrderScheduleAvailability(value: unknown): value is PublicOrder
   return (
     typeof record.minimumAllowedAt === 'string' &&
     typeof record.nextAvailableAt === 'string' &&
+    typeof record.requestedDate === 'string' &&
+    Array.isArray(record.windows) &&
     (record.requestedAt == null || typeof record.requestedAt === 'string') &&
     typeof record.requestedAvailable === 'boolean' &&
     typeof record.reason === 'string'
@@ -272,11 +265,6 @@ function isPublicOrderScheduleAvailability(value: unknown): value is PublicOrder
 function parseCountValue(value: string) {
   const parsed = Number(String(value || '').replace(/[^\d-]/g, ''));
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
-}
-
-function toLocalIso(date: string, time: string) {
-  const parsed = parseLocalDateTime(date, time);
-  return parsed ? parsed.toISOString() : null;
 }
 
 function formatCurrencyBRL(value?: number | null) {
@@ -388,14 +376,10 @@ export function PublicOrderPage() {
     lng: null
   });
   const [minimumSchedule, setMinimumSchedule] = useState<Date | null>(null);
+  const [scheduleAvailability, setScheduleAvailability] = useState<PublicOrderScheduleAvailability | null>(null);
   const [draftSessionId, setDraftSessionId] = useState(() => resolvePublicOrderDraftSessionId());
   const minimumDateValue = minimumSchedule ? formatDateInputValue(minimumSchedule) : '';
-  const minimumTimeValue = minimumSchedule ? formatTimeInputValue(minimumSchedule) : '';
   const isPickupSelected = form.fulfillmentMode === 'PICKUP';
-  const selectedTimeParts = useMemo(() => parseTimeValueParts(form.time), [form.time]);
-  const minimumTimeParts = useMemo(() => parseTimeValueParts(minimumTimeValue), [minimumTimeValue]);
-  const selectedHourValue = selectedTimeParts?.hour ?? '';
-  const selectedMinuteValue = selectedTimeParts?.minute ?? '';
   const runtimeOrderCatalog = useMemo(() => buildRuntimeOrderCatalog(catalogProducts), [catalogProducts]);
   const runtimeBoxEntries = runtimeOrderCatalog.boxEntries;
   const flavorProducts = runtimeOrderCatalog.flavorProducts;
@@ -409,66 +393,6 @@ export function PublicOrderPage() {
     [catalogProducts]
   );
   const saboresCardArt = useMemo(() => resolveOrderSaboresCardArt(catalogProducts), [catalogProducts]);
-  const availableMinuteOptions = useMemo(() => {
-    if (
-      form.date === minimumDateValue &&
-      minimumTimeParts &&
-      selectedHourValue === minimumTimeParts.hour
-    ) {
-      return PUBLIC_ORDER_MINUTE_OPTIONS.filter((option) => option >= minimumTimeParts.minute);
-    }
-    return PUBLIC_ORDER_MINUTE_OPTIONS;
-  }, [form.date, minimumDateValue, minimumTimeParts, selectedHourValue]);
-
-  const handleHourChange = useCallback(
-    (nextHour: string) => {
-      setForm((current) => {
-        if (!nextHour) {
-          return { ...current, time: '' };
-        }
-
-        const currentParts = parseTimeValueParts(current.time);
-        const currentMinimumParts =
-          current.date === minimumDateValue ? parseTimeValueParts(minimumTimeValue) : null;
-        const allowedMinuteOptions =
-          currentMinimumParts && nextHour === currentMinimumParts.hour
-            ? PUBLIC_ORDER_MINUTE_OPTIONS.filter((option) => option >= currentMinimumParts.minute)
-            : PUBLIC_ORDER_MINUTE_OPTIONS;
-        const nextMinute =
-          currentParts && allowedMinuteOptions.includes(currentParts.minute as PublicOrderMinuteOption)
-            ? currentParts.minute
-            : (allowedMinuteOptions[0] ?? PUBLIC_ORDER_MINUTE_OPTIONS[0]);
-
-        return {
-          ...current,
-          time: buildTimeValue(nextHour, nextMinute)
-        };
-      });
-    },
-    [minimumDateValue, minimumTimeValue]
-  );
-
-  const handleMinuteChange = useCallback((nextMinute: string) => {
-    setForm((current) => {
-      const currentParts = parseTimeValueParts(current.time);
-      const nextHour = currentParts?.hour ?? '';
-      if (!nextHour || !nextMinute) return current;
-      return {
-        ...current,
-        time: buildTimeValue(nextHour, nextMinute)
-      };
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!selectedHourValue || !selectedMinuteValue) return;
-    if (availableMinuteOptions.includes(selectedMinuteValue as PublicOrderMinuteOption)) return;
-    const nextMinute = availableMinuteOptions[0] ?? PUBLIC_ORDER_MINUTE_OPTIONS[0];
-    setForm((current) => ({
-      ...current,
-      time: buildTimeValue(selectedHourValue, nextMinute)
-    }));
-  }, [availableMinuteOptions, selectedHourValue, selectedMinuteValue]);
 
   useEffect(() => {
     let cancelled = false;
@@ -734,7 +658,6 @@ export function PublicOrderPage() {
     () => roundCurrency(Math.max(estimatedTotal - couponDiscountAmount, 0)),
     [couponDiscountAmount, estimatedTotal]
   );
-  const scheduledAtIso = useMemo(() => toLocalIso(form.date, form.time), [form.date, form.time]);
   const selectedBoxes = useMemo<SelectedBoxSummary[]>(
     () => [
       ...runtimeBoxEntries
@@ -781,7 +704,17 @@ export function PublicOrderPage() {
   );
   const deliveryFee = deliveryQuote?.fee ?? 0;
   const displayTotal = discountedSubtotal + deliveryFee;
-  const parsedScheduledAt = useMemo(() => parseLocalDateTime(form.date, form.time), [form.date, form.time]);
+  const selectedWindowAvailability = useMemo(
+    () => scheduleAvailability?.windows.find((window) => window.key === form.timeWindow) ?? null,
+    [form.timeWindow, scheduleAvailability]
+  );
+  const selectedTimeWindowLabel = selectedWindowAvailability?.label ?? null;
+  const scheduledAtIso = selectedWindowAvailability?.scheduledAt ?? null;
+  const parsedScheduledAt = useMemo(() => {
+    if (!scheduledAtIso) return null;
+    const parsed = new Date(scheduledAtIso);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }, [scheduledAtIso]);
   const minimumScheduleLabel = useMemo(
     () => (minimumSchedule ? formatExternalOrderMinimumSchedule(minimumSchedule) : null),
     [minimumSchedule]
@@ -791,28 +724,24 @@ export function PublicOrderPage() {
     return parsedScheduledAt.getTime() < minimumSchedule.getTime();
   }, [minimumSchedule, parsedScheduledAt]);
 
-  const applyScheduleToForm = useCallback((nextSchedule: Date) => {
-    setMinimumSchedule(nextSchedule);
-    setForm((current) => {
-      const currentScheduledAt = parseLocalDateTime(current.date, current.time);
-      if (currentScheduledAt && currentScheduledAt.getTime() >= nextSchedule.getTime()) {
-        return current;
-      }
-      return {
-        ...current,
-        date: formatDateInputValue(nextSchedule),
-        time: formatTimeInputValue(nextSchedule)
-      };
-    });
-  }, []);
-
-  const fetchPublicScheduleAvailability = useCallback(async (requestedAt?: string | null, requestedTotalBroas?: number) => {
+  const fetchPublicScheduleAvailability = useCallback(async (options?: {
+    requestedDate?: string | null;
+    requestedWindowKey?: ExternalOrderDeliveryWindowKey | '' | null;
+    requestedTotalBroas?: number;
+  }) => {
     const params = new URLSearchParams();
-    if (requestedAt) {
-      params.set('scheduledAt', requestedAt);
+    if (options?.requestedDate) {
+      params.set('date', options.requestedDate);
     }
-    if (typeof requestedTotalBroas === 'number' && Number.isFinite(requestedTotalBroas) && requestedTotalBroas > 0) {
-      params.set('totalBroas', String(Math.max(Math.floor(requestedTotalBroas), 0)));
+    if (options?.requestedWindowKey) {
+      params.set('timeWindow', options.requestedWindowKey);
+    }
+    if (
+      typeof options?.requestedTotalBroas === 'number' &&
+      Number.isFinite(options.requestedTotalBroas) &&
+      options.requestedTotalBroas > 0
+    ) {
+      params.set('totalBroas', String(Math.max(Math.floor(options.requestedTotalBroas), 0)));
     }
     const query = params.size > 0 ? `?${params.toString()}` : '';
     const response = await fetch(`/api/order-schedule${query}`, {
@@ -830,30 +759,74 @@ export function PublicOrderPage() {
     return data;
   }, []);
 
-  const syncMinimumSchedule = useCallback(async (requestedAt?: string | null) => {
+  const syncScheduleAvailability = useCallback(async (options?: {
+    requestedDate?: string | null;
+    requestedWindowKey?: ExternalOrderDeliveryWindowKey | '' | null;
+  }) => {
     try {
-      const availability = await fetchPublicScheduleAvailability(
-        requestedAt,
-        Math.max(totalBroas, ORDER_BOX_UNITS)
-      );
+      const availability = await fetchPublicScheduleAvailability({
+        requestedDate: options?.requestedDate,
+        requestedWindowKey: options?.requestedWindowKey,
+        requestedTotalBroas: Math.max(totalBroas, ORDER_BOX_UNITS)
+      });
+      setScheduleAvailability(availability);
       const nextMinimum = new Date(availability.nextAvailableAt);
       if (Number.isNaN(nextMinimum.getTime())) {
-        throw new Error('Horario publico invalido.');
+        throw new Error('Agenda publica invalida.');
       }
-      applyScheduleToForm(nextMinimum);
+      setMinimumSchedule(new Date(availability.minimumAllowedAt));
+
+      const nextAvailableDate = formatDateInputValue(nextMinimum);
+      const nextAvailableWindowKey = resolveExternalOrderDeliveryWindowKeyForDate(nextMinimum) ?? '';
+      const firstAvailableWindowKey = availability.windows.find((window) => window.available)?.key ?? '';
+
+      setForm((current) => {
+        const requestedDate = options?.requestedDate ?? current.date;
+        const requestedWindowKey = options?.requestedWindowKey ?? current.timeWindow;
+        const keepRequestedDate = Boolean(requestedDate) && availability.requestedDate === requestedDate && availability.windows.some((window) => window.available);
+        const nextDate = keepRequestedDate ? availability.requestedDate : nextAvailableDate;
+        const preferredWindowKey =
+          availability.windows.find((window) => window.key === requestedWindowKey && window.available)?.key ??
+          firstAvailableWindowKey ??
+          nextAvailableWindowKey;
+        const nextTimeWindow = keepRequestedDate ? preferredWindowKey : nextAvailableWindowKey || preferredWindowKey;
+
+        if (current.date === nextDate && current.timeWindow === nextTimeWindow) {
+          return current;
+        }
+
+        return {
+          ...current,
+          date: nextDate,
+          timeWindow: nextTimeWindow
+        };
+      });
     } catch {
-      applyScheduleToForm(resolveExternalOrderMinimumSchedule());
+      const fallbackMinimum = resolveExternalOrderMinimumSchedule();
+      setScheduleAvailability(null);
+      setMinimumSchedule(fallbackMinimum);
+      setForm((current) => ({
+        ...current,
+        date: formatDateInputValue(fallbackMinimum),
+        timeWindow: resolveExternalOrderDeliveryWindowKeyForDate(fallbackMinimum) ?? 'MORNING'
+      }));
     }
-  }, [applyScheduleToForm, fetchPublicScheduleAvailability, totalBroas]);
+  }, [fetchPublicScheduleAvailability, totalBroas]);
 
   useEffect(() => {
-    void syncMinimumSchedule();
+    void syncScheduleAvailability();
     const timer = window.setInterval(() => {
-      void syncMinimumSchedule();
+      void syncScheduleAvailability({
+        requestedDate: form.date || null,
+        requestedWindowKey: form.timeWindow || null
+      });
     }, 60_000);
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        void syncMinimumSchedule();
+        void syncScheduleAvailability({
+          requestedDate: form.date || null,
+          requestedWindowKey: form.timeWindow || null
+        });
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -861,12 +834,14 @@ export function PublicOrderPage() {
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [syncMinimumSchedule]);
+  }, [form.date, form.timeWindow, syncScheduleAvailability]);
 
   useEffect(() => {
-    if (!scheduledAtIso) return;
-    void syncMinimumSchedule(scheduledAtIso);
-  }, [scheduledAtIso, syncMinimumSchedule, totalBroas]);
+    void syncScheduleAvailability({
+      requestedDate: form.date || null,
+      requestedWindowKey: form.timeWindow || null
+    });
+  }, [form.date, form.timeWindow, syncScheduleAvailability, totalBroas]);
 
   const applyCoupon = useCallback(
     async (forcedCode?: string | null) => {
@@ -1082,9 +1057,9 @@ export function PublicOrderPage() {
       return null;
     }
 
-    if (!scheduledAtIso) {
+    if (!form.timeWindow || !selectedWindowAvailability?.available || !scheduledAtIso) {
       setDeliveryQuote(null);
-      setDeliveryQuoteError('Escolha data e horario validos para calcular o frete.');
+      setDeliveryQuoteError('Escolha uma faixa de horario disponivel para calcular o frete.');
       return null;
     }
 
@@ -1199,11 +1174,13 @@ export function PublicOrderPage() {
     form.lat,
     form.lng,
     form.placeId,
+    form.timeWindow,
     incompleteCustomBoxes.length,
     isCouponApplied,
     minimumSchedule,
     normalizedCouponInput,
     parsedScheduledAt,
+    selectedWindowAvailability?.available,
     scheduledAtIso,
     flavorManifestItems,
     totalBroas
@@ -1247,16 +1224,20 @@ export function PublicOrderPage() {
       setError('Informe o endereco para entrega.');
       return;
     }
-    if (!scheduledAt) {
-      setError('Informe data e horario validos.');
+    if (!form.date) {
+      setError('Informe a data do pedido.');
       return;
     }
-    const parsedScheduledAt = parseLocalDateTime(form.date, form.time);
+    if (!form.timeWindow || !selectedWindowAvailability?.available || !scheduledAt) {
+      setError('Escolha uma faixa de horario disponivel.');
+      return;
+    }
     if (!parsedScheduledAt || parsedScheduledAt.getTime() < currentMinimumSchedule.getTime()) {
+      const suggestedWindowKey = resolveExternalOrderDeliveryWindowKeyForDate(currentMinimumSchedule) ?? 'MORNING';
       setForm((current) => ({
         ...current,
         date: formatDateInputValue(currentMinimumSchedule),
-        time: formatTimeInputValue(currentMinimumSchedule)
+        timeWindow: suggestedWindowKey
       }));
       setMinimumSchedule(currentMinimumSchedule);
       setError(buildPublicOrderScheduleErrorMessage(currentMinimumSchedule));
@@ -1301,7 +1282,9 @@ export function PublicOrderPage() {
       },
       fulfillment: {
         mode: form.fulfillmentMode,
-        scheduledAt
+        scheduledAt,
+        date: form.date,
+        timeWindow: form.timeWindow
       },
       delivery:
         form.fulfillmentMode === 'DELIVERY' && deliveryQuote
@@ -1364,7 +1347,12 @@ export function PublicOrderPage() {
         if (typeof record?.nextAvailableAt === 'string') {
           const suggestedSchedule = new Date(record.nextAvailableAt);
           if (!Number.isNaN(suggestedSchedule.getTime())) {
-            applyScheduleToForm(suggestedSchedule);
+            setForm((current) => ({
+              ...current,
+              date: formatDateInputValue(suggestedSchedule),
+              timeWindow: resolveExternalOrderDeliveryWindowKeyForDate(suggestedSchedule) ?? current.timeWindow
+            }));
+            setMinimumSchedule(suggestedSchedule);
           }
         }
         throw new Error(extractErrorMessage(data));
@@ -1385,7 +1373,10 @@ export function PublicOrderPage() {
         returnPath: '/pedido',
         returnLabel: 'Fazer novo pedido',
         productSubtotal: discountedSubtotal,
-        order: result.order,
+        order: {
+          ...result.order,
+          deliveryWindowLabel: selectedTimeWindowLabel
+        },
         intake: {
           stage: result.intake.stage,
           deliveryFee: result.intake.deliveryFee,
@@ -1437,7 +1428,7 @@ export function PublicOrderPage() {
     setForm({
       ...initialFormState,
       date: formatDateInputValue(nextMinimum),
-      time: formatTimeInputValue(nextMinimum)
+      timeWindow: resolveExternalOrderDeliveryWindowKeyForDate(nextMinimum) ?? 'MORNING'
     });
     setCustomBoxes([]);
     setError(null);
@@ -1447,7 +1438,7 @@ export function PublicOrderPage() {
     setAppliedCoupon(null);
     setCouponError(null);
     setPendingPrefilledCouponCode(null);
-    void syncMinimumSchedule();
+    void syncScheduleAvailability();
   };
 
   return (
@@ -1505,7 +1496,7 @@ export function PublicOrderPage() {
                   </h2>
                   {minimumScheduleLabel ? (
                     <p className="mt-2 max-w-[44rem] text-sm leading-6 text-[color:var(--ink-muted)]">
-                      Próximo horário:
+                      Próxima faixa a partir de
                       <strong className="ml-1 text-[color:var(--ink-strong)]">{minimumScheduleLabel}</strong>.
                     </p>
                   ) : null}
@@ -1647,40 +1638,56 @@ export function PublicOrderPage() {
                       onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))}
                     />
                   </FormField>
-                  <FormField label="Horario">
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
-                      <select
-                        className="app-select xl:h-14 xl:text-[1.02rem]"
-                        value={selectedHourValue}
-                        onChange={(event) => handleHourChange(event.target.value)}
-                      >
-                        <option value="">Hora</option>
-                        {PUBLIC_ORDER_HOUR_OPTIONS.map((hour) => {
-                          const isDisabled =
-                            form.date === minimumDateValue &&
-                            Boolean(minimumTimeParts) &&
-                            hour < (minimumTimeParts?.hour || '');
-                          return (
-                            <option key={hour} value={hour} disabled={isDisabled}>
-                              {hour}
-                            </option>
-                          );
-                        })}
-                      </select>
-                      <span className="text-base font-semibold text-[color:var(--ink-muted)]">:</span>
-                      <select
-                        className="app-select xl:h-14 xl:text-[1.02rem]"
-                        value={selectedMinuteValue}
-                        onChange={(event) => handleMinuteChange(event.target.value)}
-                        disabled={!selectedHourValue}
-                      >
-                        <option value="">Min</option>
-                        {availableMinuteOptions.map((minute) => (
-                          <option key={minute} value={minute}>
-                            {minute}
-                          </option>
-                        ))}
-                      </select>
+                  <FormField label="Faixa de horario">
+                    <div className="grid gap-2.5">
+                      {(scheduleAvailability?.windows ?? EXTERNAL_ORDER_DELIVERY_WINDOWS.map((window) => ({
+                        key: window.key,
+                        label: window.label,
+                        startLabel: `${window.startHour}h`,
+                        endLabel: `${window.endHour}h`,
+                        available: false,
+                        scheduledAt: null,
+                        reason: 'SLOT_TAKEN' as const
+                      }))).map((window) => {
+                        const active = form.timeWindow === window.key;
+                        return (
+                          <button
+                            key={window.key}
+                            type="button"
+                            onClick={() =>
+                              window.available &&
+                              setForm((current) => ({
+                                ...current,
+                                timeWindow: window.key
+                              }))
+                            }
+                            disabled={!window.available}
+                            className={`rounded-[18px] border px-4 py-3 text-left transition ${
+                              active && window.available
+                                ? 'border-[rgba(181,68,57,0.28)] bg-[rgb(255,245,241)] shadow-[0_14px_28px_rgba(181,68,57,0.12)]'
+                                : window.available
+                                  ? 'border-[rgba(126,79,45,0.12)] bg-[rgb(252,248,242)] hover:border-[rgba(126,79,45,0.22)]'
+                                  : 'cursor-not-allowed border-[rgba(126,79,45,0.08)] bg-[rgb(246,241,235)] opacity-60'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-semibold text-[color:var(--ink-strong)] xl:text-[1rem]">
+                                  {window.label}
+                                </p>
+                                <p className="mt-1 text-xs text-[color:var(--ink-muted)] xl:text-[0.9rem]">
+                                  {window.available ? 'Disponivel' : 'Indisponivel'}
+                                </p>
+                              </div>
+                              {active && window.available ? (
+                                <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[rgb(255,234,228)] text-[rgb(160,20,26)]">
+                                  ✓
+                                </span>
+                              ) : null}
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
                   </FormField>
                 </div>
@@ -1688,7 +1695,7 @@ export function PublicOrderPage() {
                 {minimumScheduleLabel ? (
                   <div className="mt-3 rounded-[18px] border border-[rgba(181,68,57,0.16)] bg-[rgb(255,244,240)] px-4 py-3 text-sm leading-6 text-[color:var(--ink-muted)]">
                     <span className="block">
-                      Próximo horário: <strong>{minimumScheduleLabel}</strong>.
+                      Próxima faixa disponivel a partir de <strong>{minimumScheduleLabel}</strong>.
                     </span>
                   </div>
                 ) : null}
@@ -2097,14 +2104,16 @@ export function PublicOrderPage() {
 
                 <div className="rounded-[20px] bg-white p-4 sm:rounded-[24px]">
                   <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)] sm:text-xs">
-                    Data e hora
+                    Data e faixa
                   </p>
                   <p className="mt-2 text-base font-semibold text-[color:var(--ink-strong)] sm:text-lg">
-                    {form.date && form.time ? `${form.date} às ${form.time}` : 'Escolha data e hora'}
+                    {form.date && selectedTimeWindowLabel
+                      ? `${form.date} • ${selectedTimeWindowLabel}`
+                      : 'Escolha data e faixa de horario'}
                   </p>
                   {minimumScheduleLabel ? (
                     <p className="mt-2 text-sm leading-6 text-[color:var(--ink-muted)]">
-                      Próximo horário: <strong className="text-[color:var(--ink-strong)]">{minimumScheduleLabel}</strong>.
+                      Próxima faixa a partir de <strong className="text-[color:var(--ink-strong)]">{minimumScheduleLabel}</strong>.
                     </p>
                   ) : null}
                 </div>

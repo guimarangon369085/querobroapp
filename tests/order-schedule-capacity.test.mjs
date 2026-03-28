@@ -3,7 +3,7 @@ import test from 'node:test';
 import { ensureApiServer, request } from './lib/api-server.mjs';
 
 function resolveScheduleDate(seed = Date.now()) {
-  const baseDate = new Date(Date.UTC(2030, 0, 1, 0, 0, 0, 0));
+  const baseDate = new Date(Date.UTC(2090, 0, 1, 0, 0, 0, 0));
   const offsetDays = Math.abs(Number(seed) || 0) % 320;
   baseDate.setUTCDate(baseDate.getUTCDate() + offsetDays);
   return baseDate;
@@ -229,4 +229,51 @@ test('internal dashboard orders can overlap even when public schedule is blocked
 
   assert.equal(updated.id, second.order.id);
   assert.equal(updated.scheduledAt, firstSchedule);
+});
+
+test('public schedule exposes delivery windows while keeping exact internal allocation', async (t) => {
+  const { apiUrl, shutdown } = await ensureApiServer();
+  const created = {
+    productId: null,
+    orderIds: [],
+    customerIds: []
+  };
+
+  t.after(async () => {
+    for (const orderId of created.orderIds) {
+      try {
+        await request(apiUrl, `/orders/${orderId}`, { method: 'DELETE' });
+      } catch {}
+    }
+    for (const customerId of created.customerIds) {
+      try {
+        await request(apiUrl, `/customers/${customerId}`, { method: 'DELETE' });
+      } catch {}
+    }
+    if (created.productId) {
+      try {
+        await request(apiUrl, `/inventory-products/${created.productId}`, { method: 'DELETE' });
+      } catch {}
+    }
+    await shutdown();
+  });
+
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const scheduleDate = resolveScheduleDate(`${suffix}-windowed`.length + Date.now());
+  const product = await createOrderProduct(apiUrl, suffix);
+  created.productId = product.id;
+
+  const morningOrder = await createIntakeOrder(apiUrl, product.id, `${suffix}-1`, localScheduleIso(scheduleDate, 10, 0), 14);
+  created.orderIds.push(morningOrder.order.id);
+  created.customerIds.push(morningOrder.intake.customerId);
+
+  const availability = await request(
+    apiUrl,
+    `/orders/public-schedule?date=${encodeURIComponent(scheduleDate.toISOString().slice(0, 10))}&timeWindow=MORNING&totalBroas=14`
+  );
+
+  assert.equal(availability.requestedWindowKey, 'MORNING');
+  assert.equal(availability.requestedWindowAvailable, true);
+  assert.equal(availability.requestedWindowScheduledAt, localScheduleIso(scheduleDate, 9, 0));
+  assert.equal(availability.windows.find((entry) => entry.key === 'MORNING')?.scheduledAt, localScheduleIso(scheduleDate, 9, 0));
 });

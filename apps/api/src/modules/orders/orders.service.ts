@@ -4,6 +4,7 @@ import type { Customer as PrismaCustomer } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
 import {
   compareMoney,
+  ExternalOrderDeliveryWindowKeyEnum,
   ExternalOrderScheduleAvailabilitySchema,
   ExternalOrderSubmissionPreviewSchema,
   ExternalOrderSubmissionSchema,
@@ -46,6 +47,8 @@ import {
 import {
   externalOrderScheduleAvailabilityErrorMessage,
   externalOrderScheduleErrorMessage,
+  resolveExternalOrderDeliveryWindowKeyForDate,
+  resolveExternalOrderDeliveryWindowLabel,
   isExternalOrderScheduleAllowed,
   resolveExternalOrderScheduleAvailability
 } from '../../common/external-order-schedule.js';
@@ -183,6 +186,7 @@ type OrderIntakeMeta = z.infer<typeof OrderIntakeMetaSchema>;
 type PixCharge = z.infer<typeof PixChargeSchema>;
 type ExternalOrderSubmissionPayload = z.infer<typeof ExternalOrderSubmissionSchema>;
 type ExternalOrderSubmissionPreview = z.infer<typeof ExternalOrderSubmissionPreviewSchema>;
+type ExternalOrderDeliveryWindowKey = z.infer<typeof ExternalOrderDeliveryWindowKeyEnum>;
 type OrderCustomerSnapshotPayload = z.infer<typeof OrderCustomerSnapshotSchema>;
 type OrderFlavorCode = 'T' | 'G' | 'D' | 'Q' | 'R' | 'RJ';
 type FillingFlavorCode = Exclude<OrderFlavorCode, 'T'>;
@@ -966,6 +970,8 @@ export class OrdersService {
     client: OrderScheduleQueryClient,
     options: {
       requestedAt?: Date | null;
+      requestedDate?: string | null;
+      requestedWindowKey?: string | null;
       requestedTotalBroas?: number | null;
       excludeOrderId?: number | null;
       reference?: Date;
@@ -993,6 +999,9 @@ export class OrdersService {
       }
     });
 
+    const parsedRequestedWindowKey = ExternalOrderDeliveryWindowKeyEnum.safeParse(options.requestedWindowKey ?? null);
+    const requestedWindowKey = parsedRequestedWindowKey.success ? parsedRequestedWindowKey.data : null;
+
     const availability = resolveExternalOrderScheduleAvailability({
       scheduledOrders: scheduledOrders.map((entry) => ({
         scheduledAt: entry.scheduledAt,
@@ -1005,6 +1014,8 @@ export class OrdersService {
         )
       })),
       requestedAt: options.requestedAt ?? null,
+      requestedDate: options.requestedDate ?? null,
+      requestedWindowKey,
       requestedTotalBroas: options.requestedTotalBroas ?? null,
       reference: options.reference
     });
@@ -1020,8 +1031,112 @@ export class OrdersService {
       requestedDurationMinutes: availability.requestedDurationMinutes,
       slotMinutes: availability.slotMinutes,
       dayOrderCount: availability.dayOrderCount,
-      slotTaken: availability.slotTaken
+      slotTaken: availability.slotTaken,
+      requestedDate: availability.requestedDate,
+      requestedWindowKey: availability.requestedWindowKey,
+      requestedWindowLabel: availability.requestedWindowLabel,
+      requestedWindowAvailable: availability.requestedWindowAvailable,
+      requestedWindowReason: availability.requestedWindowReason,
+      requestedWindowScheduledAt: availability.requestedWindowScheduledAt?.toISOString() ?? null,
+      requestedWindowNextAvailableAt: availability.requestedWindowNextAvailableAt?.toISOString() ?? null,
+      windows: availability.windows.map((window) => ({
+        key: window.key,
+        label: window.label,
+        startLabel: window.startLabel,
+        endLabel: window.endLabel,
+        available: window.available,
+        scheduledAt: window.scheduledAt?.toISOString() ?? null,
+        reason: window.reason
+      }))
     });
+  }
+
+  private buildPublicWindowAvailabilityError(availability: z.infer<typeof ExternalOrderScheduleAvailabilitySchema>) {
+    const nextAvailableAt = availability.requestedWindowNextAvailableAt ?? availability.nextAvailableAt;
+    const nextDate = new Date(nextAvailableAt);
+    const nextWindowKey = resolveExternalOrderDeliveryWindowKeyForDate(nextDate);
+    const nextWindowLabel = resolveExternalOrderDeliveryWindowLabel(nextWindowKey);
+    const nextLabel = nextWindowLabel
+      ? `${nextWindowLabel} (${new Intl.DateTimeFormat('pt-BR', {
+          day: '2-digit',
+          month: '2-digit'
+        }).format(nextDate)})`
+      : new Intl.DateTimeFormat('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit'
+        }).format(nextDate);
+
+    const reason = availability.requestedWindowReason ?? availability.reason;
+    const message =
+      reason === 'DAY_FULL'
+        ? `Esse dia ja atingiu ${availability.dailyLimit} pedidos agendados. Próxima faixa: ${nextLabel}.`
+        : `Essa faixa nao comporta o tempo de forno necessario. Próxima faixa: ${nextLabel}.`;
+
+    return new BadRequestException({
+      message,
+      nextAvailableAt,
+      reason,
+      dailyLimit: availability.dailyLimit,
+      requestedDate: availability.requestedDate,
+      requestedWindowKey: availability.requestedWindowKey
+    });
+  }
+
+  private async resolvePublicExternalSubmissionSchedule(
+    client: OrderScheduleQueryClient,
+    fulfillment: ExternalOrderSubmissionPayload['fulfillment'],
+    options: {
+      requestedTotalBroas?: number | null;
+      reference?: Date;
+    } = {}
+  ) {
+    const requestedDate = String(fulfillment.date || '').trim() || null;
+    const requestedWindowKey =
+      ExternalOrderDeliveryWindowKeyEnum.safeParse(fulfillment.timeWindow ?? null).success
+        ? (fulfillment.timeWindow as ExternalOrderDeliveryWindowKey)
+        : null;
+
+    if (requestedDate && requestedWindowKey) {
+      const availability = await this.buildExternalOrderScheduleAvailability(client, {
+        requestedDate,
+        requestedWindowKey,
+        requestedTotalBroas: options.requestedTotalBroas ?? null,
+        reference: options.reference
+      });
+
+      if (!availability.requestedWindowAvailable || !availability.requestedWindowScheduledAt) {
+        throw this.buildPublicWindowAvailabilityError(availability);
+      }
+
+      const scheduledAt = this.parseOptionalDateTime(availability.requestedWindowScheduledAt);
+      if (!scheduledAt) {
+        throw new BadRequestException('Faixa de horario invalida para o pedido.');
+      }
+
+      return {
+        availability,
+        scheduledAt,
+        scheduledAtIso: availability.requestedWindowScheduledAt,
+        requestedDate,
+        requestedWindowKey
+      };
+    }
+
+    const scheduledAt = this.parseOptionalDateTime(fulfillment.scheduledAt);
+    await this.ensurePublicOrderScheduleAllowed(scheduledAt, {
+      requestedTotalBroas: options.requestedTotalBroas ?? null,
+      reference: options.reference
+    });
+
+    return {
+      availability: null,
+      scheduledAt,
+      scheduledAtIso: scheduledAt?.toISOString() ?? fulfillment.scheduledAt ?? null,
+      requestedDate: null,
+      requestedWindowKey: null
+    };
   }
 
   private async ensureOrderScheduleCapacityAllowed(
@@ -1071,9 +1186,16 @@ export class OrdersService {
     });
   }
 
-  async getPublicScheduleAvailability(requestedAt?: string | null, requestedTotalBroas?: number | null) {
+  async getPublicScheduleAvailability(
+    requestedDate?: string | null,
+    requestedWindowKey?: string | null,
+    requestedAt?: string | null,
+    requestedTotalBroas?: number | null
+  ) {
     const parsedRequestedAt = this.parseOptionalDateTime(requestedAt ?? null);
     return this.buildExternalOrderScheduleAvailability(this.prisma, {
+      requestedDate: requestedDate ?? null,
+      requestedWindowKey: requestedWindowKey ?? null,
       requestedAt: parsedRequestedAt,
       requestedTotalBroas: requestedTotalBroas ?? ORDER_BOX_UNITS
     });
@@ -1368,7 +1490,7 @@ export class OrdersService {
   ) {
     const items = await this.resolveExternalSubmissionItems(data);
     const pricedOrder = await this.priceOrderItems(this.prisma, items);
-    await this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt), {
+    const resolvedSchedule = await this.resolvePublicExternalSubmissionSchedule(this.prisma, data.fulfillment, {
       requestedTotalBroas: pricedOrder.productionTotalBroas
     });
     const coupon = await this.resolveCouponDiscount({
@@ -1391,7 +1513,7 @@ export class OrdersService {
       },
       fulfillment: {
         mode: data.fulfillment.mode,
-        scheduledAt: data.fulfillment.scheduledAt
+        scheduledAt: resolvedSchedule.scheduledAtIso
       },
       delivery: data.delivery,
       order: {
@@ -1412,7 +1534,7 @@ export class OrdersService {
       payment: {
         method: 'pix',
         status: 'PENDENTE',
-        dueAt: data.fulfillment.scheduledAt
+        dueAt: resolvedSchedule.scheduledAtIso
       },
       source: {
         channel: params.intakeChannel,
@@ -1431,7 +1553,7 @@ export class OrdersService {
   ): Promise<ExternalOrderSubmissionPreview> {
     const items = await this.resolveExternalSubmissionItems(data);
     const pricedOrder = await this.priceOrderItems(this.prisma, items);
-    await this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt), {
+    const resolvedSchedule = await this.resolvePublicExternalSubmissionSchedule(this.prisma, data.fulfillment, {
       requestedTotalBroas: pricedOrder.productionTotalBroas
     });
     const coupon = await this.resolveCouponDiscount({
@@ -1439,12 +1561,12 @@ export class OrdersService {
       subtotal: pricedOrder.subtotal,
       customerPhone: data.customer.phone ?? null
     });
-    const scheduledAt = this.parseOptionalDateTime(data.fulfillment.scheduledAt);
+    const scheduledAt = resolvedSchedule.scheduledAt;
     const deliveryQuote = await this.deliveriesService.resolveDeliverySelection(
       data.delivery,
       this.buildDeliveryQuoteDraft({
         fulfillmentMode: data.fulfillment.mode,
-        scheduledAt: scheduledAt?.toISOString() ?? data.fulfillment.scheduledAt ?? null,
+        scheduledAt: resolvedSchedule.scheduledAtIso,
         customerName: data.customer.name,
         customerPhone: data.customer.phone ?? null,
         customerAddress: data.customer.address ?? null,
@@ -1477,7 +1599,7 @@ export class OrdersService {
       channel: params.intakeChannel,
       expectedStage: 'PIX_PENDING',
       fulfillmentMode: data.fulfillment.mode,
-      scheduledAt: data.fulfillment.scheduledAt,
+      scheduledAt: resolvedSchedule.scheduledAtIso,
       customer: {
         name: data.customer.name,
         phone: data.customer.phone ?? null,
@@ -1512,7 +1634,7 @@ export class OrdersService {
         method: 'pix',
         status: 'PENDENTE',
         payable: false,
-        dueAt: data.fulfillment.scheduledAt
+        dueAt: resolvedSchedule.scheduledAtIso
       },
       source: {
         channel: data.source.channel,
@@ -2794,7 +2916,8 @@ export class OrdersService {
         }),
         {
           enforceExternalSchedule: false,
-          allowManualFallback: true
+          allowManualFallback: true,
+          persistQuoteRecord: false
         }
       );
       const quotedDeliveryFee = this.toMoney(deliveryQuote.fee ?? 0);
@@ -2865,6 +2988,9 @@ export class OrdersService {
         });
       }
       return this.withFinancial(refreshedUpdated);
+    }, {
+      maxWait: 15_000,
+      timeout: 15_000
     });
   }
 

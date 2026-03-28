@@ -109,11 +109,15 @@ export class OrdersController {
   @Public()
   @Get('public-schedule')
   getPublicScheduleAvailability(
+    @Query('date') date?: string,
+    @Query('timeWindow') timeWindow?: string,
     @Query('scheduledAt') scheduledAt?: string,
     @Query('totalBroas') totalBroas?: string
   ) {
     const parsedTotalBroas = totalBroas == null || totalBroas === '' ? null : Number(totalBroas);
     return this.service.getPublicScheduleAvailability(
+      date ?? null,
+      timeWindow ?? null,
       scheduledAt ?? null,
       Number.isFinite(parsedTotalBroas) ? parsedTotalBroas : null
     );

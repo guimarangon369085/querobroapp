@@ -1,4 +1,5 @@
 import {
+  EXTERNAL_ORDER_DELIVERY_WINDOWS,
   EXTERNAL_ORDER_FIRST_SLOT_HOUR,
   EXTERNAL_ORDER_FIRST_SLOT_MINUTE,
   EXTERNAL_ORDER_MAX_ORDERS_PER_DAY,
@@ -7,6 +8,8 @@ import {
   EXTERNAL_ORDER_OVEN_CAPACITY_BROAS,
   EXTERNAL_ORDER_SLOT_MINUTES,
   ExternalOrderScheduleAvailabilitySchema,
+  resolveExternalOrderDeliveryWindowKeyForDate,
+  resolveExternalOrderDeliveryWindowLabel,
   formatExternalOrderMinimumSchedule,
   isExternalOrderScheduleAllowed,
   resolveExternalOrderProductionDurationMinutes,
@@ -16,6 +19,7 @@ import {
 import type { z } from 'zod';
 
 export {
+  EXTERNAL_ORDER_DELIVERY_WINDOWS,
   EXTERNAL_ORDER_FIRST_SLOT_HOUR,
   EXTERNAL_ORDER_FIRST_SLOT_MINUTE,
   EXTERNAL_ORDER_MAX_ORDERS_PER_DAY,
@@ -24,6 +28,8 @@ export {
   EXTERNAL_ORDER_OVEN_CAPACITY_BROAS,
   EXTERNAL_ORDER_SLOT_MINUTES,
   isExternalOrderScheduleAllowed,
+  resolveExternalOrderDeliveryWindowKeyForDate,
+  resolveExternalOrderDeliveryWindowLabel,
   resolveExternalOrderProductionDurationMinutes,
   resolveExternalOrderScheduleAvailability,
   resolveExternalOrderMinimumSchedule
@@ -36,15 +42,20 @@ export function externalOrderScheduleErrorMessage(reference = new Date()) {
 }
 
 export function externalOrderScheduleAvailabilityErrorMessage(availability: ExternalOrderScheduleAvailability) {
-  const nextLabel = formatExternalOrderMinimumSchedule(new Date(availability.nextAvailableAt));
+  const nextDate = new Date(availability.nextAvailableAt);
+  const nextWindowKey = resolveExternalOrderDeliveryWindowKeyForDate(nextDate);
+  const nextWindowLabel = resolveExternalOrderDeliveryWindowLabel(nextWindowKey);
+  const nextLabel = nextWindowLabel
+    ? `${nextWindowLabel} (${formatExternalOrderMinimumSchedule(nextDate)})`
+    : formatExternalOrderMinimumSchedule(nextDate);
 
   if (availability.reason === 'DAY_FULL') {
-    return `Esse dia ja atingiu ${availability.dailyLimit} pedidos agendados. Próximo horário: ${nextLabel}.`;
+    return `Esse dia ja atingiu ${availability.dailyLimit} pedidos agendados. Próxima faixa: ${nextLabel}.`;
   }
 
   if (availability.reason === 'SLOT_TAKEN') {
-    return `Esse horário nao comporta o tempo de forno necessario. Próximo horário: ${nextLabel}.`;
+    return `Essa faixa nao comporta o tempo de forno necessario. Próxima faixa: ${nextLabel}.`;
   }
 
-  return `Próximo horário: ${nextLabel}.`;
+  return `Próxima faixa: ${nextLabel}.`;
 }

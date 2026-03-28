@@ -11,6 +11,7 @@ export type PublicOrderResult = {
     publicNumber?: number | null;
     total?: number;
     scheduledAt?: string | null;
+    deliveryWindowLabel?: string | null;
   };
   intake: OrderIntakeMeta;
 };

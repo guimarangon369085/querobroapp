@@ -14,6 +14,7 @@ export type StoredOrderFinalized = {
     publicNumber?: number | null;
     total?: number | null;
     scheduledAt?: string | null;
+    deliveryWindowLabel?: string | null;
   };
   intake: Pick<OrderIntakeMeta, 'stage' | 'deliveryFee' | 'pixCharge'>;
 };

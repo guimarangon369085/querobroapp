@@ -292,6 +292,10 @@ Ultima atualizacao: 2026-03-27
 - Ciclo executado: `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, `node --test tests/order-discount-pct-marketing.test.mjs`
 - Resultado: o modal de edicao de pedido em `/pedidos` passou a permitir incluir, alterar e remover desconto percentual, usando o mesmo padrao do novo pedido. O update do backend passou a recalcular o total e a sincronizar a metadata de `Investimento de marketing: AMOSTRAS` quando o desconto e ajustado no fluxo interno.
 
+- Data: 2026-03-28
+- Ciclo executado: `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, `node --test tests/order-schedule-capacity.test.mjs`
+- Resultado: o `/pedido` deixou de expor horarios exatos ao cliente e passou a trabalhar com 3 faixas publicas (`9h - 12h`, `12h - 16h`, `16h - 20h`). O backend resolve internamente o primeiro horario viavel dentro da faixa escolhida, preservando a logica de duracao por quantidade de broas e a capacidade do forno. O `/pedidos` interno segue livre de sobreposicao forçada pela trava publica, e o fluxo de edicao interna deixou de depender da persistencia de quote de frete dentro da transacao.
+
 ## Como religar e validar rapido
 
 1. `./scripts/stop-all.sh`

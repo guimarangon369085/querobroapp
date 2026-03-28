@@ -30,6 +30,13 @@ function formatScheduledAt(value?: string | null) {
   }).format(date);
 }
 
+function resolveDeliveryWindowLabel(order: StoredOrderFinalized['order']) {
+  if (order.deliveryWindowLabel) {
+    return order.deliveryWindowLabel;
+  }
+  return formatScheduledAt(order.scheduledAt);
+}
+
 export function PublicOrderSuccessPage() {
   const router = useRouter();
   const { notifyError, notifyInfo } = useFeedback();
@@ -85,7 +92,7 @@ export function PublicOrderSuccessPage() {
               Obrigado pelo pedido! Ja recebemos sua solicitacao.
             </h1>
             <p className="mt-2 text-[0.88rem] leading-6 text-[color:var(--ink-muted)] sm:text-sm">
-              Programado para {formatScheduledAt(order.scheduledAt)}.
+              Programado para a faixa {resolveDeliveryWindowLabel(order)}.
             </p>
           </div>
 
