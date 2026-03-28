@@ -602,13 +602,9 @@ export function OrderQuickCreate({
               placeholder="0 a 100"
               value={newOrderDiscountPct}
               inputMode="decimal"
-              aria-describedby="order-discount-pct-hint"
               onChange={(e) => onDiscountChange(e.target.value)}
               onBlur={onDiscountBlur}
             />
-            <p id="order-discount-pct-hint" className="mt-1 text-xs text-[color:var(--ink-muted)]">
-              Campo livre de 0% a 100%.
-            </p>
           </FormField>
           <FormField label="Obs.">
             <input

@@ -2974,11 +2974,6 @@ function OrdersPageContent() {
     const parsed = parseLocaleNumber(selectedOrderEditDiscountPct);
     return parsed == null ? 0 : Math.min(Math.max(roundMoney(parsed), 0), 100);
   }, [selectedOrderEditDiscountPct]);
-  const selectedOrderEditDiscountAmountPreview = useMemo(() => {
-    const subtotal = Math.max(Number(selectedOrder?.subtotal ?? 0), 0);
-    if (subtotal <= 0 || selectedOrderEditDiscountPctNumber <= 0) return 0;
-    return roundMoney((subtotal * selectedOrderEditDiscountPctNumber) / 100);
-  }, [selectedOrder?.subtotal, selectedOrderEditDiscountPctNumber]);
   const selectedCustomer = selectedOrder
     ? selectedOrder.customer || customers.find((customer) => customer.id === selectedOrder.customerId) || null
     : null;
@@ -4603,9 +4598,6 @@ function OrdersPageContent() {
                   onChange={(event) => setSelectedOrderEditDiscountPct(event.target.value)}
                   onBlur={() => setSelectedOrderEditDiscountPct(normalizeDiscountPctInput(selectedOrderEditDiscountPct))}
                 />
-                <span className="text-[11px] normal-case tracking-normal text-[color:var(--ink-muted)]">
-                  Campo livre de 0% a 100% • {formatCurrencyBR(selectedOrderEditDiscountAmountPreview)}
-                </span>
               </label>
               <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
                 Obs.

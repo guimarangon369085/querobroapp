@@ -4,6 +4,8 @@ Ultima atualizacao: 2026-03-27
 
 ## Estado atual
 
+- 2026-03-28: `/pedidos` removeu o helper textual do campo de desconto (`Campo livre de 0% a 100%` e o preview em reais) tanto na criacao quanto na edicao de pedidos. O input continua livre de `0` a `100`, mas a interface ficou mais limpa.
+
 - 2026-03-27: `/pedido` deixou de expor codigos de sabores ao cliente (`(T)`, `(G)` etc.). A caixa customizada foi renomeada de `Caixa Sabores` para `Monte Sua Caixa`, com subtitulo `Monte sua caixa com 7 broas como quiser!`, preco visivel no proprio bloco, resumo lateral e alertas/erros alinhados, sem mexer em `content IDs`, `legacyCode` ou nos calculos de subtotal/frete. O texto auxiliar do cupom sobre impacto no frete tambem foi removido.
 
 - 2026-03-27: `/pedidos` deixou de renderizar qualquer card intermediario entre o calendario e a secao `PEDIDOS`; o bloco de overflow do dia foi removido e o fluxo visual agora segue direto para `Resumo do dia` e lista. No mesmo ciclo, a paleta oficial do web foi levemente iluminada, com tons e gradientes mais brilhantes em `globals.css`, ícones, dashboard, `/pedido`, `/pedido/feito` e cards de caixas, preservando a mesma família cromática e hierarquia.
