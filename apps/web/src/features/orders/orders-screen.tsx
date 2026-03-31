@@ -1463,6 +1463,7 @@ function OrdersPageContent() {
   const newOrderDialogRef = useRef<HTMLDivElement | null>(null);
   const orderDetailDialogRef = useRef<HTMLDivElement | null>(null);
   const selectedOrderId = selectedOrder?.id ?? null;
+  const selectedOrderIdRef = useRef<number | null>(null);
   const newOrderTitleId = useId();
   const orderDetailTitleId = useId();
   const { confirm, notifyError, notifySuccess, presentSuccess } = useFeedback();
@@ -1475,9 +1476,10 @@ function OrdersPageContent() {
       setOrders(ordersData);
       setCustomers(customersData);
       setProducts(productsData);
-      if (selectedOrderId) {
-        const fresh = ordersData.find((o) => o.id === selectedOrderId) || null;
-        setSelectedOrder(fresh);
+      const currentSelectedOrderId = selectedOrderIdRef.current;
+      if (currentSelectedOrderId) {
+        const fresh = ordersData.find((o) => o.id === currentSelectedOrderId) || null;
+        setSelectedOrder((current) => (current?.id === currentSelectedOrderId ? fresh : current));
         if (!fresh) {
           setIsOrderDetailModalOpen(false);
         }
@@ -1489,7 +1491,7 @@ function OrdersPageContent() {
     } finally {
       setLoading(false);
     }
-  }, [selectedOrderId]);
+  }, []);
 
   const openOrderDetail = useCallback((order: OrderView) => {
     setSelectedOrder(order);
@@ -1526,6 +1528,10 @@ function OrdersPageContent() {
   const openCalendarEntry = useCallback((entry: CalendarOrderEntry) => {
     openOrderDetail(entry.order);
   }, [openOrderDetail]);
+
+  useEffect(() => {
+    selectedOrderIdRef.current = selectedOrderId;
+  }, [selectedOrderId]);
 
   useEffect(() => {
     loadAll().catch(() => {

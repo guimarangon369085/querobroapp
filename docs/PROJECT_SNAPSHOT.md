@@ -4,6 +4,8 @@ Ultima atualizacao: 2026-03-30
 
 ## Estado atual
 
+- 2026-03-30: `/pedidos` deixou de recarregar a workspace inteira ao apenas selecionar um pedido. O detalhe agora abre sem disparar novo `fetchOrdersWorkspace()` por troca de `selectedOrder`, removendo o micro-loop visual que acontecia ao clicar em cards. Na mesma varredura, `Clientes`, `Estoque` e `Dashboard` nao mostraram o mesmo anti-padrao de loader recriado por item selecionado.
+
 - 2026-03-30: `/pedidos` deixou de usar popup central fragil em mobile e passou a abrir `Novo pedido` e `Detalhe do pedido` como drawer lateral sobreposto, com scroll interno no painel, altura travada ao viewport real e fechamento mais estavel em navegacao touch. No mesmo ciclo, o app passou a desabilitar pinch zoom globalmente (`maximumScale: 1`, `userScalable: false`) e a restringir o gesto principal a rolagem vertical.
 
 - 2026-03-30: o calendario de `/pedidos` agora entra em modo compacto quando varios pedidos compartilham a mesma faixa e o card fica comprimido, exibindo apenas o nome do cliente em mobile em vez de sumir com o texto. O fluxo interno tambem passou a exibir explicitamente as 3 faixas publicas de `/pedido` (`9h - 12h`, `12h - 16h`, `16h - 20h`) no quick create, na edicao e nos metadados do pedido, para conferência operacional sem reimpor a trava publica sobre a agenda interna.
@@ -183,6 +185,10 @@ Ultima atualizacao: 2026-03-30
 - A home publica passou a usar a mesma cadencia de `2s` em qualquer viewport para a troca automatica de imagens, evitando regressao para `6s` em mobile por bifurcacao de viewport.
 
 ## Validacao operacional mais recente
+
+- Data: 2026-03-30
+- Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`
+- Resultado: clicar em cards de `/pedidos` deixou de disparar um recarregamento inteiro da workspace; a tela abre o drawer de detalhe direto, sem o loop curto de carregamento. A varredura nas outras telas operacionais nao encontrou o mesmo padrao de refetch acoplado a selecao local.
 
 - Data: 2026-03-30
 - Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`
