@@ -68,6 +68,18 @@ async function expectJson(url, init = {}) {
   return { response, body };
 }
 
+async function expectProtectedRedirect(pathname, expectedTargetPrefix) {
+  const response = await fetch(`${APP_URL}${pathname}`, { redirect: 'manual' });
+  const location = response.headers.get('location') || '';
+  if (response.status < 300 || response.status >= 400) {
+    throw new Error(`${pathname} deveria estar protegido, mas respondeu ${response.status}`);
+  }
+  if (!location.startsWith(expectedTargetPrefix)) {
+    throw new Error(`${pathname} redirecionou para ${location}, esperado prefixo ${expectedTargetPrefix}`);
+  }
+  return response;
+}
+
 async function main() {
   const summary = {
     appUrl: APP_URL,
@@ -77,7 +89,7 @@ async function main() {
 
   const home = await expectOk('/');
   const pedido = await expectOk('/pedido');
-  const pedidos = await expectOk('/pedidos');
+  const pedidos = await expectProtectedRedirect('/pedidos', `${APP_URL}/acesso?next=%2Fpedidos`);
 
   const pedidoHtml = await pedido.text();
   if (pedidoHtml.includes('127.0.0.1') || pedidoHtml.includes('localhost')) {
@@ -128,7 +140,8 @@ async function main() {
 
   summary.homeStatus = home.status;
   summary.pedidoStatus = 200;
-  summary.pedidosStatus = 200;
+  summary.pedidosStatus = pedidos.status;
+  summary.pedidosProtection = pedidos.headers.get('location') || null;
   summary.apiHealth = health.status;
   summary.preview = {
     channel: preview.channel,

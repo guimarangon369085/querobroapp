@@ -1,8 +1,10 @@
 # PROJECT_SNAPSHOT
 
-Ultima atualizacao: 2026-03-30
+Ultima atualizacao: 2026-03-31
 
 ## Estado atual
+
+- 2026-03-31: a operacao interna deixou de ser publica por URL direta. O web agora exige autenticacao persistente por cookie HTTP-only assinado para `/pedidos`, `/clientes`, `/estoque`, `/dashboard` e para o bridge `/api/internal/*`, com tela publica `/acesso` e sessao estavel ate logout/limpeza de cookies. No analytics, `/pedidos` deixou de cair como `public` por colisao com o prefixo `/pedido`.
 
 - 2026-03-30: a imagem canônica da home para favoritos, `apple-touch-icon`, `manifest`, favicon e preview social passou a ser a foto das broas empilhadas sobre fundo verde-claro. Os PNGs de ícone foram regenerados a partir de `stack.jpg` com crop quadrado centralizado e levemente deslocado para cima, sem padding lateral, e a home/`/pedido` ganharam um preview largo dedicado (`stack-wide.jpg`) para substituir a thumb antiga que ainda aparecia em favoritos do Safari e compartilhamento.
 

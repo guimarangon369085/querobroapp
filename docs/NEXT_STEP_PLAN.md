@@ -1,13 +1,13 @@
 # NEXT_STEP_PLAN
 
-Ultima atualizacao: 2026-03-30
+Ultima atualizacao: 2026-03-31
 
 ## Objetivo da fase atual
 
 Consolidar o lancamento publico do app sobre o mesmo nucleo operacional:
 
 - landing publica em `/`
-- operacao interna em `Pedidos`
+- operacao interna autenticada em `Pedidos`
 - captura externa em `/pedido` e `Google Forms`
 - entrega com frete cotado antes do PIX, calculado internamente por raio
 - COGS calculado por pedido com preco historico de insumo, usando baseline pesquisada desde o primeiro pedido quando necessario
@@ -26,13 +26,13 @@ Consolidar o lancamento publico do app sobre o mesmo nucleo operacional:
 
 - Subir `web`, `api` e `Postgres` no host final.
 - Apontar `www.querobroa.com.br` para o `web`.
-- Garantir `/` como landing publica, `/pedido` como captura publica e `/pedidos` como superficie operacional.
+- Garantir `/` como landing publica, `/pedido` como captura publica e `/pedidos` como superficie operacional protegida por sessao.
 - Publicar a URL final do `web` para a pagina `/pedido`.
 - Validar uma abertura externa real nas 3 rotas finais do dominio.
-- Validacao executada: `pnpm validate:public-deploy` e `pnpm validate:delivery-quote`, com `200` em `/`, `/pedido` e `/pedidos`, `apiHealth=ok` e quote publico `LOCAL / MANUAL_FALLBACK`.
+- Validacao executada: `pnpm validate:public-deploy` e `pnpm validate:delivery-quote`, com `200` em `/` e `/pedido`, protecao de `/pedidos`, `apiHealth=ok` e quote publico `LOCAL / MANUAL_FALLBACK`.
 
 Criterio de pronto:
-- `www.querobroa.com.br`, `www.querobroa.com.br/pedido` e `www.querobroa.com.br/pedidos` abrem no deploy final e usam a mesma base operacional.
+- `www.querobroa.com.br` e `www.querobroa.com.br/pedido` abrem publicamente, enquanto `www.querobroa.com.br/pedidos` exige sessao valida e usa a mesma base operacional.
 
 ## Prioridade 2 (agora)
 
@@ -45,6 +45,7 @@ Criterio de pronto:
 - Validar uma submissao real ponta a ponta caindo no app com `PIX_PENDING`.
 - Validar no mesmo teste um pedido `Entrega` com frete somado antes do PIX.
 - Rodar `pnpm validate:public-deploy` apos o deploy e manter `pnpm validate:delivery-quote` como checagem rapida de frete real.
+- Garantir que o validador publico continue checando `/pedidos -> /acesso` sem sessao, sem reabrir a operacao por engano.
 
 Criterio de pronto:
 - cliente consegue abrir o link, enviar o pedido e receber o PIX com o total final correto sem intervencao manual de cadastro.
@@ -80,6 +81,7 @@ Criterio de pronto:
 - Manter `/pedido` e `/clientes` no autocomplete novo do Google Places, sem regressao para o widget legado nem novos warnings de console ao selecionar sugestao.
 - Manter a linha de quantidade dos cards de `/pedido` no layout flexivel novo, sem voltar a comprimir o selo `caixas` em Safari/desktop ou em larguras intermediarias.
 - Manter `/dashboard` acessivel no menu principal sem voltar a aplicar trava de host no web por engano.
+- Manter `/pedidos`, `/clientes`, `/estoque`, `/dashboard` e `/api/internal/*` protegidos por sessao persistente no web, sem voltar a expor a operacao por URL direta.
 - Manter `/dashboard` no formato editorial didatico novo, sem regressao para cards genericos ou leitura mais tecnica do que humana.
 - Manter `Novo pedido` de `/pedidos` estavel em mobile, sem popup deformado nem quebra no bloco de quantidade.
 - Manter `/pedidos` mobile sem FAB flutuante para `Novo pedido`, usando acao inline no proprio painel.

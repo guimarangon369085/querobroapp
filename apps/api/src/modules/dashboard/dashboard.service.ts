@@ -558,7 +558,7 @@ function toDayKey(value: Date) {
 }
 
 function isPublicPath(path?: string | null) {
-  return path === '/' || Boolean(path && path.startsWith('/pedido'));
+  return path === '/' || path === '/pedido' || Boolean(path && path.startsWith('/pedido/'));
 }
 
 function toPercent(numerator: number, denominator: number) {
@@ -1542,7 +1542,7 @@ export class DashboardService {
       pageViews.filter((event) => event.path === '/').map((event) => event.sessionId)
     );
     const orderSessions = new Set(
-      pageViews.filter((event) => event.path?.startsWith('/pedido')).map((event) => event.sessionId)
+      pageViews.filter((event) => isPublicPath(event.path) && event.path !== '/').map((event) => event.sessionId)
     );
     const quoteSuccessSessions = new Set(
       funnelEvents

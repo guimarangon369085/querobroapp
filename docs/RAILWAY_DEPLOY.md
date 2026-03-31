@@ -6,7 +6,7 @@ Subir o mesmo app em producao com:
 
 - `querobroa.com.br` e `www.querobroa.com.br` abrindo a landing publica da marca
 - `/pedido` como captura publica
-- `/pedidos` como base operacional no mesmo deploy
+- `/pedidos` como base operacional protegida por sessao no mesmo deploy
 - `ops.querobroa.com.br` opcional apontando para o mesmo `web`, abrindo direto em `Pedidos`
 - `api.querobroa.com.br` para a API
 
@@ -29,11 +29,13 @@ Subir o mesmo app em producao com:
 - `querobroa.com.br/` abre a landing publica
 - `www.querobroa.com.br/` abre a mesma landing publica
 - `querobroa.com.br/pedido` e `www.querobroa.com.br/pedido` abrem a captura publica
-- `querobroa.com.br/pedidos` e `www.querobroa.com.br/pedidos` abrem a operacao
-- `ops.querobroa.com.br/` redireciona para `/pedidos`
-- qualquer host continua podendo acessar tanto `/pedido` quanto `/pedidos`
+- `querobroa.com.br/pedidos` e `www.querobroa.com.br/pedidos` redirecionam para `/acesso` quando nao houver sessao valida
+- `ops.querobroa.com.br/` redireciona para `/pedidos`, que por sua vez exige sessao valida
+- apenas `/` e `/pedido` permanecem publicos; a operacao interna fica persistida por cookie HTTP-only ate logout/limpeza de cookies
 
 Esse comportamento usa [page.tsx](/Users/gui/querobroapp/apps/web/src/app/page.tsx) e [public-site-config.ts](/Users/gui/querobroapp/apps/web/src/lib/public-site-config.ts).
+O gate operacional usa [middleware.ts](/Users/gui/querobroapp/apps/web/src/middleware.ts), [ops-access.ts](/Users/gui/querobroapp/apps/web/src/lib/ops-access.ts) e [ops-session.ts](/Users/gui/querobroapp/apps/web/src/lib/ops-session.ts).
+Para o login humano em `/acesso`, o web pode reaproveitar `INTERNAL_BASIC_AUTH_PASSWORD` (preferencial) ou cair nos tokens tecnicos (`APP_AUTH_TOKEN`, `APP_AUTH_TOKENS`, `APP_API_BRIDGE_TOKEN`) como fallback.
 
 ## Servico web no Railway
 

@@ -1,4 +1,7 @@
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { getOpsAccessConfig, OPS_SESSION_COOKIE_NAME } from '@/lib/ops-access';
+import { readValidOpsSession } from '@/lib/ops-session';
 import { resolveServerBridgeApiBaseUrl } from '@/lib/server-bridge-api-base-url';
 
 export const dynamic = 'force-dynamic';
@@ -43,6 +46,15 @@ function buildUpstreamHeaders(request: Request) {
 }
 
 async function proxyRequest(request: Request, context: { params: Promise<{ path: string[] }> }) {
+  const opsConfig = getOpsAccessConfig();
+  if (opsConfig.enabled) {
+    const cookieStore = await cookies();
+    const session = await readValidOpsSession(cookieStore.get(OPS_SESSION_COOKIE_NAME)?.value);
+    if (!session) {
+      return buildErrorResponse(401, { message: 'Sessao operacional obrigatoria.' });
+    }
+  }
+
   const method = request.method.toUpperCase();
   if (!ALLOWED_METHODS.has(method)) {
     return buildErrorResponse(405, { message: 'Metodo nao suportado pelo bridge interno.' });
