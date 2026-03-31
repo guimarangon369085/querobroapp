@@ -2,7 +2,13 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import type { Product } from '@querobroapp/shared';
+import {
+  EXTERNAL_ORDER_DELIVERY_WINDOWS,
+  resolveExternalOrderDeliveryWindowKeyForDate,
+  resolveExternalOrderDeliveryWindowLabel,
+  type ExternalOrderDeliveryWindowKey,
+  type Product
+} from '@querobroapp/shared';
 import { AppIcon } from '@/components/app-icons';
 import { FormField } from '@/components/form/FormField';
 import { formatCurrencyBR } from '@/lib/format';
@@ -65,6 +71,7 @@ type OrderQuickCreateProps = {
   onCustomerOptionPick: (option: SelectOption) => void;
   onCustomerAddressKeyChange: (value: string) => void;
   onScheduledAtChange: (value: string) => void;
+  onScheduledWindowPick: (windowKey: ExternalOrderDeliveryWindowKey) => void;
   onDiscountChange: (value: string) => void;
   onDiscountBlur: () => void;
   onNotesChange: (value: string) => void;
@@ -274,6 +281,7 @@ export function OrderQuickCreate({
   onCustomerOptionPick,
   onCustomerAddressKeyChange,
   onScheduledAtChange,
+  onScheduledWindowPick,
   onDiscountChange,
   onDiscountBlur,
   onNotesChange,
@@ -367,6 +375,15 @@ export function OrderQuickCreate({
   const scheduledPickerParts = useMemo(
     () => splitDateTimeLocalPickerParts(newOrderScheduledAt),
     [newOrderScheduledAt]
+  );
+  const scheduledWindowKey = useMemo(() => {
+    const parsed = new Date(newOrderScheduledAt);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return resolveExternalOrderDeliveryWindowKeyForDate(parsed);
+  }, [newOrderScheduledAt]);
+  const scheduledWindowLabel = useMemo(
+    () => resolveExternalOrderDeliveryWindowLabel(scheduledWindowKey),
+    [scheduledWindowKey]
   );
   const customerSuggestions = useMemo(() => {
     const raw = customerSearch.trim().toLowerCase();
@@ -568,6 +585,27 @@ export function OrderQuickCreate({
                 )
               }
             />
+          </div>
+          <div className="mt-2 grid gap-2">
+            <div className="flex flex-wrap gap-2">
+              {EXTERNAL_ORDER_DELIVERY_WINDOWS.map((window) => (
+                <button
+                  key={window.key}
+                  type="button"
+                  className={`app-button ${
+                    scheduledWindowKey === window.key ? 'app-button-primary' : 'app-button-ghost'
+                  } min-h-[38px] px-3 text-xs normal-case tracking-[0.02em]`}
+                  onClick={() => onScheduledWindowPick(window.key)}
+                >
+                  {window.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-neutral-500">
+              {scheduledWindowLabel
+                ? `Faixa pública atual: ${scheduledWindowLabel}.`
+                : 'Horario fora das 3 faixas publicas de /pedido.'}
+            </p>
           </div>
         </FormField>
       </div>

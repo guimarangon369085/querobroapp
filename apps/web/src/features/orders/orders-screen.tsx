@@ -14,10 +14,14 @@ import {
   type MouseEvent
 } from 'react';
 import {
+  EXTERNAL_ORDER_DELIVERY_WINDOWS,
+  resolveExternalOrderDeliveryWindowKeyForDate,
+  resolveExternalOrderDeliveryWindowLabel,
   resolveExternalOrderProductionDurationMinutes,
   resolveDisplayNumber,
   roundMoney,
   stripOrderNoteMetadata,
+  type ExternalOrderDeliveryWindowKey,
   type Customer,
   type OrderIntake,
   type OrderCustomerSnapshot,
@@ -481,6 +485,22 @@ function mergeDateTimeLocalPickerParts(parts: { date: string; hour: string; minu
   return `${parts.date}T${parts.hour}:${parts.minute}`;
 }
 
+function applyDateTimeLocalPickerWindow(value: string, windowKey: ExternalOrderDeliveryWindowKey) {
+  const parts = splitDateTimeLocalPickerParts(value || defaultOrderDateTimeInput());
+  const targetWindow = EXTERNAL_ORDER_DELIVERY_WINDOWS.find((window) => window.key === windowKey);
+  if (!targetWindow) {
+    return normalizeDateTimeLocalToAllowedQuarter(mergeDateTimeLocalPickerParts(parts));
+  }
+
+  return normalizeDateTimeLocalToAllowedQuarter(
+    mergeDateTimeLocalPickerParts({
+      date: parts.date,
+      hour: `${targetWindow.startHour}`.padStart(2, '0'),
+      minute: `${targetWindow.startMinute}`.padStart(2, '0')
+    })
+  );
+}
+
 function parseDateTimeLocalInput(value: string) {
   const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
   if (!match) return null;
@@ -516,6 +536,11 @@ function formatOrderDateTimeLabel(date?: Date | null) {
     hour: '2-digit',
     minute: '2-digit'
   });
+}
+
+function formatPublicScheduleWindowLabel(date?: Date | null) {
+  const windowKey = resolveExternalOrderDeliveryWindowKeyForDate(date ?? null);
+  return resolveExternalOrderDeliveryWindowLabel(windowKey);
 }
 
 function formatDeletionTimestampLabel(date?: string | null) {
@@ -2016,6 +2041,10 @@ function OrdersPageContent() {
     (entry: CalendarOrderEntry) => compactCustomerLabelForCalendar(resolveCustomerName(entry.order)),
     [resolveCustomerName]
   );
+  const resolveCalendarEntryCustomerName = useCallback(
+    (entry: CalendarOrderEntry) => resolveCustomerName(entry.order),
+    [resolveCustomerName]
+  );
   const resolveCalendarEntryGridLabel = useCallback(
     (entry: CalendarOrderEntry) => {
       const customer = resolveOrderCustomerProfile(entry.order);
@@ -2970,6 +2999,18 @@ function OrdersPageContent() {
       ),
     [selectedOrderEditScheduledAt]
   );
+  const selectedOrderEditScheduledAtDate = useMemo(
+    () => parseDateTimeLocalInput(selectedOrderEditScheduledAt),
+    [selectedOrderEditScheduledAt]
+  );
+  const selectedOrderEditScheduledWindowKey = useMemo(
+    () => resolveExternalOrderDeliveryWindowKeyForDate(selectedOrderEditScheduledAtDate ?? null),
+    [selectedOrderEditScheduledAtDate]
+  );
+  const selectedOrderEditScheduledWindowLabel = useMemo(
+    () => resolveExternalOrderDeliveryWindowLabel(selectedOrderEditScheduledWindowKey),
+    [selectedOrderEditScheduledWindowKey]
+  );
   const selectedOrderEditDiscountPctNumber = useMemo(() => {
     const parsed = parseLocaleNumber(selectedOrderEditDiscountPct);
     return parsed == null ? 0 : Math.min(Math.max(roundMoney(parsed), 0), 100);
@@ -2992,6 +3033,10 @@ function OrdersPageContent() {
     formatPhoneBR(selectedOrderCustomerProfile.phone) ||
     (selectedOrderCustomerProfile.phone || '').trim() ||
     'Telefone nao informado';
+  const selectedOrderScheduledWindowLabel = useMemo(
+    () => formatPublicScheduleWindowLabel(resolveOrderDate(selectedOrder)),
+    [selectedOrder]
+  );
   const selectedOrderDeliveryFee = toMoney(Math.max(selectedOrder?.deliveryFee ?? 0, 0));
   const selectedOrderProductSubtotal = toMoney(
     Math.max(roundMoney((selectedOrder?.total ?? 0) - selectedOrderDeliveryFee), 0)
@@ -3812,8 +3857,11 @@ function OrdersPageContent() {
                         const isSelected = selectedOrder?.id === item.entry.order.id;
                         const isDraggable = true;
                         const eventKey = `timeline-${calendarEntryBaseKey(item.entry)}`;
-                        const eventLabel = resolveCalendarEntryGridLabel(item.entry);
-                        const eventNote = formatOrderNoteLabel(item.entry.order.notes);
+                        const isCompactTimelineCard = item.laneCount > 1;
+                        const eventLabel = isCompactTimelineCard
+                          ? resolveCalendarEntryCustomerName(item.entry)
+                          : resolveCalendarEntryGridLabel(item.entry);
+                        const eventNote = isCompactTimelineCard ? '' : formatOrderNoteLabel(item.entry.order.notes);
                         const activeDrag = dayGridDragState?.eventKey === eventKey ? dayGridDragState : null;
                         const previewReadyMinutes = activeDrag ? activeDrag.previewMinutes : null;
                         const displayRange = resolveCalendarEntryTimeRange(item.entry, previewReadyMinutes);
@@ -3837,6 +3885,7 @@ function OrdersPageContent() {
                             className={`orders-day-grid__event ${
                               isSelected ? `ring-2 ring-offset-1 ${calendarStatusRingClass(status)}` : ''
                             } ${activeDrag ? 'orders-day-grid__event--dragging' : ''}`}
+                            data-label-mode={isCompactTimelineCard ? 'compact' : 'default'}
                             onClick={() => handleDayGridEventClick(item.entry, eventKey)}
                             onPointerDown={
                               isDraggable
@@ -3973,7 +4022,8 @@ function OrdersPageContent() {
                           displayTimelineEvents.map((item) => {
                             const status = resolveCalendarEntryStatus(item.entry);
                             const eventLabel = resolveCalendarEntryCompactName(item.entry);
-                            const eventNote = formatOrderNoteLabel(item.entry.order.notes);
+                            const isCompactTimelineCard = item.laneCount > 1;
+                            const eventNote = isCompactTimelineCard ? '' : formatOrderNoteLabel(item.entry.order.notes);
                             const isSelected = selectedOrder?.id === item.entry.order.id;
                             const isDraggable = true;
                             const eventKey = item.entry.order.id
@@ -3996,6 +4046,7 @@ function OrdersPageContent() {
                                 } ${isDragging ? 'orders-week-grid__event--dragging' : ''} ${
                                   isSourceGhost ? 'orders-week-grid__event--ghost' : ''
                                 }`}
+                                data-label-mode={isCompactTimelineCard ? 'compact' : 'default'}
                                 style={
                                   {
                                     top: `${item.top}px`,
@@ -4191,6 +4242,9 @@ function OrdersPageContent() {
                       formatOrderDateTimeLabel(
                         resolveOrderDate(order) ?? safeDateFromIso(order.createdAt ?? null)
                       ) || 'Sem data';
+                    const publicWindowLabel = formatPublicScheduleWindowLabel(
+                      resolveOrderDate(order) ?? safeDateFromIso(order.createdAt ?? null)
+                    );
                     const customerName = resolveCustomerName(order);
                     const historyCustomer = resolveOrderCustomerProfile(order);
                     const historyCustomerAddress =
@@ -4250,6 +4304,7 @@ function OrdersPageContent() {
                               <p className="orders-list-panel__line-customer">{customerName}</p>
                               <p className="orders-list-panel__line-meta">
                                 Pedido #{displayOrderNumber(order)} • {dateLabel}
+                                {publicWindowLabel ? ` • ${publicWindowLabel}` : ' • Fora da faixa publica'}
                               </p>
                               {historyOrderNote ? (
                                 <p className="orders-list-panel__line-note">{historyOrderNote}</p>
@@ -4372,6 +4427,9 @@ function OrdersPageContent() {
                 }}
                 onCustomerAddressKeyChange={setNewOrderSelectedAddressKey}
                 onScheduledAtChange={setNewOrderScheduledAt}
+                onScheduledWindowPick={(windowKey) => {
+                  setNewOrderScheduledAt((current) => applyDateTimeLocalPickerWindow(current, windowKey));
+                }}
                 onDiscountChange={setNewOrderDiscountPct}
                 onDiscountBlur={() => setNewOrderDiscountPct(normalizeDiscountPctInput(newOrderDiscountPct))}
                 onNotesChange={setNewOrderNotes}
@@ -4534,6 +4592,9 @@ function OrdersPageContent() {
                 >
                   {formatDisplayedPaymentStatus(selectedOrderPaymentStatus)}
                 </span>
+                <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold text-[color:var(--ink-muted)]">
+                  {selectedOrderScheduledWindowLabel ? selectedOrderScheduledWindowLabel : 'Fora da faixa publica'}
+                </span>
                 <span>{formatCurrencyBR(selectedOrder.total ?? 0)}</span>
               </div>
               {selectedCustomer?.deletedAt ? (
@@ -4585,6 +4646,33 @@ function OrdersPageContent() {
                       )
                     }
                   />
+                </div>
+                <div className="mt-2 grid gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    {EXTERNAL_ORDER_DELIVERY_WINDOWS.map((window) => (
+                      <button
+                        key={window.key}
+                        type="button"
+                        className={`app-button ${
+                          selectedOrderEditScheduledWindowKey === window.key
+                            ? 'app-button-primary'
+                            : 'app-button-ghost'
+                        } min-h-[38px] px-3 text-xs normal-case tracking-[0.02em]`}
+                        onClick={() =>
+                          setSelectedOrderEditScheduledAt((current) =>
+                            applyDateTimeLocalPickerWindow(current, window.key)
+                          )
+                        }
+                      >
+                        {window.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs font-normal normal-case tracking-normal text-[color:var(--ink-muted)]">
+                    {selectedOrderEditScheduledWindowLabel
+                      ? `Faixa pública atual: ${selectedOrderEditScheduledWindowLabel}.`
+                      : 'Horario fora das 3 faixas publicas de /pedido.'}
+                  </p>
                 </div>
               </label>
               <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">

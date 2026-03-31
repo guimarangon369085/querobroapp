@@ -111,6 +111,7 @@ body {
   max-width: 100%;
   overflow-x: hidden;
   overflow-x: clip;
+  touch-action: pan-y;
 }
 
 body {
@@ -2990,8 +2991,9 @@ input[type='radio'] {
   position: fixed;
   inset: 0;
   z-index: 110;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
   padding:
     max(18px, calc(12px + var(--app-safe-area-top)))
     max(18px, calc(12px + var(--app-safe-area-right)))
@@ -3000,34 +3002,37 @@ input[type='radio'] {
   background: rgba(24, 16, 10, 0.38);
   backdrop-filter: blur(4px);
   overflow: hidden;
+  overscroll-behavior: contain;
 }
 
 .order-detail-modal__dialog {
   position: relative;
-  width: min(1120px, calc(var(--app-viewport-width) - var(--app-safe-area-left) - var(--app-safe-area-right) - max(24px, calc(2 * var(--app-overlay-gap)))));
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  width: min(1040px, calc(var(--app-viewport-width) - var(--app-safe-area-left) - var(--app-safe-area-right) - max(24px, calc(2 * var(--app-overlay-gap)))));
   max-width: 100%;
-  max-height: min(calc(var(--app-viewport-height) - max(24px, calc(2 * var(--app-overlay-gap)))), 920px);
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable both-edges;
-}
-
-.order-detail-modal__dialog--quick-create {
-  border-radius: 28px;
+  height: min(calc(var(--app-viewport-height) - max(24px, calc(2 * var(--app-overlay-gap)))), 920px);
+  overflow: hidden;
+  border-radius: 30px;
   border: 1px solid color-mix(in srgb, var(--line-soft), white 22%);
   background:
     linear-gradient(180deg, rgba(255, 251, 246, 0.99), rgba(250, 239, 226, 0.97));
-  box-shadow: 0 22px 50px rgba(40, 24, 14, 0.18);
+  box-shadow: 0 24px 60px rgba(40, 24, 14, 0.22);
   padding: 12px;
 }
 
+.order-detail-modal__dialog--quick-create {
+  width: min(680px, calc(var(--app-viewport-width) - var(--app-safe-area-left) - var(--app-safe-area-right) - max(24px, calc(2 * var(--app-overlay-gap)))));
+}
+
 .order-detail-modal__close {
-  position: sticky;
-  top: 0;
+  position: relative;
+  flex: 0 0 auto;
+  align-self: flex-end;
   z-index: 2;
   margin-left: auto;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -3043,18 +3048,43 @@ input[type='radio'] {
 }
 
 .order-detail-modal__panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: clip;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable both-edges;
   background: rgba(255, 251, 246, 0.98);
   min-width: 0;
-  overflow-x: clip;
+  border-radius: 24px;
 }
 
 .order-detail-modal__panel--quick-create {
   background: transparent;
-  overflow: visible;
+  border-radius: 20px;
 }
 
 .order-detail-modal__panel > * {
   min-width: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .order-detail-modal__dialog {
+    animation: order-detail-drawer-enter 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+}
+
+@keyframes order-detail-drawer-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(22px, 0, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
 }
 
 .order-workflow-strip {
@@ -5045,7 +5075,6 @@ html.app-render-stability .app-topbar {
   }
 
   .order-detail-modal {
-    place-items: start center;
     padding:
       max(12px, calc(8px + var(--app-safe-area-top)))
       max(12px, calc(8px + var(--app-safe-area-right)))
@@ -5055,17 +5084,16 @@ html.app-render-stability .app-topbar {
 
   .order-detail-modal__dialog {
     width: 100%;
-    max-height: calc(var(--app-viewport-height) - max(24px, calc(2 * var(--app-overlay-gap))));
+    height: calc(var(--app-viewport-height) - max(24px, calc(2 * var(--app-overlay-gap))));
+    border-radius: 24px;
+    padding: 10px;
   }
 
   .order-detail-modal__dialog--quick-create {
-    border-radius: 24px;
-    padding: 10px;
     scrollbar-gutter: auto;
   }
 
   .order-detail-modal__close {
-    top: 2px;
     padding: 7px 11px;
   }
 
@@ -5157,9 +5185,27 @@ html.app-render-stability .app-topbar {
   }
 
   .orders-day-grid__event {
-    left: calc((100% / var(--orders-day-grid-lanes)) * var(--orders-day-grid-lane) + 6px);
-    width: calc((100% / var(--orders-day-grid-lanes)) - 9px);
+    left: calc(
+      (100% / var(--orders-day-grid-group-lanes, var(--orders-day-grid-lanes, 1))) *
+        var(--orders-day-grid-lane) +
+        6px
+    );
+    width: calc((100% / var(--orders-day-grid-group-lanes, var(--orders-day-grid-lanes, 1))) - 9px);
     padding: 5px 7px;
+  }
+
+  .orders-day-grid__event[data-label-mode='compact'] .orders-day-grid__event-time,
+  .orders-day-grid__event[data-label-mode='compact'] .orders-day-grid__event-note,
+  .orders-week-grid__event[data-label-mode='compact'] .orders-week-grid__event-time,
+  .orders-week-grid__event[data-label-mode='compact'] .orders-week-grid__event-note {
+    display: none;
+  }
+
+  .orders-day-grid__event[data-label-mode='compact'] .orders-day-grid__event-title,
+  .orders-week-grid__event[data-label-mode='compact'] .orders-week-grid__event-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .orders-day-grid__event-title,
@@ -5370,7 +5416,7 @@ html.app-render-stability .app-topbar {
 @media (min-width: 1280px) {
   .order-detail-modal__dialog {
     width: min(
-      1280px,
+      1080px,
       calc(
         var(--app-viewport-width) - var(--app-safe-area-left) - var(--app-safe-area-right) -
           max(24px, calc(2 * var(--app-overlay-gap)))

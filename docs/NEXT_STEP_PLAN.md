@@ -1,6 +1,6 @@
 # NEXT_STEP_PLAN
 
-Ultima atualizacao: 2026-03-23
+Ultima atualizacao: 2026-03-30
 
 ## Objetivo da fase atual
 
@@ -63,6 +63,8 @@ Criterio de pronto:
 - Manter a home travada ao viewport visivel real, sem qualquer rolagem residual causada por `100vh` ou barras do navegador.
 - Manter a home sem bounce/scroll residual em iPhone, mesmo com barras dinamicas do navegador, e validar isso no dominio publico.
 - Manter o restante do app no mesmo modelo de viewport real da home, com modais, toasts, avisos e barras sticky respeitando `visualViewport` e safe areas do navegador.
+- Manter `Novo pedido`, detalhe de pedido e detalhe de cliente no padrao drawer lateral sobreposto, sem regressao para modal central flutuante nem scroll no container externo.
+- Manter o app sem pinch zoom e com gesto principal de navegacao restrito ao eixo vertical, evitando zoom acidental e conflito com drawers/calendario em mobile.
 - Manter as rotas publicas com copy social curta e editorial no compartilhamento, sem texto tecnico de operacao no preview.
   Copy atual: `Sua vida + broa :) 🙂`.
 - Manter na home desktop o fundo em 3 colunas sincronizadas e sem repeticao, evitando crop agressivo de uma unica imagem em widescreen.
@@ -80,6 +82,8 @@ Criterio de pronto:
 - Manter `/dashboard` no formato editorial didatico novo, sem regressao para cards genericos ou leitura mais tecnica do que humana.
 - Manter `Novo pedido` de `/pedidos` estavel em mobile, sem popup deformado nem quebra no bloco de quantidade.
 - Manter `/pedidos` mobile sem FAB flutuante para `Novo pedido`, usando acao inline no proprio painel.
+- Manter os cards comprimidos do calendario de `/pedidos` mostrando ao menos o nome do cliente em mobile quando houver sobreposicao na mesma faixa.
+- Manter `/pedidos` exibindo de forma visivel as 3 faixas publicas de `/pedido` (`9h - 12h`, `12h - 16h`, `16h - 20h`) no quick create e na edicao, para conferência operacional sem remover a liberdade de sobreposicao interna.
 - Manter o intake externo/publico sem abortar transacao no Postgres ao reservar `publicNumber` para cliente/pedido.
 - Manter a navegacao padronizada com `PEDIDOS` como item principal e labels em caixa alta em todo o menu.
 - Seguir limpando redundancias em `Estoque` agora que `Produtos` saiu da navegação.

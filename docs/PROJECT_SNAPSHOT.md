@@ -4,6 +4,10 @@ Ultima atualizacao: 2026-03-30
 
 ## Estado atual
 
+- 2026-03-30: `/pedidos` deixou de usar popup central fragil em mobile e passou a abrir `Novo pedido` e `Detalhe do pedido` como drawer lateral sobreposto, com scroll interno no painel, altura travada ao viewport real e fechamento mais estavel em navegacao touch. No mesmo ciclo, o app passou a desabilitar pinch zoom globalmente (`maximumScale: 1`, `userScalable: false`) e a restringir o gesto principal a rolagem vertical.
+
+- 2026-03-30: o calendario de `/pedidos` agora entra em modo compacto quando varios pedidos compartilham a mesma faixa e o card fica comprimido, exibindo apenas o nome do cliente em mobile em vez de sumir com o texto. O fluxo interno tambem passou a exibir explicitamente as 3 faixas publicas de `/pedido` (`9h - 12h`, `12h - 16h`, `16h - 20h`) no quick create, na edicao e nos metadados do pedido, para conferência operacional sem reimpor a trava publica sobre a agenda interna.
+
 - 2026-03-30: `/pedido` deixou de resetar a data escolhida pelo cliente para a proxima faixa disponivel. A sincronizacao da agenda publica agora consulta sempre a selecao atual do formulario e ignora respostas stale fora de ordem, preservando `date/timeWindow` enquanto o usuario navega no calendario.
 
 - 2026-03-28: `/pedidos` removeu o helper textual do campo de desconto (`Campo livre de 0% a 100%` e o preview em reais) tanto na criacao quanto na edicao de pedidos. O input continua livre de `0` a `100`, mas a interface ficou mais limpa.
@@ -179,6 +183,10 @@ Ultima atualizacao: 2026-03-30
 - A home publica passou a usar a mesma cadencia de `2s` em qualquer viewport para a troca automatica de imagens, evitando regressao para `6s` em mobile por bifurcacao de viewport.
 
 ## Validacao operacional mais recente
+
+- Data: 2026-03-30
+- Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`
+- Resultado: `/pedidos` passou a operar com drawer lateral no lugar do modal central, o viewport do app ficou travado sem pinch zoom e o calendario mobile preserva ao menos o nome do cliente quando os cards ficam comprimidos por sobreposicao.
 
 - Data: 2026-03-30
 - Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, `npx --yes @railway/cli up -d -s querobroapp -m "fix(web): preserve public order date selection"`, `pnpm validate:public-deploy`

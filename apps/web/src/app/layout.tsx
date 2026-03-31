@@ -1,5 +1,5 @@
 import './globals.css';
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Suspense, type ReactNode } from 'react';
 import { BuilderRuntimeTheme } from '@/components/builder-runtime-theme';
 import { FeedbackProvider } from '@/components/feedback-provider';
@@ -41,6 +41,14 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image'
   }
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: 'cover'
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
