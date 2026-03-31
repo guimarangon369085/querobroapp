@@ -4,7 +4,7 @@ import { buildPublicAppUrl } from '@/lib/public-site-config';
 
 const pageTitle = 'Fazer pedido | QUEROBROAPP';
 const pageDescription = 'Sua vida + broa :) 🙂';
-const socialImagePath = '/querobroa-brand/cardapio/sabores-caixa.jpg';
+const socialImagePath = '/querobroa-brand/stack.jpg';
 
 export function generateMetadata(): Metadata {
   const canonicalUrl = buildPublicAppUrl('/pedido', {
@@ -37,9 +37,9 @@ export function generateMetadata(): Metadata {
         ? [
             {
               url: socialImageUrl,
-              width: 1466,
-              height: 2200,
-              alt: 'Cardapio de sabores QUEROBROA'
+              width: 1333,
+              height: 2000,
+              alt: 'Broas QUEROBROA empilhadas sobre fundo verde-claro'
             }
           ]
         : undefined

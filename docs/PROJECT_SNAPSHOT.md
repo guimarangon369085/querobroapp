@@ -4,6 +4,8 @@ Ultima atualizacao: 2026-03-30
 
 ## Estado atual
 
+- 2026-03-30: a imagem canônica da home para favoritos, `apple-touch-icon`, `manifest`, favicon e preview social passou a ser a foto vertical das broas empilhadas sobre fundo verde-claro (`stack.jpg`). Os PNGs de ícone foram regenerados a partir dessa foto, substituindo a composição antiga que ainda aparecia ao favoritar o site ou sugerir atalho na tela inicial.
+
 - 2026-03-30: `/pedidos` deixou de recarregar a workspace inteira ao apenas selecionar um pedido. O detalhe agora abre sem disparar novo `fetchOrdersWorkspace()` por troca de `selectedOrder`, removendo o micro-loop visual que acontecia ao clicar em cards. Na mesma varredura, `Clientes`, `Estoque` e `Dashboard` nao mostraram o mesmo anti-padrao de loader recriado por item selecionado.
 
 - 2026-03-30: `/pedidos` deixou de usar popup central fragil em mobile e passou a abrir `Novo pedido` e `Detalhe do pedido` como drawer lateral sobreposto, com scroll interno no painel, altura travada ao viewport real e fechamento mais estavel em navegacao touch. No mesmo ciclo, o app passou a desabilitar pinch zoom globalmente (`maximumScale: 1`, `userScalable: false`) e a restringir o gesto principal a rolagem vertical.
@@ -185,6 +187,10 @@ Ultima atualizacao: 2026-03-30
 - A home publica passou a usar a mesma cadencia de `2s` em qualquer viewport para a troca automatica de imagens, evitando regressao para `6s` em mobile por bifurcacao de viewport.
 
 ## Validacao operacional mais recente
+
+- Data: 2026-03-30
+- Ciclo executado: `pnpm --filter @querobroapp/web build`
+- Resultado: a home e `/pedido` passaram a anunciar a foto vertical `stack.jpg` como imagem social, e os arquivos `icon.png`, `apple-touch-icon.png`, `querobroa-icon-192.png` e `querobroa-icon-512.png` foram regenerados a partir dessa mesma asset para alinhar bookmark e atalho com a foto atual da marca.
 
 - Data: 2026-03-30
 - Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`

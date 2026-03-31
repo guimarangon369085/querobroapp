@@ -62,6 +62,7 @@ Criterio de pronto:
 - Manter a home sem CTA de instalacao/atalho enquanto iPhone/iOS nao permitir um fluxo realmente coerente por clique direto.
 - Manter a home travada ao viewport visivel real, sem qualquer rolagem residual causada por `100vh` ou barras do navegador.
 - Manter a home sem bounce/scroll residual em iPhone, mesmo com barras dinamicas do navegador, e validar isso no dominio publico.
+- Manter favoritos, favicon, `apple-touch-icon`, `manifest` e preview social da home ancorados na foto canonica atual (`stack.jpg`), sem voltar a sugerir imagens antigas da galeria ou composições desatualizadas ao favoritar/adicionar atalho.
 - Manter o restante do app no mesmo modelo de viewport real da home, com modais, toasts, avisos e barras sticky respeitando `visualViewport` e safe areas do navegador.
 - Manter `Novo pedido`, detalhe de pedido e detalhe de cliente no padrao drawer lateral sobreposto, sem regressao para modal central flutuante nem scroll no container externo.
 - Manter o app sem pinch zoom e com gesto principal de navegacao restrito ao eixo vertical, evitando zoom acidental e conflito com drawers/calendario em mobile.
