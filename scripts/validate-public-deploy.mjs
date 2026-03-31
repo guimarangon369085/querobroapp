@@ -71,10 +71,11 @@ async function expectJson(url, init = {}) {
 async function expectProtectedRedirect(pathname, expectedTargetPrefix) {
   const response = await fetch(`${APP_URL}${pathname}`, { redirect: 'manual' });
   const location = response.headers.get('location') || '';
+  const expectedRelativeTarget = expectedTargetPrefix.replace(APP_URL, '') || '/';
   if (response.status < 300 || response.status >= 400) {
     throw new Error(`${pathname} deveria estar protegido, mas respondeu ${response.status}`);
   }
-  if (!location.startsWith(expectedTargetPrefix)) {
+  if (!location.startsWith(expectedTargetPrefix) && !location.startsWith(expectedRelativeTarget)) {
     throw new Error(`${pathname} redirecionou para ${location}, esperado prefixo ${expectedTargetPrefix}`);
   }
   return response;
