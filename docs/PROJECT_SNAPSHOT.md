@@ -1,8 +1,10 @@
 # PROJECT_SNAPSHOT
 
-Ultima atualizacao: 2026-03-27
+Ultima atualizacao: 2026-03-30
 
 ## Estado atual
+
+- 2026-03-30: `/pedido` deixou de resetar a data escolhida pelo cliente para a proxima faixa disponivel. A sincronizacao da agenda publica agora consulta sempre a selecao atual do formulario e ignora respostas stale fora de ordem, preservando `date/timeWindow` enquanto o usuario navega no calendario.
 
 - 2026-03-28: `/pedidos` removeu o helper textual do campo de desconto (`Campo livre de 0% a 100%` e o preview em reais) tanto na criacao quanto na edicao de pedidos. O input continua livre de `0` a `100`, mas a interface ficou mais limpa.
 
@@ -60,9 +62,9 @@ Ultima atualizacao: 2026-03-27
 - As caixas mistas agora usam corte seco entre as duas imagens, sem a faixa branca intermediaria.
 - O desktop de `/pedido` agora usa grids mais elasticas em vez de tracks fixas, evitando colapso de endereco, caixas e `Caixa Sabores` em navegacoes diferentes, inclusive browsers mais sensiveis a `minmax` rigido.
 - `/pedido` agora deixa explicito antes do submit que pedido novo nao entra para hoje, mostrando o primeiro horario disponivel na propria area de agendamento e no resumo lateral.
-- A `Caixa Sabores` de `/pedido` agora mostra uma composicao com as 5 artes oficiais dos sabores no mesmo envelope visual da imagem anterior.
-- A composicao de `Caixa Sabores` agora foi centralizada em arte compartilhada de 5 colunas, evitando que `/pedido` e outros pontos do web recaiam no JPG legado `sabores-caixa.jpg` por fallback generico.
-- O asset publico `sabores-caixa.jpg` tambem foi atualizado para a mesma composicao vertical full bleed de 5 colunas, alinhando site e catalogos que consumam essa imagem estatica.
+- A `Caixa Sabores` de `/pedido` agora mostra uma composicao com as artes oficiais dos sabores ativos do catalogo no mesmo envelope visual da imagem anterior.
+- A composicao de `Caixa Sabores` agora foi centralizada em arte compartilhada alinhada aos sabores ativos do catalogo, evitando que `/pedido` e outros pontos do web recaiam no JPG legado `sabores-caixa.jpg` por fallback generico.
+- O asset publico `sabores-caixa.jpg` tambem foi atualizado para a mesma composicao vertical full bleed alinhada ao catalogo atual, incluindo `Romeu e Julieta`, mantendo site e catalogos sincronizados.
 - O autocomplete de endereco em `/pedido` e `/clientes` saiu do widget legado `google.maps.places.Autocomplete` e passou para a API nova programatica do Google Places, preservando os inputs atuais e eliminando o warning de deprecacao no console.
 - A linha de quantidade dos cards de caixas em `/pedido` saiu do grid aninhado fragil e passou a usar miolo flexivel com container query por card, evitando que o selo `0 caixas` seja esmagado entre input e botao `+` em Safari/desktop.
 - O bloco `Entrega ou retirada` de `/pedido` agora responde ao tamanho real do painel via container query, sem voltar a colapsar `Endereco/Data/Horario` em Chrome/desktop ou em larguras intermediarias.
@@ -112,14 +114,14 @@ Ultima atualizacao: 2026-03-27
 - `/pedido`: pagina publica do cliente com submit para o intake canonico, cotacao previa de frete, exibicao do PIX copia e cola e CTA mobile sem barra flutuante sobre o conteudo.
 - `/pedido`: CTA principal abaixo do bloco `Resumo`; em `Entrega` ele calcula o frete antes da finalizacao, e em `Retirada` o frete zera.
 - `/pedido`: desktop sem colapso nos blocos de agendamento e sabores; a copy de agendamento agora avisa claramente que pedido novo nao entra para hoje.
-- `/pedido`: `Caixa Sabores` e fallbacks genericos do catalogo agora usam a mesma composicao oficial em 5 colunas, sem regressao para a arte antiga.
+- `/pedido`: `Caixa Sabores` e fallbacks genericos do catalogo agora usam a mesma composicao oficial alinhada aos sabores ativos do catalogo, sem regressao para a arte antiga.
 - `/pedido`: autocomplete de endereco segue no input atual, com sugestoes novas do Google Places e sem warning legado no console.
 - `/pedido`: o menu de sugestoes do endereco agora usa visual simples de caixa de selecao, sem blur/glass effect, para melhorar legibilidade no fluxo publico.
 - `/pedido`: cards de caixas no desktop mantem input e selo de quantidade legiveis lado a lado, sem o bloco `caixas` comprimir ou quebrar em colunas estreitas.
 - `/pedido`: o grid de `Endereco/Data/Horario` agora abre 1, 2 ou 3 colunas conforme a largura real do card, em vez de depender de breakpoint de viewport que podia divergir entre browsers.
 - `/pedido` e `/pedidos`: caixas mistas agora usam as fotos finais exportadas da marca, em vez da montagem antiga com meia-broa.
 - `/`: landing publica fullscreen da marca, preparada para `www.querobroa.com.br`.
-- `/`: landing publica fullscreen da marca com CTA de atalho mobile para instalar/acessar `Pedido rapido`.
+- `/`: landing publica fullscreen da marca com CTA principal para `Fazer pedido`, sem CTA de instalacao/atalho mobile.
 - `/pedidos`: agenda do dia, criacao de pedido, status, producao, entrega e pagamento.
 - `/pedidos`: popup de detalhe agora permite clicar diretamente na etapa desejada do workflow por icone, mantendo anteriores como concluidas e posteriores como pendentes sem quebrar a sequencia canonica do backend.
 - `/pedidos`: modal `Novo pedido` alinhado visualmente com `/pedido`, sem miniatura redundante e com CTA de frete abaixo do resumo.
@@ -177,6 +179,10 @@ Ultima atualizacao: 2026-03-27
 - A home publica passou a usar a mesma cadencia de `2s` em qualquer viewport para a troca automatica de imagens, evitando regressao para `6s` em mobile por bifurcacao de viewport.
 
 ## Validacao operacional mais recente
+
+- Data: 2026-03-30
+- Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, `npx --yes @railway/cli up -d -s querobroapp -m "fix(web): preserve public order date selection"`, `pnpm validate:public-deploy`
+- Resultado: o formulario publico de `/pedido` deixou de voltar sozinho para a proxima data disponivel ao trocar o calendario; o deploy do web foi publicado no Railway e a validacao publica voltou verde com `200` em `/`, `/pedido` e `/pedidos`, `apiHealth=ok`, preview `PIX_PENDING` e quote `LOCAL / MANUAL_FALLBACK`.
 
 - Data: 2026-03-25
 - Ciclo executado: `pnpm --filter @querobroapp/web build`

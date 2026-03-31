@@ -56,8 +56,9 @@ Criterio de pronto:
 - Continuar reduzindo densidade visual e scroll na visao `Dia`.
 - Continuar a extracao dos blocos grandes restantes de `orders-screen` para componentes menores.
 - Manter o catalogo de caixas/sabores centralizado entre `/pedido`, `quick create` e `/pedidos`.
+- Manter em `/pedido` a selecao manual de data/faixa estavel, sem resync da agenda sobrescrever a escolha do cliente durante a interacao com o calendario.
 - Manter a numeracao publica sequencial de clientes/pedidos como unico numero exposto na interface.
-- Validar em producao o atalho mobile da home, o prefill local de `/pedido` e o fluxo `Refazer ultimo pedido`.
+- Validar em producao o CTA principal da home, o prefill local de `/pedido` e o fluxo `Refazer ultimo pedido`.
 - Manter a home sem CTA de instalacao/atalho enquanto iPhone/iOS nao permitir um fluxo realmente coerente por clique direto.
 - Manter a home travada ao viewport visivel real, sem qualquer rolagem residual causada por `100vh` ou barras do navegador.
 - Manter a home sem bounce/scroll residual em iPhone, mesmo com barras dinamicas do navegador, e validar isso no dominio publico.
@@ -72,7 +73,7 @@ Criterio de pronto:
 - Manter `/pedido` abrindo direto em `Dados`, sem header/resumo duplicado no topo e sem labels redundantes de seção.
 - Manter `/pedido` sem colapsos em desktop/mobile intermediario, com grids elasticos para agendamento, caixas e `Caixa Sabores` em qualquer navegador.
 - Manter em `/pedido` a mensagem explicita de que pedido novo nao entra para hoje, sempre mostrando o primeiro horario liberado antes do erro final.
-- Manter `/pedido` sem subtotal/CTA flutuante no mobile e com a `Caixa Sabores` exibindo a composicao oficial dos 5 sabores.
+- Manter `/pedido` sem subtotal/CTA flutuante no mobile e com a `Caixa Sabores` exibindo a composicao oficial alinhada aos sabores ativos do catalogo.
 - Manter `/pedido` e `/clientes` no autocomplete novo do Google Places, sem regressao para o widget legado nem novos warnings de console ao selecionar sugestao.
 - Manter a linha de quantidade dos cards de `/pedido` no layout flexivel novo, sem voltar a comprimir o selo `caixas` em Safari/desktop ou em larguras intermediarias.
 - Manter `/dashboard` acessivel no menu principal sem voltar a aplicar trava de host no web por engano.

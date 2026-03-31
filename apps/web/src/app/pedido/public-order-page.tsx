@@ -375,6 +375,7 @@ export function PublicOrderPage() {
     lat: null,
     lng: null
   });
+  const scheduleSyncRequestIdRef = useRef(0);
   const [minimumSchedule, setMinimumSchedule] = useState<Date | null>(null);
   const [scheduleAvailability, setScheduleAvailability] = useState<PublicOrderScheduleAvailability | null>(null);
   const [draftSessionId, setDraftSessionId] = useState(() => resolvePublicOrderDraftSessionId());
@@ -763,12 +764,18 @@ export function PublicOrderPage() {
     requestedDate?: string | null;
     requestedWindowKey?: ExternalOrderDeliveryWindowKey | '' | null;
   }) => {
+    const requestId = scheduleSyncRequestIdRef.current + 1;
+    scheduleSyncRequestIdRef.current = requestId;
+
     try {
       const availability = await fetchPublicScheduleAvailability({
         requestedDate: options?.requestedDate,
         requestedWindowKey: options?.requestedWindowKey,
         requestedTotalBroas: Math.max(totalBroas, ORDER_BOX_UNITS)
       });
+      if (scheduleSyncRequestIdRef.current !== requestId) {
+        return;
+      }
       setScheduleAvailability(availability);
       const nextMinimum = new Date(availability.nextAvailableAt);
       if (Number.isNaN(nextMinimum.getTime())) {
@@ -802,6 +809,9 @@ export function PublicOrderPage() {
         };
       });
     } catch {
+      if (scheduleSyncRequestIdRef.current !== requestId) {
+        return;
+      }
       const fallbackMinimum = resolveExternalOrderMinimumSchedule();
       setScheduleAvailability(null);
       setMinimumSchedule(fallbackMinimum);
@@ -814,19 +824,19 @@ export function PublicOrderPage() {
   }, [fetchPublicScheduleAvailability, totalBroas]);
 
   useEffect(() => {
-    void syncScheduleAvailability();
-    const timer = window.setInterval(() => {
+    const syncCurrentSelection = () =>
       void syncScheduleAvailability({
         requestedDate: form.date || null,
         requestedWindowKey: form.timeWindow || null
       });
+
+    syncCurrentSelection();
+    const timer = window.setInterval(() => {
+      syncCurrentSelection();
     }, 60_000);
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        void syncScheduleAvailability({
-          requestedDate: form.date || null,
-          requestedWindowKey: form.timeWindow || null
-        });
+        syncCurrentSelection();
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -835,13 +845,6 @@ export function PublicOrderPage() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [form.date, form.timeWindow, syncScheduleAvailability]);
-
-  useEffect(() => {
-    void syncScheduleAvailability({
-      requestedDate: form.date || null,
-      requestedWindowKey: form.timeWindow || null
-    });
-  }, [form.date, form.timeWindow, syncScheduleAvailability, totalBroas]);
 
   const applyCoupon = useCallback(
     async (forcedCode?: string | null) => {
