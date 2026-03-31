@@ -4,7 +4,7 @@ Ultima atualizacao: 2026-03-30
 
 ## Estado atual
 
-- 2026-03-30: a imagem canônica da home para favoritos, `apple-touch-icon`, `manifest`, favicon e preview social passou a ser a foto vertical das broas empilhadas sobre fundo verde-claro (`stack.jpg`). Os PNGs de ícone foram regenerados a partir dessa foto, substituindo a composição antiga que ainda aparecia ao favoritar o site ou sugerir atalho na tela inicial.
+- 2026-03-30: a imagem canônica da home para favoritos, `apple-touch-icon`, `manifest`, favicon e preview social passou a ser a foto vertical das broas empilhadas sobre fundo verde-claro (`stack.jpg`). Os PNGs de ícone foram regenerados a partir dessa foto com crop quadrado centralizado, sem padding lateral, substituindo a composição antiga que ainda aparecia ao favoritar o site ou sugerir atalho na tela inicial.
 
 - 2026-03-30: `/pedidos` deixou de recarregar a workspace inteira ao apenas selecionar um pedido. O detalhe agora abre sem disparar novo `fetchOrdersWorkspace()` por troca de `selectedOrder`, removendo o micro-loop visual que acontecia ao clicar em cards. Na mesma varredura, `Clientes`, `Estoque` e `Dashboard` nao mostraram o mesmo anti-padrao de loader recriado por item selecionado.
 
@@ -190,7 +190,7 @@ Ultima atualizacao: 2026-03-30
 
 - Data: 2026-03-30
 - Ciclo executado: `pnpm --filter @querobroapp/web build`
-- Resultado: a home e `/pedido` passaram a anunciar a foto vertical `stack.jpg` como imagem social, e os arquivos `icon.png`, `apple-touch-icon.png`, `querobroa-icon-192.png` e `querobroa-icon-512.png` foram regenerados a partir dessa mesma asset para alinhar bookmark e atalho com a foto atual da marca.
+- Resultado: a home e `/pedido` passaram a anunciar a foto vertical `stack.jpg` como imagem social, e os arquivos `icon.png`, `apple-touch-icon.png`, `querobroa-icon-192.png` e `querobroa-icon-512.png` foram regenerados a partir dessa mesma asset com crop quadrado centralizado para alinhar bookmark e atalho com a foto atual da marca sem bordas laterais.
 
 - Data: 2026-03-30
 - Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`
