@@ -14,14 +14,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, next: '/pedidos' });
   }
   if (!config.credentialsBySecret.size || !config.signingSecret) {
-    return buildErrorResponse(503, 'Acesso operacional indisponivel: credencial nao configurada.');
+    return buildErrorResponse(503, 'Acesso operacional indisponível: credencial não configurada.');
   }
 
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return buildErrorResponse(400, 'Payload invalido para autenticacao.');
+    return buildErrorResponse(400, 'Payload inválido para autenticação.');
   }
 
   const record = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
@@ -34,7 +34,7 @@ export async function POST(request: Request) {
 
   const credential = config.credentialsBySecret.get(submittedSecret);
   if (!credential) {
-    return buildErrorResponse(401, 'Senha operacional invalida.');
+    return buildErrorResponse(401, 'Senha operacional inválida.');
   }
 
   const sessionValue = await createOpsSessionCookieValue({

@@ -132,3 +132,51 @@ test(
     );
   }
 );
+
+test(
+  'produto Amigos da Broa nao nasce com ficha clonada de broa',
+  { timeout: 180000 },
+  async (t) => {
+    const { apiUrl, shutdown } = await ensureApiServer();
+    let productId = null;
+
+    t.after(async () => {
+      if (productId) {
+        try {
+          await request(apiUrl, `/inventory-products/${productId}`, { method: 'DELETE' });
+        } catch {
+          // melhor esforco
+        }
+      }
+      await shutdown();
+    });
+
+    const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const product = await request(apiUrl, '/inventory-products', {
+      method: 'POST',
+      body: {
+        name: `Cafe Coado [TESTE_E2E] ${suffix}`,
+        category: 'Amigos da Broa',
+        unit: 'unidade',
+        price: 9,
+        active: true,
+        imageUrl: '/querobroa-brand/cardapio/sabores-caixa.jpg',
+        inventoryQtyPerSaleUnit: 90,
+        companionInventory: {
+          balance: 0,
+          unit: 'g',
+          purchasePackSize: 500,
+          purchasePackCost: 19.9
+        }
+      }
+    });
+    productId = product.id;
+
+    const productBom = (await request(apiUrl, '/boms')).find((entry) => entry.productId === product.id);
+    assert.equal(productBom, undefined, 'Amigos da Broa nao deve clonar BOM de broa automaticamente');
+    assert.ok(product.inventoryItemId, 'Amigos da Broa deve criar item de estoque proprio');
+    assert.equal(product.inventoryQtyPerSaleUnit, 90);
+    assert.equal(product.companionInventory?.unit, 'g');
+    assert.equal(product.companionInventory?.purchasePackSize, 500);
+  }
+);

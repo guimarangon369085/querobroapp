@@ -46,6 +46,25 @@ export class CustomersController {
     return this.service.addAddress(customerId, payload);
   }
 
+  @Put(':id/addresses/:addressId')
+  updateAddress(@Param('id') id: string, @Param('addressId') addressId: string, @Body() body: unknown) {
+    const customerId = parseWithSchema(idSchema, id);
+    const parsedAddressId = parseWithSchema(idSchema, addressId);
+    const payload = CustomerAddressSchema.omit({
+      id: true,
+      customerId: true,
+      createdAt: true,
+      updatedAt: true,
+      isPrimary: true
+    }).parse(body);
+    return this.service.updateAddress(customerId, parsedAddressId, payload);
+  }
+
+  @Delete(':id/addresses/:addressId')
+  removeAddress(@Param('id') id: string, @Param('addressId') addressId: string) {
+    return this.service.removeAddress(parseWithSchema(idSchema, id), parseWithSchema(idSchema, addressId));
+  }
+
   @Delete(':id')
   async remove(@Param('id') id: string) {
     await this.service.remove(parseWithSchema(idSchema, id));

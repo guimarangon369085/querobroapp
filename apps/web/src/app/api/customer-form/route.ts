@@ -7,13 +7,45 @@ function buildErrorResponse(status: number, payload: unknown) {
   return NextResponse.json(payload, { status });
 }
 
+function sanitizePublicCustomerFormSuccessPayload(payload: unknown) {
+  if (!payload || typeof payload !== 'object') return payload;
+
+  const record = payload as Record<string, unknown>;
+  const order = record.order;
+  const intake = record.intake;
+  if (!order || typeof order !== 'object' || !intake || typeof intake !== 'object') {
+    return payload;
+  }
+
+  const orderRecord = order as Record<string, unknown>;
+  const intakeRecord = intake as Record<string, unknown>;
+  return {
+    order: {
+      total:
+        typeof orderRecord.total === 'number' && Number.isFinite(orderRecord.total)
+          ? orderRecord.total
+          : null,
+      scheduledAt: typeof orderRecord.scheduledAt === 'string' ? orderRecord.scheduledAt : null
+    },
+    intake: {
+      stage:
+        (typeof intakeRecord.stage === 'string' && intakeRecord.stage.trim()) || 'CONFIRMED',
+      deliveryFee:
+        typeof intakeRecord.deliveryFee === 'number' && Number.isFinite(intakeRecord.deliveryFee)
+          ? intakeRecord.deliveryFee
+          : 0,
+      pixCharge: intakeRecord.pixCharge ?? null
+    }
+  };
+}
+
 export async function POST(request: Request) {
   let body: unknown;
   try {
     body = await request.json();
   } catch {
     return buildErrorResponse(400, {
-      message: 'Payload invalido para envio do pedido.'
+      message: 'Payload inválido para envio do pedido.'
     });
   }
 
@@ -41,7 +73,8 @@ export async function POST(request: Request) {
     } catch {
       payload = raw ? { message: raw } : null;
     }
-    return new NextResponse(JSON.stringify(payload), {
+    const responsePayload = response.ok ? sanitizePublicCustomerFormSuccessPayload(payload) : payload;
+    return new NextResponse(JSON.stringify(responsePayload), {
       status: response.status,
       headers: {
         'Content-Type': contentType
@@ -51,8 +84,8 @@ export async function POST(request: Request) {
     return buildErrorResponse(502, {
       message:
         error instanceof Error
-          ? `Falha ao conectar o formulario com a API: ${error.message}`
-          : 'Falha ao conectar o formulario com a API.'
+          ? `Falha ao conectar o formulário com a API: ${error.message}`
+          : 'Falha ao conectar o formulário com a API.'
     });
   }
 }

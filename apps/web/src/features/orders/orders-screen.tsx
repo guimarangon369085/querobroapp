@@ -1,20 +1,29 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import {
   Suspense,
+  startTransition,
   useCallback,
+  useDeferredValue,
   useEffect,
   useId,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
-  type PointerEvent,
   type MouseEvent
 } from 'react';
 import {
+  IconMotorbike,
+  IconReceipt2,
+  IconShoppingBag
+} from '@tabler/icons-react';
+import {
   EXTERNAL_ORDER_DELIVERY_WINDOWS,
+  normalizeOrderStatus,
+  parseAppliedCouponFromNotes,
   resolveExternalOrderDeliveryWindowKeyForDate,
   resolveExternalOrderDeliveryWindowLabel,
   resolveExternalOrderProductionDurationMinutes,
@@ -55,13 +64,16 @@ import {
   buildRuntimeOrderCatalog,
   calculateOrderSubtotalFromProductItems,
   compactOrderProductName,
+  resolveRuntimeOrderItemGroup,
   resolveOrderVirtualBoxLabel
 } from './order-box-catalog';
-import { type DeliveryQuote, type OrderView } from './orders-model';
+import { type DeliveryQuote, type OrderView, type ScheduleDayAvailability } from './orders-model';
 import {
   fetchInternalDeliveryQuote,
   fetchOrdersWorkspace,
-  submitOrderIntake
+  fetchScheduleDayAvailability,
+  submitOrderIntake,
+  updateScheduleDayAvailability
 } from './orders-api';
 
 const TEST_DATA_TAG = '[TESTE_E2E]';
@@ -83,20 +95,9 @@ type OrderVirtualEditableBox = {
   targetUnits: number;
   tone: 'CLOSED' | 'OPEN';
 };
-type DraftOrderItem = {
-  productId: number;
-  quantity: number;
-};
-type CustomerLastOrderDraft = {
-  customerId: number;
-  customerName: string;
-  orderId: number;
-  referenceLabel: string;
-  referenceTime: number;
-  fulfillmentMode: 'DELIVERY' | 'PICKUP';
-  items: DraftOrderItem[];
-  discountPct: number;
-  notes: string;
+type CustomerOption = {
+  id: number;
+  label: string;
 };
 
 type CustomerAddressLike = {
@@ -202,22 +203,20 @@ function mergeCustomerProfile(
 function formatCustomerFullAddress(customer?: CustomerAddressLike | null) {
   if (!customer) return '';
   const normalizedAddress = stripPostalCodeFromAddressLabel(customer.address);
-  if (normalizedAddress) return normalizedAddress;
+  const inferred = buildCustomerAddressAutofill(normalizedAddress);
+  const addressLine1 = compactWhitespace(customer.addressLine1 || inferred.addressLine1 || '');
+  const neighborhoodSource = compactWhitespace(customer.neighborhood || inferred.neighborhood || '');
+  const neighborhood = /\d/.test(neighborhoodSource) ? '' : neighborhoodSource;
+  const addressLine2 = compactWhitespace(customer.addressLine2 || '');
+  const parts = [addressLine1, neighborhood, addressLine2].filter(Boolean);
+  if (parts.length > 0) return parts.join(', ');
 
-  const cityState = [customer.city, customer.state]
-    .map((part) => (part || '').trim())
+  const fallbackParts = normalizedAddress
+    .split(',')
+    .map((part) => compactWhitespace(part))
     .filter(Boolean)
-    .join(' - ');
-  const structuredParts = [
-    customer.addressLine1,
-    customer.addressLine2,
-    customer.neighborhood,
-    cityState,
-    customer.country
-  ]
-    .map((part) => (part || '').trim())
-    .filter(Boolean);
-  return stripPostalCodeFromAddressLabel(structuredParts.join(', '));
+    .slice(0, 2);
+  return fallbackParts.join(', ');
 }
 
 function buildEditableOrderCustomerDraft(source?: CustomerAddressLike | null): EditableOrderCustomerDraft {
@@ -272,6 +271,9 @@ function draftToOrderCustomerSnapshot(draft: EditableOrderCustomerDraft): OrderC
   };
 }
 
+const EMPTY_ORDER_CUSTOMER_SNAPSHOT = draftToOrderCustomerSnapshot(buildEditableOrderCustomerDraft());
+const EMPTY_CUSTOMER_OPTIONS: CustomerOption[] = [];
+
 function buildCustomerAddressOptions(customer?: Customer | null): CustomerAddressOption[] {
   if (!customer) return [];
 
@@ -292,7 +294,7 @@ function buildCustomerAddressOptions(customer?: Customer | null): CustomerAddres
     seen.add(identity);
     options.push({
       key,
-      label: `${prefix} • ${formatCustomerFullAddress(value) || 'Endereco sem resumo'}`,
+      label: `${prefix} • ${formatCustomerFullAddress(value) || 'Endereço sem resumo'}`,
       value,
       isPrimary
     });
@@ -569,15 +571,6 @@ function toMoney(value: number) {
   return roundMoney(value);
 }
 
-function normalizeDraftOrderItems(items?: Array<{ productId?: number; quantity?: number }> | null) {
-  return (items || [])
-    .map((item) => ({
-      productId: Number(item.productId),
-      quantity: Math.max(Math.floor(item.quantity || 0), 0)
-    }))
-    .filter((item) => Number.isFinite(item.productId) && item.productId > 0 && item.quantity > 0);
-}
-
 function formatOrderNoteLabel(value?: string | null) {
   const normalized = compactWhitespace(stripOrderNoteMetadata(value) || '');
   return normalized ? `Obs: ${normalized}` : '';
@@ -613,28 +606,142 @@ function withTestDataTag(value?: string | null, fallback = '') {
   return `${baseValue} ${TEST_DATA_TAG}`.trim();
 }
 
+type OrderToneName = 'cream' | 'gold' | 'sage' | 'olive' | 'blush' | 'roast' | 'pix' | 'danger';
+
+const ORDER_TONE_META: Record<
+  OrderToneName,
+  {
+    badgeClassName: string;
+    dotClassName: string;
+    lineClassName: string;
+    ringClassName: string;
+    surfaceStyle: CSSProperties;
+  }
+> = {
+  cream: {
+    badgeClassName:
+      'border-[color:var(--tone-cream-line)] bg-[color:var(--tone-cream-surface)] text-[color:var(--tone-cream-ink)]',
+    dotClassName: 'bg-[color:var(--tone-cream-ink)]',
+    lineClassName: 'bg-[color:var(--tone-cream-line)]',
+    ringClassName: 'ring-[color:var(--tone-cream-line)]',
+    surfaceStyle: {
+      borderColor: 'var(--tone-cream-line)',
+      backgroundColor: 'var(--tone-cream-surface)'
+    }
+  },
+  gold: {
+    badgeClassName:
+      'border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)] text-[color:var(--tone-gold-ink)]',
+    dotClassName: 'bg-[color:var(--tone-gold-ink)]',
+    lineClassName: 'bg-[color:var(--tone-gold-line)]',
+    ringClassName: 'ring-[color:var(--tone-gold-line)]',
+    surfaceStyle: {
+      borderColor: 'var(--tone-gold-line)',
+      backgroundColor: 'var(--tone-gold-surface)'
+    }
+  },
+  sage: {
+    badgeClassName:
+      'border-[color:var(--tone-sage-line)] bg-[color:var(--tone-sage-surface)] text-[color:var(--tone-sage-ink)]',
+    dotClassName: 'bg-[color:var(--tone-sage-ink)]',
+    lineClassName: 'bg-[color:var(--tone-sage-line)]',
+    ringClassName: 'ring-[color:var(--tone-sage-line)]',
+    surfaceStyle: {
+      borderColor: 'var(--tone-sage-line)',
+      backgroundColor: 'var(--tone-sage-surface)'
+    }
+  },
+  olive: {
+    badgeClassName:
+      'border-[color:var(--tone-olive-line)] bg-[color:var(--tone-olive-surface)] text-[color:var(--tone-olive-ink)]',
+    dotClassName: 'bg-[color:var(--tone-olive-ink)]',
+    lineClassName: 'bg-[color:var(--tone-olive-line)]',
+    ringClassName: 'ring-[color:var(--tone-olive-line)]',
+    surfaceStyle: {
+      borderColor: 'var(--tone-olive-line)',
+      backgroundColor: 'var(--tone-olive-surface)'
+    }
+  },
+  blush: {
+    badgeClassName:
+      'border-[color:var(--tone-blush-line)] bg-[color:var(--tone-blush-surface)] text-[color:var(--tone-blush-ink)]',
+    dotClassName: 'bg-[color:var(--tone-blush-ink)]',
+    lineClassName: 'bg-[color:var(--tone-blush-line)]',
+    ringClassName: 'ring-[color:var(--tone-blush-line)]',
+    surfaceStyle: {
+      borderColor: 'var(--tone-blush-line)',
+      backgroundColor: 'var(--tone-blush-surface)'
+    }
+  },
+  roast: {
+    badgeClassName:
+      'border-[color:var(--tone-roast-line)] bg-[color:var(--tone-roast-surface)] text-[color:var(--tone-roast-ink)]',
+    dotClassName: 'bg-[color:var(--tone-roast-ink)]',
+    lineClassName: 'bg-[color:var(--tone-roast-line)]',
+    ringClassName: 'ring-[color:var(--tone-roast-line)]',
+    surfaceStyle: {
+      borderColor: 'var(--tone-roast-line)',
+      backgroundColor: 'var(--tone-roast-surface)'
+    }
+  },
+  pix: {
+    badgeClassName:
+      'border-[color:var(--tone-pix-line)] bg-[color:var(--tone-pix-surface)] text-[color:var(--tone-pix-ink)]',
+    dotClassName: 'bg-[color:var(--tone-pix-ink)]',
+    lineClassName: 'bg-[color:var(--tone-pix-line)]',
+    ringClassName: 'ring-[color:var(--tone-pix-line)]',
+    surfaceStyle: {
+      borderColor: 'var(--tone-pix-line)',
+      backgroundColor: 'var(--tone-pix-surface)'
+    }
+  },
+  danger: {
+    badgeClassName:
+      'border-[color:var(--tone-danger-line)] bg-[color:var(--tone-danger-surface)] text-[color:var(--tone-danger-ink)]',
+    dotClassName: 'bg-[color:var(--tone-danger-ink)]',
+    lineClassName: 'bg-[color:var(--tone-danger-line)]',
+    ringClassName: 'ring-[color:var(--tone-danger-line)]',
+    surfaceStyle: {
+      borderColor: 'var(--tone-danger-line)',
+      backgroundColor: 'var(--tone-danger-surface)'
+    }
+  }
+};
+
+function orderStatusTone(status?: string | null): OrderToneName {
+  const normalizedStatus = normalizeOrderStatus(status) || status;
+  if (normalizedStatus === 'ENTREGUE') return 'sage';
+  if (normalizedStatus === 'CANCELADO') return 'danger';
+  if (normalizedStatus === 'PRONTO') return 'olive';
+  return 'cream';
+}
+
+function orderPaymentTone(status?: string | null): OrderToneName {
+  if (status === 'PAGO') return 'pix';
+  if (status === 'PARCIAL') return 'gold';
+  return 'cream';
+}
+
+function calendarStatusTone(status?: string | null): OrderToneName {
+  const normalizedStatus = normalizeOrderStatus(status);
+  if (status === 'PRONTA' || normalizedStatus === 'PRONTO') return 'olive';
+  if (status === 'INGREDIENTES') return 'blush';
+  if (normalizedStatus === 'ENTREGUE') return 'sage';
+  if (normalizedStatus === 'CANCELADO') return 'danger';
+  return 'cream';
+}
+
 function orderStatusBadgeClass(status: string) {
-  if (status === 'ENTREGUE')
-    return 'border-[color:var(--tone-sage-line)] bg-[color:var(--tone-sage-surface)] text-[color:var(--tone-sage-ink)]';
-  if (status === 'CANCELADO')
-    return 'border-[color:var(--tone-roast-line)] bg-[color:var(--tone-roast-surface)] text-[color:var(--tone-roast-ink)]';
-  if (status === 'PRONTO')
-    return 'border-[color:var(--tone-olive-line)] bg-[color:var(--tone-olive-surface)] text-[color:var(--tone-olive-ink)]';
-  return 'border-[color:var(--tone-cream-line)] bg-[color:var(--tone-cream-surface)] text-[color:var(--tone-cream-ink)]';
+  return ORDER_TONE_META[orderStatusTone(status)].badgeClassName;
 }
 
 function orderPaymentBadgeClass(status?: string | null) {
-  if (status === 'PAGO')
-    return 'border-[color:var(--tone-sage-line)] bg-[color:var(--tone-sage-surface)] text-[color:var(--tone-sage-ink)]';
-  if (status === 'PARCIAL')
-    return 'border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)] text-[color:var(--tone-gold-ink)]';
-  return 'border-[color:var(--tone-cream-line)] bg-[color:var(--tone-cream-surface)] text-[color:var(--tone-cream-ink)]';
+  return ORDER_TONE_META[orderPaymentTone(status)].badgeClassName;
 }
 
 function formatDisplayedOrderStatus(status?: string | null) {
   if (!status) return '';
-  if (status === 'EM_PREPARACAO') return 'NO FORNO';
-  return status;
+  return normalizeOrderStatus(status) || status;
 }
 
 function formatDisplayedPaymentStatus(status?: string | null) {
@@ -644,16 +751,12 @@ function formatDisplayedPaymentStatus(status?: string | null) {
   return 'PENDENTE';
 }
 
-function formatWorkflowPaymentToggleLabel(status?: string | null) {
-  return status === 'PAGO' ? 'PAGO' : 'NAO PAGO';
+function formatWorkflowPaymentToggleLabel(_status?: string | null) {
+  return 'PAGO';
 }
 
 function displayOrderNumber(order?: { id?: number | null; publicNumber?: number | null } | null) {
   return resolveDisplayNumber(order) ?? order?.id ?? '-';
-}
-
-function displayCustomerNumber(customer?: { id?: number | null; publicNumber?: number | null } | null) {
-  return resolveDisplayNumber(customer) ?? customer?.id ?? '-';
 }
 
 function stripPostalCodeFromAddressLabel(value?: string | null) {
@@ -682,6 +785,8 @@ function resolveCalendarOrderTotalBroas(order: OrderView, productMap: Map<number
     if (quantity <= 0) return sum;
 
     const product = productMap.get(item.productId);
+    const group = resolveRuntimeOrderItemGroup(product);
+    if (group === 'COMPANION' || group === 'OTHER') return sum;
     const productName = normalizeOrderProductionDescriptor(product?.name);
     const productUnit = normalizeOrderProductionDescriptor(product?.unit);
     const looksLikeOfficialBroa =
@@ -711,6 +816,9 @@ function normalizeTextForSort(value?: string | null) {
 }
 
 function quickCreateProductRank(product: Product) {
+  const itemGroup = resolveRuntimeOrderItemGroup(product);
+  if (itemGroup === 'COMPANION') return 10;
+  if (itemGroup === 'OTHER') return 20;
   const normalizedName = normalizeTextForSort(product.name);
   if (normalizedName.includes('tradicional')) return 0;
   if (normalizedName.includes('goiabada')) return 1;
@@ -728,8 +836,6 @@ function sortQuickCreateProducts(products: Product[]) {
 
 type OrderWorkflowIllustrationName =
   | 'phone-check'
-  | 'mixer'
-  | 'oven'
   | 'bag-check'
   | 'scooter'
   | 'pix';
@@ -741,119 +847,46 @@ function OrderWorkflowIllustration({
   name: OrderWorkflowIllustrationName;
   className?: string;
 }) {
-  const sharedProps = {
-    fill: 'none',
-    stroke: 'currentColor',
-    strokeLinecap: 'round' as const,
-    strokeLinejoin: 'round' as const,
-    strokeWidth: 2.35
-  };
-
-  const textProps = {
-    fill: 'currentColor',
-    fontFamily: 'Arial, Helvetica, sans-serif',
-    fontWeight: 700
+  const iconClassName = className || 'h-8 w-8';
+  const iconProps = {
+    className: `${iconClassName} text-[#181411]`,
+    stroke: 1.55
   };
 
   if (name === 'phone-check') {
-    return (
-      <svg aria-hidden="true" className={className} viewBox="0 0 64 64">
-        <rect {...sharedProps} x="12" y="7" width="20" height="48" rx="4.5" />
-        <path {...sharedProps} d="M18.5 33.5 24 39l10.5-10.5" />
-      </svg>
-    );
-  }
-
-  if (name === 'mixer') {
-    return (
-      <svg aria-hidden="true" className={className} viewBox="0 0 64 64">
-        <circle {...sharedProps} cx="16" cy="10.5" r="2.8" />
-        <path {...sharedProps} d="M14 31V22.5c0-7.8 9-12.5 22.5-12.5 13.9 0 21.5 4.3 21.5 11.4 0 5.3-4.1 9.8-10.2 11.1" />
-        <path {...sharedProps} d="M14.5 24.5h27.5" />
-        <path {...sharedProps} d="M21 24.5v28.5" />
-        <path {...sharedProps} d="M21 53H10.5" />
-        <path {...sharedProps} d="M20.5 53h14l2.5 4H50" />
-        <path {...sharedProps} d="M28 32.5c2.6-1.5 10.6-1.5 13.2 0v10.4c0 6.3-3.7 10.3-9.8 10.3s-9.8-4-9.8-10.3V32.5c0-1.9 1.5-3.4 3.4-3.4h12.8c1.9 0 3.4 1.5 3.4 3.4" />
-        <path {...sharedProps} d="M42 29.5v12" />
-        <text {...textProps} x="25.2" y="21.4" fontSize="6.1" letterSpacing="1.3">
-          SMEG
-        </text>
-      </svg>
-    );
-  }
-
-  if (name === 'oven') {
-    return (
-      <svg aria-hidden="true" className={className} viewBox="0 0 64 64">
-        <rect {...sharedProps} x="8.5" y="14" width="47" height="36" rx="3.5" />
-        <path {...sharedProps} d="M8.5 24h47" />
-        <circle {...sharedProps} cx="18" cy="18.8" r="2.6" />
-        <circle {...sharedProps} cx="31.5" cy="18.8" r="2.6" />
-        <circle {...sharedProps} cx="45" cy="18.8" r="2.6" />
-        <rect {...sharedProps} x="18" y="29.2" width="28" height="15.8" rx="1.8" />
-        <path {...sharedProps} d="M26 41c0-2.4 2.3-3.2 2.3-5.6 0-2.3-2.3-3.1-2.3-5.5" />
-        <path {...sharedProps} d="M32.3 41c0-2.4 2.3-3.2 2.3-5.6 0-2.3-2.3-3.1-2.3-5.5" />
-        <path {...sharedProps} d="M38.6 41c0-2.4 2.3-3.2 2.3-5.6 0-2.3-2.3-3.1-2.3-5.5" />
-      </svg>
-    );
+    return <IconReceipt2 aria-hidden="true" {...iconProps} />;
   }
 
   if (name === 'bag-check') {
-    return (
-      <svg aria-hidden="true" className={className} viewBox="0 0 64 64">
-        <path {...sharedProps} d="M20 26h25l-2.7 27H22.7L20 26Z" />
-        <path {...sharedProps} d="M24.5 26v-5.8c0-5 3.6-8.7 8.4-8.7 4.8 0 8.4 3.7 8.4 8.7V26" />
-        <path {...sharedProps} d="M42.5 11.5 48 17l9-9" />
-        <text
-          {...textProps}
-          x="24"
-          y="44"
-          fontSize="5.15"
-          textLength="17.8"
-          lengthAdjust="spacingAndGlyphs"
-        >
-          @QUEROBROA
-        </text>
-      </svg>
-    );
+    return <IconShoppingBag aria-hidden="true" {...iconProps} />;
+  }
+
+  if (name === 'scooter') {
+    return <IconMotorbike aria-hidden="true" {...iconProps} />;
   }
 
   if (name === 'pix') {
     return (
-      <svg aria-hidden="true" className={className} viewBox="0 0 64 64">
-        <path {...sharedProps} d="M21 13h7.4l4.7 4.7-7.2 7.2a4.7 4.7 0 0 1-6.6 0L13 18.6 17.7 14a4.7 4.7 0 0 1 3.3-1z" />
-        <path {...sharedProps} d="m31 22.8 6.1 6.1a4.7 4.7 0 0 0 6.6 0l7.3-7.3-4.7-4.6a4.7 4.7 0 0 0-3.3-1.4h-7.3" />
-        <path {...sharedProps} d="m31 41.2 6.1-6.1a4.7 4.7 0 0 1 6.6 0l7.3 7.3-4.7 4.6a4.7 4.7 0 0 1-3.3 1.4h-7.3" />
-        <path {...sharedProps} d="M21 51h7.4l4.7-4.7-7.2-7.2a4.7 4.7 0 0 0-6.6 0L13 45.4l4.7 4.6A4.7 4.7 0 0 0 21 51z" />
-      </svg>
+      <span className={`inline-flex items-center justify-center ${iconClassName}`}>
+        <Image
+          aria-hidden="true"
+          alt=""
+          src="/brand/pix-logo.svg"
+          width={32}
+          height={32}
+          className="h-full w-full object-contain"
+        />
+      </span>
     );
   }
 
-  return (
-    <svg aria-hidden="true" className={className} viewBox="0 0 64 64">
-      <circle {...sharedProps} cx="18" cy="49" r="3.7" />
-      <circle {...sharedProps} cx="45" cy="49" r="3.7" />
-      <rect {...sharedProps} x="14" y="31" width="11.5" height="12.5" rx="1.2" />
-      <path {...sharedProps} d="M25.5 43h9.5l4.5 5.5h7.5" />
-      <path {...sharedProps} d="M34.5 43V35h6.7l4.3 4.3" />
-      <path {...sharedProps} d="M49.5 48.5h3.3c3 0 5.2-2.3 5.2-5.2v-6.1" />
-      <path {...sharedProps} d="M54 26.5h4.8l2.7 5.2" />
-      <path {...sharedProps} d="M57.3 37.3 61 35.2" />
-      <path {...sharedProps} d="M34 30.4h-5.4c-1.6 0-2.9 1.3-2.9 2.9V43" />
-    </svg>
-  );
+  return <IconMotorbike aria-hidden="true" {...iconProps} />;
 }
 
-type OrderWorkflowStatus = 'ABERTO' | 'CONFIRMADO' | 'EM_PREPARACAO' | 'PRONTO' | 'ENTREGUE';
+type OrderWorkflowStatus = 'ABERTO' | 'PRONTO' | 'ENTREGUE';
 type OrderWorkflowStage = OrderWorkflowStatus | 'PAGO';
 
-const ORDER_WORKFLOW_STATUSES: OrderWorkflowStatus[] = [
-  'ABERTO',
-  'CONFIRMADO',
-  'EM_PREPARACAO',
-  'PRONTO',
-  'ENTREGUE'
-];
+const ORDER_WORKFLOW_STATUSES: OrderWorkflowStatus[] = ['ABERTO', 'PRONTO', 'ENTREGUE'];
 const ORDER_WORKFLOW_STAGES: OrderWorkflowStage[] = [...ORDER_WORKFLOW_STATUSES, 'PAGO'];
 
 const orderWorkflowStatusMeta: Record<
@@ -869,57 +902,37 @@ const orderWorkflowStatusMeta: Record<
   ABERTO: {
     label: 'Pedido',
     illustration: 'phone-check',
-    activeClassName:
-      'border-[color:var(--tone-cream-line)] bg-[color:var(--tone-cream-surface)] text-[color:var(--tone-cream-ink)]',
-    passedDotClassName: 'bg-[color:var(--tone-cream-ink)]',
-    activeLineClassName: 'bg-[color:var(--tone-cream-line)]'
-  },
-  CONFIRMADO: {
-    label: 'Massa',
-    illustration: 'mixer',
-    activeClassName:
-      'border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)] text-[color:var(--tone-gold-ink)]',
-    passedDotClassName: 'bg-[color:var(--tone-gold-ink)]',
-    activeLineClassName: 'bg-[color:var(--tone-gold-line)]'
-  },
-  EM_PREPARACAO: {
-    label: 'Forno',
-    illustration: 'oven',
-    activeClassName:
-      'border-[color:var(--tone-roast-line)] bg-[color:var(--tone-roast-surface)] text-[color:var(--tone-roast-ink)]',
-    passedDotClassName: 'bg-[color:var(--tone-roast-ink)]',
-    activeLineClassName: 'bg-[color:var(--tone-roast-line)]'
+    activeClassName: ORDER_TONE_META.cream.badgeClassName,
+    passedDotClassName: ORDER_TONE_META.cream.dotClassName,
+    activeLineClassName: ORDER_TONE_META.cream.lineClassName
   },
   PRONTO: {
     label: 'Pronto',
     illustration: 'bag-check',
-    activeClassName:
-      'border-[color:var(--tone-olive-line)] bg-[color:var(--tone-olive-surface)] text-[color:var(--tone-olive-ink)]',
-    passedDotClassName: 'bg-[color:var(--tone-olive-ink)]',
-    activeLineClassName: 'bg-[color:var(--tone-olive-line)]'
+    activeClassName: ORDER_TONE_META.olive.badgeClassName,
+    passedDotClassName: ORDER_TONE_META.olive.dotClassName,
+    activeLineClassName: ORDER_TONE_META.olive.lineClassName
   },
   ENTREGUE: {
     label: 'Entregue',
     illustration: 'scooter',
-    activeClassName:
-      'border-[color:var(--tone-sage-line)] bg-[color:var(--tone-sage-surface)] text-[color:var(--tone-sage-ink)]',
-    passedDotClassName: 'bg-[color:var(--tone-sage-ink)]',
-    activeLineClassName: 'bg-[color:var(--tone-sage-line)]'
+    activeClassName: ORDER_TONE_META.sage.badgeClassName,
+    passedDotClassName: ORDER_TONE_META.sage.dotClassName,
+    activeLineClassName: ORDER_TONE_META.sage.lineClassName
   },
   PAGO: {
     label: 'Pago',
     illustration: 'pix',
-    activeClassName:
-      'border-[color:var(--tone-blush-line)] bg-[color:var(--tone-blush-surface)] text-[color:var(--tone-blush-ink)]',
-    passedDotClassName: 'bg-[color:var(--tone-blush-ink)]',
-    activeLineClassName: 'bg-[color:var(--tone-blush-line)]'
+    activeClassName: ORDER_TONE_META.pix.badgeClassName,
+    passedDotClassName: ORDER_TONE_META.pix.dotClassName,
+    activeLineClassName: ORDER_TONE_META.pix.lineClassName
   }
 };
 
 function toOrderWorkflowStatus(status?: string | null): OrderWorkflowStatus | null {
-  if (!status) return null;
-  return ORDER_WORKFLOW_STATUSES.includes(status as OrderWorkflowStatus)
-    ? (status as OrderWorkflowStatus)
+  const normalizedStatus = normalizeOrderStatus(status);
+  return normalizedStatus && ORDER_WORKFLOW_STATUSES.includes(normalizedStatus as OrderWorkflowStatus)
+    ? (normalizedStatus as OrderWorkflowStatus)
     : null;
 }
 
@@ -938,63 +951,6 @@ type CalendarOrderEntry = {
   durationMinutes: number;
   totalBroas: number;
   dateKey: string;
-};
-
-type DayGridDragState = {
-  pointerId: number;
-  eventKey: string;
-  orderId: number;
-  previousScheduledAtIso: string | null;
-  baseDate: Date;
-  baseMinutes: number;
-  previewMinutes: number;
-  lane: number;
-  height: number;
-  startClientY: number;
-};
-
-type DayGridDragIntentState = {
-  pointerId: number;
-  eventKey: string;
-  orderId: number;
-  previousScheduledAtIso: string | null;
-  baseDate: Date;
-  baseMinutes: number;
-  lane: number;
-  height: number;
-  target: HTMLButtonElement;
-  startClientX: number;
-  startClientY: number;
-  holdTimeoutId: number;
-};
-
-type WeekGridDragState = {
-  pointerId: number;
-  eventKey: string;
-  orderId: number;
-  previousScheduledAtIso: string | null;
-  entry: CalendarOrderEntry;
-  sourceDateKey: string;
-  previewDateKey: string;
-  baseMinutes: number;
-  previewMinutes: number;
-  height: number;
-  startClientY: number;
-};
-
-type WeekGridDragIntentState = {
-  pointerId: number;
-  eventKey: string;
-  orderId: number;
-  previousScheduledAtIso: string | null;
-  entry: CalendarOrderEntry;
-  sourceDateKey: string;
-  baseMinutes: number;
-  height: number;
-  target: HTMLButtonElement;
-  startClientX: number;
-  startClientY: number;
-  holdTimeoutId: number;
 };
 
 type TimelineLayoutInput<TEntry> = {
@@ -1158,7 +1114,7 @@ function formatDeliveryEstimateCaption(order?: OrderView | null) {
   const quoteExpiry = formatOrderDateTimeLabel(safeDateFromIso(order.deliveryQuoteExpiresAt ?? null));
 
   if (quoteStatus === 'FAILED') {
-    return 'Cotacao do frete indisponivel. Revise os dados do cliente e atualize o frete.';
+    return 'Cotação do frete indisponível. Revise os dados do cliente e atualize o frete.';
   }
 
   if (quoteStatus === 'EXPIRED') {
@@ -1172,7 +1128,7 @@ function formatDeliveryEstimateCaption(order?: OrderView | null) {
   }
 
   if (deliveryFee <= 0) {
-    return 'Frete ainda nao cotado.';
+    return 'Frete ainda não cotado.';
   }
 
   return quoteExpiry ? `Frete calculado ate ${quoteExpiry}.` : 'Frete calculado para este pedido.';
@@ -1266,90 +1222,15 @@ function formatCalendarWeekdayLabel(date: Date) {
 }
 
 function calendarStatusDotClass(status: string) {
-  if (status === 'PRONTA') return 'bg-[color:var(--tone-sage-ink)]';
-  if (status === 'NO_FORNO') return 'bg-[color:var(--tone-gold-ink)]';
-  if (status === 'PREPARO') return 'bg-[color:var(--tone-roast-ink)]';
-  if (status === 'INGREDIENTES') return 'bg-[color:var(--tone-blush-ink)]';
-  if (status === 'ENTREGUE') return 'bg-[color:var(--tone-sage-ink)]';
-  if (status === 'CANCELADO') return 'bg-[color:var(--tone-roast-ink)]';
-  if (status === 'PRONTO') return 'bg-[color:var(--tone-olive-ink)]';
-  if (status === 'EM_PREPARACAO') return 'bg-[color:var(--tone-roast-ink)]';
-  if (status === 'CONFIRMADO') return 'bg-[color:var(--tone-gold-ink)]';
-  return 'bg-[color:var(--tone-cream-ink)]';
+  return ORDER_TONE_META[calendarStatusTone(status)].dotClassName;
 }
 
 function calendarStatusEventSurfaceStyle(status: string): CSSProperties {
-  if (status === 'PRONTA') {
-    return {
-      borderColor: 'var(--tone-sage-line)',
-      backgroundColor: 'var(--tone-sage-surface)'
-    };
-  }
-  if (status === 'NO_FORNO') {
-    return {
-      borderColor: 'var(--tone-gold-line)',
-      backgroundColor: 'var(--tone-gold-surface)'
-    };
-  }
-  if (status === 'PREPARO') {
-    return {
-      borderColor: 'var(--tone-roast-line)',
-      backgroundColor: 'var(--tone-roast-surface)'
-    };
-  }
-  if (status === 'INGREDIENTES') {
-    return {
-      borderColor: 'var(--tone-blush-line)',
-      backgroundColor: 'var(--tone-blush-surface)'
-    };
-  }
-  if (status === 'ENTREGUE') {
-    return {
-      borderColor: 'var(--tone-sage-line)',
-      backgroundColor: 'var(--tone-sage-surface)'
-    };
-  }
-  if (status === 'CANCELADO') {
-    return {
-      borderColor: 'var(--tone-roast-line)',
-      backgroundColor: 'var(--tone-roast-surface)'
-    };
-  }
-  if (status === 'PRONTO') {
-    return {
-      borderColor: 'var(--tone-olive-line)',
-      backgroundColor: 'var(--tone-olive-surface)'
-    };
-  }
-  if (status === 'EM_PREPARACAO') {
-    return {
-      borderColor: 'var(--tone-roast-line)',
-      backgroundColor: 'var(--tone-roast-surface)'
-    };
-  }
-  if (status === 'CONFIRMADO') {
-    return {
-      borderColor: 'var(--tone-gold-line)',
-      backgroundColor: 'var(--tone-gold-surface)'
-    };
-  }
-  return {
-    borderColor: 'var(--tone-cream-line)',
-    backgroundColor: 'var(--tone-cream-surface)'
-  };
+  return ORDER_TONE_META[calendarStatusTone(status)].surfaceStyle;
 }
 
 function calendarStatusRingClass(status: string) {
-  if (status === 'PRONTA') return 'ring-[color:var(--tone-sage-line)]';
-  if (status === 'NO_FORNO') return 'ring-[color:var(--tone-gold-line)]';
-  if (status === 'PREPARO') return 'ring-[color:var(--tone-roast-line)]';
-  if (status === 'INGREDIENTES') return 'ring-[color:var(--tone-blush-line)]';
-  if (status === 'ENTREGUE') return 'ring-[color:var(--tone-sage-line)]';
-  if (status === 'CANCELADO') return 'ring-[color:var(--tone-roast-line)]';
-  if (status === 'PRONTO') return 'ring-[color:var(--tone-olive-line)]';
-  if (status === 'EM_PREPARACAO') return 'ring-[color:var(--tone-roast-line)]';
-  if (status === 'CONFIRMADO') return 'ring-[color:var(--tone-gold-line)]';
-  return 'ring-[color:var(--tone-cream-line)]';
+  return ORDER_TONE_META[calendarStatusTone(status)].ringClassName;
 }
 
 function minutesIntoDay(date: Date) {
@@ -1409,12 +1290,6 @@ function OrdersPageContent() {
   const [newOrderDiscountPct, setNewOrderDiscountPct] = useState<string>('0');
   const [newOrderNotes, setNewOrderNotes] = useState<string>('');
   const [newOrderScheduledAt, setNewOrderScheduledAt] = useState<string>(() => defaultOrderDateTimeInput());
-  const [restoredLastOrderDraft, setRestoredLastOrderDraft] = useState<{
-    customerId: number;
-    customerName: string;
-    orderId: number;
-    referenceLabel: string;
-  } | null>(null);
   const [newOrderDeliveryQuote, setNewOrderDeliveryQuote] = useState<DeliveryQuote | null>(null);
   const [newOrderDeliveryQuoteError, setNewOrderDeliveryQuoteError] = useState<string | null>(null);
   const [isQuotingNewOrderDelivery, setIsQuotingNewOrderDelivery] = useState(false);
@@ -1426,21 +1301,12 @@ function OrdersPageContent() {
   const [calendarAnchorDate, setCalendarAnchorDate] = useState<Date>(() => startOfLocalDay(new Date()));
   const [selectedCalendarDateKey, setSelectedCalendarDateKey] = useState(() => dateKeyFromDate(new Date()));
   const [calendarNow, setCalendarNow] = useState(() => new Date());
+  const [scheduleDayAvailabilityByDayKey, setScheduleDayAvailabilityByDayKey] = useState<
+    Record<string, ScheduleDayAvailability>
+  >({});
+  const [isSavingSelectedScheduleDay, setIsSavingSelectedScheduleDay] = useState(false);
   const isOperationMode = true;
-  const [dayGridDragState, setDayGridDragState] = useState<DayGridDragState | null>(null);
-  const [weekGridDragState, setWeekGridDragState] = useState<WeekGridDragState | null>(null);
-  const dayGridDragIntentRef = useRef<DayGridDragIntentState | null>(null);
-  const weekGridDragIntentRef = useRef<WeekGridDragIntentState | null>(null);
-  const dayGridSuppressClickRef = useRef<string | null>(null);
-  const weekGridSuppressClickRef = useRef<string | null>(null);
-  const dayGridScrollLockRef = useRef<{
-    bodyOverflow: string;
-    bodyTouchAction: string;
-    htmlOverflow: string;
-    htmlTouchAction: string;
-    preventTouchMove: (event: TouchEvent) => void;
-  } | null>(null);
-  const weekGridCanvasByDateKeyRef = useRef(new Map<string, HTMLDivElement>());
+  const [isDeliveredListExpanded, setIsDeliveredListExpanded] = useState(false);
   const [isStatusUpdatePending, setIsStatusUpdatePending] = useState(false);
   const [selectedOrderEditScheduledAt, setSelectedOrderEditScheduledAt] = useState<string>('');
   const [selectedOrderEditDiscountPct, setSelectedOrderEditDiscountPct] = useState<string>('0');
@@ -1449,6 +1315,7 @@ function OrdersPageContent() {
     EMPTY_EDITABLE_ORDER_CUSTOMER_DRAFT
   );
   const [selectedOrderSavedAddressKey, setSelectedOrderSavedAddressKey] = useState<string>('primary');
+  const [isSelectedOrderAddressEditing, setIsSelectedOrderAddressEditing] = useState(false);
   const [selectedOrderEditError, setSelectedOrderEditError] = useState<string | null>(null);
   const [isSavingSelectedOrderEdit, setIsSavingSelectedOrderEdit] = useState(false);
   const [isSavingSelectedOrderCustomerAddress, setIsSavingSelectedOrderCustomerAddress] = useState(false);
@@ -1459,37 +1326,71 @@ function OrdersPageContent() {
   const [selectedOrderEditingBoxError, setSelectedOrderEditingBoxError] = useState<string | null>(null);
   const [isSavingSelectedOrderEditingBox, setIsSavingSelectedOrderEditingBox] = useState(false);
   const [isDeletingSelectedOrderEditingBox, setIsDeletingSelectedOrderEditingBox] = useState(false);
+  const [selectedOrderCompanionDraftByProductId, setSelectedOrderCompanionDraftByProductId] = useState<
+    Record<number, number>
+  >({});
+  const [selectedOrderCompanionEditError, setSelectedOrderCompanionEditError] = useState<string | null>(null);
+  const [isSavingSelectedOrderCompanions, setIsSavingSelectedOrderCompanions] = useState(false);
   const newOrderQuoteRequestIdRef = useRef(0);
   const newOrderDialogRef = useRef<HTMLDivElement | null>(null);
   const orderDetailDialogRef = useRef<HTMLDivElement | null>(null);
   const selectedOrderId = selectedOrder?.id ?? null;
   const selectedOrderIdRef = useRef<number | null>(null);
+  const scheduleDayAvailabilityLoadedKeysRef = useRef(new Set<string>());
   const newOrderTitleId = useId();
   const orderDetailTitleId = useId();
   const { confirm, notifyError, notifySuccess, presentSuccess } = useFeedback();
+  const deferredOrders = useDeferredValue(orders);
+  const deferredCustomers = useDeferredValue(customers);
+  const deferredProducts = useDeferredValue(products);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
       const { orders: ordersData, customers: customersData, products: productsData } = await fetchOrdersWorkspace();
-      setOrders(ordersData);
-      setCustomers(customersData);
-      setProducts(productsData);
       const currentSelectedOrderId = selectedOrderIdRef.current;
-      if (currentSelectedOrderId) {
-        const fresh = ordersData.find((o) => o.id === currentSelectedOrderId) || null;
-        setSelectedOrder((current) => (current?.id === currentSelectedOrderId ? fresh : current));
-        if (!fresh) {
-          setIsOrderDetailModalOpen(false);
+      startTransition(() => {
+        setOrders(ordersData);
+        setCustomers(customersData);
+        setProducts(productsData);
+        if (currentSelectedOrderId) {
+          const fresh = ordersData.find((o) => o.id === currentSelectedOrderId) || null;
+          setSelectedOrder((current) => (current?.id === currentSelectedOrderId ? fresh : current));
+          if (!fresh) {
+            setIsOrderDetailModalOpen(false);
+          }
         }
-      }
+      });
       return ordersData;
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Falha ao carregar dados de pedidos.');
       throw err;
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const syncOrderInWorkspace = useCallback((nextOrder: OrderView | null) => {
+    if (!nextOrder?.id) return;
+    startTransition(() => {
+      setOrders((current) => {
+        const hasExisting = current.some((entry) => entry.id === nextOrder.id);
+        if (!hasExisting) return current;
+        return current.map((entry) => (entry.id === nextOrder.id ? nextOrder : entry));
+      });
+      setSelectedOrder((current) => (current?.id === nextOrder.id ? nextOrder : current));
+    });
+  }, []);
+
+  const removeOrderFromWorkspace = useCallback((orderId: number) => {
+    startTransition(() => {
+      setOrders((current) => current.filter((entry) => entry.id !== orderId));
+      setSelectedOrder((current) => (current?.id === orderId ? null : current));
+    });
+    if (selectedOrderIdRef.current === orderId) {
+      selectedOrderIdRef.current = null;
+      setIsOrderDetailModalOpen(false);
     }
   }, []);
 
@@ -1525,6 +1426,8 @@ function OrdersPageContent() {
     dialogRef: orderDetailDialogRef,
     onClose: closeOrderDetail
   });
+  const shouldDeriveNewOrderContext = isNewOrderModalOpen;
+  const shouldDeriveSelectedOrderDetail = Boolean(selectedOrder && isOrderDetailModalOpen);
   const openCalendarEntry = useCallback((entry: CalendarOrderEntry) => {
     openOrderDetail(entry.order);
   }, [openOrderDetail]);
@@ -1648,7 +1551,6 @@ function OrdersPageContent() {
     setNewOrderDiscountPct('0');
     setNewOrderNotes(tutorialMode ? withTestDataTag('', 'Pedido do momento') : '');
     setNewOrderScheduledAt(defaultOrderDateTimeInput());
-    setRestoredLastOrderDraft(null);
     setNewOrderDeliveryQuote(null);
     setNewOrderDeliveryQuoteError(null);
     setOrderError(null);
@@ -1657,7 +1559,7 @@ function OrdersPageContent() {
   const createOrder = async () => {
     if (isCreatingOrder) return;
     if (!newOrderCustomerId || newOrderItems.length === 0) {
-      setOrderError('Selecione cliente e caixa.');
+      setOrderError('Selecione cliente e ao menos um item.');
       return;
     }
     if (!newOrderScheduledAtDate) {
@@ -1665,11 +1567,11 @@ function OrdersPageContent() {
       return;
     }
     if (draftDiscount < 0) {
-      setOrderError('Desconto nao pode ser negativo.');
+      setOrderError('Desconto não pode ser negativo.');
       return;
     }
     if (isQuotingNewOrderDelivery) {
-      setOrderError('Aguarde a cotacao do frete terminar.');
+      setOrderError('Aguarde a cotação do frete terminar.');
       return;
     }
     if (newOrderFulfillmentMode === 'DELIVERY' && !newOrderDeliveryQuote) {
@@ -1679,13 +1581,22 @@ function OrdersPageContent() {
     setOrderError(null);
     setIsCreatingOrder(true);
     try {
-      const payload: OrderIntake = {
-        version: 1,
-        intent: 'CONFIRMED',
-        customer: isUsingAlternateNewOrderAddress
+      const nextOrderCustomerPayload: OrderIntake['customer'] = {
+        customerId: Number(newOrderCustomerId),
+        ...(selectedNewOrderCustomerSnapshot.address ||
+        selectedNewOrderCustomerSnapshot.addressLine1 ||
+        selectedNewOrderCustomerSnapshot.addressLine2 ||
+        selectedNewOrderCustomerSnapshot.neighborhood ||
+        selectedNewOrderCustomerSnapshot.city ||
+        selectedNewOrderCustomerSnapshot.state ||
+        selectedNewOrderCustomerSnapshot.postalCode ||
+        selectedNewOrderCustomerSnapshot.country ||
+        selectedNewOrderCustomerSnapshot.placeId ||
+        typeof selectedNewOrderCustomerSnapshot.lat === 'number' ||
+        typeof selectedNewOrderCustomerSnapshot.lng === 'number' ||
+        selectedNewOrderCustomerSnapshot.deliveryNotes
           ? {
-              customerId: Number(newOrderCustomerId),
-              address: selectedNewOrderCustomerSnapshot.address ?? null,
+              address: (selectedNewOrderCustomerSnapshot.address ?? newOrderCustomerAddress) || null,
               addressLine1: selectedNewOrderCustomerSnapshot.addressLine1 ?? null,
               addressLine2: selectedNewOrderCustomerSnapshot.addressLine2 ?? null,
               neighborhood: selectedNewOrderCustomerSnapshot.neighborhood ?? null,
@@ -1698,7 +1609,12 @@ function OrdersPageContent() {
               lng: selectedNewOrderCustomerSnapshot.lng ?? null,
               deliveryNotes: selectedNewOrderCustomerSnapshot.deliveryNotes ?? null
             }
-          : { customerId: Number(newOrderCustomerId) },
+          : {})
+      };
+      const payload: OrderIntake = {
+        version: 1,
+        intent: 'CONFIRMED',
+        customer: nextOrderCustomerPayload,
         fulfillment: {
           mode: newOrderFulfillmentMode,
           scheduledAt: newOrderScheduledAtDate.toISOString()
@@ -1734,7 +1650,7 @@ function OrdersPageContent() {
       const created = await submitOrderIntake(payload);
       const createdOrder = created.order;
       if (typeof createdOrder.id !== 'number') {
-        throw new Error('Pedido criado sem identificador valido.');
+        throw new Error('Pedido criado sem identificador válido.');
       }
       setNewOrderCustomerId('');
       setNewOrderSelectedAddressKey('primary');
@@ -1744,7 +1660,6 @@ function OrdersPageContent() {
       setNewOrderDiscountPct('0');
       setNewOrderNotes(tutorialMode ? withTestDataTag('', 'Pedido do momento') : '');
       setNewOrderScheduledAt(defaultOrderDateTimeInput());
-      setRestoredLastOrderDraft(null);
       setNewOrderDeliveryQuote(null);
       setNewOrderDeliveryQuoteError(null);
       setIsNewOrderModalOpen(false);
@@ -1756,8 +1671,6 @@ function OrdersPageContent() {
         returnLabel: 'Voltar para pedidos',
         productSubtotal: Math.max(roundMoney((createdOrder.total || 0) - (created.intake.deliveryFee || 0)), 0),
         order: {
-          id: createdOrder.id,
-          publicNumber: createdOrder.publicNumber ?? null,
           total: createdOrder.total ?? null,
           scheduledAt: createdOrder.scheduledAt ?? null
         },
@@ -1767,10 +1680,12 @@ function OrdersPageContent() {
           pixCharge: created.intake.pixCharge
         }
       });
-      await loadAll();
+      startTransition(() => {
+        setOrders((current) => [createdOrder, ...current.filter((entry) => entry.id !== createdOrder.id)]);
+      });
       router.push('/pedidofinalizado');
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Nao foi possivel criar.';
+      const message = err instanceof Error ? err.message : 'Não foi possível criar.';
       setOrderError(message);
       notifyError(message);
     } finally {
@@ -1789,13 +1704,11 @@ function OrdersPageContent() {
     if (!accepted) return;
     try {
       await apiFetch(`/orders/${orderId}`, { method: 'DELETE' });
-      setSelectedOrder(null);
-      setIsOrderDetailModalOpen(false);
-      await loadAll();
-      notifySuccess('Pedido excluido.');
+      removeOrderFromWorkspace(orderId);
+      notifySuccess('Pedido excluído.');
       scrollToLayoutSlot('list');
     } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Nao foi possivel excluir.');
+      notifyError(err instanceof Error ? err.message : 'Não foi possível excluir.');
     }
   };
 
@@ -1804,18 +1717,18 @@ function OrdersPageContent() {
     setIsStatusUpdatePending(true);
     try {
       const currentOrder = orders.find((entry) => entry.id === orderId) ?? selectedOrder;
-      await apiFetch(`/orders/${orderId}/status`, {
+      const updatedOrder = await apiFetch<OrderView>(`/orders/${orderId}/status`, {
         method: 'PATCH',
         body: JSON.stringify({ status }),
       });
-      await loadAll();
+      syncOrderInWorkspace(updatedOrder);
       if (status === 'ENTREGUE') {
         presentSuccess('Pedido finalizado e movido para entregue.', `Pedido #${displayOrderNumber(currentOrder)}`);
       } else {
         notifySuccess(`Status atualizado para ${formatDisplayedOrderStatus(status)}.`);
       }
     } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Nao foi possivel atualizar o status.');
+      notifyError(err instanceof Error ? err.message : 'Não foi possível atualizar o status.');
     } finally {
       setIsStatusUpdatePending(false);
     }
@@ -1831,85 +1744,41 @@ function OrdersPageContent() {
         ...(typeof options?.paid === 'boolean' ? { paid: options.paid } : {}),
         ...(options?.paidAt ? { paidAt: options.paidAt } : {})
       };
-      await apiFetch(`/orders/${orderId}/mark-paid`, {
+      const updatedOrder = await apiFetch<OrderView>(`/orders/${orderId}/mark-paid`, {
         method: 'PATCH',
         body: JSON.stringify(body)
       });
-      const refreshedOrders = await loadAll();
-      const freshSelected = refreshedOrders.find((entry) => entry.id === orderId) || null;
-      if (freshSelected && selectedOrder?.id === orderId) {
-        setSelectedOrder(freshSelected);
-      }
+      syncOrderInWorkspace(updatedOrder);
       notifySuccess(
         shouldMarkPaid
           ? `Pagamento confirmado para o pedido #${displayOrderNumber(currentOrder)}.`
-          : `Pedido #${displayOrderNumber(currentOrder)} marcado como nao pago.`
+          : `Pedido #${displayOrderNumber(currentOrder)} marcado como não pago.`
       );
     } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Nao foi possivel atualizar o pagamento.');
+      notifyError(err instanceof Error ? err.message : 'Não foi possível atualizar o pagamento.');
     } finally {
       setIsStatusUpdatePending(false);
     }
   };
 
-  const applyLocalOrderSchedule = (orderId: number, scheduledAtIso: string | null) => {
-    setOrders((current) =>
-      current.map((order) => (order.id === orderId ? { ...order, scheduledAt: scheduledAtIso } : order))
-    );
-    setSelectedOrder((current) =>
-      current?.id === orderId ? { ...current, scheduledAt: scheduledAtIso } : current
-    );
-  };
-
-  const persistOrderSchedule = async (
-    orderId: number,
-    nextDate: Date,
-    options: {
-      previousScheduledAtIso: string | null;
-      notifyOnSuccess?: boolean;
-    }
-  ) => {
-    const { previousScheduledAtIso, notifyOnSuccess = true } = options;
-    const nextScheduledAtIso = nextDate.toISOString();
-
-    applyLocalOrderSchedule(orderId, nextScheduledAtIso);
-
-    try {
-      await apiFetch(`/orders/${orderId}`, {
-        method: 'PUT',
-        body: JSON.stringify({ scheduledAt: nextScheduledAtIso }),
-      });
-      await loadAll();
-      if (notifyOnSuccess) {
-        notifySuccess('Data atualizada.');
-      }
-      return true;
-    } catch (err) {
-      applyLocalOrderSchedule(orderId, previousScheduledAtIso);
-      notifyError(err instanceof Error ? err.message : 'Nao foi possivel atualizar a data.');
-      return false;
-    }
-  };
-
   const productMap = useMemo(() => {
-    return new Map(products.map((p) => [p.id!, p]));
-  }, [products]);
+    return new Map(deferredProducts.map((p) => [p.id!, p]));
+  }, [deferredProducts]);
   const orderableProducts = useMemo(() => {
-    const canonical = products.filter((product) => {
-      const normalizedName = normalizeTextForSort(product.name);
-      const normalizedCategory = normalizeTextForSort(product.category);
-      return product.active !== false && normalizedCategory === 'sabores' && normalizedName.startsWith('broa ');
+    const canonical = deferredProducts.filter((product) => {
+      const itemGroup = resolveRuntimeOrderItemGroup(product);
+      return product.active !== false && (itemGroup === 'FLAVOR' || itemGroup === 'COMPANION');
     });
 
     if (canonical.length > 0) {
       return sortQuickCreateProducts(canonical);
     }
 
-    return sortQuickCreateProducts(products.filter((product) => product.active !== false));
-  }, [products]);
+    return sortQuickCreateProducts(deferredProducts.filter((product) => product.active !== false));
+  }, [deferredProducts]);
   const runtimeOrderCatalog = useMemo(
-    () => buildRuntimeOrderCatalog(orderableProducts.length > 0 ? orderableProducts : products),
-    [orderableProducts, products]
+    () => buildRuntimeOrderCatalog(orderableProducts.length > 0 ? orderableProducts : deferredProducts),
+    [deferredProducts, orderableProducts]
   );
   const selectedOrderEditableFlavorEntries = useMemo(() => {
     return runtimeOrderCatalog.flavorProducts.map((product) => ({
@@ -1924,13 +1793,89 @@ function OrdersPageContent() {
       ),
     [selectedOrderEditableFlavorEntries]
   );
+  const buildSelectedOrderCompanionDraft = useCallback(
+    (items: Array<{ productId: number; quantity: number }> | undefined | null) => {
+      const byProductId: Record<number, number> = {};
+      for (const product of runtimeOrderCatalog.companionProducts) {
+        byProductId[product.id] = 0;
+      }
+      for (const item of items || []) {
+        if (resolveRuntimeOrderItemGroup(productMap.get(item.productId)) !== 'COMPANION') continue;
+        byProductId[item.productId] = (byProductId[item.productId] || 0) + Math.max(Math.floor(item.quantity || 0), 0);
+      }
+      return byProductId;
+    },
+    [productMap, runtimeOrderCatalog.companionProducts]
+  );
+  const selectedOrderPersistedCompanionDraftByProductId = useMemo(
+    () =>
+      shouldDeriveSelectedOrderDetail ? buildSelectedOrderCompanionDraft(selectedOrder?.items || []) : {},
+    [buildSelectedOrderCompanionDraft, selectedOrder, shouldDeriveSelectedOrderDetail]
+  );
+  const selectedOrderEditableCompanionRows = useMemo(() => {
+    if (!shouldDeriveSelectedOrderDetail) {
+      return [];
+    }
+
+    const knownRows = runtimeOrderCatalog.companionProducts.map((product) => ({
+      productId: product.id,
+      productName: product.displayTitle || compactOrderProductName(product.name),
+      productMeta: [product.displayFlavor, product.measureLabel, product.displayMakerLine].filter(Boolean).join(' • '),
+      price: Number(product.price || 0)
+    }));
+    const knownProductIds = new Set(knownRows.map((row) => row.productId));
+    const extraRows = Object.entries(selectedOrderCompanionDraftByProductId)
+      .map(([rawProductId, quantity]) => ({
+        productId: Number(rawProductId),
+        quantity: Math.max(Math.floor(quantity || 0), 0)
+      }))
+      .filter((entry) => entry.quantity > 0 && !knownProductIds.has(entry.productId))
+      .map((entry) => {
+        const fallbackProduct = productMap.get(entry.productId);
+        return {
+          productId: entry.productId,
+          productName: compactOrderProductName(fallbackProduct?.name ?? `Produto ${entry.productId}`),
+          productMeta: fallbackProduct?.category || '',
+          price: Number(fallbackProduct?.price || 0)
+        };
+      });
+
+    return [...knownRows, ...extraRows];
+  }, [
+    productMap,
+    runtimeOrderCatalog.companionProducts,
+    selectedOrderCompanionDraftByProductId,
+    shouldDeriveSelectedOrderDetail
+  ]);
+  const selectedOrderCompanionDraftDirty = useMemo(() => {
+    const productIds = new Set([
+      ...Object.keys(selectedOrderPersistedCompanionDraftByProductId),
+      ...Object.keys(selectedOrderCompanionDraftByProductId)
+    ]);
+
+    for (const rawProductId of productIds) {
+      const productId = Number(rawProductId);
+      const persistedQuantity = Math.max(
+        Math.floor(selectedOrderPersistedCompanionDraftByProductId[productId] || 0),
+        0
+      );
+      const draftQuantity = Math.max(Math.floor(selectedOrderCompanionDraftByProductId[productId] || 0), 0);
+      if (persistedQuantity !== draftQuantity) {
+        return true;
+      }
+    }
+
+    return false;
+  }, [selectedOrderCompanionDraftByProductId, selectedOrderPersistedCompanionDraftByProductId]);
 
   const customerOptions = useMemo(
     () =>
-      customers
-        .filter((customer) => !customer.deletedAt)
-        .map((c) => ({ id: c.id!, label: `${c.name} (#${c.id})` })),
-    [customers]
+      shouldDeriveNewOrderContext
+        ? deferredCustomers
+            .filter((customer) => !customer.deletedAt)
+            .map((c) => ({ id: c.id!, label: `${c.name} (#${c.id})` }))
+        : EMPTY_CUSTOMER_OPTIONS,
+    [deferredCustomers, shouldDeriveNewOrderContext]
   );
 
   const parseIdFromLabel = (
@@ -1960,19 +1905,19 @@ function OrdersPageContent() {
   };
   const customerMap = useMemo(() => {
     const map = new Map<number, Customer>();
-    for (const customer of customers) {
+    for (const customer of deferredCustomers) {
       if (customer.id) {
         map.set(customer.id, customer);
       }
     }
-    for (const order of orders) {
+    for (const order of deferredOrders) {
       const customer = order.customer;
       if (customer?.id && !map.has(customer.id)) {
         map.set(customer.id, customer);
       }
     }
     return map;
-  }, [customers, orders]);
+  }, [deferredCustomers, deferredOrders]);
 
   const resolveOrderCustomerProfile = useCallback(
     (order?: OrderView | null) => {
@@ -1997,51 +1942,14 @@ function OrdersPageContent() {
     if (!selectedOrder || !isOrderDetailModalOpen) return;
     setSelectedOrderEditCustomerDraft(buildEditableOrderCustomerDraft(resolveOrderCustomerProfile(selectedOrder)));
     setSelectedOrderSavedAddressKey('primary');
+    setIsSelectedOrderAddressEditing(false);
   }, [isOrderDetailModalOpen, resolveOrderCustomerProfile, selectedOrder]);
 
-  const latestOrderDraftByCustomerId = useMemo(() => {
-    const map = new Map<number, CustomerLastOrderDraft>();
-
-    for (const order of orders) {
-      const customerId = Number(order.customerId || 0);
-      if (!Number.isFinite(customerId) || customerId <= 0) continue;
-
-      const items = normalizeDraftOrderItems(order.items);
-      if (items.length === 0) continue;
-
-      const referenceDate = resolveOrderDate(order);
-      const referenceTime = referenceDate?.getTime() ?? 0;
-      const current = map.get(customerId);
-      if (
-        current &&
-        (current.referenceTime > referenceTime ||
-          (current.referenceTime === referenceTime && current.orderId >= (order.id ?? 0)))
-      ) {
-        continue;
-      }
-
-      const fallbackCustomer = customerMap.get(customerId) || order.customer || null;
-      const orderCustomerProfile = resolveOrderCustomerProfile(order);
-      const customerName =
-        orderCustomerProfile.name ||
-        customerMap.get(customerId)?.name ||
-        order.customer?.name ||
-        `Cliente #${displayCustomerNumber(fallbackCustomer)}`;
-      map.set(customerId, {
-        customerId,
-        customerName,
-        orderId: order.id ?? 0,
-        referenceLabel: formatOrderDateTimeLabel(referenceDate),
-        referenceTime,
-        fulfillmentMode: order.fulfillmentMode === 'PICKUP' ? 'PICKUP' : 'DELIVERY',
-        items,
-        discountPct: deriveDiscountPctFromOrder(order),
-        notes: stripOrderNoteMetadata(order.notes) || ''
-      });
-    }
-
-    return map;
-  }, [customerMap, orders, resolveOrderCustomerProfile]);
+  useEffect(() => {
+    if (!selectedOrder || !isOrderDetailModalOpen) return;
+    setSelectedOrderCompanionDraftByProductId(buildSelectedOrderCompanionDraft(selectedOrder.items || []));
+    setSelectedOrderCompanionEditError(null);
+  }, [buildSelectedOrderCompanionDraft, isOrderDetailModalOpen, selectedOrder]);
 
   const resolveCalendarEntryCompactName = useCallback(
     (entry: CalendarOrderEntry) => compactCustomerLabelForCalendar(resolveCustomerName(entry.order)),
@@ -2055,7 +1963,7 @@ function OrdersPageContent() {
     (entry: CalendarOrderEntry) => {
       const customer = resolveOrderCustomerProfile(entry.order);
       const customerName = resolveCustomerName(entry.order);
-      const customerAddress = formatCustomerFullAddress(customer) || 'Endereco nao informado';
+      const customerAddress = formatCustomerFullAddress(customer) || 'Endereço não informado';
 
       return `${customerName} • ${customerAddress}`;
     },
@@ -2065,24 +1973,47 @@ function OrdersPageContent() {
   const resolveCalendarEntryStatus = useCallback((entry: CalendarOrderEntry) => entry.order.status || '', []);
 
   const visibleOrders = useMemo(() => {
-    if (!isOperationMode) return orders;
-    return orders.filter((order) => order.status !== 'CANCELADO');
-  }, [orders, isOperationMode]);
+    if (!isOperationMode) return deferredOrders;
+    return deferredOrders.filter((order) => order.status !== 'CANCELADO');
+  }, [deferredOrders, isOperationMode]);
 
-  const sortedVisibleOrderList = useMemo(() => {
-    return [...visibleOrders].sort((a, b) => {
-      const aDeliveryAt = resolveOrderDate(a) ?? safeDateFromIso(a.createdAt ?? null) ?? new Date(0);
-      const bDeliveryAt = resolveOrderDate(b) ?? safeDateFromIso(b.createdAt ?? null) ?? new Date(0);
-      const deliveryDiff = bDeliveryAt.getTime() - aDeliveryAt.getTime();
-      if (deliveryDiff !== 0) return deliveryDiff;
+  const openVisibleOrderList = useMemo(() => {
+    return visibleOrders
+      .filter((order) => order.status !== 'ENTREGUE')
+      .sort((a, b) => {
+        const aDeliveryAt = resolveOrderDate(a) ?? safeDateFromIso(a.createdAt ?? null) ?? new Date(0);
+        const bDeliveryAt = resolveOrderDate(b) ?? safeDateFromIso(b.createdAt ?? null) ?? new Date(0);
+        const deliveryDiff = aDeliveryAt.getTime() - bDeliveryAt.getTime();
+        if (deliveryDiff !== 0) return deliveryDiff;
 
-      const aCreatedAt = safeDateFromIso(a.createdAt ?? null) ?? new Date(0);
-      const bCreatedAt = safeDateFromIso(b.createdAt ?? null) ?? new Date(0);
-      const createdDiff = bCreatedAt.getTime() - aCreatedAt.getTime();
-      if (createdDiff !== 0) return createdDiff;
+        const aCreatedAt = safeDateFromIso(a.createdAt ?? null) ?? new Date(0);
+        const bCreatedAt = safeDateFromIso(b.createdAt ?? null) ?? new Date(0);
+        const createdDiff = aCreatedAt.getTime() - bCreatedAt.getTime();
+        if (createdDiff !== 0) return createdDiff;
 
-      return (b.id ?? 0) - (a.id ?? 0);
-    });
+        return (a.id ?? 0) - (b.id ?? 0);
+      });
+  }, [visibleOrders]);
+
+  const deliveredVisibleOrderList = useMemo(() => {
+    return visibleOrders
+      .filter((order) => order.status === 'ENTREGUE')
+      .sort((a, b) => {
+        const aUpdatedAt =
+          safeDateFromIso(a.updatedAt ?? null) ??
+          resolveOrderDate(a) ??
+          safeDateFromIso(a.createdAt ?? null) ??
+          new Date(0);
+        const bUpdatedAt =
+          safeDateFromIso(b.updatedAt ?? null) ??
+          resolveOrderDate(b) ??
+          safeDateFromIso(b.createdAt ?? null) ??
+          new Date(0);
+        const updatedDiff = bUpdatedAt.getTime() - aUpdatedAt.getTime();
+        if (updatedDiff !== 0) return updatedDiff;
+
+        return (b.id ?? 0) - (a.id ?? 0);
+      });
   }, [visibleOrders]);
 
   const calendarEntries = useMemo<CalendarOrderEntry[]>(() => {
@@ -2117,7 +2048,10 @@ function OrdersPageContent() {
     let intervalId: number | null = null;
     let timeoutId: number | null = null;
 
-    const tick = () => setCalendarNow(new Date());
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return;
+      setCalendarNow(new Date());
+    };
     const armInterval = () => {
       tick();
       intervalId = window.setInterval(tick, 60_000);
@@ -2134,6 +2068,9 @@ function OrdersPageContent() {
   }, []);
 
   const todayDateKey = dateKeyFromDate(calendarNow);
+  const isDayCalendarView = calendarView === 'DAY';
+  const isWeekCalendarView = calendarView === 'WEEK';
+  const isMonthCalendarView = calendarView === 'MONTH';
   const selectedCalendarDate = useMemo(
     () => startOfLocalDay(dateFromDateKey(selectedCalendarDateKey)),
     [selectedCalendarDateKey]
@@ -2151,110 +2088,66 @@ function OrdersPageContent() {
         .trim(),
     [selectedCalendarDate]
   );
+  const selectedScheduleDayAvailability = scheduleDayAvailabilityByDayKey[selectedCalendarDateKey] ?? null;
+  const selectedScheduleDayWindows = useMemo(
+    () =>
+      selectedScheduleDayAvailability?.windows ?? EXTERNAL_ORDER_DELIVERY_WINDOWS.map((window) => ({
+        key: window.key,
+        label: window.label,
+        startLabel: `${window.startHour}h`,
+        endLabel: `${window.endHour}h`,
+        isOpen: true
+      })),
+    [selectedScheduleDayAvailability?.windows]
+  );
+  const selectedScheduleDayUpdatedLabel = useMemo(() => {
+    if (!selectedScheduleDayAvailability?.updatedAt) return null;
+    const parsed = new Date(selectedScheduleDayAvailability.updatedAt);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toLocaleString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }, [selectedScheduleDayAvailability?.updatedAt]);
+  const selectedScheduleDayBlockedCount = selectedScheduleDayAvailability?.blockedWindows.length ?? 0;
+
+  const loadSelectedScheduleDayAvailability = useCallback(async (dayKey: string, force = false) => {
+    if (!force && scheduleDayAvailabilityLoadedKeysRef.current.has(dayKey)) {
+      return;
+    }
+    try {
+      const availability = await fetchScheduleDayAvailability(dayKey);
+      scheduleDayAvailabilityLoadedKeysRef.current.add(dayKey);
+      setScheduleDayAvailabilityByDayKey((current) => ({
+        ...current,
+        [dayKey]: availability
+      }));
+    } catch (availabilityError) {
+      notifyError(
+        availabilityError instanceof Error
+          ? availabilityError.message
+          : 'Não foi possível carregar a disponibilidade do dia.',
+      );
+    }
+  }, [notifyError]);
+
+  useEffect(() => {
+    if (!isDayCalendarView) {
+      return;
+    }
+    void loadSelectedScheduleDayAvailability(selectedCalendarDateKey);
+  }, [isDayCalendarView, loadSelectedScheduleDayAvailability, selectedCalendarDateKey]);
 
   const selectedDateEntries = useMemo(() => {
+    if (!isDayCalendarView) return [];
     const entries = calendarOrdersByDate.get(selectedCalendarDateKey) || [];
     return [...entries].sort((a, b) => a.productionStartAt.getTime() - b.productionStartAt.getTime());
-  }, [calendarOrdersByDate, selectedCalendarDateKey]);
-  const selectedDateProductionSummary = useMemo(() => {
-    const byCustomer = new Map<
-      string,
-      {
-        customerKey: string;
-        customerLabel: string;
-        flavorCounts: Map<number, { label: string; quantity: number }>;
-        totalOrders: number;
-        readyOrders: number;
-        earliestProductionAt: number;
-      }
-    >();
-
-    for (const entry of selectedDateEntries) {
-      const customerName = resolveCustomerName(entry.order);
-      const isReady = entry.order.status === 'PRONTO' || entry.order.status === 'ENTREGUE';
-      const customerKey = entry.order.customerId
-        ? `customer:${entry.order.customerId}`
-        : `name:${normalizeTextForSort(customerName) || 'sem-cliente'}`;
-      const current = byCustomer.get(customerKey) || {
-        customerKey,
-        customerLabel: compactCustomerLabelForCalendar(customerName),
-        flavorCounts: new Map<number, { label: string; quantity: number }>(),
-        totalOrders: 0,
-        readyOrders: 0,
-        earliestProductionAt: entry.productionStartAt.getTime()
-      };
-      current.totalOrders += 1;
-      if (isReady) current.readyOrders += 1;
-      current.earliestProductionAt = Math.min(current.earliestProductionAt, entry.productionStartAt.getTime());
-
-      for (const item of entry.order.items || []) {
-        const quantity = Math.max(Math.floor(item.quantity || 0), 0);
-        if (quantity <= 0) continue;
-
-        const label = compactOrderProductName(productMap.get(item.productId)?.name ?? `Produto ${item.productId}`);
-        const existing = current.flavorCounts.get(item.productId) || {
-          label,
-          quantity: 0
-        };
-        existing.quantity += quantity;
-        current.flavorCounts.set(item.productId, existing);
-      }
-
-      byCustomer.set(customerKey, current);
-    }
-
-    return Array.from(byCustomer.values())
-      .map((entry) => {
-        const hasPending = entry.readyOrders < entry.totalOrders;
-        const readyState =
-          entry.readyOrders <= 0
-            ? 'PENDING'
-            : hasPending
-              ? 'PARTIAL'
-              : 'READY';
-        return {
-          customerKey: entry.customerKey,
-          customerLabel: entry.customerLabel,
-          totalOrders: entry.totalOrders,
-          readyOrders: entry.readyOrders,
-          hasPending,
-          readyState,
-          earliestProductionAt: entry.earliestProductionAt,
-          flavorLines:
-            Array.from(entry.flavorCounts.entries())
-              .map(([productId, flavor]) => ({
-                productId,
-                label: flavor.label.replace(/\s+\([^)]+\)\s*$/u, '').trim(),
-                quantity: flavor.quantity,
-                product: productMap.get(productId) || null
-              }))
-              .sort((left, right) => {
-                const leftProduct = left.product;
-                const rightProduct = right.product;
-                if (leftProduct && rightProduct) {
-                  const rankDiff = quickCreateProductRank(leftProduct) - quickCreateProductRank(rightProduct);
-                  if (rankDiff !== 0) return rankDiff;
-                }
-                return left.label.localeCompare(right.label, 'pt-BR');
-              })
-              .map((flavor) => `${flavor.quantity.toLocaleString('pt-BR')} ${flavor.label}`)
-        };
-      })
-      .sort((left, right) => {
-        if (left.hasPending !== right.hasPending) {
-          return left.hasPending ? -1 : 1;
-        }
-        if (left.readyOrders !== right.readyOrders) {
-          return left.readyOrders - right.readyOrders;
-        }
-        if (left.earliestProductionAt !== right.earliestProductionAt) {
-          return left.earliestProductionAt - right.earliestProductionAt;
-        }
-        return left.customerLabel.localeCompare(right.customerLabel, 'pt-BR');
-      });
-  }, [productMap, resolveCustomerName, selectedDateEntries]);
+  }, [calendarOrdersByDate, isDayCalendarView, selectedCalendarDateKey]);
 
   const monthCells = useMemo(() => {
+    if (!isMonthCalendarView) return [];
     const currentMonth = calendarAnchorDate.getMonth();
     return monthGridDates(calendarAnchorDate).map((date) => {
       const key = dateKeyFromDate(date);
@@ -2270,9 +2163,10 @@ function OrdersPageContent() {
         isSelected: key === selectedCalendarDateKey
       };
     });
-  }, [calendarAnchorDate, calendarOrdersByDate, selectedCalendarDateKey, todayDateKey]);
+  }, [calendarAnchorDate, calendarOrdersByDate, isMonthCalendarView, selectedCalendarDateKey, todayDateKey]);
 
   const weekCells = useMemo(() => {
+    if (!isWeekCalendarView) return [];
     return weekGridDates(calendarAnchorDate).map((date) => {
       const key = dateKeyFromDate(date);
       const entries = calendarOrdersByDate.get(key) || [];
@@ -2287,37 +2181,36 @@ function OrdersPageContent() {
         isSelected: key === selectedCalendarDateKey
       };
     });
-  }, [calendarAnchorDate, calendarOrdersByDate, selectedCalendarDateKey, todayDateKey]);
-  const weekDateByKey = useMemo(
-    () => new Map(weekCells.map((cell) => [cell.key, cell.date] as const)),
-    [weekCells]
-  );
-
-  const dayHourSlots = useMemo(() => Array.from({ length: 14 }, (_, index) => index + 8), []);
+  }, [calendarAnchorDate, calendarOrdersByDate, isWeekCalendarView, selectedCalendarDateKey, todayDateKey]);
+  const dayHourSlots = useMemo(() => Array.from({ length: 18 }, (_, index) => index + 6), []);
   const dayGridStartMinutes = (dayHourSlots[0] ?? 0) * 60;
   const dayGridEndMinutes = ((dayHourSlots[dayHourSlots.length - 1] ?? 23) + 1) * 60;
   const dayGridDurationMinutes = Math.max(dayGridEndMinutes - dayGridStartMinutes, 60);
   const dayGridPixelsPerHour = 40;
   const dayGridSnapMinutes = 30;
-  const dayGridDragHoldMs = 200;
-  const dayGridDragStartDistancePx = 8;
   const dayGridHeight = Math.round((dayGridDurationMinutes / 60) * dayGridPixelsPerHour);
   const dayGridLineSlots = useMemo(
-    () =>
+    () => {
+      if (!isDayCalendarView && !isWeekCalendarView) return [];
+      return (
       Array.from(
         { length: Math.floor(dayGridDurationMinutes / dayGridSnapMinutes) },
         (_, index) => dayGridStartMinutes + index * dayGridSnapMinutes
-      ),
-    [dayGridDurationMinutes, dayGridSnapMinutes, dayGridStartMinutes]
+      )
+      );
+    },
+    [dayGridDurationMinutes, dayGridSnapMinutes, dayGridStartMinutes, isDayCalendarView, isWeekCalendarView]
   );
   const selectedDateEntriesInsideGrid = useMemo(() => {
+    if (!isDayCalendarView) return [];
     return selectedDateEntries.filter((entry) => {
       const startMinutes = minutesIntoDay(entry.productionStartAt);
       const endMinutes = startMinutes + entry.durationMinutes;
       return endMinutes > dayGridStartMinutes && startMinutes < dayGridEndMinutes;
     });
-  }, [dayGridEndMinutes, dayGridStartMinutes, selectedDateEntries]);
+  }, [dayGridEndMinutes, dayGridStartMinutes, isDayCalendarView, selectedDateEntries]);
   const selectedDateTimelineEvents = useMemo(() => {
+    if (!isDayCalendarView) return [];
     const pixelsPerMinute = dayGridHeight / dayGridDurationMinutes;
     const minCardHeight = Math.max(Math.round(dayGridSnapMinutes * pixelsPerMinute), 42);
 
@@ -2348,34 +2241,78 @@ function OrdersPageContent() {
     dayGridHeight,
     dayGridSnapMinutes,
     dayGridStartMinutes,
+    isDayCalendarView,
     selectedDateEntriesInsideGrid
+  ]);
+  const selectedDateBlockedWindowEvents = useMemo(() => {
+    if (!isDayCalendarView) return [];
+
+    return selectedScheduleDayWindows
+      .filter((window) => !window.isOpen)
+      .map((window) => {
+        const definition = EXTERNAL_ORDER_DELIVERY_WINDOWS.find((entry) => entry.key === window.key);
+        if (!definition) return null;
+        const startMinutes = definition.startHour * 60 + definition.startMinute;
+        const endMinutes = definition.endHour * 60 + definition.endMinute;
+        const clampedStartMinutes = clampNumber(startMinutes, dayGridStartMinutes, dayGridEndMinutes);
+        const clampedEndMinutes = clampNumber(endMinutes, clampedStartMinutes + dayGridSnapMinutes, dayGridEndMinutes);
+        const durationMinutes = Math.max(clampedEndMinutes - clampedStartMinutes, dayGridSnapMinutes);
+        const top = Math.round(((clampedStartMinutes - dayGridStartMinutes) / dayGridDurationMinutes) * dayGridHeight);
+        const height = Math.max(Math.round((durationMinutes / dayGridDurationMinutes) * dayGridHeight), 44);
+
+        return {
+          key: window.key,
+          label: 'INDISPONÍVEL',
+          timeLabel: `${window.startLabel}-${window.endLabel}`,
+          top,
+          height
+        };
+      })
+      .filter((entry): entry is { key: ExternalOrderDeliveryWindowKey; label: string; timeLabel: string; top: number; height: number } => Boolean(entry));
+  }, [
+    dayGridDurationMinutes,
+    dayGridEndMinutes,
+    dayGridHeight,
+    dayGridSnapMinutes,
+    dayGridStartMinutes,
+    isDayCalendarView,
+    selectedScheduleDayWindows
   ]);
   const dayTimelineLaneCount = useMemo(
     () =>
+      !isDayCalendarView
+        ? 1
+        :
       Math.max(
         selectedDateTimelineEvents.reduce((max, item) => Math.max(max, item.laneCount), 0),
         1
       ),
-    [selectedDateTimelineEvents]
+    [isDayCalendarView, selectedDateTimelineEvents]
   );
   const weekGridHeight = Math.max(Math.round(dayGridHeight * 0.58), 320);
   const weekGridMinEventHeight = 30;
   const weekGridLineOffsets = useMemo(
-    () =>
+    () => {
+      if (!isWeekCalendarView) return [];
+      return (
       dayGridLineSlots.map((minutes) =>
         Math.round(((minutes - dayGridStartMinutes) / dayGridDurationMinutes) * weekGridHeight)
-      ),
-    [dayGridDurationMinutes, dayGridLineSlots, dayGridStartMinutes, weekGridHeight]
+      )
+      );
+    },
+    [dayGridDurationMinutes, dayGridLineSlots, dayGridStartMinutes, isWeekCalendarView, weekGridHeight]
   );
   const currentTimeMarkerTop = useMemo(() => {
+    if (!isDayCalendarView) return null;
     const currentMinutes =
       calendarNow.getHours() * 60 + calendarNow.getMinutes() + calendarNow.getSeconds() / 60;
     if (currentMinutes < dayGridStartMinutes || currentMinutes > dayGridEndMinutes) return null;
     return ((currentMinutes - dayGridStartMinutes) / dayGridDurationMinutes) * dayGridHeight;
-  }, [calendarNow, dayGridDurationMinutes, dayGridEndMinutes, dayGridHeight, dayGridStartMinutes]);
+  }, [calendarNow, dayGridDurationMinutes, dayGridEndMinutes, dayGridHeight, dayGridStartMinutes, isDayCalendarView]);
   const selectedDateCurrentTimeMarkerTop =
-    selectedCalendarDateKey === todayDateKey ? currentTimeMarkerTop : null;
+    isDayCalendarView && selectedCalendarDateKey === todayDateKey ? currentTimeMarkerTop : null;
   const weekTimelineCells = useMemo(() => {
+    if (!isWeekCalendarView) return [];
     return weekCells.map((cell) => {
       const { overflowCount, timelineLaneCount, timelineEvents } = buildWeekTimelineMetrics(
         cell.entries,
@@ -2401,6 +2338,7 @@ function OrdersPageContent() {
     dayGridEndMinutes,
     dayGridSnapMinutes,
     dayGridStartMinutes,
+    isWeekCalendarView,
     weekCells,
     weekGridHeight,
     weekGridMinEventHeight
@@ -2433,6 +2371,76 @@ function OrdersPageContent() {
     setSelectedCalendarDateKey(dateKeyFromDate(today));
   };
 
+  const handleToggleSelectedScheduleWindow = useCallback(async (windowKey: ExternalOrderDeliveryWindowKey) => {
+    const nextBlockedWindows = selectedScheduleDayWindows
+      .filter((window) => {
+        if (window.key === windowKey) {
+          return window.isOpen;
+        }
+        return !window.isOpen;
+      })
+      .map((window) => window.key);
+    const windowLabel = selectedScheduleDayWindows.find((window) => window.key === windowKey)?.label ?? windowKey;
+    const previousAvailability = selectedScheduleDayAvailability;
+    const optimisticAvailability: ScheduleDayAvailability = {
+      dayKey: selectedCalendarDateKey,
+      blockedWindows: nextBlockedWindows,
+      windows: selectedScheduleDayWindows.map((window) => ({
+        ...window,
+        isOpen: !nextBlockedWindows.includes(window.key)
+      })),
+      updatedAt: previousAvailability?.updatedAt ?? new Date().toISOString()
+    };
+
+    try {
+      setIsSavingSelectedScheduleDay(true);
+      scheduleDayAvailabilityLoadedKeysRef.current.add(selectedCalendarDateKey);
+      setScheduleDayAvailabilityByDayKey((current) => ({
+        ...current,
+        [selectedCalendarDateKey]: optimisticAvailability
+      }));
+      const updated = await updateScheduleDayAvailability(selectedCalendarDateKey, nextBlockedWindows);
+      scheduleDayAvailabilityLoadedKeysRef.current.add(selectedCalendarDateKey);
+      setScheduleDayAvailabilityByDayKey((current) => ({
+        ...current,
+        [selectedCalendarDateKey]: updated
+      }));
+      notifySuccess(
+        nextBlockedWindows.includes(windowKey)
+          ? `Faixa ${windowLabel} marcada como indisponível.`
+          : `Faixa ${windowLabel} reaberta para agendamentos.`,
+      );
+    } catch (availabilityError) {
+      notifyError(
+        availabilityError instanceof Error
+          ? availabilityError.message
+          : 'Não foi possível atualizar a disponibilidade do dia.',
+      );
+      setScheduleDayAvailabilityByDayKey((current) => {
+        if (!previousAvailability) {
+          const next = { ...current };
+          delete next[selectedCalendarDateKey];
+          return next;
+        }
+        return {
+          ...current,
+          [selectedCalendarDateKey]: previousAvailability
+        };
+      });
+      if (!previousAvailability) {
+        scheduleDayAvailabilityLoadedKeysRef.current.delete(selectedCalendarDateKey);
+      }
+    } finally {
+      setIsSavingSelectedScheduleDay(false);
+    }
+  }, [
+    notifyError,
+    notifySuccess,
+    selectedCalendarDateKey,
+    selectedScheduleDayAvailability,
+    selectedScheduleDayWindows
+  ]);
+
   const selectCalendarDate = (date: Date) => {
     const normalized = startOfLocalDay(date);
     const nextDateKey = dateKeyFromDate(normalized);
@@ -2448,410 +2456,12 @@ function OrdersPageContent() {
     }
   };
 
-  const handleDayGridEventClick = (entry: CalendarOrderEntry, eventKey: string) => {
-    if (dayGridSuppressClickRef.current === eventKey) {
-      dayGridSuppressClickRef.current = null;
-      return;
-    }
+  const handleDayGridEventClick = (entry: CalendarOrderEntry) => {
     openCalendarEntry(entry);
   };
 
-  const handleWeekGridEventClick = (entry: CalendarOrderEntry, eventKey: string) => {
-    if (weekGridSuppressClickRef.current === eventKey) {
-      weekGridSuppressClickRef.current = null;
-      return;
-    }
+  const handleWeekGridEventClick = (entry: CalendarOrderEntry) => {
     openCalendarEntry(entry);
-  };
-
-  const lockDayGridScroll = useCallback(() => {
-    if (typeof document === 'undefined' || dayGridScrollLockRef.current) return;
-    const body = document.body;
-    const html = document.documentElement;
-    const preventTouchMove = (event: TouchEvent) => {
-      event.preventDefault();
-    };
-    dayGridScrollLockRef.current = {
-      bodyOverflow: body.style.overflow,
-      bodyTouchAction: body.style.touchAction,
-      htmlOverflow: html.style.overflow,
-      htmlTouchAction: html.style.touchAction,
-      preventTouchMove
-    };
-    body.style.overflow = 'hidden';
-    body.style.touchAction = 'none';
-    html.style.overflow = 'hidden';
-    html.style.touchAction = 'none';
-    document.addEventListener('touchmove', preventTouchMove, { passive: false, capture: true });
-  }, []);
-
-  const unlockDayGridScroll = useCallback(() => {
-    if (typeof document === 'undefined' || !dayGridScrollLockRef.current) return;
-    const body = document.body;
-    const html = document.documentElement;
-    document.removeEventListener('touchmove', dayGridScrollLockRef.current.preventTouchMove, true);
-    body.style.overflow = dayGridScrollLockRef.current.bodyOverflow;
-    body.style.touchAction = dayGridScrollLockRef.current.bodyTouchAction;
-    html.style.overflow = dayGridScrollLockRef.current.htmlOverflow;
-    html.style.touchAction = dayGridScrollLockRef.current.htmlTouchAction;
-    dayGridScrollLockRef.current = null;
-  }, []);
-
-  const activateDayGridDrag = useCallback(
-    (intent: DayGridDragIntentState) => {
-      if (dayGridDragIntentRef.current?.pointerId !== intent.pointerId) return;
-      if (intent.target.isConnected) {
-        intent.target.setPointerCapture(intent.pointerId);
-      }
-      lockDayGridScroll();
-      setDayGridDragState({
-        pointerId: intent.pointerId,
-        eventKey: intent.eventKey,
-        orderId: intent.orderId,
-        previousScheduledAtIso: intent.previousScheduledAtIso,
-        baseDate: intent.baseDate,
-        baseMinutes: intent.baseMinutes,
-        previewMinutes: intent.baseMinutes,
-        lane: intent.lane,
-        height: intent.height,
-        startClientY: intent.startClientY
-      });
-      dayGridDragIntentRef.current = null;
-    },
-    [lockDayGridScroll]
-  );
-
-  const activateWeekGridDrag = useCallback(
-    (intent: WeekGridDragIntentState) => {
-      if (weekGridDragIntentRef.current?.pointerId !== intent.pointerId) return;
-      if (intent.target.isConnected) {
-        intent.target.setPointerCapture(intent.pointerId);
-      }
-      lockDayGridScroll();
-      setWeekGridDragState({
-        pointerId: intent.pointerId,
-        eventKey: intent.eventKey,
-        orderId: intent.orderId,
-        previousScheduledAtIso: intent.previousScheduledAtIso,
-        entry: intent.entry,
-        sourceDateKey: intent.sourceDateKey,
-        previewDateKey: intent.sourceDateKey,
-        baseMinutes: intent.baseMinutes,
-        previewMinutes: intent.baseMinutes,
-        height: intent.height,
-        startClientY: intent.startClientY
-      });
-      weekGridDragIntentRef.current = null;
-    },
-    [lockDayGridScroll]
-  );
-
-  useEffect(() => {
-    return () => {
-      if (dayGridDragIntentRef.current) {
-        window.clearTimeout(dayGridDragIntentRef.current.holdTimeoutId);
-        dayGridDragIntentRef.current = null;
-      }
-      if (weekGridDragIntentRef.current) {
-        window.clearTimeout(weekGridDragIntentRef.current.holdTimeoutId);
-        weekGridDragIntentRef.current = null;
-      }
-      unlockDayGridScroll();
-    };
-  }, [unlockDayGridScroll]);
-
-  const registerWeekGridCanvas = useCallback((dateKey: string, element: HTMLDivElement | null) => {
-    if (element) {
-      weekGridCanvasByDateKeyRef.current.set(dateKey, element);
-      return;
-    }
-    weekGridCanvasByDateKeyRef.current.delete(dateKey);
-  }, []);
-
-  const resolveWeekGridPreviewPosition = useCallback(
-    (clientX: number, clientY: number, fallbackDateKey: string) => {
-      if (typeof document === 'undefined') return null;
-      const target = document.elementFromPoint(clientX, clientY);
-      const targetDay = target instanceof HTMLElement ? target.closest<HTMLElement>('[data-week-grid-date-key]') : null;
-      const nextDateKey = targetDay?.dataset.weekGridDateKey || fallbackDateKey;
-      const targetDate = weekDateByKey.get(nextDateKey);
-      const canvas = weekGridCanvasByDateKeyRef.current.get(nextDateKey);
-      if (!targetDate || !canvas) return null;
-
-      const rect = canvas.getBoundingClientRect();
-      const relativeY = clampNumber(clientY - rect.top, 0, rect.height);
-      const rawMinutes =
-        dayGridStartMinutes + (relativeY / Math.max(rect.height, 1)) * dayGridDurationMinutes;
-      const previewMinutes = clampNumber(
-        Math.round(rawMinutes / dayGridSnapMinutes) * dayGridSnapMinutes,
-        dayGridStartMinutes,
-        dayGridEndMinutes - dayGridSnapMinutes
-      );
-
-      return {
-        previewDateKey: nextDateKey,
-        previewMinutes
-      };
-    },
-    [
-      dayGridDurationMinutes,
-      dayGridEndMinutes,
-      dayGridSnapMinutes,
-      dayGridStartMinutes,
-      weekDateByKey
-    ]
-  );
-
-  const handleDayGridEventPointerDown = (
-    event: PointerEvent<HTMLButtonElement>,
-    item: { entry: CalendarOrderEntry; lane: number; height: number }
-  ) => {
-    if (!event.isPrimary) return;
-    const orderId = item.entry.order.id;
-    if (!orderId) return;
-
-    const baseMinutes = clampNumber(
-      Math.round(minutesIntoDay(item.entry.createdAt) / dayGridSnapMinutes) * dayGridSnapMinutes,
-      dayGridStartMinutes,
-      dayGridEndMinutes - dayGridSnapMinutes
-    );
-
-    if (dayGridDragIntentRef.current) {
-      window.clearTimeout(dayGridDragIntentRef.current.holdTimeoutId);
-      dayGridDragIntentRef.current = null;
-    }
-    dayGridSuppressClickRef.current = null;
-    const intent: DayGridDragIntentState = {
-      pointerId: event.pointerId,
-      eventKey: `timeline-${calendarEntryBaseKey(item.entry)}`,
-      orderId,
-      previousScheduledAtIso: item.entry.order.scheduledAt ?? null,
-      baseDate: item.entry.createdAt,
-      baseMinutes,
-      lane: item.lane,
-      height: item.height,
-      target: event.currentTarget,
-      startClientX: event.clientX,
-      startClientY: event.clientY,
-      holdTimeoutId: 0
-    };
-    intent.holdTimeoutId = window.setTimeout(() => activateDayGridDrag(intent), dayGridDragHoldMs);
-    dayGridDragIntentRef.current = intent;
-  };
-
-  const handleDayGridEventPointerMove = (event: PointerEvent<HTMLButtonElement>) => {
-    const activeDrag = dayGridDragState;
-    if (activeDrag && event.pointerId === activeDrag.pointerId) {
-      event.preventDefault();
-      const pixelsPerMinute = dayGridHeight / dayGridDurationMinutes;
-      const rawDeltaMinutes = (event.clientY - activeDrag.startClientY) / pixelsPerMinute;
-      const snappedDeltaMinutes =
-        Math.round(rawDeltaMinutes / dayGridSnapMinutes) * dayGridSnapMinutes;
-      const nextMinutes = clampNumber(
-        activeDrag.baseMinutes + snappedDeltaMinutes,
-        dayGridStartMinutes,
-        dayGridEndMinutes - dayGridSnapMinutes
-      );
-
-      if (nextMinutes === activeDrag.previewMinutes) return;
-
-      setDayGridDragState((current) =>
-        current ? { ...current, previewMinutes: nextMinutes } : current
-      );
-      return;
-    }
-
-    const intent = dayGridDragIntentRef.current;
-    if (!intent || event.pointerId !== intent.pointerId) return;
-
-    const distanceX = Math.abs(event.clientX - intent.startClientX);
-    const distanceY = Math.abs(event.clientY - intent.startClientY);
-    if (Math.max(distanceX, distanceY) < dayGridDragStartDistancePx) return;
-
-    window.clearTimeout(intent.holdTimeoutId);
-    dayGridDragIntentRef.current = null;
-  };
-
-  const handleWeekGridEventPointerDown = (
-    event: PointerEvent<HTMLButtonElement>,
-    cell: { key: string },
-    item: { entry: CalendarOrderEntry; height: number }
-  ) => {
-    if (!event.isPrimary) return;
-    const orderId = item.entry.order.id;
-    if (!orderId) return;
-
-    const baseMinutes = clampNumber(
-      Math.round(minutesIntoDay(item.entry.createdAt) / dayGridSnapMinutes) * dayGridSnapMinutes,
-      dayGridStartMinutes,
-      dayGridEndMinutes - dayGridSnapMinutes
-    );
-
-    if (weekGridDragIntentRef.current) {
-      window.clearTimeout(weekGridDragIntentRef.current.holdTimeoutId);
-      weekGridDragIntentRef.current = null;
-    }
-    weekGridSuppressClickRef.current = null;
-    const intent: WeekGridDragIntentState = {
-      pointerId: event.pointerId,
-      eventKey: `week-order-${orderId}`,
-      orderId,
-      previousScheduledAtIso: item.entry.order.scheduledAt ?? null,
-      entry: item.entry,
-      sourceDateKey: cell.key,
-      baseMinutes,
-      height: item.height,
-      target: event.currentTarget,
-      startClientX: event.clientX,
-      startClientY: event.clientY,
-      holdTimeoutId: 0
-    };
-    intent.holdTimeoutId = window.setTimeout(() => activateWeekGridDrag(intent), dayGridDragHoldMs);
-    weekGridDragIntentRef.current = intent;
-  };
-
-  const handleWeekGridEventPointerMove = (event: PointerEvent<HTMLButtonElement>) => {
-    const activeDrag = weekGridDragState;
-    if (activeDrag && event.pointerId === activeDrag.pointerId) {
-      event.preventDefault();
-      const preview = resolveWeekGridPreviewPosition(
-        event.clientX,
-        event.clientY,
-        activeDrag.previewDateKey
-      );
-      if (!preview) return;
-      if (
-        preview.previewDateKey === activeDrag.previewDateKey &&
-        preview.previewMinutes === activeDrag.previewMinutes
-      ) {
-        return;
-      }
-
-      setWeekGridDragState((current) =>
-        current
-          ? {
-              ...current,
-              previewDateKey: preview.previewDateKey,
-              previewMinutes: preview.previewMinutes
-            }
-          : current
-      );
-      return;
-    }
-
-    const intent = weekGridDragIntentRef.current;
-    if (!intent || event.pointerId !== intent.pointerId) return;
-
-    const distanceX = Math.abs(event.clientX - intent.startClientX);
-    const distanceY = Math.abs(event.clientY - intent.startClientY);
-    if (Math.max(distanceX, distanceY) < dayGridDragStartDistancePx) return;
-
-    window.clearTimeout(intent.holdTimeoutId);
-    weekGridDragIntentRef.current = null;
-  };
-
-  const finishDayGridDrag = async (pointerId: number) => {
-    if (!dayGridDragState || pointerId !== dayGridDragState.pointerId) return;
-
-    const currentDrag = dayGridDragState;
-    setDayGridDragState(null);
-    unlockDayGridScroll();
-
-    dayGridSuppressClickRef.current = currentDrag.eventKey;
-
-    if (currentDrag.previewMinutes === currentDrag.baseMinutes) return;
-
-    await persistOrderSchedule(
-      currentDrag.orderId,
-      dateWithMinutes(currentDrag.baseDate, currentDrag.previewMinutes),
-      {
-        previousScheduledAtIso: currentDrag.previousScheduledAtIso,
-        notifyOnSuccess: false
-      }
-    );
-  };
-
-  const finishWeekGridDrag = async (pointerId: number) => {
-    if (!weekGridDragState || pointerId !== weekGridDragState.pointerId) return;
-
-    const currentDrag = weekGridDragState;
-    setWeekGridDragState(null);
-    unlockDayGridScroll();
-
-    weekGridSuppressClickRef.current = currentDrag.eventKey;
-
-    if (
-      currentDrag.previewDateKey === currentDrag.sourceDateKey &&
-      currentDrag.previewMinutes === currentDrag.baseMinutes
-    ) {
-      return;
-    }
-
-    const previewDate = weekDateByKey.get(currentDrag.previewDateKey);
-    if (!previewDate) return;
-
-    await persistOrderSchedule(
-      currentDrag.orderId,
-      dateWithMinutes(previewDate, currentDrag.previewMinutes),
-      {
-        previousScheduledAtIso: currentDrag.previousScheduledAtIso,
-        notifyOnSuccess: false
-      }
-    );
-  };
-
-  const handleDayGridEventPointerUp = async (event: PointerEvent<HTMLButtonElement>) => {
-    const intent = dayGridDragIntentRef.current;
-    if (intent?.pointerId === event.pointerId) {
-      window.clearTimeout(intent.holdTimeoutId);
-      dayGridDragIntentRef.current = null;
-    }
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    await finishDayGridDrag(event.pointerId);
-  };
-
-  const handleDayGridEventPointerCancel = (event: PointerEvent<HTMLButtonElement>) => {
-    const intent = dayGridDragIntentRef.current;
-    if (intent?.pointerId === event.pointerId) {
-      window.clearTimeout(intent.holdTimeoutId);
-      dayGridDragIntentRef.current = null;
-    }
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    if (dayGridDragState && event.pointerId === dayGridDragState.pointerId) {
-      setDayGridDragState(null);
-      unlockDayGridScroll();
-    }
-  };
-
-  const handleWeekGridEventPointerUp = async (event: PointerEvent<HTMLButtonElement>) => {
-    const intent = weekGridDragIntentRef.current;
-    if (intent?.pointerId === event.pointerId) {
-      window.clearTimeout(intent.holdTimeoutId);
-      weekGridDragIntentRef.current = null;
-    }
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    await finishWeekGridDrag(event.pointerId);
-  };
-
-  const handleWeekGridEventPointerCancel = (event: PointerEvent<HTMLButtonElement>) => {
-    const intent = weekGridDragIntentRef.current;
-    if (intent?.pointerId === event.pointerId) {
-      window.clearTimeout(intent.holdTimeoutId);
-      weekGridDragIntentRef.current = null;
-    }
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    if (weekGridDragState && event.pointerId === weekGridDragState.pointerId) {
-      setWeekGridDragState(null);
-      unlockDayGridScroll();
-    }
   };
 
   const handleCalendarChipClick = (
@@ -2863,6 +2473,14 @@ function OrdersPageContent() {
   };
 
   const draftTotalUnits = useMemo(
+    () =>
+      newOrderItems.reduce((sum, item) => {
+        if (resolveRuntimeOrderItemGroup(productMap.get(item.productId)) !== 'FLAVOR') return sum;
+        return sum + Math.max(item.quantity || 0, 0);
+      }, 0),
+    [newOrderItems, productMap]
+  );
+  const draftTotalSelectedUnits = useMemo(
     () => newOrderItems.reduce((sum, item) => sum + Math.max(item.quantity || 0, 0), 0),
     [newOrderItems]
   );
@@ -2883,14 +2501,14 @@ function OrdersPageContent() {
   const draftTotal = Math.max(draftSubtotal - draftDiscount, 0);
   const selectedNewOrderCustomer = useMemo(
     () =>
-      typeof newOrderCustomerId === 'number'
+      shouldDeriveNewOrderContext && typeof newOrderCustomerId === 'number'
         ? customers.find((customer) => customer.id === newOrderCustomerId) || null
         : null,
-    [customers, newOrderCustomerId]
+    [customers, newOrderCustomerId, shouldDeriveNewOrderContext]
   );
   const newOrderCustomerAddressOptions = useMemo(
-    () => buildCustomerAddressOptions(selectedNewOrderCustomer),
-    [selectedNewOrderCustomer]
+    () => (shouldDeriveNewOrderContext ? buildCustomerAddressOptions(selectedNewOrderCustomer) : []),
+    [selectedNewOrderCustomer, shouldDeriveNewOrderContext]
   );
   const selectedNewOrderAddressOption = useMemo(
     () =>
@@ -2900,15 +2518,18 @@ function OrdersPageContent() {
     [newOrderCustomerAddressOptions, newOrderSelectedAddressKey]
   );
   const selectedNewOrderCustomerProfile = useMemo(
-    () => mergeCustomerProfile(selectedNewOrderCustomer, selectedNewOrderAddressOption?.value ?? null),
-    [selectedNewOrderAddressOption?.value, selectedNewOrderCustomer]
+    () =>
+      shouldDeriveNewOrderContext
+        ? mergeCustomerProfile(selectedNewOrderCustomer, selectedNewOrderAddressOption?.value ?? null)
+        : null,
+    [selectedNewOrderAddressOption?.value, selectedNewOrderCustomer, shouldDeriveNewOrderContext]
   );
   const selectedNewOrderCustomerSnapshot = useMemo(
-    () => draftToOrderCustomerSnapshot(buildEditableOrderCustomerDraft(selectedNewOrderCustomerProfile)),
-    [selectedNewOrderCustomerProfile]
-  );
-  const isUsingAlternateNewOrderAddress = Boolean(
-    selectedNewOrderAddressOption && selectedNewOrderAddressOption.key !== 'primary'
+    () =>
+      shouldDeriveNewOrderContext
+        ? draftToOrderCustomerSnapshot(buildEditableOrderCustomerDraft(selectedNewOrderCustomerProfile))
+        : EMPTY_ORDER_CUSTOMER_SNAPSHOT,
+    [selectedNewOrderCustomerProfile, shouldDeriveNewOrderContext]
   );
   const newOrderCustomerAddress = useMemo(
     () => formatCustomerFullAddress(selectedNewOrderCustomerProfile),
@@ -2924,13 +2545,15 @@ function OrdersPageContent() {
   );
   const newOrderQuoteManifestItems = useMemo(
     () =>
-      newOrderItems
-        .filter((item) => Math.max(Math.floor(item.quantity || 0), 0) > 0)
-        .map((item) => ({
-          name: productMap.get(item.productId)?.name ?? `Produto ${item.productId}`,
-          quantity: Math.max(Math.floor(item.quantity || 0), 0)
-        })),
-    [newOrderItems, productMap]
+      shouldDeriveNewOrderContext
+        ? newOrderItems
+            .filter((item) => Math.max(Math.floor(item.quantity || 0), 0) > 0)
+            .map((item) => ({
+              name: productMap.get(item.productId)?.name ?? `Produto ${item.productId}`,
+              quantity: Math.max(Math.floor(item.quantity || 0), 0)
+            }))
+        : [],
+    [newOrderItems, productMap, shouldDeriveNewOrderContext]
   );
   const requiresNewOrderDeliveryQuote = newOrderFulfillmentMode === 'DELIVERY';
   const canCreateOrder =
@@ -2942,10 +2565,21 @@ function OrdersPageContent() {
     draftTotalUnits > 0 ? unitsToCloseOrderBox(draftTotalUnits) : 0;
 
   const selectedOrderVirtualBoxPartitions = useMemo(
-    () => buildOrderVirtualBoxPartitions(selectedOrder?.items || [], productMap),
-    [selectedOrder, productMap]
+    () =>
+      shouldDeriveSelectedOrderDetail
+        ? buildOrderVirtualBoxPartitions(
+            (selectedOrder?.items || []).filter(
+              (item) => resolveRuntimeOrderItemGroup(productMap.get(item.productId)) === 'FLAVOR'
+            ),
+            productMap
+          )
+        : { boxes: [], openBox: [], openBoxUnits: 0 },
+    [productMap, selectedOrder, shouldDeriveSelectedOrderDetail]
   );
   const selectedOrderEditableBoxes = useMemo<OrderVirtualEditableBox[]>(() => {
+    if (!shouldDeriveSelectedOrderDetail) {
+      return [];
+    }
     const closedBoxes = selectedOrderVirtualBoxPartitions.boxes.map((box, index) => ({
       key: `box-${index + 1}`,
       label: `#${index + 1}`,
@@ -2968,7 +2602,7 @@ function OrdersPageContent() {
         tone: 'OPEN' as const
       }
     ];
-  }, [selectedOrderVirtualBoxPartitions]);
+  }, [selectedOrderVirtualBoxPartitions, shouldDeriveSelectedOrderDetail]);
   const selectedOrderNewEditableBox = useMemo<OrderVirtualEditableBox>(
     () => ({
       key: SELECTED_ORDER_NEW_BOX_KEY,
@@ -2981,11 +2615,14 @@ function OrdersPageContent() {
     []
   );
   const selectedOrderRenderedBoxes = useMemo(() => {
+    if (!shouldDeriveSelectedOrderDetail) {
+      return [];
+    }
     if (selectedOrderEditingBoxKey !== SELECTED_ORDER_NEW_BOX_KEY) {
       return selectedOrderEditableBoxes;
     }
     return [...selectedOrderEditableBoxes, selectedOrderNewEditableBox];
-  }, [selectedOrderEditableBoxes, selectedOrderEditingBoxKey, selectedOrderNewEditableBox]);
+  }, [selectedOrderEditableBoxes, selectedOrderEditingBoxKey, selectedOrderNewEditableBox, shouldDeriveSelectedOrderDetail]);
   const selectedOrderEditableBoxByKey = useMemo(() => {
     return new Map(selectedOrderRenderedBoxes.map((box) => [box.key, box]));
   }, [selectedOrderRenderedBoxes]);
@@ -2993,11 +2630,14 @@ function OrdersPageContent() {
     ? selectedOrderEditableBoxByKey.get(selectedOrderEditingBoxKey) || null
     : null;
   const selectedOrderEditingBoxDraftTotalUnits = useMemo(() => {
+    if (!shouldDeriveSelectedOrderDetail) {
+      return 0;
+    }
     return Object.values(selectedOrderEditingBoxDraftByProductId).reduce(
       (sum, quantity) => sum + Math.max(Math.floor(quantity || 0), 0),
       0
     );
-  }, [selectedOrderEditingBoxDraftByProductId]);
+  }, [selectedOrderEditingBoxDraftByProductId, shouldDeriveSelectedOrderDetail]);
   const selectedOrderEditPickerParts = useMemo(
     () =>
       splitDateTimeLocalPickerParts(
@@ -3021,24 +2661,38 @@ function OrdersPageContent() {
     const parsed = parseLocaleNumber(selectedOrderEditDiscountPct);
     return parsed == null ? 0 : Math.min(Math.max(roundMoney(parsed), 0), 100);
   }, [selectedOrderEditDiscountPct]);
-  const selectedCustomer = selectedOrder
-    ? selectedOrder.customer || customers.find((customer) => customer.id === selectedOrder.customerId) || null
-    : null;
+  const selectedOrderAppliedCoupon = useMemo(() => {
+    if (!selectedOrder) return null;
+    const persistedCode = String(selectedOrder.couponCode || '').trim();
+    const noteCoupon = parseAppliedCouponFromNotes(selectedOrder.notes ?? null);
+    if (persistedCode) {
+      return {
+        code: persistedCode,
+        discountPct: noteCoupon?.discountPct ?? null
+      };
+    }
+    return noteCoupon;
+  }, [selectedOrder]);
+  const selectedCustomer =
+    shouldDeriveSelectedOrderDetail && selectedOrder
+      ? selectedOrder.customer || customers.find((customer) => customer.id === selectedOrder.customerId) || null
+      : null;
   const selectedCustomerAddressOptions = useMemo(
     () => buildCustomerAddressOptions(selectedCustomer),
     [selectedCustomer]
   );
   const selectedOrderCustomerProfile = useMemo(
-    () => resolveOrderCustomerProfile(selectedOrder),
-    [resolveOrderCustomerProfile, selectedOrder]
+    () =>
+      shouldDeriveSelectedOrderDetail ? resolveOrderCustomerProfile(selectedOrder) : mergeCustomerProfile(null, null),
+    [resolveOrderCustomerProfile, selectedOrder, shouldDeriveSelectedOrderDetail]
   );
   const selectedCustomerNameLabel = selectedOrder ? resolveCustomerName(selectedOrder) : 'Sem cliente';
   const selectedCustomerAddressLabel =
-    formatCustomerFullAddress(selectedOrderCustomerProfile) || 'Endereco nao informado';
+    formatCustomerFullAddress(selectedOrderCustomerProfile) || 'Endereço não informado';
   const selectedCustomerPhoneLabel =
     formatPhoneBR(selectedOrderCustomerProfile.phone) ||
     (selectedOrderCustomerProfile.phone || '').trim() ||
-    'Telefone nao informado';
+    'Telefone não informado';
   const selectedOrderScheduledWindowLabel = useMemo(
     () => formatPublicScheduleWindowLabel(resolveOrderDate(selectedOrder)),
     [selectedOrder]
@@ -3066,56 +2720,19 @@ function OrdersPageContent() {
     setNewOrderNotes(tutorialMode ? withTestDataTag('', 'Pedido do momento') : '');
     setOrderError(null);
   }, [tutorialMode]);
-  const applyLastOrderDraftForCustomer = useCallback(
-    (customerId: number | '') => {
-      if (!customerId) {
-        if (restoredLastOrderDraft) {
-          resetNewOrderDraftDetails();
-        }
-        setRestoredLastOrderDraft(null);
-        return;
-      }
-
-      const lastOrderDraft = latestOrderDraftByCustomerId.get(customerId);
-      if (!lastOrderDraft) {
-        if (restoredLastOrderDraft) {
-          resetNewOrderDraftDetails();
-        }
-        setRestoredLastOrderDraft(null);
-        return;
-      }
-
-      setNewOrderItems(lastOrderDraft.items);
-      setNewOrderFulfillmentMode(lastOrderDraft.fulfillmentMode);
-      setNewOrderDiscountPct(normalizeDiscountPctInput(lastOrderDraft.discountPct));
-      setNewOrderNotes(lastOrderDraft.notes);
-      setOrderError(null);
-      setRestoredLastOrderDraft({
-        customerId: lastOrderDraft.customerId,
-        customerName: lastOrderDraft.customerName,
-        orderId: lastOrderDraft.orderId,
-        referenceLabel: lastOrderDraft.referenceLabel
-      });
-    },
-    [latestOrderDraftByCustomerId, resetNewOrderDraftDetails, restoredLastOrderDraft]
-  );
   const syncNewOrderCustomerSelection = useCallback(
     (value: string, options: Array<{ id: number; label: string }>) => {
       const parsedId = parseIdFromLabel(value, options);
       const nextCustomerId = Number.isFinite(parsedId) ? parsedId : '';
-      setNewOrderCustomerId((current) => (current === nextCustomerId ? current : nextCustomerId));
-      if (
-        nextCustomerId &&
-        restoredLastOrderDraft?.customerId === nextCustomerId &&
-        restoredLastOrderDraft.orderId === latestOrderDraftByCustomerId.get(nextCustomerId)?.orderId
-      ) {
-        return;
+      if (newOrderCustomerId !== nextCustomerId) {
+        resetNewOrderDraftDetails();
       }
-      applyLastOrderDraftForCustomer(nextCustomerId);
+      setNewOrderCustomerId((current) => (current === nextCustomerId ? current : nextCustomerId));
     },
-    [applyLastOrderDraftForCustomer, latestOrderDraftByCustomerId, restoredLastOrderDraft]
+    [newOrderCustomerId, resetNewOrderDraftDetails]
   );
   useEffect(() => {
+    if (!isNewOrderModalOpen) return;
     if (!customerSearch.trim()) {
       if (newOrderCustomerId) {
         syncNewOrderCustomerSelection('', customerOptions);
@@ -3123,7 +2740,7 @@ function OrdersPageContent() {
       return;
     }
     syncNewOrderCustomerSelection(customerSearch, customerOptions);
-  }, [customerOptions, customerSearch, newOrderCustomerId, syncNewOrderCustomerSelection]);
+  }, [customerOptions, customerSearch, isNewOrderModalOpen, newOrderCustomerId, syncNewOrderCustomerSelection]);
 
   const refreshNewOrderDeliveryQuote = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -3144,7 +2761,7 @@ function OrdersPageContent() {
 
       if (!newOrderCustomerAddress.trim()) {
         setNewOrderDeliveryQuote(null);
-        setNewOrderDeliveryQuoteError('Cliente sem endereco completo para cotacao do frete.');
+        setNewOrderDeliveryQuoteError('Cliente sem endereço completo para cotação do frete.');
         setIsQuotingNewOrderDelivery(false);
         return null;
       }
@@ -3163,6 +2780,13 @@ function OrdersPageContent() {
             name: selectedNewOrderCustomerSnapshot.name,
             phone: selectedNewOrderCustomerSnapshot.phone ?? null,
             address: selectedNewOrderCustomerSnapshot.address ?? newOrderCustomerAddress,
+            addressLine1: selectedNewOrderCustomerSnapshot.addressLine1 ?? null,
+            addressLine2: selectedNewOrderCustomerSnapshot.addressLine2 ?? null,
+            neighborhood: selectedNewOrderCustomerSnapshot.neighborhood ?? null,
+            city: selectedNewOrderCustomerSnapshot.city ?? null,
+            state: selectedNewOrderCustomerSnapshot.state ?? null,
+            postalCode: selectedNewOrderCustomerSnapshot.postalCode ?? null,
+            country: selectedNewOrderCustomerSnapshot.country ?? null,
             placeId: selectedNewOrderCustomerSnapshot.placeId ?? null,
             lat: typeof selectedNewOrderCustomerSnapshot.lat === 'number' ? selectedNewOrderCustomerSnapshot.lat : null,
             lng: typeof selectedNewOrderCustomerSnapshot.lng === 'number' ? selectedNewOrderCustomerSnapshot.lng : null,
@@ -3170,8 +2794,8 @@ function OrdersPageContent() {
           },
           manifest: {
             items: newOrderQuoteManifestItems,
-            subtotal: draftSubtotal,
-            totalUnits: draftTotalUnits
+            subtotal: draftTotal,
+            totalUnits: draftTotalSelectedUnits
           }
         });
         if (requestId !== newOrderQuoteRequestIdRef.current) {
@@ -3184,7 +2808,7 @@ function OrdersPageContent() {
         if (requestId !== newOrderQuoteRequestIdRef.current) {
           return null;
         }
-        const message = error instanceof Error ? error.message : 'Nao foi possivel calcular o frete agora.';
+        const message = error instanceof Error ? error.message : 'Não foi possível calcular o frete agora.';
         setNewOrderDeliveryQuote(null);
         setNewOrderDeliveryQuoteError(message);
         return null;
@@ -3196,7 +2820,7 @@ function OrdersPageContent() {
     },
     [
       draftSubtotal,
-      draftTotalUnits,
+      draftTotalSelectedUnits,
       newOrderCustomerAddress,
       newOrderFulfillmentMode,
       newOrderQuoteManifestItems,
@@ -3208,6 +2832,7 @@ function OrdersPageContent() {
   );
 
   useEffect(() => {
+    if (!isNewOrderModalOpen) return;
     if (newOrderFulfillmentMode !== 'DELIVERY') {
       newOrderQuoteRequestIdRef.current += 1;
       setNewOrderDeliveryQuote(null);
@@ -3235,7 +2860,7 @@ function OrdersPageContent() {
     if (!newOrderCustomerAddress.trim()) {
       newOrderQuoteRequestIdRef.current += 1;
       setNewOrderDeliveryQuote(null);
-      setNewOrderDeliveryQuoteError('Cliente sem endereco completo para cotacao do frete.');
+      setNewOrderDeliveryQuoteError('Cliente sem endereço completo para cotação do frete.');
       setIsQuotingNewOrderDelivery(false);
       return;
     }
@@ -3246,6 +2871,7 @@ function OrdersPageContent() {
     setIsQuotingNewOrderDelivery(false);
   }, [
     draftSubtotal,
+    isNewOrderModalOpen,
     newOrderFulfillmentMode,
     newOrderCustomerAddress,
     newOrderCustomerId,
@@ -3342,20 +2968,20 @@ function OrdersPageContent() {
 
   const saveSelectedOrderCustomerAddress = async () => {
     if (!selectedCustomer?.id) {
-      setSelectedOrderEditError('Pedido sem cliente vinculado para salvar endereco.');
+      setSelectedOrderEditError('Pedido sem cliente vinculado para salvar endereço.');
       return;
     }
 
     const snapshot = draftToOrderCustomerSnapshot(selectedOrderEditCustomerDraft);
     if (!snapshot.address) {
-      setSelectedOrderEditError('Informe o endereco antes de salvar no cliente.');
+      setSelectedOrderEditError('Informe o endereço antes de salvar no cliente.');
       return;
     }
 
     setSelectedOrderEditError(null);
     setIsSavingSelectedOrderCustomerAddress(true);
     try {
-      await apiFetch(`/customers/${selectedCustomer.id}/addresses`, {
+      const updatedCustomer = await apiFetch<Customer>(`/customers/${selectedCustomer.id}/addresses`, {
         method: 'POST',
         body: JSON.stringify({
           address: snapshot.address,
@@ -3372,16 +2998,19 @@ function OrdersPageContent() {
           deliveryNotes: snapshot.deliveryNotes
         })
       });
-      const refreshedOrders = await loadAll();
-      const freshSelected = selectedOrder?.id
-        ? refreshedOrders.find((entry) => entry.id === selectedOrder.id) || null
-        : null;
-      if (freshSelected) {
-        setSelectedOrder(freshSelected);
-      }
-      notifySuccess('Endereco salvo no cliente.');
+      startTransition(() => {
+        setCustomers((current) =>
+          current.map((entry) => (entry.id === updatedCustomer.id ? { ...entry, ...updatedCustomer } : entry))
+        );
+        setSelectedOrder((current) =>
+          current && current.customerId === updatedCustomer.id
+            ? { ...current, customer: updatedCustomer }
+            : current
+        );
+      });
+      notifySuccess('Endereço salvo no cliente.');
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Nao foi possivel salvar o endereco no cliente.';
+      const message = err instanceof Error ? err.message : 'Não foi possível salvar o endereço no cliente.';
       setSelectedOrderEditError(message);
       notifyError(message);
     } finally {
@@ -3402,14 +3031,14 @@ function OrdersPageContent() {
       return;
     }
     if (selectedOrder.fulfillmentMode === 'DELIVERY' && !customerSnapshot.address) {
-      setSelectedOrderEditError('Informe o endereco deste pedido.');
+      setSelectedOrderEditError('Informe o endereço deste pedido.');
       return;
     }
 
     setSelectedOrderEditError(null);
     setIsSavingSelectedOrderEdit(true);
     try {
-      await apiFetch(`/orders/${selectedOrder.id}`, {
+      const updatedOrder = await apiFetch<OrderView>(`/orders/${selectedOrder.id}`, {
         method: 'PUT',
         body: JSON.stringify({
           scheduledAt: parsedScheduledAt.toISOString(),
@@ -3418,14 +3047,10 @@ function OrdersPageContent() {
           customerSnapshot
         })
       });
-      const refreshedOrders = await loadAll();
-      const freshSelected = refreshedOrders.find((entry) => entry.id === selectedOrder.id) || null;
-      if (freshSelected) {
-        setSelectedOrder(freshSelected);
-      }
+      syncOrderInWorkspace(updatedOrder);
       notifySuccess('Pedido salvo.');
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Nao foi possivel salvar o pedido.';
+      const message = err instanceof Error ? err.message : 'Não foi possível salvar o pedido.';
       setSelectedOrderEditError(message);
       notifyError(message);
     } finally {
@@ -3447,6 +3072,22 @@ function OrdersPageContent() {
     },
     [selectedOrderEditableFlavorEntries]
   );
+  const buildSelectedOrderItemsPayload = useCallback(
+    (
+      boxes: OrderVirtualBoxPart[][],
+      companionDraftByProductId: Record<number, number> = selectedOrderCompanionDraftByProductId
+    ) => {
+      const boxItems = mapOrderVirtualBoxPartsToItems(boxes);
+      const companionItems = Object.entries(companionDraftByProductId)
+        .map(([rawProductId, quantity]) => ({
+          productId: Number(rawProductId),
+          quantity: Math.max(Math.floor(quantity || 0), 0)
+        }))
+        .filter((item) => item.quantity > 0);
+      return [...boxItems, ...companionItems];
+    },
+    [selectedOrderCompanionDraftByProductId]
+  );
 
   const openSelectedOrderBoxEditor = useCallback(
     (box: OrderVirtualEditableBox) => {
@@ -3462,8 +3103,43 @@ function OrdersPageContent() {
     },
     [buildSelectedOrderBoxDraft, selectedOrderEditingBoxKey]
   );
+  const updateSelectedOrderCompanionQuantity = useCallback((productId: number, nextValue: number) => {
+    setSelectedOrderCompanionDraftByProductId((current) => ({
+      ...current,
+      [productId]: Math.max(Math.floor(nextValue), 0)
+    }));
+    setSelectedOrderCompanionEditError(null);
+  }, []);
+
+  const decrementSelectedOrderCompanionQuantity = useCallback(
+    (productId: number) => {
+      const currentQuantity = selectedOrderCompanionDraftByProductId[productId] || 0;
+      if (currentQuantity <= 0) return;
+      updateSelectedOrderCompanionQuantity(productId, currentQuantity - 1);
+    },
+    [selectedOrderCompanionDraftByProductId, updateSelectedOrderCompanionQuantity]
+  );
+
+  const addSelectedOrderCompanionQuantity = useCallback(
+    (productId: number, units: number) => {
+      if (!selectedOrderAllowsBoxEdit || selectedOrderEditingBoxKey) return;
+      const normalizedUnits = Math.max(Math.floor(units), 0);
+      if (normalizedUnits <= 0) return;
+      const currentQuantity = selectedOrderCompanionDraftByProductId[productId] || 0;
+      updateSelectedOrderCompanionQuantity(productId, currentQuantity + normalizedUnits);
+    },
+    [
+      selectedOrderAllowsBoxEdit,
+      selectedOrderCompanionDraftByProductId,
+      selectedOrderEditingBoxKey,
+      updateSelectedOrderCompanionQuantity
+    ]
+  );
 
   const selectedOrderEditingBoxRows = useMemo(() => {
+    if (!shouldDeriveSelectedOrderDetail) {
+      return [];
+    }
     const knownRows = selectedOrderEditableFlavorEntries.map((entry) => ({
       productId: entry.productId,
       productName: entry.productName
@@ -3482,7 +3158,7 @@ function OrdersPageContent() {
       }));
 
     return [...knownRows, ...extraRows];
-  }, [productMap, selectedOrderEditableFlavorEntries, selectedOrderEditingBoxDraftByProductId]);
+  }, [productMap, selectedOrderEditableFlavorEntries, selectedOrderEditingBoxDraftByProductId, shouldDeriveSelectedOrderDetail]);
 
   const updateSelectedOrderEditingBoxQuantity = useCallback((productId: number, nextValue: number) => {
     setSelectedOrderEditingBoxDraftByProductId((current) => ({
@@ -3513,7 +3189,7 @@ function OrdersPageContent() {
       );
       if (normalizedUnits > remainingUnits) {
         setSelectedOrderEditingBoxError(
-          `Cabem mais ${remainingUnits} un nesta caixa.`
+          `Cabem mais ${remainingUnits} un. nesta caixa.`
         );
         return;
       }
@@ -3577,6 +3253,9 @@ function OrdersPageContent() {
     setSelectedOrderEditingBoxError(null);
     setIsSavingSelectedOrderEditingBox(false);
     setIsDeletingSelectedOrderEditingBox(false);
+    setSelectedOrderCompanionDraftByProductId({});
+    setSelectedOrderCompanionEditError(null);
+    setIsSavingSelectedOrderCompanions(false);
   }, [isOrderDetailModalOpen]);
 
   useEffect(() => {
@@ -3627,7 +3306,7 @@ function OrdersPageContent() {
       : selectedOrderEditableBoxes.map((box) =>
           box.key === selectedOrderEditingBox.key ? nextParts : box.parts
         );
-    const nextItems = mapOrderVirtualBoxPartsToItems(nextBoxes);
+    const nextItems = buildSelectedOrderItemsPayload(nextBoxes);
     if (nextItems.length === 0) {
       setSelectedOrderEditingBoxError('Pedido precisa ter ao menos 1 item.');
       return;
@@ -3637,31 +3316,26 @@ function OrdersPageContent() {
     setSelectedOrderEditingBoxError(null);
     setIsSavingSelectedOrderEditingBox(true);
     try {
-      await apiFetch<OrderView>(`/orders/${orderId}/items`, {
+      const updatedOrder = await apiFetch<OrderView>(`/orders/${orderId}/items`, {
         method: 'PUT',
         body: JSON.stringify({
           items: nextItems
         })
       });
-
-      const refreshedOrders = await loadAll();
-      const freshSelected = refreshedOrders.find((entry) => entry.id === orderId) || null;
-      if (freshSelected) {
-        setSelectedOrder(freshSelected);
-      }
+      syncOrderInWorkspace(updatedOrder);
       setSelectedOrderEditingBoxKey(null);
       setSelectedOrderEditingBoxDraftByProductId({});
       setSelectedOrderEditingBoxError(null);
       notifySuccess(isAddingNewBox ? 'Caixa adicionada.' : 'Caixa atualizada.');
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Nao foi possivel salvar a caixa.';
+      const message = err instanceof Error ? err.message : 'Não foi possível salvar a caixa.';
       setSelectedOrderEditingBoxError(message);
       notifyError(message);
     } finally {
       setIsSavingSelectedOrderEditingBox(false);
     }
   }, [
-    loadAll,
+    buildSelectedOrderItemsPayload,
     notifyError,
     notifySuccess,
     productMap,
@@ -3670,7 +3344,54 @@ function OrdersPageContent() {
     selectedOrderEditableBoxes,
     selectedOrderEditingBox,
     selectedOrderEditingBoxDraftByProductId,
-    selectedOrderEditingBoxDraftTotalUnits
+    selectedOrderEditingBoxDraftTotalUnits,
+    syncOrderInWorkspace
+  ]);
+
+  const saveSelectedOrderCompanionEdit = useCallback(async () => {
+    if (!selectedOrder?.id || !selectedOrderAllowsBoxEdit) return;
+    if (selectedOrderEditingBoxKey) {
+      setSelectedOrderCompanionEditError('Salve ou cancele a caixa aberta antes de mexer nas Amigas da Broa.');
+      return;
+    }
+
+    const nextItems = buildSelectedOrderItemsPayload(
+      selectedOrderEditableBoxes.map((box) => box.parts),
+      selectedOrderCompanionDraftByProductId
+    );
+    if (nextItems.length === 0) {
+      setSelectedOrderCompanionEditError('Pedido precisa ter ao menos 1 item.');
+      return;
+    }
+
+    setSelectedOrderCompanionEditError(null);
+    setIsSavingSelectedOrderCompanions(true);
+    try {
+      const updatedOrder = await apiFetch<OrderView>(`/orders/${selectedOrder.id}/items`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          items: nextItems
+        })
+      });
+      syncOrderInWorkspace(updatedOrder);
+      notifySuccess('Amigas da Broa atualizadas.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Não foi possível salvar as Amigas da Broa.';
+      setSelectedOrderCompanionEditError(message);
+      notifyError(message);
+    } finally {
+      setIsSavingSelectedOrderCompanions(false);
+    }
+  }, [
+    buildSelectedOrderItemsPayload,
+    notifyError,
+    notifySuccess,
+    selectedOrder,
+    selectedOrderAllowsBoxEdit,
+    selectedOrderCompanionDraftByProductId,
+    selectedOrderEditableBoxes,
+    selectedOrderEditingBoxKey,
+    syncOrderInWorkspace
   ]);
 
   const removeSelectedOrderEditingBox = useCallback(async () => {
@@ -3686,7 +3407,7 @@ function OrdersPageContent() {
 
     const accepted = await confirm({
       title: 'Excluir caixa?',
-      description: 'A caixa sera removida e o total recalculado.',
+      description: 'A caixa será removida e o total recalculado.',
       confirmLabel: 'Excluir caixa',
       cancelLabel: 'Cancelar',
       danger: true
@@ -3696,9 +3417,9 @@ function OrdersPageContent() {
     const nextBoxes = selectedOrderEditableBoxes
       .filter((box) => box.key !== selectedOrderEditingBox.key)
       .map((box) => box.parts);
-    const nextItems = mapOrderVirtualBoxPartsToItems(nextBoxes);
+    const nextItems = buildSelectedOrderItemsPayload(nextBoxes);
     if (nextItems.length === 0) {
-      setSelectedOrderEditingBoxError('O pedido precisa ter ao menos 1 caixa.');
+      setSelectedOrderEditingBoxError('O pedido precisa ter ao menos 1 item.');
       return;
     }
 
@@ -3706,39 +3427,142 @@ function OrdersPageContent() {
     setSelectedOrderEditingBoxError(null);
     setIsDeletingSelectedOrderEditingBox(true);
     try {
-      await apiFetch<OrderView>(`/orders/${orderId}/items`, {
+      const updatedOrder = await apiFetch<OrderView>(`/orders/${orderId}/items`, {
         method: 'PUT',
         body: JSON.stringify({
           items: nextItems
         })
       });
-
-      const refreshedOrders = await loadAll();
-      const freshSelected = refreshedOrders.find((entry) => entry.id === orderId) || null;
-      if (freshSelected) {
-        setSelectedOrder(freshSelected);
-      }
+      syncOrderInWorkspace(updatedOrder);
       setSelectedOrderEditingBoxKey(null);
       setSelectedOrderEditingBoxDraftByProductId({});
       setSelectedOrderEditingBoxError(null);
-      notifySuccess('Caixa excluida.');
+      notifySuccess('Caixa excluída.');
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Nao foi possivel excluir a caixa.';
+      const message = err instanceof Error ? err.message : 'Não foi possível excluir a caixa.';
       setSelectedOrderEditingBoxError(message);
       notifyError(message);
     } finally {
       setIsDeletingSelectedOrderEditingBox(false);
     }
   }, [
+    buildSelectedOrderItemsPayload,
     confirm,
-    loadAll,
     notifyError,
     notifySuccess,
     selectedOrder,
     selectedOrderAllowsBoxEdit,
     selectedOrderEditableBoxes,
-    selectedOrderEditingBox
+    selectedOrderEditingBox,
+    syncOrderInWorkspace
   ]);
+
+  function renderOrderListLine(order: OrderView) {
+    const dateLabel =
+      formatOrderDateTimeLabel(resolveOrderDate(order) ?? safeDateFromIso(order.createdAt ?? null)) || 'Sem data';
+    const publicWindowLabel = formatPublicScheduleWindowLabel(
+      resolveOrderDate(order) ?? safeDateFromIso(order.createdAt ?? null)
+    );
+    const customerName = resolveCustomerName(order);
+    const historyCustomer = resolveOrderCustomerProfile(order);
+    const historyCustomerAddress = formatCustomerFullAddress(historyCustomer) || 'Endereço não informado';
+    const historyCustomerPhone =
+      formatPhoneBR(historyCustomer.phone) || (historyCustomer.phone || '').trim() || 'Telefone não informado';
+    const statusDotClass = calendarStatusDotClass(order.status || '');
+    const isActive = selectedOrder?.id === order.id;
+    const paymentStatus = order.paymentStatus || 'PENDENTE';
+    const balanceDue = toMoney(Math.max(order.balanceDue ?? (order.total ?? 0) - toMoney(order.amountPaid ?? 0), 0));
+    const itemCount = (order.items || []).reduce((sum, item) => sum + Math.max(item.quantity || 0, 0), 0);
+    const historyOrderNote = formatOrderNoteLabel(order.notes);
+
+    return (
+      <div
+        key={`list-${order.id ?? 'na'}`}
+        className={`orders-list-panel__line app-panel app-panel--expandable app-panel--interactive relative ${
+          isActive ? 'app-panel--expanded' : ''
+        }`}
+      >
+        <button
+          type="button"
+          className={`orders-list-panel__line-button ${!isOperationMode ? 'orders-list-panel__line-button--with-remove' : ''}`}
+          onClick={() => openOrderDetail(order)}
+        >
+          <div className="flex flex-wrap items-start justify-between gap-1">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-1">
+                <span
+                  className={`inline-flex items-center rounded-full border px-1.5 py-0 text-[10px] font-semibold leading-4 ${orderStatusBadgeClass(order.status || '')}`}
+                >
+                  <span
+                    className={`mr-1.5 inline-flex h-1.5 w-1.5 rounded-full ${statusDotClass}`}
+                    aria-hidden="true"
+                  />
+                  {formatDisplayedOrderStatus(order.status)}
+                </span>
+                <span
+                  className={`inline-flex items-center rounded-full border px-1.5 py-0 text-[10px] font-semibold leading-4 ${orderPaymentBadgeClass(paymentStatus)}`}
+                >
+                  {formatDisplayedPaymentStatus(paymentStatus)}
+                </span>
+                {isActive ? (
+                  <span className="inline-flex items-center rounded-full border border-[color:var(--tone-roast-line)] bg-[color:var(--tone-roast-surface)] px-1.5 py-0 text-[10px] font-semibold leading-4 text-[color:var(--tone-roast-ink)]">
+                    Em foco
+                  </span>
+                ) : null}
+              </div>
+              <p className="orders-list-panel__line-customer">{customerName}</p>
+              <p className="orders-list-panel__line-meta">
+                Pedido #{displayOrderNumber(order)} • {dateLabel}
+                {publicWindowLabel ? ` • ${publicWindowLabel}` : ' • Fora da faixa publica'}
+              </p>
+              {historyOrderNote ? <p className="orders-list-panel__line-note">{historyOrderNote}</p> : null}
+              <p className="orders-list-panel__line-contact">{historyCustomerAddress}</p>
+              <p className="orders-list-panel__line-contact">{historyCustomerPhone}</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="orders-list-panel__line-total">{formatCurrencyBR(order.total ?? 0)}</span>
+              <span className="app-panel__chevron" aria-hidden="true" />
+            </div>
+          </div>
+
+          <div className="app-panel__expand" aria-hidden={!isActive}>
+            <div className="app-panel__expand-inner">
+              <div className="app-panel__expand-surface grid gap-2 text-sm text-neutral-600">
+                <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/80 bg-white/70 px-3 py-2">
+                  <span>Unidades</span>
+                  <span className="font-semibold text-neutral-900">{formatOrderUnitsLabel(itemCount)}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/80 bg-white/70 px-3 py-2">
+                  <span>Pagamento</span>
+                  <span className="font-semibold text-neutral-900">
+                    {paymentStatus === 'PAGO'
+                      ? 'PIX recebido'
+                      : balanceDue > 0
+                        ? `Saldo ${formatCurrencyBR(balanceDue)}`
+                        : paymentStatus === 'PENDENTE'
+                          ? 'PIX pendente'
+                          : paymentStatus}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </button>
+        {!isOperationMode ? (
+          <button
+            type="button"
+            className="orders-list-panel__line-remove app-button app-button-danger"
+            onClick={(event) => {
+              event.stopPropagation();
+              removeOrder(order.id!);
+            }}
+          >
+            Remover
+          </button>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <>
@@ -3764,22 +3588,22 @@ function OrdersPageContent() {
           helperText={null}
           toolbar={
             <div className="orders-calendar-toolbar">
-              <div className="orders-calendar-toolbar__controls">
-                <div className="app-inline-actions">
-                  {(['DAY', 'WEEK', 'MONTH'] as CalendarViewMode[]).map((view) => (
+	              <div className="orders-calendar-toolbar__controls">
+	                <div className="app-inline-actions">
+	                  {(['DAY', 'WEEK', 'MONTH'] as CalendarViewMode[]).map((view) => (
                     <button
                       key={view}
                       type="button"
                       className={`app-button ${calendarView === view ? 'app-button-primary' : 'app-button-ghost'}`}
                       onClick={() => setCalendarView(view)}
                     >
-                      {calendarViewLabels[view]}
-                    </button>
-                  ))}
-                </div>
-                <div className="orders-calendar-toolbar__cta xl:hidden">
-                  <button
-                    type="button"
+	                      {calendarViewLabels[view]}
+	                    </button>
+	                  ))}
+	                </div>
+	                <div className="orders-calendar-toolbar__cta xl:hidden">
+	                  <button
+	                    type="button"
                     className="app-button app-button-primary w-full sm:w-auto"
                     onClick={openNewOrderModal}
                   >
@@ -3813,7 +3637,35 @@ function OrdersPageContent() {
             {calendarView === 'DAY' ? (
               <div className="orders-day-sheet">
                 <div className="orders-day-sheet__header">
-                  <h4 className="orders-day-sheet__title">{selectedCalendarDateTitle}</h4>
+                  <div className="grid gap-1">
+                    <h4 className="orders-day-sheet__title">{selectedCalendarDateTitle}</h4>
+                    <p className="text-xs text-[color:var(--ink-muted)]">
+                      {selectedScheduleDayBlockedCount > 0
+                        ? `${selectedScheduleDayBlockedCount} faixa(s) indisponível(is) para agendamento.`
+                        : 'Todas as faixas estão liberadas para agendamento.'}
+                      {selectedScheduleDayUpdatedLabel ? ` Atualizado em ${selectedScheduleDayUpdatedLabel}.` : ''}
+                    </p>
+                  </div>
+                  <div className="orders-day-sheet__availability">
+                    {selectedScheduleDayWindows.map((window) => {
+                      const blocked = !window.isOpen;
+                      return (
+                        <label
+                          key={window.key}
+                          className="orders-day-sheet__availability-option"
+                          data-blocked={blocked ? 'true' : 'false'}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={blocked}
+                            disabled={isSavingSelectedScheduleDay}
+                            onChange={() => void handleToggleSelectedScheduleWindow(window.key)}
+                          />
+                          <span>{window.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div
                   className="orders-day-grid"
@@ -3855,72 +3707,60 @@ function OrdersPageContent() {
                         <span className="orders-calendar-now__dot" />
                       </div>
                     ) : null}
-                    {selectedDateTimelineEvents.length === 0 ? (
+                    {selectedDateBlockedWindowEvents.map((item) => (
+                      <div
+                        key={`blocked-${item.key}`}
+                        className="orders-day-grid__blocked"
+                        style={{
+                          top: `${item.top}px`,
+                          height: `${item.height}px`
+                        }}
+                      >
+                        <span className="orders-day-grid__blocked-title">{item.label}</span>
+                        <span className="orders-day-grid__blocked-time">{item.timeLabel}</span>
+                      </div>
+                    ))}
+                    {selectedDateTimelineEvents.length === 0 && selectedDateBlockedWindowEvents.length === 0 ? (
                       <div className="orders-day-grid__empty">sem pedidos no horario</div>
-                    ) : (
-                      selectedDateTimelineEvents.map((item) => {
-                        const status = resolveCalendarEntryStatus(item.entry);
-                        const isSelected = selectedOrder?.id === item.entry.order.id;
-                        const isDraggable = true;
-                        const eventKey = `timeline-${calendarEntryBaseKey(item.entry)}`;
-                        const isCompactTimelineCard = item.laneCount > 1;
-                        const eventLabel = isCompactTimelineCard
-                          ? resolveCalendarEntryCustomerName(item.entry)
-                          : resolveCalendarEntryGridLabel(item.entry);
-                        const eventNote = isCompactTimelineCard ? '' : formatOrderNoteLabel(item.entry.order.notes);
-                        const activeDrag = dayGridDragState?.eventKey === eventKey ? dayGridDragState : null;
-                        const previewReadyMinutes = activeDrag ? activeDrag.previewMinutes : null;
-                        const displayRange = resolveCalendarEntryTimeRange(item.entry, previewReadyMinutes);
-                        const displayTop = activeDrag
-                          ? Math.round(
-                              ((clampNumber(
-                                minutesIntoDay(displayRange.startAt),
-                                dayGridStartMinutes,
-                                dayGridEndMinutes - dayGridSnapMinutes
-                              ) -
-                                dayGridStartMinutes) /
-                                dayGridDurationMinutes) *
-                                dayGridHeight
-                            )
-                          : item.top;
+	                    ) : (
+	                      selectedDateTimelineEvents.map((item) => {
+	                        const status = resolveCalendarEntryStatus(item.entry);
+	                        const isSelected = selectedOrder?.id === item.entry.order.id;
+	                        const isCompactTimelineCard = item.laneCount > 1;
+	                        const eventLabel = isCompactTimelineCard
+	                          ? resolveCalendarEntryCustomerName(item.entry)
+	                          : resolveCalendarEntryGridLabel(item.entry);
+	                        const eventNote = isCompactTimelineCard ? '' : formatOrderNoteLabel(item.entry.order.notes);
 
-                        return (
-                          <button
-                            type="button"
-                            key={eventKey}
-                            className={`orders-day-grid__event ${
-                              isSelected ? `ring-2 ring-offset-1 ${calendarStatusRingClass(status)}` : ''
-                            } ${activeDrag ? 'orders-day-grid__event--dragging' : ''}`}
-                            data-label-mode={isCompactTimelineCard ? 'compact' : 'default'}
-                            onClick={() => handleDayGridEventClick(item.entry, eventKey)}
-                            onPointerDown={
-                              isDraggable
-                                ? (event) => handleDayGridEventPointerDown(event, item)
-                                : undefined
-                            }
-                            onPointerMove={isDraggable ? handleDayGridEventPointerMove : undefined}
-                            onPointerUp={isDraggable ? handleDayGridEventPointerUp : undefined}
-                            onPointerCancel={isDraggable ? handleDayGridEventPointerCancel : undefined}
-                            style={
-                              {
-                                top: `${displayTop}px`,
-                                height: `${activeDrag ? activeDrag.height : item.height}px`,
-                                '--orders-day-grid-lane': `${activeDrag ? activeDrag.lane : item.lane}`,
-                                '--orders-day-grid-group-lanes': `${item.laneCount}`,
-                                ...calendarStatusEventSurfaceStyle(status)
-                              } as CSSProperties
+	                        return (
+	                          <button
+	                            type="button"
+	                            key={`timeline-${calendarEntryBaseKey(item.entry)}`}
+	                            className={`orders-day-grid__event ${
+	                              isSelected ? `ring-2 ring-offset-1 ${calendarStatusRingClass(status)}` : ''
+	                            }`}
+	                            data-label-mode={isCompactTimelineCard ? 'compact' : 'default'}
+	                            onClick={() => handleDayGridEventClick(item.entry)}
+	                            style={
+	                              {
+	                                top: `${item.top}px`,
+	                                height: `${item.height}px`,
+	                                '--orders-day-grid-lane': `${item.lane}`,
+	                                '--orders-day-grid-group-lanes': `${item.laneCount}`,
+	                                ...calendarStatusEventSurfaceStyle(status)
+	                              } as CSSProperties
                             }
                           >
                             <span className="orders-day-grid__event-head">
-                              <span
-                                className={`orders-calendar-chip__dot ${calendarStatusDotClass(status)}`}
-                                aria-hidden="true"
-                              />
-                              <span className="orders-day-grid__event-time">
-                                {formatCalendarEntryTimeRangeLabel(item.entry, previewReadyMinutes)}
-                              </span>
-                              <span className="orders-day-grid__event-title">{eventLabel}</span>
-                            </span>
+	                              <span
+	                                className={`orders-calendar-chip__dot ${calendarStatusDotClass(status)}`}
+	                                aria-hidden="true"
+	                              />
+	                              <span className="orders-day-grid__event-time">
+	                                {formatCalendarEntryTimeRangeLabel(item.entry)}
+	                              </span>
+	                              <span className="orders-day-grid__event-title">{eventLabel}</span>
+	                            </span>
                             {eventNote ? (
                               <span className="orders-day-grid__event-note">{eventNote}</span>
                             ) : null}
@@ -3931,45 +3771,11 @@ function OrdersPageContent() {
                   </div>
                 </div>
               </div>
-            ) : calendarView === 'WEEK' ? (
-              <div className="orders-week-grid">
-                {weekTimelineCells.map((cell) => {
-                  const activeWeekDrag = weekGridDragState;
-                  let displayTimelineEvents = cell.timelineEvents;
-                  let displayTimelineLaneCount = cell.timelineLaneCount;
-
-                  if (activeWeekDrag && activeWeekDrag.previewDateKey === cell.key) {
-                    const filteredEntries = cell.entries.filter(
-                      (entry) => !isMatchingOrderEntry(entry, activeWeekDrag.orderId)
-                    );
-                    const previewDate = weekDateByKey.get(activeWeekDrag.previewDateKey);
-                    if (previewDate) {
-                      const previewReadyAt = dateWithMinutes(previewDate, activeWeekDrag.previewMinutes);
-                      filteredEntries.push({
-                        ...activeWeekDrag.entry,
-                        createdAt: previewReadyAt,
-                        productionStartAt: new Date(
-                          previewReadyAt.getTime() - activeWeekDrag.entry.durationMinutes * 60_000
-                        ),
-                        dateKey: activeWeekDrag.previewDateKey
-                      });
-                    }
-                    const previewMetrics = buildWeekTimelineMetrics(filteredEntries, {
-                      weekGridHeight,
-                      dayGridDurationMinutes,
-                      dayGridEndMinutes,
-                      dayGridSnapMinutes,
-                      dayGridStartMinutes,
-                      weekGridMinEventHeight,
-                      forcedOrderId:
-                        activeWeekDrag.previewDateKey === cell.key ? activeWeekDrag.orderId : undefined
-                    });
-                    displayTimelineEvents = previewMetrics.timelineEvents;
-                    displayTimelineLaneCount = previewMetrics.timelineLaneCount;
-                  }
-
-                  return (
-                    <div
+	            ) : calendarView === 'WEEK' ? (
+	              <div className="orders-week-grid">
+	                {weekTimelineCells.map((cell) => {
+	                  return (
+	                    <div
                       key={cell.key}
                       data-week-grid-date-key={cell.key}
                       className={`orders-week-grid__day ${
@@ -3995,16 +3801,15 @@ function OrdersPageContent() {
                         <span className="orders-week-grid__count">{cell.entries.length}</span>
                       </button>
 
-                      <div
-                        ref={(element) => registerWeekGridCanvas(cell.key, element)}
-                        className="orders-week-grid__canvas"
-                        style={
-                          {
-                            '--orders-week-grid-height': `${weekGridHeight}px`,
-                            '--orders-day-grid-lanes': `${displayTimelineLaneCount}`
-                          } as CSSProperties
-                        }
-                      >
+	                      <div
+	                        className="orders-week-grid__canvas"
+	                        style={
+	                          {
+	                            '--orders-week-grid-height': `${weekGridHeight}px`,
+	                            '--orders-day-grid-lanes': `${cell.timelineLaneCount}`
+	                          } as CSSProperties
+	                        }
+	                      >
                         {weekGridLineOffsets.map((top, index) => (
                           <div
                             key={`week-line-${cell.key}-${index}`}
@@ -4022,38 +3827,31 @@ function OrdersPageContent() {
                             <span className="orders-calendar-now__dot" />
                           </div>
                         ) : null}
-                        {displayTimelineEvents.length === 0 ? (
-                          <div className="orders-week-grid__empty">sem pedidos</div>
-                        ) : (
-                          displayTimelineEvents.map((item) => {
-                            const status = resolveCalendarEntryStatus(item.entry);
-                            const eventLabel = resolveCalendarEntryCompactName(item.entry);
-                            const isCompactTimelineCard = item.laneCount > 1;
-                            const eventNote = isCompactTimelineCard ? '' : formatOrderNoteLabel(item.entry.order.notes);
-                            const isSelected = selectedOrder?.id === item.entry.order.id;
-                            const isDraggable = true;
-                            const eventKey = item.entry.order.id
-                              ? `week-order-${item.entry.order.id}`
-                              : `week-${calendarEntryBaseKey(item.entry)}`;
-                            const isDragging = weekGridDragState?.eventKey === eventKey;
-                            const isSourceGhost =
-                              isDragging &&
-                              weekGridDragState?.sourceDateKey === cell.key &&
-                              weekGridDragState.previewDateKey !== cell.key;
+	                        {cell.timelineEvents.length === 0 ? (
+	                          <div className="orders-week-grid__empty">sem pedidos</div>
+	                        ) : (
+	                          cell.timelineEvents.map((item) => {
+	                            const status = resolveCalendarEntryStatus(item.entry);
+	                            const eventLabel = resolveCalendarEntryCompactName(item.entry);
+	                            const isCompactTimelineCard = item.laneCount > 1;
+	                            const eventNote = isCompactTimelineCard ? '' : formatOrderNoteLabel(item.entry.order.notes);
+	                            const isSelected = selectedOrder?.id === item.entry.order.id;
 
-                            return (
-                              <button
-                                key={`week-event-${cell.key}-${eventKey}`}
-                                type="button"
-                                className={`orders-week-grid__event ${
-                                  isSelected
-                                    ? `ring-2 ring-offset-1 ${calendarStatusRingClass(status)}`
-                                    : ''
-                                } ${isDragging ? 'orders-week-grid__event--dragging' : ''} ${
-                                  isSourceGhost ? 'orders-week-grid__event--ghost' : ''
-                                }`}
-                                data-label-mode={isCompactTimelineCard ? 'compact' : 'default'}
-                                style={
+	                            return (
+	                              <button
+	                                key={`week-event-${cell.key}-${
+	                                  item.entry.order.id
+	                                    ? `week-order-${item.entry.order.id}`
+	                                    : `week-${calendarEntryBaseKey(item.entry)}`
+	                                }`}
+	                                type="button"
+	                                className={`orders-week-grid__event ${
+	                                  isSelected
+	                                    ? `ring-2 ring-offset-1 ${calendarStatusRingClass(status)}`
+	                                    : ''
+	                                }`}
+	                                data-label-mode={isCompactTimelineCard ? 'compact' : 'default'}
+	                                style={
                                   {
                                     top: `${item.top}px`,
                                     height: `${item.height}px`,
@@ -4061,19 +3859,11 @@ function OrdersPageContent() {
                                     ...calendarStatusEventSurfaceStyle(status)
                                   } as CSSProperties
                                 }
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  handleWeekGridEventClick(item.entry, eventKey);
-                                }}
-                                onPointerDown={
-                                  isDraggable
-                                    ? (event) => handleWeekGridEventPointerDown(event, cell, item)
-                                    : undefined
-                                }
-                                onPointerMove={isDraggable ? handleWeekGridEventPointerMove : undefined}
-                                onPointerUp={isDraggable ? handleWeekGridEventPointerUp : undefined}
-                                onPointerCancel={isDraggable ? handleWeekGridEventPointerCancel : undefined}
-                              >
+	                                onClick={(event) => {
+	                                  event.stopPropagation();
+	                                  handleWeekGridEventClick(item.entry);
+	                                }}
+	                              >
                                 <span
                                   className={`orders-calendar-chip__dot ${calendarStatusDotClass(status)}`}
                                   aria-hidden="true"
@@ -4173,198 +3963,49 @@ function OrdersPageContent() {
               <div className="orders-list-panel__header">
                 <div>
                   <p className="orders-list-panel__title">PEDIDOS</p>
-                  <p className="orders-list-panel__subtitle">Total {sortedVisibleOrderList.length}</p>
+                  <p className="orders-list-panel__subtitle">
+                    {openVisibleOrderList.length} abertos • {deliveredVisibleOrderList.length} entregues
+                  </p>
                 </div>
               </div>
-              {selectedDateProductionSummary.length > 0 ? (
-                <div className="mb-3 rounded-[22px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(155deg,rgba(255,252,247,0.96),rgba(245,236,226,0.9))] p-3 shadow-[0_12px_28px_rgba(70,44,26,0.06)]">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
-                        Resumo do dia
-                      </p>
-                      <p className="text-xs text-[color:var(--ink-muted)]">{selectedCalendarDateTitle}</p>
-                    </div>
-                    <span className="rounded-full border border-white/80 bg-white/82 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-strong)]">
-                      {selectedDateProductionSummary.length} cliente(s)
-                    </span>
-                  </div>
-                  <div className="mt-3 grid gap-2">
-                    {selectedDateProductionSummary.map((entry) => {
-                      const toneClass =
-                        entry.readyState === 'READY'
-                          ? 'border-[color:var(--tone-sage-line)] bg-[color:var(--tone-sage-surface)]'
-                          : entry.readyState === 'PARTIAL'
-                            ? 'border-[color:var(--tone-olive-line)] bg-[color:var(--tone-olive-surface)]'
-                            : 'border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)]';
-                      const badgeClass =
-                        entry.readyState === 'READY'
-                          ? 'border-[color:var(--tone-sage-line)] bg-white/90 text-[color:var(--tone-sage-ink)]'
-                          : entry.readyState === 'PARTIAL'
-                            ? 'border-[color:var(--tone-olive-line)] bg-white/90 text-[color:var(--tone-olive-ink)]'
-                            : 'border-[color:var(--tone-gold-line)] bg-white/90 text-[color:var(--tone-gold-ink)]';
-                      const statusLabel =
-                        entry.readyState === 'READY'
-                          ? 'Pronto'
-                          : entry.readyState === 'PARTIAL'
-                            ? `${entry.readyOrders}/${entry.totalOrders} prontos`
-                            : 'A fazer';
-                      return (
-                        <div
-                          key={entry.customerKey}
-                          className={`rounded-[18px] border px-3 py-2 shadow-[0_8px_20px_rgba(57,39,24,0.04)] ${toneClass}`}
-                        >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="text-sm font-semibold text-[color:var(--ink-strong)]">{entry.customerLabel}</p>
-                          <span
-                            className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] ${badgeClass}`}
-                          >
-                            {statusLabel}
-                          </span>
-                        </div>
-                        {entry.flavorLines.length > 0 ? (
-                          <div className="mt-1 grid gap-0.5 text-xs leading-5 text-[color:var(--ink-muted)]">
-                            {entry.flavorLines.map((line) => (
-                              <p key={`${entry.customerKey}-${line}`}>{line}</p>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="text-xs leading-5 text-[color:var(--ink-muted)]">Sem sabores mapeados</p>
-                        )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
               <div className="orders-list-panel__stack">
-                {sortedVisibleOrderList.length === 0 ? (
-                  <p className="orders-list-panel__empty">
-                    Sem pedidos.
-                  </p>
+                {openVisibleOrderList.length === 0 ? (
+                  <p className="orders-list-panel__empty">Sem pedidos em aberto.</p>
                 ) : (
-                  sortedVisibleOrderList.map((order) => {
-                    const dateLabel =
-                      formatOrderDateTimeLabel(
-                        resolveOrderDate(order) ?? safeDateFromIso(order.createdAt ?? null)
-                      ) || 'Sem data';
-                    const publicWindowLabel = formatPublicScheduleWindowLabel(
-                      resolveOrderDate(order) ?? safeDateFromIso(order.createdAt ?? null)
-                    );
-                    const customerName = resolveCustomerName(order);
-                    const historyCustomer = resolveOrderCustomerProfile(order);
-                    const historyCustomerAddress =
-                      formatCustomerFullAddress(historyCustomer) || 'Endereco nao informado';
-                    const historyCustomerPhone =
-                      formatPhoneBR(historyCustomer.phone) ||
-                      (historyCustomer.phone || '').trim() ||
-                      'Telefone nao informado';
-                    const statusDotClass = calendarStatusDotClass(order.status || '');
-                    const isActive = selectedOrder?.id === order.id;
-                    const paymentStatus = order.paymentStatus || 'PENDENTE';
-                    const amountPaid = toMoney(order.amountPaid ?? 0);
-                    const balanceDue = toMoney(
-                      Math.max(order.balanceDue ?? (order.total ?? 0) - amountPaid, 0)
-                    );
-                    const itemCount = (order.items || []).reduce(
-                      (sum, item) => sum + Math.max(item.quantity || 0, 0),
-                      0
-                    );
-                    const historyOrderNote = formatOrderNoteLabel(order.notes);
-
-                    return (
-                      <div
-                        key={`list-${order.id ?? 'na'}`}
-                        className={`orders-list-panel__line app-panel app-panel--expandable app-panel--interactive relative ${
-                          isActive ? 'app-panel--expanded' : ''
-                        }`}
-                      >
-                        <button
-                          type="button"
-                          className={`orders-list-panel__line-button ${!isOperationMode ? 'orders-list-panel__line-button--with-remove' : ''}`}
-                          onClick={() => openOrderDetail(order)}
-                        >
-                          <div className="flex flex-wrap items-start justify-between gap-1">
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-center gap-1">
-                                <span
-                                  className={`inline-flex items-center rounded-full border px-1.5 py-0 text-[10px] font-semibold leading-4 ${orderStatusBadgeClass(order.status || '')}`}
-                                >
-                                  <span
-                                    className={`mr-1.5 inline-flex h-1.5 w-1.5 rounded-full ${statusDotClass}`}
-                                    aria-hidden="true"
-                                  />
-                                  {formatDisplayedOrderStatus(order.status)}
-                                </span>
-                                <span
-                                  className={`inline-flex items-center rounded-full border px-1.5 py-0 text-[10px] font-semibold leading-4 ${orderPaymentBadgeClass(paymentStatus)}`}
-                                >
-                                  {formatDisplayedPaymentStatus(paymentStatus)}
-                                </span>
-                                {isActive ? (
-                                  <span className="inline-flex items-center rounded-full border border-[color:var(--tone-roast-line)] bg-[color:var(--tone-roast-surface)] px-1.5 py-0 text-[10px] font-semibold leading-4 text-[color:var(--tone-roast-ink)]">
-                                    Em foco
-                                  </span>
-                                ) : null}
-                              </div>
-                              <p className="orders-list-panel__line-customer">{customerName}</p>
-                              <p className="orders-list-panel__line-meta">
-                                Pedido #{displayOrderNumber(order)} • {dateLabel}
-                                {publicWindowLabel ? ` • ${publicWindowLabel}` : ' • Fora da faixa publica'}
-                              </p>
-                              {historyOrderNote ? (
-                                <p className="orders-list-panel__line-note">{historyOrderNote}</p>
-                              ) : null}
-                              <p className="orders-list-panel__line-contact">{historyCustomerAddress}</p>
-                              <p className="orders-list-panel__line-contact">{historyCustomerPhone}</p>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="orders-list-panel__line-total">
-                                {formatCurrencyBR(order.total ?? 0)}
-                              </span>
-                              <span className="app-panel__chevron" aria-hidden="true" />
-                            </div>
-                          </div>
-
-                          <div className="app-panel__expand" aria-hidden={!isActive}>
-                            <div className="app-panel__expand-inner">
-                              <div className="app-panel__expand-surface grid gap-2 text-sm text-neutral-600">
-                                <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/80 bg-white/70 px-3 py-2">
-                                  <span>Unidades</span>
-                                  <span className="font-semibold text-neutral-900">{formatOrderUnitsLabel(itemCount)}</span>
-                                </div>
-                                <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/80 bg-white/70 px-3 py-2">
-                                  <span>Pagamento</span>
-                                  <span className="font-semibold text-neutral-900">
-                                    {paymentStatus === 'PAGO'
-                                      ? 'PIX recebido'
-                                      : balanceDue > 0
-                                        ? `Saldo ${formatCurrencyBR(balanceDue)}`
-                                        : paymentStatus === 'PENDENTE'
-                                          ? 'PIX pendente'
-                                          : paymentStatus}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </button>
-                        {!isOperationMode ? (
-                          <button
-                            type="button"
-                            className="orders-list-panel__line-remove app-button app-button-danger"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              removeOrder(order.id!);
-                            }}
-                          >
-                            Remover
-                          </button>
-                        ) : null}
-                      </div>
-                    );
-                  })
+                  openVisibleOrderList.map((order) => renderOrderListLine(order))
                 )}
+                {deliveredVisibleOrderList.length > 0 ? (
+                  <div className="grid gap-2 pt-2">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between rounded-[18px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(155deg,rgba(255,252,247,0.96),rgba(245,236,226,0.9))] px-4 py-3 text-left shadow-[0_8px_20px_rgba(57,39,24,0.04)]"
+                      onClick={() => setIsDeliveredListExpanded((current) => !current)}
+                      aria-expanded={isDeliveredListExpanded}
+                    >
+                      <span>
+                        <span className="block text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
+                          Entregues
+                        </span>
+                        <span className="block text-sm text-[color:var(--ink-strong)]">
+                          {deliveredVisibleOrderList.length} pedido(s)
+                        </span>
+                      </span>
+                      <span
+                        className={`text-sm font-semibold text-[color:var(--ink-muted)] transition-transform ${
+                          isDeliveredListExpanded ? 'rotate-180' : ''
+                        }`}
+                        aria-hidden="true"
+                      >
+                        ˅
+                      </span>
+                    </button>
+                    {isDeliveredListExpanded ? (
+                      <div className="grid gap-2">
+                        {deliveredVisibleOrderList.map((order) => renderOrderListLine(order))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             </div>
           </>
@@ -4408,7 +4049,6 @@ function OrdersPageContent() {
                 selectedCustomerId={newOrderCustomerId}
                 selectedCustomerAddressKey={newOrderSelectedAddressKey}
                 selectedCustomerAddressLabel={newOrderCustomerAddress}
-                restoredFromLastOrder={restoredLastOrderDraft}
                 newOrderScheduledAt={newOrderScheduledAt}
                 newOrderDiscountPct={newOrderDiscountPct}
                 newOrderNotes={newOrderNotes}
@@ -4446,6 +4086,7 @@ function OrdersPageContent() {
                 onClearDraft={clearDraft}
                 onDecrementProduct={decrementDraftItem}
                 onAddProductUnits={addDraftItemUnits}
+                onSetProductQuantity={setDraftItemQuantity}
               />
             </div>
           </div>
@@ -4493,9 +4134,13 @@ function OrdersPageContent() {
                         ? selectedOrderPaymentStatus === 'PAGO'
                         : selectedOrderWorkflowIndex > statusIndex;
                     const paymentToggleActionLabel =
-                      selectedOrderPaymentStatus === 'PAGO' ? 'Marcar pedido como nao pago' : 'Marcar pedido como pago';
+                      selectedOrderPaymentStatus === 'PAGO'
+                        ? 'Marcar pedido como pendente'
+                        : 'Marcar pedido como pago';
                     const isDisabled =
-                      isStatusUpdatePending || selectedOrderIsCancelled || (!isPaymentStage && isCurrent);
+                      isStatusUpdatePending ||
+                      selectedOrderIsCancelled ||
+                      (!isPaymentStage && isCurrent);
 
                     return (
                       <li key={status} className="order-workflow-strip__item">
@@ -4537,7 +4182,7 @@ function OrdersPageContent() {
                           >
                             <OrderWorkflowIllustration
                               name={stageMeta.illustration}
-                              className="h-7 w-7"
+                              className="h-8 w-8"
                             />
                           </span>
                           <span
@@ -4566,7 +4211,7 @@ function OrdersPageContent() {
               </div>
             </div>
             {selectedOrderIsCancelled ? (
-              <p className="mt-2 text-xs text-[color:var(--tone-roast-ink)]">
+              <p className="mt-2 text-xs text-[color:var(--tone-danger-ink)]">
                 Pedido cancelado. Etapas bloqueadas.
               </p>
             ) : null}
@@ -4605,7 +4250,7 @@ function OrdersPageContent() {
               </div>
               {selectedCustomer?.deletedAt ? (
                 <p className="mt-1 text-xs text-[color:var(--tone-gold-ink)]">
-                  Cliente excluido em {selectedCustomerDeletedAtLabel}. Pedido mantido.
+                  Cliente excluído em {selectedCustomerDeletedAtLabel}. Pedido mantido.
                 </p>
               ) : null}
             </div>
@@ -4692,6 +4337,17 @@ function OrdersPageContent() {
                   onChange={(event) => setSelectedOrderEditDiscountPct(event.target.value)}
                   onBlur={() => setSelectedOrderEditDiscountPct(normalizeDiscountPctInput(selectedOrderEditDiscountPct))}
                 />
+                {selectedOrderAppliedCoupon ? (
+                  <p className="text-[11px] font-medium normal-case tracking-normal text-[color:var(--ink-muted)]">
+                    Cupom usado: <strong className="text-[color:var(--ink-strong)]">{selectedOrderAppliedCoupon.code}</strong>
+                    {typeof selectedOrderAppliedCoupon.discountPct === 'number'
+                      ? ` (${selectedOrderAppliedCoupon.discountPct.toLocaleString('pt-BR', {
+                          minimumFractionDigits: 0,
+                          maximumFractionDigits: 2
+                        })}%)`
+                      : ''}
+                  </p>
+                ) : null}
               </label>
               <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
                 Obs.
@@ -4736,132 +4392,157 @@ function OrdersPageContent() {
                   placeholder="Telefone"
                 />
               </label>
-              {selectedCustomerAddressOptions.length > 0 ? (
-                <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
-                  Endereços salvos
-                  <select
-                    className="app-input text-sm normal-case tracking-normal text-[color:var(--ink-strong)]"
-                    value={selectedOrderSavedAddressKey}
-                    onChange={(event) => applySelectedOrderSavedAddress(event.target.value)}
-                  >
-                    {selectedCustomerAddressOptions.map((option) => (
-                      <option key={option.key} value={option.key}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : (
-                <div className="hidden xl:block" aria-hidden="true" />
-              )}
-              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)] lg:col-span-2 xl:col-span-3">
-                Endereço
-                <input
-                  className="app-input"
-                  type="text"
-                  value={selectedOrderEditCustomerDraft.address}
-                  onChange={(event) =>
-                    updateSelectedOrderCustomerDraft(
-                      { address: event.target.value },
-                      { clearGeocode: true }
-                    )
-                  }
-                  onBlur={handleSelectedOrderAddressBlur}
-                  placeholder="Rua, número, bairro, cidade"
-                />
-              </label>
-              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
-                Complemento
-                <input
-                  className="app-input"
-                  type="text"
-                  value={selectedOrderEditCustomerDraft.addressLine2}
-                  onChange={(event) => updateSelectedOrderCustomerDraft({ addressLine2: event.target.value })}
-                  placeholder="Apto, bloco, referência"
-                />
-              </label>
-              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
-                Bairro
-                <input
-                  className="app-input"
-                  type="text"
-                  value={selectedOrderEditCustomerDraft.neighborhood}
-                  onChange={(event) =>
-                    updateSelectedOrderCustomerDraft(
-                      { neighborhood: event.target.value },
-                      { clearGeocode: true }
-                    )
-                  }
-                  placeholder="Bairro"
-                />
-              </label>
-              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
-                Cidade
-                <input
-                  className="app-input"
-                  type="text"
-                  value={selectedOrderEditCustomerDraft.city}
-                  onChange={(event) =>
-                    updateSelectedOrderCustomerDraft({ city: event.target.value }, { clearGeocode: true })
-                  }
-                  placeholder="Cidade"
-                />
-              </label>
-              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
-                UF
-                <input
-                  className="app-input"
-                  type="text"
-                  maxLength={2}
-                  value={selectedOrderEditCustomerDraft.state}
-                  onChange={(event) =>
-                    updateSelectedOrderCustomerDraft(
-                      { state: event.target.value.toUpperCase() },
-                      { clearGeocode: true }
-                    )
-                  }
-                  placeholder="UF"
-                />
-              </label>
-              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
-                CEP
-                <input
-                  className="app-input"
-                  type="text"
-                  inputMode="numeric"
-                  value={selectedOrderEditCustomerDraft.postalCode}
-                  onChange={(event) =>
-                    updateSelectedOrderCustomerDraft(
-                      { postalCode: event.target.value },
-                      { clearGeocode: true }
-                    )
-                  }
-                  onBlur={handleSelectedOrderPostalCodeBlur}
-                  placeholder="00000-000"
-                />
-              </label>
-              <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)] lg:col-span-2 xl:col-span-3">
-                Obs. entrega
-                <input
-                  className="app-input"
-                  type="text"
-                  value={selectedOrderEditCustomerDraft.deliveryNotes}
-                  onChange={(event) => updateSelectedOrderCustomerDraft({ deliveryNotes: event.target.value })}
-                  placeholder="Portão, referência, instruções"
-                />
-              </label>
-              {selectedCustomer?.id && !selectedCustomer?.deletedAt ? (
-                <div className="flex items-center justify-start lg:col-span-2 xl:col-span-3">
+              <div className="grid gap-3 lg:col-span-2 xl:col-span-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
+                    Endereço
+                  </p>
                   <button
                     type="button"
                     className="app-button app-button-ghost w-full text-xs sm:w-auto"
-                    onClick={saveSelectedOrderCustomerAddress}
-                    disabled={isSavingSelectedOrderCustomerAddress}
+                    onClick={() => setIsSelectedOrderAddressEditing((current) => !current)}
                   >
-                    {isSavingSelectedOrderCustomerAddress ? 'Salvando endereço...' : 'Salvar endereço no cliente'}
+                    {isSelectedOrderAddressEditing ? 'Fechar edição' : 'Editar endereço'}
                   </button>
                 </div>
-              ) : null}
+                {!isSelectedOrderAddressEditing ? (
+                  <div className="rounded-2xl border border-white/70 bg-[color:var(--bg-soft)] px-3 py-3 text-sm text-[color:var(--ink-strong)]">
+                    <p>{formatCustomerFullAddress(selectedOrderEditCustomerDraft)}</p>
+                    <p className="mt-1 text-xs text-[color:var(--ink-muted)]">
+                      {selectedOrderEditCustomerDraft.deliveryNotes || 'Sem observações de entrega'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid gap-3 rounded-2xl border border-white/70 bg-[color:var(--bg-soft)] p-3 lg:grid-cols-2 xl:grid-cols-3">
+                    {selectedCustomerAddressOptions.length > 0 ? (
+                      <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
+                        Endereços salvos
+                        <select
+                          className="app-input text-sm normal-case tracking-normal text-[color:var(--ink-strong)]"
+                          value={selectedOrderSavedAddressKey}
+                          onChange={(event) => applySelectedOrderSavedAddress(event.target.value)}
+                        >
+                          {selectedCustomerAddressOptions.map((option) => (
+                            <option key={option.key} value={option.key}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : (
+                      <div className="hidden xl:block" aria-hidden="true" />
+                    )}
+                    <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)] lg:col-span-2 xl:col-span-3">
+                      Endereço
+                      <input
+                        className="app-input"
+                        type="text"
+                        value={selectedOrderEditCustomerDraft.address}
+                        onChange={(event) =>
+                          updateSelectedOrderCustomerDraft(
+                            { address: event.target.value },
+                            { clearGeocode: true }
+                          )
+                        }
+                        onBlur={handleSelectedOrderAddressBlur}
+                        placeholder="Rua, número, bairro, cidade"
+                      />
+                    </label>
+                    <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
+                      Complemento
+                      <input
+                        className="app-input"
+                        type="text"
+                        value={selectedOrderEditCustomerDraft.addressLine2}
+                        onChange={(event) => updateSelectedOrderCustomerDraft({ addressLine2: event.target.value })}
+                        placeholder="Apto, bloco, referência"
+                      />
+                    </label>
+                    <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
+                      Bairro
+                      <input
+                        className="app-input"
+                        type="text"
+                        value={selectedOrderEditCustomerDraft.neighborhood}
+                        onChange={(event) =>
+                          updateSelectedOrderCustomerDraft(
+                            { neighborhood: event.target.value },
+                            { clearGeocode: true }
+                          )
+                        }
+                        placeholder="Bairro"
+                      />
+                    </label>
+                    <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
+                      Cidade
+                      <input
+                        className="app-input"
+                        type="text"
+                        value={selectedOrderEditCustomerDraft.city}
+                        onChange={(event) =>
+                          updateSelectedOrderCustomerDraft({ city: event.target.value }, { clearGeocode: true })
+                        }
+                        placeholder="Cidade"
+                      />
+                    </label>
+                    <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
+                      UF
+                      <input
+                        className="app-input"
+                        type="text"
+                        maxLength={2}
+                        value={selectedOrderEditCustomerDraft.state}
+                        onChange={(event) =>
+                          updateSelectedOrderCustomerDraft(
+                            { state: event.target.value.toUpperCase() },
+                            { clearGeocode: true }
+                          )
+                        }
+                        placeholder="UF"
+                      />
+                    </label>
+                    <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)]">
+                      CEP
+                      <input
+                        className="app-input"
+                        type="text"
+                        inputMode="numeric"
+                        value={selectedOrderEditCustomerDraft.postalCode}
+                        onChange={(event) =>
+                          updateSelectedOrderCustomerDraft(
+                            { postalCode: event.target.value },
+                            { clearGeocode: true }
+                          )
+                        }
+                        onBlur={handleSelectedOrderPostalCodeBlur}
+                        placeholder="00000-000"
+                      />
+                    </label>
+                    <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-[color:var(--ink-muted)] lg:col-span-2 xl:col-span-3">
+                      Obs. entrega
+                      <input
+                        className="app-input"
+                        type="text"
+                        value={selectedOrderEditCustomerDraft.deliveryNotes}
+                        onChange={(event) => updateSelectedOrderCustomerDraft({ deliveryNotes: event.target.value })}
+                        placeholder="Portão, referência, instruções"
+                      />
+                    </label>
+                    {selectedCustomer?.id && !selectedCustomer?.deletedAt ? (
+                      <div className="flex items-center justify-start lg:col-span-2 xl:col-span-3">
+                        <button
+                          type="button"
+                          className="app-button app-button-ghost w-full text-xs sm:w-auto"
+                          onClick={saveSelectedOrderCustomerAddress}
+                          disabled={isSavingSelectedOrderCustomerAddress}
+                        >
+                          {isSavingSelectedOrderCustomerAddress ? 'Salvando endereço...' : 'Salvar endereço no cliente'}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
               <h4 className="font-semibold">Caixas</h4>
@@ -5114,6 +4795,95 @@ function OrdersPageContent() {
             ) : (
               <p className="mt-3 text-xs text-neutral-500">Sem caixas.</p>
             )}
+            <div className="mt-3 grid gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                <h4 className="font-semibold">Amigas da Broa</h4>
+                <button
+                  type="button"
+                  className="app-button app-button-primary w-full text-xs disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                  onClick={() => {
+                    void saveSelectedOrderCompanionEdit();
+                  }}
+                  disabled={
+                    !selectedOrderAllowsBoxEdit ||
+                    !selectedOrderCompanionDraftDirty ||
+                    Boolean(selectedOrderEditingBoxKey) ||
+                    isSavingSelectedOrderCompanions
+                  }
+                >
+                  {isSavingSelectedOrderCompanions ? 'Salvando...' : 'Salvar Amigas'}
+                </button>
+              </div>
+              {selectedOrderEditableCompanionRows.length > 0 ? (
+                <div className="grid gap-1.5 rounded-2xl border border-white/70 bg-white/80 p-3">
+                  {selectedOrderEditableCompanionRows.map((row) => {
+                    const quantity = Math.max(
+                      Math.floor(selectedOrderCompanionDraftByProductId[row.productId] || 0),
+                      0
+                    );
+                    const controlsDisabled =
+                      !selectedOrderAllowsBoxEdit ||
+                      Boolean(selectedOrderEditingBoxKey) ||
+                      isSavingSelectedOrderCompanions;
+                    return (
+                      <div
+                        key={`selected-order-companion-row-${row.productId}`}
+                        className="flex flex-col gap-2 rounded-lg border border-white/70 bg-white/85 px-3 py-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between"
+                      >
+                        <div className="min-w-0">
+                          <p className="break-words text-sm font-semibold text-[color:var(--ink-strong)]">
+                            {row.productName}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[color:var(--ink-muted)]">
+                            {row.productMeta ? <span>{row.productMeta}</span> : null}
+                            <span>{formatCurrencyBR(row.price)}</span>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1 sm:justify-end">
+                          <button
+                            type="button"
+                            className="app-button app-button-ghost px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                            onClick={() => decrementSelectedOrderCompanionQuantity(row.productId)}
+                            disabled={quantity <= 0 || controlsDisabled}
+                            aria-label={`Diminuir ${row.productName}`}
+                          >
+                            -
+                          </button>
+                          <span className="min-w-6 text-center text-xs font-semibold text-[color:var(--ink-strong)]">
+                            {quantity}
+                          </span>
+                          <button
+                            type="button"
+                            className="app-button app-button-primary px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                            onClick={() => addSelectedOrderCompanionQuantity(row.productId, 1)}
+                            disabled={controlsDisabled}
+                            aria-label={`Aumentar ${row.productName}`}
+                          >
+                            +1
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {selectedOrderCompanionEditError ? (
+                    <p className="text-xs font-medium text-[color:var(--tone-roast-ink)]">
+                      {selectedOrderCompanionEditError}
+                    </p>
+                  ) : null}
+                  {!selectedOrderAllowsBoxEdit ? (
+                    <p className="text-xs text-[color:var(--tone-gold-ink)]">
+                      Esse status bloqueia a edicao das Amigas da Broa.
+                    </p>
+                  ) : selectedOrderEditingBoxKey ? (
+                    <p className="text-xs text-[color:var(--ink-muted)]">
+                      Salve ou cancele a caixa aberta antes de mexer nas Amigas da Broa.
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="text-xs text-neutral-500">Sem itens Amigas da Broa disponíveis.</p>
+              )}
+            </div>
             <div className="mt-3 grid gap-2 rounded-2xl border border-white/70 bg-white/80 p-3">
               <div className="flex items-baseline justify-between gap-3">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">Produtos</p>

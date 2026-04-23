@@ -29,7 +29,7 @@ export class ZodExceptionFilter implements ExceptionFilter {
     response.status(400).json({
       statusCode: 400,
       error: 'Bad Request',
-      message: messages.length > 0 ? messages.join('; ') : 'Payload invalido.',
+      message: messages.length > 0 ? messages.join('; ') : 'Payload inválido.',
       issues: {
         formErrors: flattened.formErrors,
         fieldErrors: flattened.fieldErrors

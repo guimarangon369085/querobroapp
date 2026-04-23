@@ -1,8 +1,22 @@
 # PROJECT_SNAPSHOT
 
-Ultima atualizacao: 2026-03-31
+Ultima atualizacao: 2026-04-22
 
 ## Estado atual
+
+- 2026-04-22: o feed `meta-catalog.csv` e os assets públicos do sabor `Romeu e Julieta` foram recompostos para manter o catálogo do WhatsApp alinhado ao web. `romeu-e-julieta.jpg` foi reexportado na resolução publicada, `sabores-caixa.jpg` foi regenerado com a coluna atual do `RJ`, a `Caixa Mista de Romeu e Julieta` ganhou a arte quadrada `mista-romeu-e-julieta-meta-square-v2.jpg` no mesmo padrão diagonal full bleed das demais mistas, sem moldura clara, e o web voltou a usar também a composição vertical `mista-romeu-e-julieta.jpg` nos pontos internos do catálogo.
+
+- 2026-04-16: o `/pedido` publicado incorporou o pacote `AMIGAS DA BROA` no trilho principal, com cards/gavetas proprios, estoque direto por produto, auto-inativacao quando o saldo zera, reativacao automatica apos reposicao e cupom incidindo apenas sobre o total das Broas. A operacao em `/pedidos` tambem passou a permitir incluir `AMIGAS` no quick create sem misturar esse grupo nas contagens de caixas/broas.
+
+- 2026-04-16: o fluxo de frete ficou consistente entre preview e submit em `/pedido` e `/pedidos`, incluindo endereco alternativo, cupom e itens de `AMIGAS DA BROA`, eliminando o erro `Frete atualizado. Revise o valor antes de enviar novamente.` no fechamento de pedidos.
+
+- 2026-04-16: o feed publico `https://querobroa.com.br/meta-catalog.csv` passou a refletir o catalogo publicado da web, com `18` linhas (`12` itens de Broas e `6` itens de `AMIGAS DA BROA`), incluindo `Caixa Mista de Romeu e Julieta` e labels de agrupamento (`custom_label_0` / `custom_label_1`) para facilitar um conjunto separado de `AMIGAS` no Commerce Manager / WhatsApp.
+
+- 2026-03-31: a conciliacao financeira deixou de depender da bridge local do Nubank. O dashboard agora aceita importacao manual do extrato semanal do Nu Empresas em `.eml`, `.csv` ou `.ofx`, persiste as movimentacoes no backend, reconcilia automaticamente os PIX de entrada com pedidos pendentes e recalcula caixa real, custos operacionais e fluxo liquido assim que o operador clica em `ATUALIZAR EXTRATO`.
+
+- 2026-03-31: `/dashboard` foi refeito de novo para reduzir poluicao visual e aumentar capacidade analitica real. O comparador temporal agora usa granularidade automatica (`diaria` abaixo de `120` dias e `mensal` acima disso), o historico passou a consolidar receita/recebimento/COGS sobre a mesma base temporal por `createdAt`, e a leitura executiva foi reorganizada em `Cockpit do board`, `Tendencia e decisao`, atribuicao por `origem/referrer`, `Meta mensal e ritmo`, `Economia unitária e caixa`, `Drivers de custo e mix` e `Saúde digital`. O web tambem passou a expor o plano de meta mensal com run rate dos ultimos `30` dias, e a API agora entrega atribuicao de canal com `share`, `chegou /pedido`, `envio` e indice relativo por origem.
+
+- 2026-03-31: `/dashboard` foi promovido para um cockpit executivo real. A API normalizou os KPIs `all time` mesmo nos recortes de `24h/7d/30d`, separou o funil em `Home -> /pedido`, `Pedido -> envio` e `Quote -> envio`, e passou a carregar a serie diaria com sessoes de home, pedido, quote e envio. No web, a antiga leitura mensal fraca foi substituida por `Cockpit do board`, comparador mensal de ate `2 KPIs`, tabela historica consolidada e bloco de `Fontes e integrações` para deixar clara a origem operacional de cada numero.
 
 - 2026-03-31: a operacao interna deixou de ser publica por URL direta. O web agora exige autenticacao persistente por cookie HTTP-only assinado para `/pedidos`, `/clientes`, `/estoque`, `/dashboard` e para o bridge `/api/internal/*`, com tela publica `/acesso` e sessao estavel ate logout/limpeza de cookies. No analytics, `/pedidos` deixou de cair como `public` por colisao com o prefixo `/pedido`.
 
@@ -47,11 +61,10 @@ Ultima atualizacao: 2026-03-31
 - Existe agora uma captura publica de pedido em `/pedido`, usando o mesmo intake externo que atende `Google Forms` e a pagina propria.
 - O intake externo agora expoe preview seguro para `Google Forms` e `customer-form`, validando payload, frete e total sem criar pedido nem PIX.
 - Os dados oficiais da QUEROBROA (telefone, CNPJ, PIX e conta bancaria) agora estao canonizados em contratos compartilhados, painel interno e fluxo publico.
-- O backend agora aceita conciliacao segura de PIX por nome + valor em `POST /payments/pix-reconciliations/webhook`, mantendo a baixa canonica por `txid/paymentId` em `pix-settlements`.
+- O backend agora usa importacao de extrato como fonte canonica de caixa real do dashboard, conciliando PIX de entrada por nome + valor no momento da importacao do arquivo.
 - Pedidos de `Entrega` agora podem receber cotacao de frete antes do submit final, com o valor incorporado ao total e ao PIX.
 - `/pedido`, `quick create` e a logica de caixas em `Pedidos` passaram a compartilhar o mesmo catalogo de caixas/sabores e as mesmas imagens originais da marca.
-- A automacao local `scripts/nubank-pix-bridge.mjs` segue como unico trilho ativo para baixa PIX automatica, lendo o webapp autenticado do Nubank PJ no Chrome e delegando o matching seguro ao backend.
-- O repo tambem inclui instalador de `launchd` para esse bridge (`bank:pix:bridge:install`), permitindo deixar a conciliacao rodando em segundo plano no Mac operacional.
+- O fluxo bancario oficial passou a ser o upload do email de extrato (`.eml`) ou dos anexos (`.csv`/`.ofx`) direto no dashboard, sem depender de Chrome autenticado, AppleScript ou agente local.
 - As superficies internas do web voltaram a abrir sem prompt de navegador; o endurecimento ficou concentrado na API direta e no proxy server-to-server do app.
 - A API agora roda com `APP_AUTH_ENABLED=true` em producao; leituras operacionais anonimas como `/orders`, `/customers`, `/payments`, `/dashboard/summary` e `/runtime-config` passaram a responder `401`.
 - O tema publico do builder/home passou a ser servido por `/api/runtime-theme`, que usa token server-to-server sem reabrir `runtime-config` completo ao navegador.
@@ -63,7 +76,7 @@ Ultima atualizacao: 2026-03-31
 - A home publica `/` agora fixa tambem o `body` em `position: fixed` enquanto esta montada, para bloquear bounce/rolagem residual em iPhone e navegadores com barras dinamicas.
 - Em `/pedido`, o header sticky compacto e o hero superior com `@QUEROBROA` + galeria foram removidos no desktop; a experiencia passa a abrir direto no formulario/resumo nessa largura.
 - Em `/pedido`, os dois blocos introdutorios do topo foram removidos por completo; a pagina agora abre direto em `Dados`, e os rótulos pequenos redundantes das seções tambem sairam.
-- O frete do cliente agora segue tabela operacional fixa por raio a partir da Alameda Jau, 731: `R$ 12` ate `5 km` e `R$ 18` acima disso; a cotacao e o calculo acontecem 100% no backend.
+- O frete do cliente segue tabela operacional por raio a partir da Alameda Jau, 731: `R$ 12` ate `5 km`, `R$ 20` de `6-10 km`, `R$ 22` de `11-15 km`, `R$ 25` de `16-20 km`, `R$ 30` de `21-25 km` e `R$ 35` de `26-30 km`; acima de `30 km` o cliente recebe `FORA DA ÁREA DE ENTREGA`. A cotacao e o calculo acontecem 100% no backend e a tabela agora pode ser editada internamente em `/frete`, refletindo imediatamente nos novos quotes.
 - A cotacao agora protege o caso `origem = destino` e usa hash de quote mais fiel ao payload real.
 - `/pedido` e o modal de novo pedido em `/pedidos` agora usam o mesmo fluxo em duas etapas para entrega: `Calcular frete` antes de `Finalizar pedido/Criar pedido`.
 - `/pedido` passou a preservar o cadastro ao usar `Fazer outro pedido`, limpando apenas a composicao do pedido e rolando de volta ao topo para uma nova montagem.
@@ -102,7 +115,7 @@ Ultima atualizacao: 2026-03-31
 - A criacao de pedido agora dispara alerta operacional assincrono no backend, com `ntfy` como canal gratuito principal para iPhone/PWA e webhook como canal opcional.
 - A navegacao operacional foi normalizada: o item principal antes chamado `Agenda` agora se chama `PEDIDOS`, e o menu passou a usar labels em caixa alta de forma consistente.
 - `Clientes` nao coleta mais nem exibe email em nenhuma superficie ativa; nas paginas internas a ficha pode ficar incompleta enquanto o atendimento evolui, e o `/pedido` publico manteve as travas de cadastro sem esse campo.
-- O dashboard operacional voltou a expor apenas o readiness do `Bridge Nubank Web`, sem trilhos paralelos de conciliacao PIX.
+- O dashboard operacional agora expoe o rail `Extrato bancario`, com cobertura do ultimo arquivo importado, quantidade de linhas, conciliacoes realizadas e entradas ainda sem match.
 - O fluxo de cupons agora registra tentativa invalida no backend com motivo (`sem cupons ativos`, `cupom inativo` ou `codigo nao encontrado`) e devolve mensagem explicita ao publico, para nao ficar ambiguo quando um cupom ainda nao foi cadastrado em producao.
 
 ## O que um usuario consegue fazer hoje
@@ -323,6 +336,50 @@ Ultima atualizacao: 2026-03-31
 - Data: 2026-03-28
 - Ciclo executado: `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, `node --test tests/order-schedule-capacity.test.mjs`
 - Resultado: o `/pedido` deixou de expor horarios exatos ao cliente e passou a trabalhar com 3 faixas publicas (`9h - 12h`, `12h - 16h`, `16h - 20h`). O backend resolve internamente o primeiro horario viavel dentro da faixa escolhida, preservando a logica de duracao por quantidade de broas e a capacidade do forno. O `/pedidos` interno segue livre de sobreposicao forçada pela trava publica, e o fluxo de edicao interna deixou de depender da persistencia de quote de frete dentro da transacao.
+
+- Data: 2026-04-08
+- Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, restart local do `next dev` em `127.0.0.1:3000`, validacao manual mobile de `/pedido`, `npx --yes @railway/cli up -d -s querobroapp -m "fix(web): stabilize mobile custom box layout and RJ mixed art"`, `pnpm validate:public-deploy`
+- Resultado: a `Monte Sua Caixa` em `/pedido` deixou de quebrar os controles de quantidade no mobile e passou a usar um grid estavel para sabor + `- / quantidade / +`, sem a cascata observada no iPhone. A `Mista Romeu e Julieta` deixou de montar a arte especial em 3 colunas e passou a reutilizar o mesmo split dinamico das outras mistas, usando a foto atual do sabor `RJ` automaticamente quando ele estiver ativo no catalogo. O web publicado no Railway foi revalidado com `200` em `/` e `/pedido`, redirect protegido de `/pedidos`, `apiHealth=ok`, preview `PIX_PENDING` e quote `LOCAL / MANUAL_FALLBACK`. No mesmo ciclo, o app ganhou `apps/web/src/app/not-found.tsx` para eliminar a quebra de build de `/_not-found` que estava bloqueando a publicacao do web.
+
+- Data: 2026-04-08
+- Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, validacao visual mobile em `https://querobroa.com.br/pedido`, `npx --yes @railway/cli up -d -s querobroapp -m "fix(web): restore cover art in caixas and keep contain in amigas"`, `pnpm validate:public-deploy`
+- Resultado: o renderer de arte do `/pedido` passou a distinguir uploads gerenciados por contexto. No catalogo principal (`Caixas`, `Monte Sua Caixa` e mistas), as imagens voltaram ao comportamento de `cover`, preenchendo totalmente o quadro como os demais sabores. Em `AMIGAS DA BROA`, os cards e a gaveta seguem com `contain`, preservando a imagem inteira dentro do frame sem reaplicar esse racional ao restante do catalogo. O deploy publicado foi revalidado com `200` em `/pedido`, `apiHealth=ok` e checagem visual mobile no dominio publico.
+
+- Data: 2026-04-08
+- Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, `npx --yes @railway/cli up -d -s querobroapp -m "fix(web): hide amigas da broa on public pedido"`, `pnpm validate:public-deploy`
+- Resultado: a sessao `AMIGAS DA BROA` do `/pedido` passou a ficar disponivel apenas no ambiente local. O `page.tsx` agora detecta `localhost/127.0.0.1` no host para manter `showCompanionProducts=true` localmente, enquanto o dominio publicado recebe a secao como oculta (`hidden` + `aria-hidden=true`) e sem itens companheiros entrando em resumo, total ou payload do pedido. O deploy publico voltou com `200` em `/pedido` e `apiHealth=ok`.
+
+- Data: 2026-04-08
+- Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, `npx --yes @railway/cli up -d -s querobroapp -m "fix(web): disable amigas UI in production pedido"`, `pnpm validate:public-deploy`
+- Resultado: o totalizador `Amigas` tambem saiu do painel publico de `/pedido`. A regra de exibicao foi endurecida para `process.env.NODE_ENV !== 'production'`, garantindo que a UI de `AMIGAS DA BROA` continue disponivel apenas em dev/local. No HTML publicado, o card `Amigas` deixou de existir no painel lateral, enquanto a secao principal segue entregue como `hidden` para nao impactar visualmente nem os totais/payloads do pedido publico.
+
+- Data: 2026-04-09
+- Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, validacao local de `POST /api/delivery-quote` em `127.0.0.1:3000`
+- Resultado: o fluxo publico de cotacao de frete em `/pedido` ganhou protecao contra requests penduradas e respostas antigas. O bridge `apps/web/src/app/api/delivery-quote/route.ts` agora aborta a chamada upstream apos 12s e devolve `504` com mensagem amigavel; a tela `apps/web/src/app/pedido/public-order-page.tsx` passou a cancelar cotacoes anteriores quando endereco/data/itens mudam, descartar respostas stale e limpar o estado de `CALCULANDO FRETE...` mesmo quando a request trava ou expira.
+
+- Data: 2026-04-09
+- Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, `npx --yes @railway/cli up -d -s querobroapp -m "fix(web): harden /pedido freight quote flow"`, `pnpm validate:public-deploy`
+- Resultado: a correção do frete em `/pedido` foi publicada no Railway. O domínio público voltou validado com `200` em `/pedido`, proteção de `/pedidos` por `/acesso`, `apiHealth=ok`, quote pública `LOCAL / MANUAL_FALLBACK / fee=12 / status=QUOTED` e preview `PIX_PENDING` consistente no fluxo de pedido externo.
+
+- Data: 2026-04-09
+- Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, replay local com Playwright em `http://127.0.0.1:3000/pedido`, `pnpm --filter @querobroapp/web build`, `npx --yes @railway/cli up -d -s querobroapp -m "fix(web): retain public /pedido freight quotes by request fingerprint"`, `pnpm validate:public-deploy`, replay publicado com Playwright em `https://querobroa.com.br/pedido`
+- Resultado: a causa real do travamento em `CALCULANDO FRETE...` era uma invalidação ampla demais do estado da cotação no cliente. O `/pedido` agora prende a quote a um fingerprint estável do pedido atual, só invalida quando endereço/agenda/itens realmente mudam e reaproveita a quote válida também no submit/refresh do pedido. No mesmo ciclo foi corrigido o bloqueio de deploy do `web` por lint (`prefer-const` em `apps/web/src/app/pedido/page.tsx`) e a derivação de `companionProducts` passou a usar `useMemo` para estabilizar as dependências. A publicação `87a63c7b-c103-4373-9ed4-58c514cb4d22` ficou `SUCCESS` no Railway e o replay público confirmou o fluxo completo: após `POST /api/delivery-quote => 201`, o painel lateral passou a exibir `Frete R$ 12,00`, `Total R$ 52,00` e o CTA mudou de `CALCULAR FRETE` para `FINALIZAR PEDIDO`.
+
+- Data: 2026-04-09
+- Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, `pnpm --filter @querobroapp/web build`, restart manual do `next dev` local em `127.0.0.1:3000`, checagem HTTP local de `/pedido` e `/pedidofinalizado`
+- Resultado: o fluxo público de confirmação deixou de expor identificadores do pedido ao cliente. O bridge `apps/web/src/app/api/customer-form/route.ts` agora sanitiza a resposta de sucesso do `POST /api/customer-form` para devolver apenas `total`, `scheduledAt`, `stage`, `deliveryFee` e `pixCharge`, sem `order.id`, `publicNumber`, `orderId`, `customerId` ou `paymentId`. A session storage usada por `/pedidofinalizado` (`querobroapp:order-finalized`) também passou a salvar e reler apenas o subconjunto mínimo necessário para a UI, regravando payloads antigos já no primeiro read para eliminar vazamentos residuais. O evento analítico público de submit também deixou de carregar `orderId`. O ajuste ficou validado localmente com `typecheck`, `build` e `200` em `/pedido` e `/pedidofinalizado`, mas ainda nao foi publicado.
+
+- Data: 2026-04-09
+- Ciclo executado: `pnpm --filter @querobroapp/web typecheck`, ajuste de runtime flag para `AMIGAS DA BROA`, subida local de `http://127.0.0.1:3000` e laboratorio em `http://127.0.0.1:3002`
+- Resultado: o ambiente local deixou de usar `localhost` como gatilho implícito para `AMIGAS DA BROA`. O `/pedido` oficial em `127.0.0.1:3000` agora replica o publicado por padrão, sem `AMIGAS`, enquanto o laboratório experimental ficou isolado atrás de `NEXT_PUBLIC_ENABLE_AMIGAS_DA_BROA=1` no script `pnpm dev:web:amigas-lab`, servindo em `127.0.0.1:3002`. O `/estoque` também passou a esconder a categoria e os campos experimentais nesse trilho oficial, reduzindo o risco de misturar ajustes finos do publicado com a feature ainda não lançada.
+
+- Data: 2026-04-09
+- Ciclo executado: `node --check scripts/public-site-mirror.mjs`, subida do espelho local em `http://127.0.0.1:3000`, comparacao de hash de `/pedido`, `/api/order-catalog`, `/api/order-schedule` e `/api/runtime-theme` contra `https://querobroa.com.br`, validacao do lab em `http://127.0.0.1:3002/pedido`
+- Resultado: a separacao de ambientes deixou de depender do banco local para o trilho oficial. `http://127.0.0.1:3000` passou a ser um espelho HTTP local exato do dominio publicado via `pnpm dev:web:published-local`, com hash identico ao HTML de `/pedido` e aos payloads publicos de catalogo, agenda e tema. O lab futuro segue isolado em `http://127.0.0.1:3002` usando o codigo local e a API local, inclusive com `AMIGAS DA BROA`. Isso elimina o drift que existia quando o `3000` ainda tentava simular o publicado em cima do banco SQLite local. Quando for necessario mexer no publicado sem contaminar o lab, o ponto de partida correto passa a ser o espelho oficial e nao o trilho experimental.
+
+- Data: 2026-04-14
+- Ciclo executado: evolucao completa de `AMIGAS DA BROA` entre `apps/web/src/app/pedido/public-order-page.tsx`, `apps/web/src/app/estoque/page.tsx`, `apps/api/src/modules/orders/orders.service.ts`, `apps/api/src/modules/inventory/inventory-products.service.ts` e `apps/api/src/modules/inventory/inventory.service.ts`; publicacoes sucessivas no Railway para `querobroapp` e `passionate-nourishment`; fechamento do dia com `pnpm --filter @querobroapp/shared build`, `pnpm --filter @querobroapp/api build`, `pnpm --filter @querobroapp/web build`, `pnpm --filter @querobroapp/web exec tsc -p tsconfig.json --noEmit` e `pnpm validate:public-deploy`.
+- Resultado: `AMIGAS DA BROA` foi integrada ao `/pedido` publicado com cards, gavetas, estoque direto por produto, auto-inativacao por saldo zerado, reativacao por reposicao manual e total/cupom separados das Broas. `Caixas Mistas` passaram a operar com card unico e gaveta no mesmo padrao de `Monte Sua Caixa`, preservando as fotos oficiais dentro da gaveta. O risco estrutural de perda de upload na API foi mitigado com volume em `/data` e fallback canonico das artes oficiais. O lote final do dia normalizou as acentuacoes em Portugues Brasileiro nos textos visiveis do web e nas mensagens expostas da API. Ultimos deploys do ciclo: API `8ea36cfd-7fd0-4f0c-9a45-9af66a1ac661` e web `a8174343-8235-444a-9700-7491ee4ef09f`, ambos validados com `home=200`, `pedido=200`, protecao de `/pedidos`, `apiHealth=ok`, preview `PIX_PENDING` e quote `LOCAL / MANUAL_FALLBACK`.
 
 ## Como religar e validar rapido
 

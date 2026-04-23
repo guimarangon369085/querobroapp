@@ -445,12 +445,12 @@ export function GoogleAddressAutocompleteInput({
                 {suggestion.secondary ? (
                   <span className={secondaryTextClassName}>{suggestion.secondary}</span>
                 ) : suggestion.kind === 'manual' ? (
-                  <span className={secondaryTextClassName}>Endereco ja usado</span>
+                  <span className={secondaryTextClassName}>Endereço já usado</span>
                 ) : null}
               </button>
             ))}
             {isLoading ? (
-              <div className={loadingClassName}>Buscando enderecos...</div>
+              <div className={loadingClassName}>Buscando endereços...</div>
             ) : null}
           </div>
         </div>

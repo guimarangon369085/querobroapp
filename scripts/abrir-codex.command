@@ -1,33 +1,60 @@
 #!/bin/zsh
 set -euo pipefail
 
-REPO_DIR="$HOME/querobroapp"
-CODEX_BIN="$HOME/.npm-global/bin/codex"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="${CODEX_REPO_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+CODEX_BIN="${CODEX_BIN:-}"
 STATE_DIR="$HOME/.querobroapp"
 FULL_ACCESS_MARKER="$STATE_DIR/.abrir-codex-full-disk-access-ok"
 PROMPTS_DIR="$REPO_DIR/docs/prompts"
 REFRESH_SCRIPT="$REPO_DIR/scripts/refresh-codex-context.sh"
-AUTO_SNAPSHOT_PATH="$STATE_DIR/codex-auto-session-snapshot.md"
+AUTO_SNAPSHOT_PATH="${CODEX_AUTO_SNAPSHOT_PATH:-$STATE_DIR/codex-auto-session-snapshot.md}"
 
 export PATH="$HOME/.npm-global/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
+
+resolve_codex_bin() {
+  local candidate=""
+
+  if [[ -n "$CODEX_BIN" && -x "$CODEX_BIN" ]]; then
+    printf '%s\n' "$CODEX_BIN"
+    return 0
+  fi
+
+  candidate="$(command -v codex 2>/dev/null || true)"
+  if [[ -n "$candidate" && -x "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  candidate="$HOME/.npm-global/bin/codex"
+  if [[ -x "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  return 1
+}
 
 usage() {
   cat <<'EOF'
 Uso: abrir-codex.command [quick|reboot|qa|ux]
 
 Modos:
-- quick  : bootstrap minimo padrao
+- quick  : sincroniza contexto atual e prepara a proxima rodada
 - reboot : reboot, subida local e validacao manual
 - qa     : alias de reboot
-- ux     : foco em simplificacao de UX
+- ux     : foco em simplificacao visual e UX
 EOF
 }
 
-if [[ ! -x "$CODEX_BIN" ]]; then
-  CODEX_BIN="$(command -v codex 2>/dev/null || true)"
+if [[ ! -d "$REPO_DIR" ]]; then
+  echo "Repositorio nao encontrado: $REPO_DIR"
+  exit 1
 fi
 
-if [[ -z "$CODEX_BIN" || ! -x "$CODEX_BIN" ]]; then
+CODEX_BIN="$(resolve_codex_bin || true)"
+
+if [[ -z "$CODEX_BIN" ]]; then
   echo "Codex CLI nao encontrado."
   echo "Caminho esperado: $HOME/.npm-global/bin/codex"
   echo "Instale/ajuste o caminho e tente novamente."

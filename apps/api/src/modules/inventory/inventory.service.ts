@@ -1,7 +1,12 @@
 import { Injectable, Inject, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
-import { InventoryCategoryEnum, resolveDisplayNumber, StockMovementTypeEnum } from '@querobroapp/shared';
+import {
+  InventoryCategoryEnum,
+  InventoryCriticalityEnum,
+  resolveDisplayNumber,
+  StockMovementTypeEnum
+} from '@querobroapp/shared';
 import { parseLocaleNumber } from '../../common/normalize.js';
 import { parseWithSchema } from '../../common/validation.js';
 import { z } from 'zod';
@@ -18,6 +23,10 @@ import {
   INVENTORY_PRICE_SOURCE_DEFINITIONS,
   fetchInventorySourcePrice
 } from './inventory-price-sources.js';
+import {
+  syncCompanionProductActiveStateByItemIds,
+  syncCompanionProductActiveStateByProductIds
+} from './companion-product-availability.js';
 
 const nonNegativeNumberInputSchema = z.preprocess((value) => {
   const parsed = parseLocaleNumber(value as string | number | null | undefined);
@@ -37,12 +46,28 @@ const optionalNullableNonNegativeNumberInputSchema = z.preprocess((value) => {
   return parsed === null ? value : parsed;
 }, z.number().nonnegative().nullable().optional());
 
+const optionalNullableNonNegativeIntegerInputSchema = z.preprocess((value) => {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  const parsed = parseLocaleNumber(value as string | number | null | undefined);
+  return parsed === null ? value : parsed;
+}, z.number().int().nonnegative().nullable().optional());
+
 const inventoryItemCreateSchema = z.object({
   name: z.string().trim().min(1),
   category: InventoryCategoryEnum,
   unit: z.string().trim().min(1),
   purchasePackSize: nonNegativeNumberInputSchema,
-  purchasePackCost: optionalNonNegativeNumberInputSchema
+  purchasePackCost: optionalNonNegativeNumberInputSchema,
+  leadTimeDays: optionalNullableNonNegativeIntegerInputSchema,
+  safetyStockQty: optionalNullableNonNegativeNumberInputSchema,
+  reorderPointQty: optionalNullableNonNegativeNumberInputSchema,
+  targetStockQty: optionalNullableNonNegativeNumberInputSchema,
+  perishabilityDays: optionalNullableNonNegativeIntegerInputSchema,
+  criticality: InventoryCriticalityEnum.optional().nullable(),
+  preferredSupplier: z.string().trim().max(160).optional().nullable(),
+  sourceName: z.string().trim().min(1).max(120).optional().nullable(),
+  sourceUrl: z.string().trim().min(1).max(512).optional().nullable()
 });
 
 const inventoryItemUpdateSchema = inventoryItemCreateSchema
@@ -82,6 +107,13 @@ type InventoryItemLookupEntry = {
   unit: string;
   purchasePackSize: number;
   purchasePackCost: number;
+  leadTimeDays: number | null;
+  safetyStockQty: number | null;
+  reorderPointQty: number | null;
+  targetStockQty: number | null;
+  perishabilityDays: number | null;
+  criticality: string | null;
+  preferredSupplier: string | null;
   createdAt: Date;
 };
 
@@ -181,6 +213,15 @@ export class InventoryService {
   private normalizeInventoryItemName(name: string) {
     const normalized = name.trim();
     return resolveInventoryDefinition(normalized)?.canonicalName || normalized;
+  }
+
+  private normalizeCriticality(
+    value?: string | null
+  ): 'BAIXA' | 'MEDIA' | 'ALTA' | 'CRITICA' | null {
+    if (value === 'BAIXA' || value === 'MEDIA' || value === 'ALTA' || value === 'CRITICA') {
+      return value;
+    }
+    return null;
   }
 
   private toUnitCost(purchasePackCost: number, purchasePackSize: number) {
@@ -405,7 +446,7 @@ export class InventoryService {
     });
 
     if (duplicate) {
-      throw new ConflictException(`Item oficial ${canonicalName} ja existe. Use o cadastro existente.`);
+      throw new ConflictException(`Item oficial ${canonicalName} já existe. Use o cadastro existente.`);
     }
 
     return canonicalName;
@@ -485,7 +526,8 @@ export class InventoryService {
       itemId: number;
       type: string;
       quantity: number;
-    }>
+    }>,
+    entriesByItemId: Map<number, InventoryPriceEntryRecord[]>
   ) {
     const balanceByItem = this.buildBalanceByItemId(movements);
     const groupedByFamily = new Map<string, InventoryItemLookupEntry[]>();
@@ -510,6 +552,21 @@ export class InventoryService {
           (sum, item) => this.toQty(sum + (balanceByItem.get(item.id) || 0)),
           0
         );
+        const priceEntries = familyItems
+          .flatMap((item) => entriesByItemId.get(item.id) || [])
+          .sort(
+            (left, right) =>
+              left.effectiveAt.getTime() - right.effectiveAt.getTime() ||
+              left.id - right.id
+          );
+        const latestEntry = priceEntries[priceEntries.length - 1] || null;
+        const sourceDefinition = definition
+          ? INVENTORY_PRICE_SOURCE_DEFINITIONS.find(
+              (entry) =>
+                resolveInventoryFamilyKey(entry.canonicalName) ===
+                resolveInventoryFamilyKey(definition.canonicalName)
+            ) || null
+          : null;
 
         return {
           id: representative.id,
@@ -520,6 +577,15 @@ export class InventoryService {
             representative.purchasePackSize || definition?.purchasePackSize || 0,
           purchasePackCost:
             representative.purchasePackCost || definition?.purchasePackCost || 0,
+          leadTimeDays: representative.leadTimeDays ?? null,
+          safetyStockQty: representative.safetyStockQty ?? null,
+          reorderPointQty: representative.reorderPointQty ?? null,
+          targetStockQty: representative.targetStockQty ?? null,
+          perishabilityDays: representative.perishabilityDays ?? null,
+          criticality: this.normalizeCriticality(representative.criticality),
+          preferredSupplier: representative.preferredSupplier ?? null,
+          sourceName: latestEntry?.sourceName || sourceDefinition?.sourceName || null,
+          sourceUrl: latestEntry?.sourceUrl || sourceDefinition?.url || null,
           createdAt: representative.createdAt,
           balance: this.toQty(balance),
           rawItemIds: familyItems.map((item) => item.id).sort((left, right) => left - right)
@@ -599,30 +665,33 @@ export class InventoryService {
   }
 
   async overview() {
-    const [items, movements] = await Promise.all([
+    const [items, movements, entriesByItemId] = await Promise.all([
       this.prisma.inventoryItem.findMany({ orderBy: { id: 'asc' } }),
       this.prisma.inventoryMovement.findMany({
         select: { itemId: true, type: true, quantity: true },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
-      })
+      }),
+      this.listPriceEntriesByItemId()
     ]);
 
-    return this.buildInventoryOverviewPayload(items, movements);
+    return this.buildInventoryOverviewPayload(items, movements, entriesByItemId);
   }
 
   async createItem(payload: unknown) {
     const data = parseWithSchema(inventoryItemCreateSchema, payload);
+    const { sourceName, sourceUrl, ...itemData } = data;
     const canonicalName = await this.ensureCanonicalInventoryItemUniqueness({
-      name: data.name,
-      category: data.category,
-      unit: data.unit
+      name: itemData.name,
+      category: itemData.category,
+      unit: itemData.unit
     });
 
     return this.prisma.$transaction(async (tx) => {
       const created = await tx.inventoryItem.create({
         data: {
-          ...data,
-          name: canonicalName
+          ...itemData,
+          name: canonicalName,
+          preferredSupplier: itemData.preferredSupplier?.trim() || null
         }
       });
       await this.createPriceEntryIfChanged(tx, {
@@ -630,6 +699,8 @@ export class InventoryService {
         purchasePackSize: created.purchasePackSize,
         purchasePackCost: this.roundMoney(created.purchasePackCost || 0),
         effectiveAt: created.createdAt,
+        sourceName: sourceName || null,
+        sourceUrl: sourceUrl || null,
         note: 'Cadastro inicial do item.'
       });
       return created;
@@ -638,12 +709,13 @@ export class InventoryService {
 
   async updateItem(id: number, payload: unknown) {
     const item = await this.prisma.inventoryItem.findUnique({ where: { id } });
-    if (!item) throw new NotFoundException('Item nao encontrado');
+    if (!item) throw new NotFoundException('Item não encontrado');
 
     const data = parseWithSchema(inventoryItemUpdateSchema, payload);
-    const nextCategory = data.category ?? item.category;
-    const nextUnit = data.unit ?? item.unit;
-    const nextName = data.name ?? item.name;
+    const { sourceName, sourceUrl, ...itemData } = data;
+    const nextCategory = itemData.category ?? item.category;
+    const nextUnit = itemData.unit ?? item.unit;
+    const nextName = itemData.name ?? item.name;
     const canonicalName = await this.ensureCanonicalInventoryItemUniqueness({
       id,
       name: nextName,
@@ -652,22 +724,40 @@ export class InventoryService {
     });
 
     return this.prisma.$transaction(async (tx) => {
+      const latestPriceEntry = await tx.inventoryPriceEntry.findFirst({
+        where: { itemId: id },
+        orderBy: [{ effectiveAt: 'desc' }, { id: 'desc' }]
+      });
       const updated = await tx.inventoryItem.update({
         where: { id },
         data: {
-          ...data,
-          ...(data.name !== undefined ? { name: canonicalName } : {})
+          ...itemData,
+          ...(itemData.preferredSupplier !== undefined
+            ? { preferredSupplier: itemData.preferredSupplier?.trim() || null }
+            : {}),
+          ...(itemData.name !== undefined ? { name: canonicalName } : {})
         }
       });
 
       const priceTouched =
-        data.purchasePackCost !== undefined || data.purchasePackSize !== undefined;
+        itemData.purchasePackCost !== undefined ||
+        itemData.purchasePackSize !== undefined ||
+        sourceName !== undefined ||
+        sourceUrl !== undefined;
       if (priceTouched) {
         await this.createPriceEntryIfChanged(tx, {
           itemId: updated.id,
           purchasePackSize: updated.purchasePackSize,
           purchasePackCost: this.roundMoney(updated.purchasePackCost || 0),
           effectiveAt: new Date(),
+          sourceName:
+            sourceName !== undefined
+              ? sourceName || null
+              : latestPriceEntry?.sourceName || null,
+          sourceUrl:
+            sourceUrl !== undefined
+              ? sourceUrl || null
+              : latestPriceEntry?.sourceUrl || null,
           note: 'Ajuste manual em Estoque.'
         });
       }
@@ -678,7 +768,7 @@ export class InventoryService {
 
   async removeItem(id: number) {
     const item = await this.prisma.inventoryItem.findUnique({ where: { id } });
-    if (!item) throw new NotFoundException('Item nao encontrado');
+    if (!item) throw new NotFoundException('Item não encontrado');
 
     const [movementsCount, bomItemsCount] = await this.prisma.$transaction([
       this.prisma.inventoryMovement.count({ where: { itemId: id } }),
@@ -686,13 +776,13 @@ export class InventoryService {
     ]);
 
     if (movementsCount > 0 || bomItemsCount > 0) {
-      throw new ConflictException('Item possui movimentos ou ficha tecnica vinculada.');
+      throw new ConflictException('Item possui movimentos ou ficha técnica vinculada.');
     }
 
     await this.prisma.inventoryItem.delete({ where: { id } });
   }
 
-  listMovements() {
+  listMovements(limit?: number) {
     return this.prisma.inventoryMovement.findMany({
       include: {
         item: true,
@@ -703,7 +793,8 @@ export class InventoryService {
           }
         }
       },
-      orderBy: { id: 'desc' }
+      orderBy: { id: 'desc' },
+      ...(typeof limit === 'number' && Number.isFinite(limit) && limit > 0 ? { take: limit } : {})
     }).then((movements) => movements.map((movement) => this.attachOrderDisplayNumber(movement)));
   }
 
@@ -751,7 +842,7 @@ export class InventoryService {
           effectiveAt: new Date(),
           sourceName: fetched.sourceName,
           sourceUrl: fetched.sourceUrl,
-          note: fetched.status === 'LIVE' ? 'Atualizacao online do estoque.' : fetched.message
+          note: fetched.status === 'LIVE' ? 'Atualização online do estoque.' : fetched.message
         });
 
         updatedItems.push({
@@ -799,12 +890,12 @@ export class InventoryService {
     return this.prisma.$transaction(async (tx) => {
       const items = await tx.inventoryItem.findMany({ orderBy: { id: 'asc' } });
       const targetItem = items.find((item) => item.id === id);
-      if (!targetItem) throw new NotFoundException('Item nao encontrado');
+      if (!targetItem) throw new NotFoundException('Item não encontrado');
 
       const { familyItems, representative } = this.resolveInventoryFamilyItems(items, targetItem);
       const referencePackSize = representative.purchasePackSize;
       if (!referencePackSize || referencePackSize <= 0) {
-        throw new BadRequestException('Item sem unidade de compra valida para atualizar preco.');
+        throw new BadRequestException('Item sem unidade de compra válida para atualizar preço.');
       }
 
       const nextUnitCost = data.purchasePackCost / referencePackSize;
@@ -843,7 +934,7 @@ export class InventoryService {
   async applyResearchPriceBaseline() {
     const firstOrderAt = await this.firstOrderCreatedAt();
     if (!firstOrderAt) {
-      throw new BadRequestException('Ainda nao existe pedido para definir a base historica de precos.');
+      throw new BadRequestException('Ainda não existe pedido para definir a base histórica de preços.');
     }
 
     const items = await this.prisma.inventoryItem.findMany({ orderBy: { id: 'asc' } });
@@ -945,7 +1036,7 @@ export class InventoryService {
         message:
           fetched.status === 'LIVE'
             ? `Baseline medio + preco atual aplicados a partir de ${historicalSamples.length} amostra(s).`
-            : `Fonte online indisponivel; baseline e preco atual ficaram no fallback/medio. ${fetched.message}`,
+            : `Fonte online indisponível; baseline e preço atual ficaram no fallback/médio. ${fetched.message}`,
         updatedItemIds: matchingItems.map((item) => item.id)
       });
     }
@@ -961,15 +1052,15 @@ export class InventoryService {
     const data = parseWithSchema(inventoryMovementCreateSchema, payload);
 
     const item = await this.prisma.inventoryItem.findUnique({ where: { id: data.itemId } });
-    if (!item) throw new NotFoundException('Item nao encontrado');
+    if (!item) throw new NotFoundException('Item não encontrado');
 
     if (data.orderId) {
       const order = await this.prisma.order.findUnique({ where: { id: data.orderId } });
-      if (!order) throw new NotFoundException('Pedido nao encontrado');
+      if (!order) throw new NotFoundException('Pedido não encontrado');
     }
 
-    return this.prisma.inventoryMovement
-      .create({
+    return this.prisma.$transaction(async (tx) => {
+      const movement = await tx.inventoryMovement.create({
         data,
         include: {
           item: true,
@@ -980,8 +1071,10 @@ export class InventoryService {
             }
           }
         }
-      })
-      .then((movement) => this.attachOrderDisplayNumber(movement));
+      });
+      await syncCompanionProductActiveStateByItemIds(tx, [data.itemId]);
+      return this.attachOrderDisplayNumber(movement);
+    });
   }
 
   async adjustEffectiveBalance(id: number, payload: unknown) {
@@ -990,7 +1083,7 @@ export class InventoryService {
     return this.prisma.$transaction(async (tx) => {
       const items = await tx.inventoryItem.findMany({ orderBy: { id: 'asc' } });
       const targetItem = items.find((item) => item.id === id);
-      if (!targetItem) throw new NotFoundException('Item nao encontrado');
+      if (!targetItem) throw new NotFoundException('Item não encontrado');
 
       const familyDefinition = resolveInventoryDefinition(targetItem.name);
       const familyItemIds = familyDefinition
@@ -1056,6 +1149,11 @@ export class InventoryService {
         });
       }
 
+      await syncCompanionProductActiveStateByItemIds(
+        tx,
+        adjustments.map((entry) => entry.itemId)
+      );
+
       return {
         ok: true,
         itemId: representative.id,
@@ -1067,13 +1165,27 @@ export class InventoryService {
   }
 
   async removeMovement(id: number) {
-    const movement = await this.prisma.inventoryMovement.findUnique({ where: { id } });
-    if (!movement) throw new NotFoundException('Movimentacao nao encontrada');
-    await this.prisma.inventoryMovement.delete({ where: { id } });
+    await this.prisma.$transaction(async (tx) => {
+      const movement = await tx.inventoryMovement.findUnique({ where: { id } });
+      if (!movement) throw new NotFoundException('Movimentação não encontrada');
+      await tx.inventoryMovement.delete({ where: { id } });
+      await syncCompanionProductActiveStateByItemIds(tx, [movement.itemId]);
+    });
   }
 
   async clearAllMovements() {
-    const inventoryResult = await this.prisma.inventoryMovement.deleteMany({});
+    const inventoryResult = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.inventoryMovement.deleteMany({});
+      await syncCompanionProductActiveStateByProductIds(
+        tx,
+        (
+          await tx.product.findMany({
+            select: { id: true }
+          })
+        ).map((product) => product.id)
+      );
+      return result;
+    });
 
     return {
       inventoryMovementsDeleted: inventoryResult.count,

@@ -1,18 +1,30 @@
-import type { Customer, Order, OrderItem, Payment } from '@querobroapp/shared';
+import type { Customer, ExternalOrderDeliveryWindowKey, Order, OrderItem, Payment } from '@querobroapp/shared';
+
+export type ScheduleDayAvailability = {
+  dayKey: string;
+  blockedWindows: ExternalOrderDeliveryWindowKey[];
+  windows: Array<{
+    key: ExternalOrderDeliveryWindowKey;
+    label: string;
+    startLabel: string;
+    endLabel: string;
+    isOpen: boolean;
+  }>;
+  updatedAt: string | null;
+};
 
 type DeliveryProviderCode = 'NONE' | 'LOCAL';
 type DeliveryFeeSourceCode = 'NONE' | 'MANUAL_FALLBACK';
 
 export const nextStatusByCurrent: Record<string, string | null> = {
-  ABERTO: 'CONFIRMADO',
-  CONFIRMADO: null,
-  EM_PREPARACAO: null,
+  ABERTO: 'PRONTO',
   PRONTO: null,
   ENTREGUE: null,
   CANCELADO: null
 };
 
 export type OrderView = Omit<Order, 'deliveryProvider' | 'deliveryFeeSource'> & {
+  updatedAt?: string | null;
   deliveryProvider?: DeliveryProviderCode;
   deliveryFeeSource?: DeliveryFeeSourceCode;
   items?: OrderItem[];

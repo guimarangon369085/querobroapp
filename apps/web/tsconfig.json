@@ -33,6 +33,8 @@
     ]
   },
   "include": [
+    ".next-amigas-lab/types/**/*.ts",
+    ".next-ops-local/types/**/*.ts",
     ".next-qa-browser-smoke/types/**/*.ts",
     ".next-qa-critical-e2e/types/**/*.ts",
     ".next-qa-trust/types/**/*.ts",

@@ -23,14 +23,30 @@ export function resolveDisplayNumber(subject: DisplayNumberSubject | null | unde
   return null;
 }
 
-export const OrderStatusEnum = z.enum([
-  'ABERTO',
-  'CONFIRMADO',
-  'EM_PREPARACAO',
-  'PRONTO',
-  'ENTREGUE',
-  'CANCELADO'
-]);
+const CANONICAL_ORDER_STATUS_VALUES = ['ABERTO', 'PRONTO', 'ENTREGUE', 'CANCELADO'] as const;
+const LEGACY_ORDER_STATUS_MAP = {
+  CONFIRMADO: 'ABERTO',
+  EM_PREPARACAO: 'ABERTO'
+} as const;
+
+export const OrderStatusEnum = z.enum(CANONICAL_ORDER_STATUS_VALUES);
+
+export function normalizeOrderStatus(value?: string | null) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toUpperCase();
+  if (!normalized) return null;
+  if (normalized in LEGACY_ORDER_STATUS_MAP) {
+    return LEGACY_ORDER_STATUS_MAP[normalized as keyof typeof LEGACY_ORDER_STATUS_MAP];
+  }
+  return CANONICAL_ORDER_STATUS_VALUES.includes(normalized as (typeof CANONICAL_ORDER_STATUS_VALUES)[number])
+    ? (normalized as (typeof CANONICAL_ORDER_STATUS_VALUES)[number])
+    : null;
+}
+
+const OrderStatusInputSchema = z.preprocess((input) => {
+  if (typeof input !== 'string') return input;
+  return normalizeOrderStatus(input) ?? input;
+}, OrderStatusEnum);
 
 export const PaymentStatusEnum = z.enum(['PENDENTE', 'PAGO', 'CANCELADO']);
 export const OrderPaymentStatusEnum = z.enum(['PENDENTE', 'PARCIAL', 'PAGO']);
@@ -48,9 +64,23 @@ export const DeliveryJobStatusEnum = z.enum([
   'FAILED',
   'CANCELED'
 ]);
+export const DeliveryPricingTierSchema = z.object({
+  maxKm: z.number().positive().max(999),
+  fee: z.number().nonnegative().max(9999)
+});
+export type DeliveryPricingTier = z.infer<typeof DeliveryPricingTierSchema>;
+export const DeliveryPricingConfigSchema = z.object({
+  tiers: z.array(DeliveryPricingTierSchema).min(1),
+  fallbackWithoutCoordinatesFee: z.number().nonnegative().max(9999).default(12),
+  outOfAreaMessage: z.string().trim().min(1).max(160).default('FORA DA ÁREA DE ENTREGA'),
+  updatedAt: z.string().datetime().optional().nullable()
+});
+export type DeliveryPricingConfig = z.infer<typeof DeliveryPricingConfigSchema>;
 
 export const StockMovementTypeEnum = z.enum(['IN', 'OUT', 'ADJUST']);
 export const InventoryCategoryEnum = z.enum(['INGREDIENTE', 'EMBALAGEM_INTERNA', 'EMBALAGEM_EXTERNA']);
+export const InventoryCriticalityEnum = z.enum(['BAIXA', 'MEDIA', 'ALTA', 'CRITICA']);
+export const InventoryRiskLevelEnum = z.enum(['OK', 'ATENCAO', 'CRITICO']);
 
 export const PixChargeSchema = z.object({
   provider: PixChargeProviderEnum,
@@ -122,14 +152,41 @@ export const OrderCustomerSnapshotSchema = z.object({
   deliveryNotes: z.string().optional().nullable()
 });
 
+export const CompanionProductInventorySchema = z.object({
+  balance: z.number().optional().nullable(),
+  unit: z.string().min(1).optional().nullable(),
+  purchasePackSize: z.number().positive().optional().nullable(),
+  purchasePackCost: z.number().nonnegative().optional().nullable(),
+  sourceName: z.string().max(120).optional().nullable(),
+  sourceUrl: z.string().max(512).optional().nullable(),
+  leadTimeDays: z.number().int().nonnegative().optional().nullable(),
+  safetyStockQty: z.number().nonnegative().optional().nullable(),
+  reorderPointQty: z.number().nonnegative().optional().nullable(),
+  targetStockQty: z.number().nonnegative().optional().nullable(),
+  perishabilityDays: z.number().int().nonnegative().optional().nullable(),
+  criticality: z.string().max(24).optional().nullable(),
+  preferredSupplier: z.string().max(160).optional().nullable()
+});
+
 export const ProductSchema = z.object({
   id: z.number().int().positive().optional(),
   name: z.string().min(1),
   category: z.string().optional().nullable(),
   unit: z.string().optional().nullable(),
+  measureLabel: z.string().optional().nullable(),
+  drawerNote: z.string().max(1200).optional().nullable(),
+  inventoryItemId: z.number().int().positive().optional().nullable(),
+  inventoryQtyPerSaleUnit: z.number().positive().optional().nullable(),
+  companionInventory: CompanionProductInventorySchema.optional().nullable(),
   price: z.number().nonnegative(),
   imageUrl: z.string().min(1).max(2048).optional().nullable(),
   active: z.boolean().default(true),
+  salesLimitEnabled: z.boolean().optional(),
+  salesLimitBoxes: z.number().int().positive().optional().nullable(),
+  salesLimitActivatedAt: z.string().datetime().optional().nullable(),
+  salesLimitConsumedBoxes: z.number().nonnegative().optional().nullable(),
+  salesLimitRemainingBoxes: z.number().nonnegative().optional().nullable(),
+  salesLimitExhausted: z.boolean().optional(),
   createdAt: z.string().optional().nullable()
 });
 
@@ -166,10 +223,71 @@ export const CouponResolveResponseSchema = z.object({
   subtotalAfterDiscount: z.number().nonnegative()
 });
 
+export const CouponAnalyticsCustomerSchema = z.object({
+  customerId: z.number().int().positive().optional().nullable(),
+  customerDisplayNumber: z.number().int().positive().optional().nullable(),
+  customerName: z.string().trim().min(1).max(160).optional().nullable(),
+  customerPhone: z.string().trim().min(1).max(40).optional().nullable(),
+  uses: z.number().int().nonnegative(),
+  discountInvestmentTotal: z.number().nonnegative(),
+  subtotalTotal: z.number().nonnegative(),
+  netRevenueTotal: z.number().nonnegative(),
+  lastUsedAt: z.string().datetime().optional().nullable()
+});
+
+export const CouponAnalyticsOrderSchema = z.object({
+  orderId: z.number().int().positive(),
+  orderDisplayNumber: z.number().int().positive().optional().nullable(),
+  customerId: z.number().int().positive().optional().nullable(),
+  customerDisplayNumber: z.number().int().positive().optional().nullable(),
+  customerName: z.string().trim().min(1).max(160).optional().nullable(),
+  customerPhone: z.string().trim().min(1).max(40).optional().nullable(),
+  createdAt: z.string().datetime(),
+  scheduledAt: z.string().datetime().optional().nullable(),
+  subtotal: z.number().nonnegative(),
+  discountAmount: z.number().nonnegative(),
+  total: z.number().nonnegative()
+});
+
+export const CouponAnalyticsSummarySchema = z.object({
+  uses: z.number().int().nonnegative(),
+  distinctCustomers: z.number().int().nonnegative(),
+  discountInvestmentTotal: z.number().nonnegative(),
+  subtotalTotal: z.number().nonnegative(),
+  netRevenueTotal: z.number().nonnegative(),
+  averageDiscountAmount: z.number().nonnegative(),
+  lastUsedAt: z.string().datetime().optional().nullable()
+});
+
+export const CouponAnalyticsSchema = CouponSchema.extend({
+  historicalOnly: z.boolean().default(false),
+  metrics: CouponAnalyticsSummarySchema,
+  customers: z.array(CouponAnalyticsCustomerSchema),
+  recentOrders: z.array(CouponAnalyticsOrderSchema)
+});
+
 export const APPLIED_COUPON_NOTE_PREFIX = 'Cupom aplicado:';
 export const MARKETING_SAMPLES_NOTE_PREFIX = 'Investimento de marketing:';
+export const ORDER_ITEMS_SUMMARY_NOTE_PREFIX = 'pedido=';
+export const COMPANION_PRODUCT_PROFILE_NOTE_PREFIX = 'amigas=';
 
-const ORDER_NOTE_METADATA_PREFIXES = [APPLIED_COUPON_NOTE_PREFIX, MARKETING_SAMPLES_NOTE_PREFIX];
+const ORDER_NOTE_METADATA_PREFIXES = [
+  APPLIED_COUPON_NOTE_PREFIX,
+  MARKETING_SAMPLES_NOTE_PREFIX,
+  ORDER_ITEMS_SUMMARY_NOTE_PREFIX
+];
+
+export type OrderItemsSummaryNoteEntry = {
+  label: string;
+  detail: string | null;
+};
+
+export type CompanionProductProfile = {
+  title: string;
+  flavor: string | null;
+  maker: string | null;
+  origin: string | null;
+};
 
 function splitOrderNoteLines(value?: string | null) {
   const visibleLines: string[] = [];
@@ -190,6 +308,138 @@ function splitOrderNoteLines(value?: string | null) {
     visibleLines,
     metadataLines
   };
+}
+
+function splitCompanionDrawerNoteLines(value?: string | null) {
+  const visibleLines: string[] = [];
+  const metadataLines: string[] = [];
+
+  for (const line of String(value || '')
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)) {
+    if (line.startsWith(COMPANION_PRODUCT_PROFILE_NOTE_PREFIX)) {
+      metadataLines.push(line);
+      continue;
+    }
+    visibleLines.push(line);
+  }
+
+  return {
+    visibleLines,
+    metadataLines
+  };
+}
+
+export function normalizeCompanionProductProfile(
+  value?: Partial<CompanionProductProfile> | null,
+): CompanionProductProfile | null {
+  const title = String(value?.title || '').trim();
+  if (!title) return null;
+
+  const flavor = String(value?.flavor || '').trim();
+  const maker = String(value?.maker || '').trim();
+  const origin = String(value?.origin || '').trim();
+
+  return {
+    title,
+    flavor: flavor || null,
+    maker: maker || null,
+    origin: origin || null
+  };
+}
+
+export function buildCompanionProductMakerLine(value?: Partial<CompanionProductProfile> | null) {
+  const normalized = normalizeCompanionProductProfile(value);
+  if (!normalized) return null;
+  if (normalized.maker && normalized.origin) {
+    return `${normalized.maker} - ${normalized.origin}`;
+  }
+  return normalized.maker || normalized.origin || null;
+}
+
+export function buildCompanionProductName(value?: Partial<CompanionProductProfile> | null) {
+  const normalized = normalizeCompanionProductProfile(value);
+  if (!normalized) return '';
+
+  return [normalized.title, normalized.flavor, buildCompanionProductMakerLine(normalized)]
+    .filter(Boolean)
+    .join(' • ');
+}
+
+export function parseCompanionProductProfileFromName(name?: string | null): CompanionProductProfile | null {
+  const parts = String(name || '')
+    .split('•')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  if (parts.length === 0) return null;
+
+  const makerOrigin = parts.slice(2).join(' • ').trim();
+  const makerOriginParts = makerOrigin
+    ? makerOrigin.split(' - ').map((entry) => entry.trim()).filter(Boolean)
+    : [];
+
+  return normalizeCompanionProductProfile({
+    title: parts[0],
+    flavor: parts[1] || null,
+    maker: makerOriginParts[0] || null,
+    origin: makerOriginParts.slice(1).join(' - ') || null
+  });
+}
+
+export function parseCompanionProductProfileFromDrawerNote(
+  drawerNote?: string | null,
+): CompanionProductProfile | null {
+  const { metadataLines } = splitCompanionDrawerNoteLines(drawerNote);
+  const encoded = metadataLines
+    .find((line) => line.startsWith(COMPANION_PRODUCT_PROFILE_NOTE_PREFIX))
+    ?.slice(COMPANION_PRODUCT_PROFILE_NOTE_PREFIX.length)
+    .trim();
+  if (!encoded) return null;
+
+  try {
+    const parsed = JSON.parse(decodeURIComponent(encoded));
+    if (!parsed || typeof parsed !== 'object') return null;
+    return normalizeCompanionProductProfile(parsed as Partial<CompanionProductProfile>);
+  } catch {
+    return null;
+  }
+}
+
+export function resolveCompanionProductProfile(value?: {
+  name?: string | null;
+  drawerNote?: string | null;
+} | null) {
+  return (
+    parseCompanionProductProfileFromDrawerNote(value?.drawerNote) ||
+    parseCompanionProductProfileFromName(value?.name) ||
+    normalizeCompanionProductProfile({
+      title: value?.name || ''
+    })
+  );
+}
+
+export function stripCompanionProductProfileFromDrawerNote(drawerNote?: string | null) {
+  const { visibleLines } = splitCompanionDrawerNoteLines(drawerNote);
+  return visibleLines.join('\n') || null;
+}
+
+export function mergeCompanionProductProfileIntoDrawerNote(
+  currentDrawerNote: string | null | undefined,
+  profile: Partial<CompanionProductProfile> | null | undefined,
+) {
+  const { visibleLines, metadataLines } = splitCompanionDrawerNoteLines(currentDrawerNote);
+  const preservedMetadata = metadataLines.filter(
+    (line) => !line.startsWith(COMPANION_PRODUCT_PROFILE_NOTE_PREFIX),
+  );
+  const normalizedProfile = normalizeCompanionProductProfile(profile);
+  if (normalizedProfile) {
+    preservedMetadata.push(
+      `${COMPANION_PRODUCT_PROFILE_NOTE_PREFIX}${encodeURIComponent(JSON.stringify(normalizedProfile))}`,
+    );
+  }
+  return [...visibleLines, ...preservedMetadata].join('\n') || null;
 }
 
 export function stripOrderNoteMetadata(value?: string | null) {
@@ -222,6 +472,30 @@ export function mergeAppliedCouponIntoNotes(
   return [...visibleLines, ...preservedMetadata].join('\n') || null;
 }
 
+export function parseAppliedCouponFromNotes(notes?: string | null) {
+  const { metadataLines } = splitOrderNoteLines(notes);
+  const line = metadataLines.find((entry) => entry.startsWith(APPLIED_COUPON_NOTE_PREFIX));
+  if (!line) return null;
+
+  const rawValue = line.slice(APPLIED_COUPON_NOTE_PREFIX.length).trim();
+  if (!rawValue) return null;
+
+  const match = rawValue.match(/^(.+?)(?:\s+\(([\d.,]+)%\))?$/);
+  const code = String(match?.[1] || rawValue).trim();
+  if (!code) return null;
+
+  const normalizedDiscountPct = String(match?.[2] || '')
+    .trim()
+    .replace(/\./g, '')
+    .replace(',', '.');
+  const parsedDiscountPct = normalizedDiscountPct ? Number.parseFloat(normalizedDiscountPct) : Number.NaN;
+
+  return {
+    code,
+    discountPct: Number.isFinite(parsedDiscountPct) ? parsedDiscountPct : null
+  };
+}
+
 export function mergeMarketingSamplesIntoNotes(
   currentNotes: string | null | undefined,
   marketingSample: { discountPct: number; sponsoredDeliveryFee?: number | null } | null
@@ -244,6 +518,61 @@ export function mergeMarketingSamplesIntoNotes(
         maximumFractionDigits: 2
       })}%${sponsoredDeliveryLabel})`
     );
+  }
+
+  return [...visibleLines, ...preservedMetadata].join('\n') || null;
+}
+
+export function parseOrderItemsSummaryFromNotes(notes?: string | null): OrderItemsSummaryNoteEntry[] {
+  const { metadataLines } = splitOrderNoteLines(notes);
+  const encoded = metadataLines
+    .find((line) => line.startsWith(ORDER_ITEMS_SUMMARY_NOTE_PREFIX))
+    ?.slice(ORDER_ITEMS_SUMMARY_NOTE_PREFIX.length)
+    .trim();
+  if (!encoded) return [];
+
+  try {
+    const parsed = JSON.parse(decodeURIComponent(encoded));
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') return null;
+        const label = String((entry as { label?: unknown }).label || '').trim();
+        const detail = String((entry as { detail?: unknown }).detail || '').trim();
+        if (!label) return null;
+        return {
+          label,
+          detail: detail || null
+        } satisfies OrderItemsSummaryNoteEntry;
+      })
+      .filter((entry): entry is OrderItemsSummaryNoteEntry => Boolean(entry));
+  } catch {
+    return [];
+  }
+}
+
+export function mergeOrderItemsSummaryIntoNotes(
+  currentNotes: string | null | undefined,
+  entries: OrderItemsSummaryNoteEntry[] | null | undefined
+) {
+  const { visibleLines, metadataLines } = splitOrderNoteLines(currentNotes);
+  const preservedMetadata = metadataLines.filter((line) => !line.startsWith(ORDER_ITEMS_SUMMARY_NOTE_PREFIX));
+  const normalizedEntries = Array.isArray(entries)
+    ? entries
+        .map((entry) => {
+          const label = String(entry?.label || '').trim();
+          const detail = String(entry?.detail || '').trim();
+          if (!label) return null;
+          return {
+            label,
+            detail: detail || null
+          };
+        })
+        .filter((entry): entry is OrderItemsSummaryNoteEntry => Boolean(entry))
+    : [];
+
+  if (normalizedEntries.length > 0) {
+    preservedMetadata.push(`${ORDER_ITEMS_SUMMARY_NOTE_PREFIX}${encodeURIComponent(JSON.stringify(normalizedEntries))}`);
   }
 
   return [...visibleLines, ...preservedMetadata].join('\n') || null;
@@ -287,7 +616,7 @@ export const OrderSchema = z.object({
   publicNumber: z.number().int().positive().optional().nullable(),
   customerId: z.number().int().positive(),
   customerSnapshot: OrderCustomerSnapshotSchema.optional().nullable(),
-  status: OrderStatusEnum.default('ABERTO'),
+  status: OrderStatusInputSchema.default('ABERTO'),
   fulfillmentMode: OrderFulfillmentModeEnum.default('DELIVERY'),
   subtotal: z.number().nonnegative().optional(),
   deliveryFee: z.number().nonnegative().optional(),
@@ -341,7 +670,7 @@ export const PixReconciliationWebhookSchema = z.object({
   payerName: z.string().trim().min(1).max(160),
   amount: z.number().positive(),
   paidAt: z.string().datetime({ offset: true }).optional().nullable(),
-  source: z.string().trim().min(1).max(80).default('bank-bridge'),
+  source: z.string().trim().min(1).max(80).default('bank-statement-import'),
   sourceTransactionId: z.string().trim().min(1).max(160).optional().nullable(),
   metadata: z.record(z.unknown()).optional()
 });
@@ -467,7 +796,8 @@ export const ExternalOrderScheduleAvailabilityReasonEnum = z.enum([
   'AVAILABLE',
   'BEFORE_MINIMUM',
   'SLOT_TAKEN',
-  'DAY_FULL'
+  'DAY_FULL',
+  'DAY_BLOCKED'
 ]);
 
 export const ExternalOrderDeliveryWindowKeyEnum = z.enum(['MORNING', 'AFTERNOON', 'EVENING']);
@@ -586,7 +916,7 @@ export const ExternalOrderSubmissionSchema = z
     if (flavorTotal <= 0 && itemTotal <= 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Informe ao menos 1 broa.',
+        message: 'Informe ao menos 1 item.',
         path: ['items']
       });
     }
@@ -714,6 +1044,13 @@ export const InventoryItemSchema = z.object({
   unit: z.string().min(1),
   purchasePackSize: z.number().nonnegative(),
   purchasePackCost: z.number().nonnegative().optional(),
+  leadTimeDays: z.number().int().nonnegative().optional().nullable(),
+  safetyStockQty: z.number().nonnegative().optional().nullable(),
+  reorderPointQty: z.number().nonnegative().optional().nullable(),
+  targetStockQty: z.number().nonnegative().optional().nullable(),
+  perishabilityDays: z.number().int().nonnegative().optional().nullable(),
+  criticality: InventoryCriticalityEnum.optional().nullable(),
+  preferredSupplier: z.string().max(160).optional().nullable(),
   createdAt: z.string().optional().nullable()
 });
 
@@ -745,6 +1082,8 @@ export const InventoryMovementSchema = z.object({
 
 export const InventoryOverviewItemSchema = InventoryItemSchema.extend({
   balance: z.number(),
+  sourceName: z.string().optional().nullable(),
+  sourceUrl: z.string().optional().nullable(),
   rawItemIds: z.array(z.number().int().positive()).default([])
 });
 
@@ -837,11 +1176,89 @@ export const ProductionRequirementWarningSchema = z.object({
   message: z.string()
 });
 
+export const ProductionMassReadySummarySchema = z.object({
+  requiredRecipes: z.number().nonnegative(),
+  requiredBroas: z.number().nonnegative(),
+  availableRecipes: z.number().nonnegative(),
+  availableBroas: z.number().nonnegative(),
+  missingRecipes: z.number().nonnegative(),
+  missingBroas: z.number().nonnegative(),
+  plannedPrepRecipes: z.number().nonnegative(),
+  plannedPrepBroas: z.number().nonnegative()
+});
+
 export const ProductionRequirementsResponseSchema = z.object({
   date: z.string(),
   basis: z.enum(['deliveryDate', 'createdAtPlus1']),
   rows: z.array(ProductionRequirementRowSchema),
-  warnings: z.array(ProductionRequirementWarningSchema)
+  warnings: z.array(ProductionRequirementWarningSchema),
+  massReady: ProductionMassReadySummarySchema
+});
+
+export const StockPlanningSummarySchema = z.object({
+  generatedAt: z.string(),
+  openOrdersCount: z.number().int().nonnegative(),
+  riskyOrdersCount: z.number().int().nonnegative(),
+  criticalOrdersCount: z.number().int().nonnegative(),
+  shortageItemsCount: z.number().int().nonnegative(),
+  purchaseSuggestionsCount: z.number().int().nonnegative(),
+  bomWarningsCount: z.number().int().nonnegative()
+});
+
+export const StockPlanningProductionActionSchema = z.object({
+  targetDate: z.string().nullable(),
+  requiredBroas: z.number().nonnegative(),
+  availableBroas: z.number().nonnegative(),
+  plannedPrepBroas: z.number().nonnegative(),
+  remainingBroasAfterPlan: z.number().nonnegative()
+});
+
+export const StockPlanningShortageItemSchema = z.object({
+  itemId: z.number().int().positive(),
+  name: z.string().min(1),
+  unit: z.string().min(1),
+  category: InventoryCategoryEnum,
+  level: InventoryRiskLevelEnum,
+  criticality: InventoryCriticalityEnum.optional().nullable(),
+  currentBalance: z.number(),
+  projectedBalance: z.number(),
+  totalRequiredQty: z.number().nonnegative(),
+  shortageQty: z.number().nonnegative(),
+  impactedOrdersCount: z.number().int().nonnegative(),
+  firstRiskDate: z.string().nullable(),
+  firstRiskOrderId: z.number().int().positive().nullable(),
+  firstRiskOrderPublicNumber: z.number().int().positive().nullable(),
+  reorderPointQty: z.number().nonnegative().nullable(),
+  targetStockQty: z.number().nonnegative().nullable(),
+  recommendedPurchaseQty: z.number().nonnegative(),
+  preferredSupplier: z.string().nullable()
+});
+
+export const StockPlanningPurchaseSuggestionSchema = StockPlanningShortageItemSchema.extend({
+  reason: z.enum(['SHORTAGE', 'REORDER_POINT'])
+});
+
+export const StockPlanningOrderRiskSchema = z.object({
+  orderId: z.number().int().positive(),
+  orderPublicNumber: z.number().int().positive().nullable(),
+  customerName: z.string().min(1),
+  status: OrderStatusEnum,
+  targetDate: z.string(),
+  scheduledAt: z.string().datetime().nullable(),
+  level: InventoryRiskLevelEnum,
+  shortageItemCount: z.number().int().nonnegative(),
+  belowReorderPointItemCount: z.number().int().nonnegative(),
+  bomWarningCount: z.number().int().nonnegative(),
+  highlightedItems: z.array(z.string()).default([])
+});
+
+export const StockPlanningResponseSchema = z.object({
+  summary: StockPlanningSummarySchema,
+  productionAction: StockPlanningProductionActionSchema,
+  shortageItems: z.array(StockPlanningShortageItemSchema),
+  purchaseSuggestions: z.array(StockPlanningPurchaseSuggestionSchema),
+  orderRisks: z.array(StockPlanningOrderRiskSchema),
+  bomWarnings: z.array(ProductionRequirementWarningSchema)
 });
 
 export * from './lib/phone.js';
@@ -891,13 +1308,13 @@ export const BuilderHomeSchema = z.object({
     .min(1)
     .max(500)
     .default(
-      'Redesenho completo com base em tons de goiabada, crosta assada, creme e verde menta: contraste premium, leitura rapida para operacao e identidade visual coerente com o universo artesanal da marca.'
+      'Redesenho completo com base em tons de goiabada, crosta assada, creme e verde-menta: contraste premium, leitura rápida para operação e identidade visual coerente com o universo artesanal da marca.'
     ),
   gallery: z
     .array(BuilderHomeImageSchema)
     .max(12)
     .default([
-      { id: 'hero-01', src: '/querobroa/hero-01.jpg', alt: 'Bandeja com broas e utensilios' },
+      { id: 'hero-01', src: '/querobroa/hero-01.jpg', alt: 'Bandeja com broas e utensílios' },
       { id: 'hero-02', src: '/querobroa/hero-02.jpg', alt: 'Selecao de broas e sabores' },
       {
         id: 'hero-03',
@@ -946,7 +1363,7 @@ export const BuilderLayoutsSchema = z.object({
     { id: 'load_error', label: 'Aviso de carga', kind: 'slot', visible: true, order: 1 },
     { id: 'kpis', label: 'KPIs de pedidos', kind: 'slot', visible: true, order: 2 },
     { id: 'list', label: 'Lista de pedidos', kind: 'slot', visible: true, order: 3 },
-    { id: 'new_order', label: 'Criacao de pedido', kind: 'slot', visible: true, order: 4 },
+    { id: 'new_order', label: 'Criação de pedido', kind: 'slot', visible: true, order: 4 },
     { id: 'detail', label: 'Detalhe do pedido', kind: 'slot', visible: true, order: 5 }
   ]),
   estoque: BuilderPageLayoutSchema.default([
@@ -1008,6 +1425,10 @@ export type Coupon = z.infer<typeof CouponSchema>;
 export type CouponUpsert = z.infer<typeof CouponUpsertSchema>;
 export type CouponResolveRequest = z.infer<typeof CouponResolveRequestSchema>;
 export type CouponResolveResponse = z.infer<typeof CouponResolveResponseSchema>;
+export type CouponAnalyticsCustomer = z.infer<typeof CouponAnalyticsCustomerSchema>;
+export type CouponAnalyticsOrder = z.infer<typeof CouponAnalyticsOrderSchema>;
+export type CouponAnalyticsSummary = z.infer<typeof CouponAnalyticsSummarySchema>;
+export type CouponAnalytics = z.infer<typeof CouponAnalyticsSchema>;
 
 export type Customer = z.infer<typeof CustomerSchema>;
 export type CustomerAddress = z.infer<typeof CustomerAddressSchema>;
@@ -1025,6 +1446,8 @@ export type OrderIntakeSource = z.infer<typeof OrderIntakeSourceSchema>;
 export type OrderIntake = z.infer<typeof OrderIntakeSchema>;
 export type OrderIntakeMeta = z.infer<typeof OrderIntakeMetaSchema>;
 export type InventoryCategory = z.infer<typeof InventoryCategoryEnum>;
+export type InventoryCriticality = z.infer<typeof InventoryCriticalityEnum>;
+export type InventoryRiskLevel = z.infer<typeof InventoryRiskLevelEnum>;
 export type InventoryItem = z.infer<typeof InventoryItemSchema>;
 export type InventoryPriceEntry = z.infer<typeof InventoryPriceEntrySchema>;
 export type InventoryMovement = z.infer<typeof InventoryMovementSchema>;
@@ -1039,6 +1462,12 @@ export type ProductionRequirementBreakdown = z.infer<typeof ProductionRequiremen
 export type ProductionRequirementRow = z.infer<typeof ProductionRequirementRowSchema>;
 export type ProductionRequirementWarning = z.infer<typeof ProductionRequirementWarningSchema>;
 export type ProductionRequirementsResponse = z.infer<typeof ProductionRequirementsResponseSchema>;
+export type StockPlanningSummary = z.infer<typeof StockPlanningSummarySchema>;
+export type StockPlanningProductionAction = z.infer<typeof StockPlanningProductionActionSchema>;
+export type StockPlanningShortageItem = z.infer<typeof StockPlanningShortageItemSchema>;
+export type StockPlanningPurchaseSuggestion = z.infer<typeof StockPlanningPurchaseSuggestionSchema>;
+export type StockPlanningOrderRisk = z.infer<typeof StockPlanningOrderRiskSchema>;
+export type StockPlanningResponse = z.infer<typeof StockPlanningResponseSchema>;
 export type BuilderTheme = z.infer<typeof BuilderThemeSchema>;
 export type BuilderForms = z.infer<typeof BuilderFormsSchema>;
 export type BuilderHomeImage = z.infer<typeof BuilderHomeImageSchema>;

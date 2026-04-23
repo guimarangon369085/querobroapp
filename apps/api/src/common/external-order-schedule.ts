@@ -50,11 +50,15 @@ export function externalOrderScheduleAvailabilityErrorMessage(availability: Exte
     : formatExternalOrderMinimumSchedule(nextDate);
 
   if (availability.reason === 'DAY_FULL') {
-    return `Esse dia ja atingiu ${availability.dailyLimit} pedidos agendados. Próxima faixa: ${nextLabel}.`;
+    return `Esse dia já atingiu ${availability.dailyLimit} pedidos agendados. Próxima faixa: ${nextLabel}.`;
+  }
+
+  if (availability.reason === 'DAY_BLOCKED') {
+    return `Essa faixa foi fechada para novos agendamentos. Próxima faixa: ${nextLabel}.`;
   }
 
   if (availability.reason === 'SLOT_TAKEN') {
-    return `Essa faixa nao comporta o tempo de forno necessario. Próxima faixa: ${nextLabel}.`;
+    return `Essa faixa não comporta o tempo de forno necessário. Próxima faixa: ${nextLabel}.`;
   }
 
   return `Próxima faixa: ${nextLabel}.`;

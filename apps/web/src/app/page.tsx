@@ -15,10 +15,23 @@ export function generateMetadata(): Metadata {
   const socialImageUrl = buildPublicAppUrl(homeSocialImagePath, {
     allowLocalFallback: process.env.NODE_ENV !== 'production'
   });
+  const homeIcon512 = '/querobroa-brand/icons/home-shortcut-stack-v2-512.png';
+  const homeIcon180 = '/querobroa-brand/icons/home-shortcut-stack-v2-180.png';
 
   return {
     title: pageTitle,
     description: pageDescription,
+    icons: {
+      icon: [{ url: homeIcon512, sizes: '512x512', type: 'image/png' }],
+      shortcut: homeIcon512,
+      apple: [
+        {
+          url: homeIcon180,
+          sizes: '180x180',
+          type: 'image/png'
+        }
+      ]
+    },
     alternates: canonicalUrl
       ? {
           canonical: canonicalUrl

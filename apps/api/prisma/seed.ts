@@ -47,7 +47,7 @@ type OrderSeedPayment = {
 type OrderSeed = {
   key: string;
   customerPhone: string;
-  status: 'ABERTO' | 'CONFIRMADO' | 'EM_PREPARACAO' | 'PRONTO' | 'ENTREGUE' | 'CANCELADO';
+  status: 'ABERTO' | 'PRONTO' | 'ENTREGUE' | 'CANCELADO';
   discount?: number;
   daysAgo?: number;
   items: OrderSeedItem[];
@@ -410,7 +410,7 @@ async function ensureSeedOrders(
     {
       key: '[seed] PED-001',
       customerPhone: '+55 11 98888-0000',
-      status: 'CONFIRMADO',
+      status: 'ABERTO',
       discount: 5,
       daysAgo: 1,
       items: [

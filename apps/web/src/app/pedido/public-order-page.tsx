@@ -3,33 +3,45 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   EXTERNAL_ORDER_DELIVERY_WINDOWS,
+  buildCompanionProductMakerLine,
+  resolveCompanionProductProfile,
   formatExternalOrderMinimumSchedule,
+  mergeOrderItemsSummaryIntoNotes,
   resolveExternalOrderDeliveryWindowKeyForDate,
   resolveExternalOrderMinimumSchedule,
+  stripCompanionProductProfileFromDrawerNote,
   type ExternalOrderDeliveryWindowKey,
   type ExternalOrderSubmission,
+  type OrderItemsSummaryNoteEntry,
   type CouponResolveResponse,
   type Product
 } from '@querobroapp/shared';
+import { AppIcon } from '@/components/app-icons';
 import { GoogleAddressAutocompleteInput } from '@/components/form/GoogleAddressAutocompleteInput';
 import { FormField } from '@/components/form/FormField';
 import { useFeedback } from '@/components/feedback-provider';
 import { resolveAnalyticsSessionId, trackAnalyticsEvent } from '@/lib/analytics';
-import { apiFetch } from '@/lib/api';
 import { normalizePhone } from '@/lib/format';
+import { useDialogA11y } from '@/lib/use-dialog-a11y';
 import { OrderCardArtwork } from '@/features/orders/order-card-artwork';
+import { extractStreetNumberFromAddressLine1 } from '@/lib/customer-autofill';
 import {
   ORDER_BOX_PRICE_CUSTOM,
+  ORDER_SABORES_REFERENCE_IMAGE,
   ORDER_BOX_UNITS,
   ORDER_CUSTOM_BOX_CATALOG_CODE,
   buildRuntimeOrderCatalog,
+  calculateCouponEligibleSubtotalFromProductItems,
   calculateOrderSubtotalFromProductItems,
   formatOrderProductComposition,
+  resolveOrderCardArt,
   resolveOrderSaboresCardArt,
   type OrderCardArt,
+  type RuntimeOrderBoxEntry,
   parseMetaCheckoutProductsParam,
   resolveOrderCatalogPrefillCodeFromCatalogContentId,
   resolveRuntimeOrderBoxKey,
+  resolveRuntimeOrderCompanionProductId,
   resolveRuntimeOrderFlavorProductId
 } from '@/features/orders/order-box-catalog';
 import {
@@ -44,38 +56,76 @@ import {
 import { writeStoredOrderFinalized } from '@/lib/order-finalized-storage';
 
 const GOOGLE_MAPS_API_KEY = (process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '').trim();
+const DELIVERY_QUOTE_REQUEST_TIMEOUT_MS = 12_000;
+const DELIVERY_QUOTE_CONFIRMATION_GUARD_MS = 1_200;
+const ORDER_META_COMPANION_CONTENT_ID_PREFIX = 'QUEROBROA-AMIGA-';
 
-type SelectedBoxSummary = {
+type SelectedOrderSummary = {
   key: string;
   label: string;
+  displayLabel?: string;
   quantity: number;
   quantityLabel: string;
   detail?: string | null;
+  displayDetail?: string | null;
 };
 type CustomBoxDraft = {
   id: string;
   flavors: Record<string, number>;
 };
 
+function buildOrderItemsSummaryEntries(selectedProducts: SelectedOrderSummary[]): OrderItemsSummaryNoteEntry[] {
+  return selectedProducts.flatMap((entry) => {
+    const normalizedLabel = String(entry.displayLabel || entry.label || '').trim();
+    const normalizedDetail = String(entry.detail || entry.displayDetail || '').trim();
+    if (!normalizedLabel) return [];
+
+    const looksLikeBox =
+      normalizedLabel.toLowerCase().includes('caixa') || normalizedLabel.toLowerCase().includes('monte sua caixa');
+    if (looksLikeBox) {
+      return Array.from({ length: Math.max(Math.floor(entry.quantity || 0), 0) }, () => ({
+        label: normalizedLabel,
+        detail: normalizedDetail || null
+      }));
+    }
+
+    const quantityLabel = String(entry.quantityLabel || '').trim();
+    return [
+      {
+        label: quantityLabel ? `${normalizedLabel} (${quantityLabel})` : normalizedLabel,
+        detail: normalizedDetail || null
+      }
+    ];
+  });
+}
+
 type PublicOrderFormState = {
   name: string;
   phone: string;
   fulfillmentMode: 'DELIVERY' | 'PICKUP';
   address: string;
+  addressLine1: string;
+  addressLine2: string;
+  neighborhood: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: string;
   placeId: string;
   lat: number | null;
   lng: number | null;
-  deliveryNotes: string;
   date: string;
   timeWindow: ExternalOrderDeliveryWindowKey | '';
   notes: string;
   boxes: Record<string, string>;
+  companions: Record<string, string>;
 };
 
 type StoredPublicOrderSnapshot = {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   savedAt: string;
   boxes: Record<string, string>;
+  companions: Record<string, string>;
   customBoxes: Array<Record<string, number>>;
   notes: string;
 };
@@ -94,6 +144,11 @@ type DeliveryQuote = {
 
 type AppliedCoupon = CouponResolveResponse;
 
+type PublicOrderPageProps = {
+  initialCatalogProducts?: Product[];
+  showCompanionProducts?: boolean;
+};
+
 type PublicOrderScheduleAvailability = {
   minimumAllowedAt: string;
   nextAvailableAt: string;
@@ -101,12 +156,12 @@ type PublicOrderScheduleAvailability = {
   requestedWindowKey: ExternalOrderDeliveryWindowKey | null;
   requestedWindowLabel: string | null;
   requestedWindowAvailable: boolean;
-  requestedWindowReason: 'AVAILABLE' | 'BEFORE_MINIMUM' | 'SLOT_TAKEN' | 'DAY_FULL' | null;
+  requestedWindowReason: 'AVAILABLE' | 'BEFORE_MINIMUM' | 'SLOT_TAKEN' | 'DAY_FULL' | 'DAY_BLOCKED' | null;
   requestedWindowScheduledAt: string | null;
   requestedWindowNextAvailableAt: string | null;
   requestedAt: string | null;
   requestedAvailable: boolean;
-  reason: 'AVAILABLE' | 'BEFORE_MINIMUM' | 'SLOT_TAKEN' | 'DAY_FULL';
+  reason: 'AVAILABLE' | 'BEFORE_MINIMUM' | 'SLOT_TAKEN' | 'DAY_FULL' | 'DAY_BLOCKED';
   dailyLimit: number;
   requestedTotalBroas: number;
   requestedDurationMinutes: number;
@@ -120,7 +175,7 @@ type PublicOrderScheduleAvailability = {
     endLabel: string;
     available: boolean;
     scheduledAt: string | null;
-    reason: 'AVAILABLE' | 'BEFORE_MINIMUM' | 'SLOT_TAKEN' | 'DAY_FULL';
+    reason: 'AVAILABLE' | 'BEFORE_MINIMUM' | 'SLOT_TAKEN' | 'DAY_FULL' | 'DAY_BLOCKED';
   }>;
 };
 
@@ -129,14 +184,21 @@ const initialFormState: PublicOrderFormState = {
   phone: '',
   fulfillmentMode: 'DELIVERY',
   address: '',
+  addressLine1: '',
+  addressLine2: '',
+  neighborhood: '',
+  city: '',
+  state: '',
+  postalCode: '',
+  country: '',
   placeId: '',
   lat: null,
   lng: null,
-  deliveryNotes: '',
   date: '',
   timeWindow: '',
   notes: '',
-  boxes: {}
+  boxes: {},
+  companions: {}
 };
 
 function sanitizeStoredBoxCounts(value: unknown) {
@@ -188,6 +250,21 @@ function buildPrefilledBoxCountsFromSearchParams(source: { get(name: string): st
   };
 }
 
+function resolvePrefilledCompanionProductIdFromSearchParams(source: { get(name: string): string | null }) {
+  const rawValue = String(source.get('companion') || '').trim();
+  if (!rawValue) return null;
+
+  const normalizedValue = rawValue.toUpperCase();
+  const candidate = normalizedValue.startsWith(ORDER_META_COMPANION_CONTENT_ID_PREFIX)
+    ? normalizedValue.slice(ORDER_META_COMPANION_CONTENT_ID_PREFIX.length)
+    : normalizedValue.startsWith('COMPANION:')
+      ? normalizedValue.slice('COMPANION:'.length)
+      : rawValue;
+
+  const numericId = Number.parseInt(candidate, 10);
+  return Number.isInteger(numericId) && numericId > 0 ? numericId : null;
+}
+
 function normalizeCouponCodeInput(value?: string | null) {
   return String(value || '')
     .replace(/\s+/g, ' ')
@@ -221,9 +298,37 @@ function buildPublicOrderScheduleErrorMessage(minimum: Date) {
   return windowLabel ? `Próxima faixa: ${windowLabel}.` : `Próxima faixa: ${formatExternalOrderMinimumSchedule(minimum)}.`;
 }
 
+function validateRecognizedDeliveryAddress(
+  form: Pick<
+    PublicOrderFormState,
+    'fulfillmentMode' | 'address' | 'addressLine1' | 'addressLine2' | 'neighborhood' | 'placeId'
+  >
+) {
+  if (form.fulfillmentMode !== 'DELIVERY') return null;
+  if (!form.address.trim()) {
+    return 'Informe o endereço para entrega.';
+  }
+  if (!form.placeId.trim()) {
+    return 'Selecione um endereço reconhecido pelo Google Maps.';
+  }
+  if (!form.addressLine1.trim()) {
+    return 'Selecione um endereço com rua e número.';
+  }
+  if (!extractStreetNumberFromAddressLine1(form.addressLine1)) {
+    return 'O endereço precisa incluir o número da rua.';
+  }
+  if (!form.neighborhood.trim()) {
+    return 'O endereço precisa incluir o bairro.';
+  }
+  if (!form.addressLine2.trim()) {
+    return 'Informe o complemento do endereço.';
+  }
+  return null;
+}
+
 function extractErrorMessage(body: unknown) {
   if (typeof body === 'string') return body;
-  if (!body || typeof body !== 'object') return 'Nao foi possivel enviar o pedido.';
+  if (!body || typeof body !== 'object') return 'Não foi possível enviar o pedido.';
 
   const record = body as Record<string, unknown>;
   const issues = record.issues && typeof record.issues === 'object' ? (record.issues as Record<string, unknown>) : null;
@@ -245,7 +350,7 @@ function extractErrorMessage(body: unknown) {
 
   if (typeof record.message === 'string') return record.message;
   if (Array.isArray(record.message)) return record.message.map((entry) => String(entry)).join('; ');
-  return 'Nao foi possivel enviar o pedido.';
+  return 'Não foi possível enviar o pedido.';
 }
 
 function isPublicOrderScheduleAvailability(value: unknown): value is PublicOrderScheduleAvailability {
@@ -318,6 +423,29 @@ function pluralize(count: number, singular: string, plural: string) {
   return count === 1 ? singular : plural;
 }
 
+function extractCompanionProductMeasureLabel(
+  product?: Pick<Product, 'measureLabel' | 'name' | 'unit'> | null,
+) {
+  const explicitMeasureLabel = String(product?.measureLabel || '').trim().toLowerCase();
+  if (explicitMeasureLabel) return explicitMeasureLabel;
+
+  const normalizedName = String(product?.name || '').trim();
+  if (normalizedName) {
+    const measureMatch =
+      normalizedName.match(/\(([^()]*\d+(?:[.,]\d+)?\s?(?:g|kg|mg|ml|l))\)/i) ||
+      normalizedName.match(/\b(\d+(?:[.,]\d+)?\s?(?:g|kg|mg|ml|l))\b/i);
+    if (measureMatch) {
+      return measureMatch[1].replace(/\s+/g, '').toLowerCase();
+    }
+  }
+
+  const unitLabel = String(product?.unit || '').trim().toLowerCase();
+  if (!unitLabel || unitLabel === 'un' || unitLabel === 'und' || unitLabel === 'unidade') {
+    return null;
+  }
+  return unitLabel;
+}
+
 function formatCustomBoxParts(
   counts: Record<string, number>,
   flavorProducts: Array<{ id: number; label: string }>
@@ -329,10 +457,45 @@ function formatCustomBoxParts(
     .join(' • ');
 }
 
+function resolveCompanionDrawerNote(product?: Pick<Product, 'drawerNote'> | null) {
+  const customNote = stripCompanionProductProfileFromDrawerNote(product?.drawerNote) || '';
+  return customNote.trim() || 'Toque fora da gaveta ou no botão fechar para voltar ao catálogo.';
+}
+
+function resolveCompanionProductPublicLines(
+  product?: Pick<Product, 'name' | 'drawerNote' | 'measureLabel' | 'unit'> | null,
+) {
+  const profile = resolveCompanionProductProfile(product);
+  const measureLabel = extractCompanionProductMeasureLabel(product);
+  const subtitleLine = [profile?.flavor ?? null, measureLabel].filter(Boolean).join(' • ') || null;
+  return {
+    title: profile?.title || String(product?.name || '').trim(),
+    subtitleLine,
+    makerLine: buildCompanionProductMakerLine(profile),
+    measureLabel
+  };
+}
+
+function splitCompanionCardTitle(title: string) {
+  const normalizedTitle = String(title || '').trim();
+  const parentheticalMatch = normalizedTitle.match(/^(.*?)(\s*\([^()]+\))$/);
+  if (!parentheticalMatch) {
+    return {
+      primary: normalizedTitle,
+      secondary: null as string | null
+    };
+  }
+
+  return {
+    primary: parentheticalMatch[1].trim(),
+    secondary: parentheticalMatch[2].trim()
+  };
+}
+
 function PublicOrderSaboresCollage({ art }: { art: OrderCardArt }) {
   return (
     <div className="relative aspect-[16/10] overflow-hidden rounded-[18px] bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.92),transparent_34%),linear-gradient(155deg,rgba(248,239,230,0.98),rgba(238,222,202,0.92))] xl:aspect-[21/10]">
-      <span className="sr-only">Composicao da Monte Sua Caixa com os sabores ativos do catalogo.</span>
+      <span className="sr-only">Composição da Monte Sua Caixa com os sabores ativos do catálogo.</span>
       <div className="absolute inset-[10px] sm:inset-4" aria-hidden="true">
         <OrderCardArtwork
           alt="Composicao da Monte Sua Caixa"
@@ -350,32 +513,108 @@ function PublicOrderSaboresCollage({ art }: { art: OrderCardArt }) {
   );
 }
 
-export function PublicOrderPage() {
+function resolveMixedBoxesCollectionArt(
+  mixedEntries: RuntimeOrderBoxEntry[],
+  runtimeCatalog: ReturnType<typeof buildRuntimeOrderCatalog>
+): OrderCardArt {
+  const traditionalFlavor = runtimeCatalog.traditionalFlavor;
+  if (!traditionalFlavor || mixedEntries.length === 0) {
+    return {
+      mode: 'single',
+      src: ORDER_SABORES_REFERENCE_IMAGE,
+      objectPosition: 'center center'
+    };
+  }
+
+  const traditionalArt = resolveOrderCardArt(traditionalFlavor);
+  const traditionalColumn =
+    traditionalArt.mode === 'single'
+      ? {
+          src: traditionalArt.src,
+          objectPosition: traditionalArt.objectPosition,
+          span: mixedEntries.length
+        }
+      : {
+          src: ORDER_SABORES_REFERENCE_IMAGE,
+          span: mixedEntries.length
+        };
+
+  return {
+    mode: 'weighted-columns',
+    columns: [
+      traditionalColumn,
+      ...mixedEntries.map((entry) => {
+        const pairedFlavor = runtimeCatalog.flavorProductById.get(entry.productId);
+        const pairedArt = resolveOrderCardArt(pairedFlavor);
+        return pairedArt.mode === 'single'
+          ? {
+              src: pairedArt.src,
+              objectPosition: pairedArt.objectPosition,
+              span: 1
+            }
+          : {
+              src: ORDER_SABORES_REFERENCE_IMAGE,
+              span: 1
+            };
+      })
+    ]
+  };
+}
+
+export function PublicOrderPage({
+  initialCatalogProducts = [],
+  showCompanionProducts = false
+}: PublicOrderPageProps) {
   const router = useRouter();
   const { notifyError } = useFeedback();
-  const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
+  const [catalogProducts, setCatalogProducts] = useState<Product[]>(() =>
+    Array.isArray(initialCatalogProducts) ? initialCatalogProducts : []
+  );
   const [form, setForm] = useState<PublicOrderFormState>(initialFormState);
   const [customBoxes, setCustomBoxes] = useState<CustomBoxDraft[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deliveryQuote, setDeliveryQuote] = useState<DeliveryQuote | null>(null);
+  const [deliveryQuoteFingerprint, setDeliveryQuoteFingerprint] = useState<string | null>(null);
   const [deliveryQuoteError, setDeliveryQuoteError] = useState<string | null>(null);
   const [isQuotingDelivery, setIsQuotingDelivery] = useState(false);
+  const [isDeliveryQuoteConfirmationPending, setIsDeliveryQuoteConfirmationPending] = useState(false);
+  const [expandedCompanionProductKey, setExpandedCompanionProductKey] = useState<string | null>(null);
   const [couponInput, setCouponInput] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null);
   const [couponError, setCouponError] = useState<string | null>(null);
   const [isResolvingCoupon, setIsResolvingCoupon] = useState(false);
   const [pendingPrefilledCouponCode, setPendingPrefilledCouponCode] = useState<string | null>(null);
+  const [isMixedBoxesDrawerOpen, setIsMixedBoxesDrawerOpen] = useState(false);
   const addressInputRef = useRef<HTMLInputElement | null>(null);
   const orderFormRef = useRef<HTMLFormElement | null>(null);
   const urlPrefillSignatureRef = useRef<string | null>(null);
-  const deliveryAddressDraftRef = useRef<Pick<PublicOrderFormState, 'address' | 'placeId' | 'lat' | 'lng'>>({
+  const companionPrefillSignatureRef = useRef<string | null>(null);
+  const deliveryAddressDraftRef = useRef<
+    Pick<
+      PublicOrderFormState,
+      'address' | 'addressLine1' | 'neighborhood' | 'city' | 'state' | 'postalCode' | 'country' | 'placeId' | 'lat' | 'lng'
+    >
+  >({
     address: '',
+    addressLine1: '',
+    neighborhood: '',
+    city: '',
+    state: '',
+    postalCode: '',
+    country: '',
     placeId: '',
     lat: null,
     lng: null
   });
   const scheduleSyncRequestIdRef = useRef(0);
+  const deliveryQuoteRequestIdRef = useRef(0);
+  const deliveryQuoteAbortControllerRef = useRef<AbortController | null>(null);
+  const deliveryQuoteConfirmationTimeoutRef = useRef<number | null>(null);
+  const companionPreviewDialogRef = useRef<HTMLDivElement | null>(null);
+  const companionPreviewCloseRef = useRef<HTMLButtonElement | null>(null);
+  const mixedBoxesDrawerDialogRef = useRef<HTMLDivElement | null>(null);
+  const mixedBoxesDrawerCloseRef = useRef<HTMLButtonElement | null>(null);
   const [minimumSchedule, setMinimumSchedule] = useState<Date | null>(null);
   const [scheduleAvailability, setScheduleAvailability] = useState<PublicOrderScheduleAvailability | null>(null);
   const [draftSessionId, setDraftSessionId] = useState(() => resolvePublicOrderDraftSessionId());
@@ -383,7 +622,27 @@ export function PublicOrderPage() {
   const isPickupSelected = form.fulfillmentMode === 'PICKUP';
   const runtimeOrderCatalog = useMemo(() => buildRuntimeOrderCatalog(catalogProducts), [catalogProducts]);
   const runtimeBoxEntries = runtimeOrderCatalog.boxEntries;
+  const singleBoxEntries = useMemo(
+    () => runtimeBoxEntries.filter((entry) => entry.kind === 'SINGLE'),
+    [runtimeBoxEntries]
+  );
+  const mixedBoxEntries = useMemo(
+    () => runtimeBoxEntries.filter((entry) => entry.kind === 'MIXED'),
+    [runtimeBoxEntries]
+  );
   const flavorProducts = runtimeOrderCatalog.flavorProducts;
+  const companionProducts = useMemo(
+    () => (showCompanionProducts ? runtimeOrderCatalog.companionProducts : []),
+    [runtimeOrderCatalog.companionProducts, showCompanionProducts]
+  );
+  const expandedCompanionProduct = useMemo(
+    () => companionProducts.find((product) => product.key === expandedCompanionProductKey) ?? null,
+    [companionProducts, expandedCompanionProductKey]
+  );
+  const expandedCompanionProductLines = useMemo(
+    () => resolveCompanionProductPublicLines(expandedCompanionProduct),
+    [expandedCompanionProduct]
+  );
   const productMapById = useMemo(
     () =>
       new Map(
@@ -394,20 +653,76 @@ export function PublicOrderPage() {
     [catalogProducts]
   );
   const saboresCardArt = useMemo(() => resolveOrderSaboresCardArt(catalogProducts), [catalogProducts]);
+  const mixedBoxesCardArt = useMemo(
+    () => resolveMixedBoxesCollectionArt(mixedBoxEntries, runtimeOrderCatalog),
+    [mixedBoxEntries, runtimeOrderCatalog]
+  );
+  const mixedBoxStartingPrice = useMemo(
+    () =>
+      mixedBoxEntries.reduce<number | null>((lowest, entry) => {
+        if (!Number.isFinite(entry.priceEstimate)) return lowest;
+        if (lowest == null) return entry.priceEstimate;
+        return Math.min(lowest, entry.priceEstimate);
+      }, null),
+    [mixedBoxEntries]
+  );
+  const cancelPendingDeliveryQuote = useCallback(() => {
+    deliveryQuoteRequestIdRef.current += 1;
+    deliveryQuoteAbortControllerRef.current?.abort();
+    deliveryQuoteAbortControllerRef.current = null;
+  }, []);
+  const clearDeliveryQuoteConfirmationGuard = useCallback(() => {
+    if (deliveryQuoteConfirmationTimeoutRef.current != null) {
+      window.clearTimeout(deliveryQuoteConfirmationTimeoutRef.current);
+      deliveryQuoteConfirmationTimeoutRef.current = null;
+    }
+    setIsDeliveryQuoteConfirmationPending(false);
+  }, []);
+  const armDeliveryQuoteConfirmationGuard = useCallback(() => {
+    clearDeliveryQuoteConfirmationGuard();
+    setIsDeliveryQuoteConfirmationPending(true);
+    deliveryQuoteConfirmationTimeoutRef.current = window.setTimeout(() => {
+      deliveryQuoteConfirmationTimeoutRef.current = null;
+      setIsDeliveryQuoteConfirmationPending(false);
+    }, DELIVERY_QUOTE_CONFIRMATION_GUARD_MS);
+  }, [clearDeliveryQuoteConfirmationGuard]);
+  const closeCompanionPreview = useCallback(() => {
+    setExpandedCompanionProductKey(null);
+  }, []);
+  const closeMixedBoxesDrawer = useCallback(() => {
+    setIsMixedBoxesDrawerOpen(false);
+  }, []);
+
+  useDialogA11y({
+    isOpen: Boolean(expandedCompanionProduct),
+    dialogRef: companionPreviewDialogRef,
+    onClose: closeCompanionPreview,
+    initialFocusRef: companionPreviewCloseRef
+  });
+  useDialogA11y({
+    isOpen: isMixedBoxesDrawerOpen,
+    dialogRef: mixedBoxesDrawerDialogRef,
+    onClose: closeMixedBoxesDrawer,
+    initialFocusRef: mixedBoxesDrawerCloseRef
+  });
 
   useEffect(() => {
     let cancelled = false;
 
-    void apiFetch<Product[]>('/inventory-products')
+    void fetch('/api/order-catalog', { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Falha ao carregar o catálogo público (${response.status}).`);
+        }
+        return response.json() as Promise<Product[]>;
+      })
       .then((products) => {
         if (!cancelled) {
           setCatalogProducts(Array.isArray(products) ? products : []);
         }
       })
       .catch(() => {
-        if (!cancelled) {
-          setCatalogProducts([]);
-        }
+        // Preserva o catálogo já resolvido no SSR quando o refresh do cliente falha.
       });
 
     return () => {
@@ -421,10 +736,28 @@ export function PublicOrderPage() {
   }, [draftSessionId]);
 
   useEffect(() => {
+    if (!expandedCompanionProductKey) return;
+    if (companionProducts.some((product) => product.key === expandedCompanionProductKey)) return;
+    setExpandedCompanionProductKey(null);
+  }, [companionProducts, expandedCompanionProductKey]);
+
+  useEffect(() => {
+    if (!isMixedBoxesDrawerOpen) return;
+    if (mixedBoxEntries.length > 0) return;
+    setIsMixedBoxesDrawerOpen(false);
+  }, [isMixedBoxesDrawerOpen, mixedBoxEntries.length]);
+
+  useEffect(() => {
     const storedProfile = readStoredPublicOrderProfile();
     if (storedProfile) {
       deliveryAddressDraftRef.current = {
         address: storedProfile.fulfillmentMode === 'DELIVERY' ? storedProfile.address : '',
+        addressLine1: storedProfile.fulfillmentMode === 'DELIVERY' ? storedProfile.addressLine1 : '',
+        neighborhood: storedProfile.fulfillmentMode === 'DELIVERY' ? storedProfile.neighborhood : '',
+        city: storedProfile.fulfillmentMode === 'DELIVERY' ? storedProfile.city : '',
+        state: storedProfile.fulfillmentMode === 'DELIVERY' ? storedProfile.state : '',
+        postalCode: storedProfile.fulfillmentMode === 'DELIVERY' ? storedProfile.postalCode : '',
+        country: storedProfile.fulfillmentMode === 'DELIVERY' ? storedProfile.country : '',
         placeId: storedProfile.fulfillmentMode === 'DELIVERY' ? storedProfile.placeId : '',
         lat: storedProfile.fulfillmentMode === 'DELIVERY' ? storedProfile.lat : null,
         lng: storedProfile.fulfillmentMode === 'DELIVERY' ? storedProfile.lng : null
@@ -435,10 +768,16 @@ export function PublicOrderPage() {
         phone: storedProfile.phone || current.phone,
         fulfillmentMode: storedProfile.fulfillmentMode,
         address: storedProfile.address || current.address,
+        addressLine1: storedProfile.addressLine1 || current.addressLine1,
+        addressLine2: storedProfile.addressLine2 || current.addressLine2,
+        neighborhood: storedProfile.neighborhood || current.neighborhood,
+        city: storedProfile.city || current.city,
+        state: storedProfile.state || current.state,
+        postalCode: storedProfile.postalCode || current.postalCode,
+        country: storedProfile.country || current.country,
         placeId: storedProfile.placeId,
         lat: storedProfile.lat,
-        lng: storedProfile.lng,
-        deliveryNotes: storedProfile.deliveryNotes || current.deliveryNotes
+        lng: storedProfile.lng
       }));
     }
   }, []);
@@ -456,6 +795,7 @@ export function PublicOrderPage() {
     setCustomBoxes(Array.from({ length: prefill.customBoxCount }, () => createEmptyCustomBoxDraft()));
     setError(null);
     setDeliveryQuote(null);
+    setDeliveryQuoteFingerprint(null);
     setDeliveryQuoteError(null);
     setCouponError(null);
     setAppliedCoupon(null);
@@ -463,28 +803,54 @@ export function PublicOrderPage() {
     setPendingPrefilledCouponCode(prefill.couponCode || null);
     setForm((current) => ({
       ...current,
-      boxes: prefill.boxes
+      boxes: prefill.boxes,
+      companions: {}
     }));
   }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const rawCompanionValue = String(searchParams.get('companion') || '').trim();
+    const companionProductId = resolvePrefilledCompanionProductIdFromSearchParams(searchParams);
+    if (!rawCompanionValue || companionProductId == null) return;
+
+    const matchedCompanionProduct =
+      companionProducts.find((product) => product.id === companionProductId) ?? null;
+    if (!matchedCompanionProduct) return;
+
+    const signature = `companion=${rawCompanionValue}`;
+    if (companionPrefillSignatureRef.current === signature) return;
+
+    companionPrefillSignatureRef.current = signature;
+    setExpandedCompanionProductKey(matchedCompanionProduct.key);
+  }, [companionProducts]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
     const normalizedProfile: StoredPublicOrderProfile = {
-      version: 1,
+      version: 3,
       name: form.name.trim(),
       phone: form.phone.trim(),
       fulfillmentMode: form.fulfillmentMode,
       address: form.fulfillmentMode === 'PICKUP' ? PUBLIC_ORDER_PICKUP_ADDRESS : form.address.trim(),
+      addressLine1: form.fulfillmentMode === 'DELIVERY' ? form.addressLine1.trim() : '',
+      addressLine2: form.fulfillmentMode === 'DELIVERY' ? form.addressLine2.trim() : '',
+      neighborhood: form.fulfillmentMode === 'DELIVERY' ? form.neighborhood.trim() : '',
+      city: form.fulfillmentMode === 'DELIVERY' ? form.city.trim() : '',
+      state: form.fulfillmentMode === 'DELIVERY' ? form.state.trim() : '',
+      postalCode: form.fulfillmentMode === 'DELIVERY' ? form.postalCode.trim() : '',
+      country: form.fulfillmentMode === 'DELIVERY' ? form.country.trim() : '',
       placeId: form.fulfillmentMode === 'DELIVERY' ? form.placeId.trim() : '',
       lat: form.fulfillmentMode === 'DELIVERY' && typeof form.lat === 'number' ? form.lat : null,
-      lng: form.fulfillmentMode === 'DELIVERY' && typeof form.lng === 'number' ? form.lng : null,
-      deliveryNotes: form.deliveryNotes.trim()
+      lng: form.fulfillmentMode === 'DELIVERY' && typeof form.lng === 'number' ? form.lng : null
     };
     const hasMeaningfulProfile =
       normalizedProfile.name ||
       normalizedProfile.phone ||
       normalizedProfile.address ||
-      normalizedProfile.deliveryNotes;
+      normalizedProfile.addressLine2;
     if (!hasMeaningfulProfile) {
       window.localStorage.removeItem(PUBLIC_ORDER_PROFILE_STORAGE_KEY);
       return;
@@ -492,19 +858,38 @@ export function PublicOrderPage() {
     window.localStorage.setItem(PUBLIC_ORDER_PROFILE_STORAGE_KEY, JSON.stringify(normalizedProfile));
   }, [
     form.address,
-    form.deliveryNotes,
+    form.addressLine1,
+    form.addressLine2,
     form.fulfillmentMode,
     form.lat,
     form.lng,
     form.name,
+    form.neighborhood,
     form.phone,
+    form.city,
+    form.state,
+    form.postalCode,
+    form.country,
     form.placeId
   ]);
 
   const rememberDeliveryLocation = useCallback(
-    (patch: Partial<Pick<PublicOrderFormState, 'address' | 'placeId' | 'lat' | 'lng'>>) => {
+    (
+      patch: Partial<
+        Pick<
+          PublicOrderFormState,
+          'address' | 'addressLine1' | 'neighborhood' | 'city' | 'state' | 'postalCode' | 'country' | 'placeId' | 'lat' | 'lng'
+        >
+      >
+    ) => {
       deliveryAddressDraftRef.current = {
         address: patch.address ?? deliveryAddressDraftRef.current.address,
+        addressLine1: patch.addressLine1 ?? deliveryAddressDraftRef.current.addressLine1,
+        neighborhood: patch.neighborhood ?? deliveryAddressDraftRef.current.neighborhood,
+        city: patch.city ?? deliveryAddressDraftRef.current.city,
+        state: patch.state ?? deliveryAddressDraftRef.current.state,
+        postalCode: patch.postalCode ?? deliveryAddressDraftRef.current.postalCode,
+        country: patch.country ?? deliveryAddressDraftRef.current.country,
         placeId: patch.placeId ?? deliveryAddressDraftRef.current.placeId,
         lat: Object.prototype.hasOwnProperty.call(patch, 'lat') ? patch.lat ?? null : deliveryAddressDraftRef.current.lat,
         lng: Object.prototype.hasOwnProperty.call(patch, 'lng') ? patch.lng ?? null : deliveryAddressDraftRef.current.lng
@@ -521,6 +906,12 @@ export function PublicOrderPage() {
         if (current.fulfillmentMode === 'DELIVERY') {
           deliveryAddressDraftRef.current = {
             address: current.address,
+            addressLine1: current.addressLine1,
+            neighborhood: current.neighborhood,
+            city: current.city,
+            state: current.state,
+            postalCode: current.postalCode,
+            country: current.country,
             placeId: current.placeId,
             lat: current.lat,
             lng: current.lng
@@ -531,7 +922,13 @@ export function PublicOrderPage() {
           ...current,
           fulfillmentMode: 'PICKUP',
           address: PUBLIC_ORDER_PICKUP_ADDRESS,
+          addressLine1: '',
           placeId: '',
+          neighborhood: '',
+          city: '',
+          state: '',
+          postalCode: '',
+          country: '',
           lat: null,
           lng: null
         };
@@ -541,6 +938,12 @@ export function PublicOrderPage() {
         ...current,
         fulfillmentMode: 'DELIVERY',
         address: deliveryAddressDraftRef.current.address,
+        addressLine1: deliveryAddressDraftRef.current.addressLine1,
+        neighborhood: deliveryAddressDraftRef.current.neighborhood,
+        city: deliveryAddressDraftRef.current.city,
+        state: deliveryAddressDraftRef.current.state,
+        postalCode: deliveryAddressDraftRef.current.postalCode,
+        country: deliveryAddressDraftRef.current.country,
         placeId: deliveryAddressDraftRef.current.placeId,
         lat: deliveryAddressDraftRef.current.lat,
         lng: deliveryAddressDraftRef.current.lng
@@ -563,10 +966,48 @@ export function PublicOrderPage() {
 
     return normalized;
   }, [form.boxes, runtimeBoxEntries, runtimeOrderCatalog]);
+  const parsedCompanionCounts = useMemo(() => {
+    const normalized = Object.fromEntries(
+      companionProducts.map((product) => [product.key, 0] as const)
+    ) as Record<string, number>;
+
+    for (const [rawKey, rawValue] of Object.entries(form.companions)) {
+      const productId = resolveRuntimeOrderCompanionProductId(rawKey, runtimeOrderCatalog);
+      if (!productId) continue;
+      const product = runtimeOrderCatalog.companionProductById.get(productId);
+      if (!product) continue;
+      const quantity = parseCountValue(String(rawValue));
+      if (quantity <= 0) continue;
+      normalized[product.key] = (normalized[product.key] || 0) + quantity;
+    }
+
+    return normalized;
+  }, [companionProducts, form.companions, runtimeOrderCatalog]);
+  const expandedCompanionQuantity = expandedCompanionProduct
+    ? parsedCompanionCounts[expandedCompanionProduct.key] || 0
+    : 0;
 
   const officialBoxCount = useMemo(
     () => Object.values(parsedBoxCounts).reduce((sum, quantity) => sum + quantity, 0),
     [parsedBoxCounts]
+  );
+  const totalCompanionItems = useMemo(
+    () => Object.values(parsedCompanionCounts).reduce((sum, quantity) => sum + quantity, 0),
+    [parsedCompanionCounts]
+  );
+  const activeMixedBoxSelections = useMemo(
+    () =>
+      mixedBoxEntries
+        .map((entry) => ({
+          entry,
+          quantity: parsedBoxCounts[entry.key] || 0
+        }))
+        .filter((entry) => entry.quantity > 0),
+    [mixedBoxEntries, parsedBoxCounts]
+  );
+  const totalMixedBoxes = useMemo(
+    () => activeMixedBoxSelections.reduce((sum, entry) => sum + entry.quantity, 0),
+    [activeMixedBoxSelections]
   );
 
   const customBoxSummaries = useMemo(
@@ -607,7 +1048,7 @@ export function PublicOrderPage() {
     () => officialBoxCount + activeCustomBoxes.length,
     [activeCustomBoxes.length, officialBoxCount]
   );
-  const computedOrderItems = useMemo(() => {
+  const broaOrderItems = useMemo(() => {
     const quantityByProductId = new Map<number, number>();
 
     for (const [boxKey, boxCount] of Object.entries(parsedBoxCounts)) {
@@ -638,12 +1079,44 @@ export function PublicOrderPage() {
       quantity
     }));
   }, [activeCustomBoxes, parsedBoxCounts, runtimeOrderCatalog.boxEntryByKey]);
+  const companionOrderItems = useMemo(
+    () =>
+      companionProducts
+        .map((product) => ({
+          productId: product.id,
+          quantity: parsedCompanionCounts[product.key] || 0
+        }))
+        .filter((item) => item.quantity > 0),
+    [companionProducts, parsedCompanionCounts]
+  );
+  const computedOrderItems = useMemo(() => {
+    const quantityByProductId = new Map<number, number>();
+
+    for (const item of [...broaOrderItems, ...companionOrderItems]) {
+      const quantity = Math.max(Math.floor(item.quantity || 0), 0);
+      if (quantity <= 0) continue;
+      quantityByProductId.set(item.productId, (quantityByProductId.get(item.productId) || 0) + quantity);
+    }
+
+    return Array.from(quantityByProductId.entries()).map(([productId, quantity]) => ({
+      productId,
+      quantity
+    }));
+  }, [broaOrderItems, companionOrderItems]);
   const totalBroas = useMemo(
+    () => broaOrderItems.reduce((sum, item) => sum + item.quantity, 0),
+    [broaOrderItems]
+  );
+  const totalSelectedItems = useMemo(
     () => computedOrderItems.reduce((sum, item) => sum + item.quantity, 0),
     [computedOrderItems]
   );
   const estimatedTotal = useMemo(
     () => calculateOrderSubtotalFromProductItems(computedOrderItems, productMapById),
+    [computedOrderItems, productMapById]
+  );
+  const couponEligibleSubtotal = useMemo(
+    () => calculateCouponEligibleSubtotalFromProductItems(computedOrderItems, productMapById),
     [computedOrderItems, productMapById]
   );
   const normalizedCouponInput = useMemo(() => normalizeCouponCodeInput(couponInput), [couponInput]);
@@ -653,13 +1126,13 @@ export function PublicOrderPage() {
   );
   const couponDiscountAmount = useMemo(() => {
     if (!isCouponApplied || !appliedCoupon) return 0;
-    return roundCurrency((estimatedTotal * appliedCoupon.discountPct) / 100);
-  }, [appliedCoupon, estimatedTotal, isCouponApplied]);
+    return roundCurrency((couponEligibleSubtotal * appliedCoupon.discountPct) / 100);
+  }, [appliedCoupon, couponEligibleSubtotal, isCouponApplied]);
   const discountedSubtotal = useMemo(
     () => roundCurrency(Math.max(estimatedTotal - couponDiscountAmount, 0)),
     [couponDiscountAmount, estimatedTotal]
   );
-  const selectedBoxes = useMemo<SelectedBoxSummary[]>(
+  const selectedProducts = useMemo<SelectedOrderSummary[]>(
     () => [
       ...runtimeBoxEntries
         .map((entry) => ({ entry, quantity: parsedBoxCounts[entry.key] || 0 }))
@@ -677,11 +1150,31 @@ export function PublicOrderPage() {
         quantity: 1,
         quantityLabel: box.isComplete ? '1 cx' : `${box.totalUnits}/7`,
         detail: formatCustomBoxParts(box.flavors, flavorProducts)
-      }))
+      })),
+      ...companionProducts
+        .map((product) => ({
+          product,
+          quantity: parsedCompanionCounts[product.key] || 0,
+          lines: resolveCompanionProductPublicLines(product)
+        }))
+        .filter((entry) => entry.quantity > 0)
+        .map((entry) => ({
+          key: entry.product.key,
+          label: entry.product.label,
+          displayLabel: entry.lines.title,
+          quantity: entry.quantity,
+          quantityLabel: `${entry.quantity} ${pluralize(entry.quantity, 'item', 'itens')}`,
+          detail: [entry.lines.subtitleLine, entry.lines.makerLine].filter(Boolean).join(' • ') || null,
+          displayDetail: entry.lines.subtitleLine || entry.lines.makerLine
+        }))
     ],
-    [activeCustomBoxes, flavorProducts, parsedBoxCounts, runtimeBoxEntries]
+    [activeCustomBoxes, companionProducts, flavorProducts, parsedBoxCounts, parsedCompanionCounts, runtimeBoxEntries]
   );
-  const flavorManifestItems = useMemo(
+  const orderItemsSummaryEntries = useMemo(
+    () => buildOrderItemsSummaryEntries(selectedProducts),
+    [selectedProducts]
+  );
+  const deliveryManifestItems = useMemo(
     () =>
       computedOrderItems
         .map((item) => ({
@@ -694,20 +1187,37 @@ export function PublicOrderPage() {
   );
   const legacyFlavorCounts = useMemo(
     () => ({
-      T: computedOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.T?.id)?.quantity || 0,
-      G: computedOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.G?.id)?.quantity || 0,
-      D: computedOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.D?.id)?.quantity || 0,
-      Q: computedOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.Q?.id)?.quantity || 0,
-      R: computedOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.R?.id)?.quantity || 0,
-      RJ: computedOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.RJ?.id)?.quantity || 0
+      T: broaOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.T?.id)?.quantity || 0,
+      G: broaOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.G?.id)?.quantity || 0,
+      D: broaOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.D?.id)?.quantity || 0,
+      Q: broaOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.Q?.id)?.quantity || 0,
+      R: broaOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.R?.id)?.quantity || 0,
+      RJ: broaOrderItems.find((item) => item.productId === runtimeOrderCatalog.flavorProductByLegacyCode.RJ?.id)?.quantity || 0
     }),
-    [computedOrderItems, runtimeOrderCatalog.flavorProductByLegacyCode]
+    [broaOrderItems, runtimeOrderCatalog.flavorProductByLegacyCode]
   );
-  const deliveryFee = deliveryQuote?.fee ?? 0;
-  const displayTotal = discountedSubtotal + deliveryFee;
   const selectedWindowAvailability = useMemo(
     () => scheduleAvailability?.windows.find((window) => window.key === form.timeWindow) ?? null,
     [form.timeWindow, scheduleAvailability]
+  );
+  const deliveryAddressValidationError = useMemo(
+    () =>
+      validateRecognizedDeliveryAddress({
+        fulfillmentMode: form.fulfillmentMode,
+        address: form.address,
+        addressLine1: form.addressLine1,
+        addressLine2: form.addressLine2,
+        neighborhood: form.neighborhood,
+        placeId: form.placeId
+      }),
+    [
+      form.address,
+      form.addressLine1,
+      form.addressLine2,
+      form.fulfillmentMode,
+      form.neighborhood,
+      form.placeId
+    ]
   );
   const selectedTimeWindowLabel = selectedWindowAvailability?.label ?? null;
   const scheduledAtIso = selectedWindowAvailability?.scheduledAt ?? null;
@@ -716,14 +1226,62 @@ export function PublicOrderPage() {
     const parsed = new Date(scheduledAtIso);
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }, [scheduledAtIso]);
-  const minimumScheduleLabel = useMemo(
-    () => (minimumSchedule ? formatExternalOrderMinimumSchedule(minimumSchedule) : null),
-    [minimumSchedule]
-  );
   const isScheduleBelowMinimum = useMemo(() => {
     if (!minimumSchedule || !parsedScheduledAt) return false;
     return parsedScheduledAt.getTime() < minimumSchedule.getTime();
   }, [minimumSchedule, parsedScheduledAt]);
+  const deliveryQuoteRequestFingerprint = useMemo(() => {
+    if (form.fulfillmentMode !== 'DELIVERY') return null;
+
+    return hashPublicOrderSubmission({
+      fulfillmentMode: form.fulfillmentMode,
+      scheduledAt: scheduledAtIso,
+      customer: {
+        address: form.address.trim() || null,
+        addressLine1: form.addressLine1.trim() || null,
+        addressLine2: form.addressLine2.trim() || null,
+        neighborhood: form.neighborhood.trim() || null,
+        city: form.city.trim() || null,
+        state: form.state.trim() || null,
+        postalCode: form.postalCode.trim() || null,
+        country: form.country.trim() || null,
+        placeId: form.placeId.trim() || null,
+        lat: typeof form.lat === 'number' ? Number(form.lat.toFixed(6)) : null,
+        lng: typeof form.lng === 'number' ? Number(form.lng.toFixed(6)) : null
+      },
+      manifest: {
+        items: deliveryManifestItems,
+        subtotal: discountedSubtotal,
+        totalUnits: totalSelectedItems
+      }
+    });
+  }, [
+    deliveryManifestItems,
+    discountedSubtotal,
+    form.address,
+    form.addressLine1,
+    form.addressLine2,
+    form.city,
+    form.country,
+    form.fulfillmentMode,
+    form.lat,
+    form.lng,
+    form.neighborhood,
+    form.postalCode,
+    form.placeId,
+    form.state,
+    scheduledAtIso,
+    totalSelectedItems
+  ]);
+  const activeDeliveryQuote =
+    form.fulfillmentMode !== 'DELIVERY'
+      ? deliveryQuote
+      : deliveryQuoteFingerprint && deliveryQuoteFingerprint === deliveryQuoteRequestFingerprint
+        ? deliveryQuote
+        : null;
+  const hasActiveDeliveryQuoteToken = Boolean(activeDeliveryQuote?.quoteToken);
+  const deliveryFee = activeDeliveryQuote?.fee ?? 0;
+  const displayTotal = discountedSubtotal + deliveryFee;
 
   const fetchPublicScheduleAvailability = useCallback(async (options?: {
     requestedDate?: string | null;
@@ -755,7 +1313,7 @@ export function PublicOrderPage() {
       throw new Error(extractErrorMessage(data));
     }
     if (!isPublicOrderScheduleAvailability(data)) {
-      throw new Error('Resposta invalida da agenda publica.');
+      throw new Error('Resposta inválida da agenda pública.');
     }
     return data;
   }, []);
@@ -779,7 +1337,7 @@ export function PublicOrderPage() {
       setScheduleAvailability(availability);
       const nextMinimum = new Date(availability.nextAvailableAt);
       if (Number.isNaN(nextMinimum.getTime())) {
-        throw new Error('Agenda publica invalida.');
+        throw new Error('Agenda pública inválida.');
       }
       setMinimumSchedule(new Date(availability.minimumAllowedAt));
 
@@ -857,7 +1415,7 @@ export function PublicOrderPage() {
 
       if (estimatedTotal <= 0) {
         setAppliedCoupon(null);
-        setCouponError('Escolha ao menos 1 caixa antes de aplicar o cupom.');
+      setCouponError('Escolha ao menos 1 item antes de aplicar o cupom.');
         return null;
       }
 
@@ -870,7 +1428,7 @@ export function PublicOrderPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             code,
-            subtotal: estimatedTotal,
+            subtotal: couponEligibleSubtotal,
             customerPhone: normalizePhone(form.phone || ''),
             customerName: form.name.trim() || null
           })
@@ -887,7 +1445,7 @@ export function PublicOrderPage() {
         return data;
       } catch (couponLoadError) {
         const message =
-          couponLoadError instanceof Error ? couponLoadError.message : 'Nao foi possivel validar o cupom.';
+          couponLoadError instanceof Error ? couponLoadError.message : 'Não foi possível validar o cupom.';
         setAppliedCoupon(null);
         setCouponError(message);
         return null;
@@ -895,7 +1453,7 @@ export function PublicOrderPage() {
         setIsResolvingCoupon(false);
       }
     },
-    [couponInput, estimatedTotal, form.name, form.phone]
+    [couponEligibleSubtotal, couponInput, estimatedTotal, form.name, form.phone]
   );
 
   useEffect(() => {
@@ -925,6 +1483,21 @@ export function PublicOrderPage() {
       }
     }));
   };
+
+  const setCompanionQuantity = (code: string, nextValue: number | string) => {
+    const normalized = typeof nextValue === 'number' ? String(Math.max(Math.floor(nextValue), 0)) : nextValue;
+    setForm((current) => ({
+      ...current,
+      companions: {
+        ...current.companions,
+        [code]: normalized === '0' ? '' : normalized
+      }
+    }));
+  };
+
+  const setMixedBoxQuantity = useCallback((boxKey: string, nextValue: number) => {
+    setBoxQuantity(boxKey, Math.max(Math.floor(nextValue || 0), 0));
+  }, []);
 
   const addCustomBox = () => {
     setCustomBoxes((current) => [...current, createEmptyCustomBoxDraft()]);
@@ -967,6 +1540,7 @@ export function PublicOrderPage() {
 
   useEffect(() => {
     if (form.fulfillmentMode !== 'DELIVERY') {
+      cancelPendingDeliveryQuote();
       setDeliveryQuote({
         provider: 'NONE',
         fee: 0,
@@ -978,41 +1552,68 @@ export function PublicOrderPage() {
         fallbackReason: null,
         breakdownLabel: 'Sem frete'
       });
+      setDeliveryQuoteFingerprint(null);
       setDeliveryQuoteError(null);
       setIsQuotingDelivery(false);
       return;
     }
 
-    if (minimumSchedule && parsedScheduledAt && parsedScheduledAt.getTime() < minimumSchedule.getTime()) {
+    if (deliveryAddressValidationError) {
+      cancelPendingDeliveryQuote();
       setDeliveryQuote(null);
-      setIsQuotingDelivery(false);
-      return;
-    }
-
-    if (!form.address.trim() || !scheduledAtIso || totalBroas <= 0 || incompleteCustomBoxes.length > 0) {
-      setDeliveryQuote(null);
+      setDeliveryQuoteFingerprint(null);
       setDeliveryQuoteError(null);
       setIsQuotingDelivery(false);
       return;
     }
-    setDeliveryQuote(null);
-    setDeliveryQuoteError(null);
-    setIsQuotingDelivery(false);
+
+    if (isScheduleBelowMinimum) {
+      cancelPendingDeliveryQuote();
+      setDeliveryQuote(null);
+      setDeliveryQuoteFingerprint(null);
+      setDeliveryQuoteError(null);
+      setIsQuotingDelivery(false);
+      return;
+    }
+
+    if (!form.address.trim() || !scheduledAtIso || totalSelectedItems <= 0 || incompleteCustomBoxes.length > 0) {
+      cancelPendingDeliveryQuote();
+      setDeliveryQuote(null);
+      setDeliveryQuoteFingerprint(null);
+      setDeliveryQuoteError(null);
+      setIsQuotingDelivery(false);
+      return;
+    }
+
+    if (deliveryQuoteFingerprint && deliveryQuoteFingerprint !== deliveryQuoteRequestFingerprint) {
+      cancelPendingDeliveryQuote();
+      setDeliveryQuote(null);
+      setDeliveryQuoteFingerprint(null);
+      setDeliveryQuoteError(null);
+      setIsQuotingDelivery(false);
+    }
   }, [
-    draftSessionId,
-    discountedSubtotal,
+    deliveryQuoteFingerprint,
+    deliveryQuoteRequestFingerprint,
     form.address,
     form.fulfillmentMode,
-    form.lat,
-    form.lng,
-    form.placeId,
-    minimumSchedule,
-    parsedScheduledAt,
     scheduledAtIso,
-    selectedBoxes,
-    totalBroas,
-    incompleteCustomBoxes.length
+    totalSelectedItems,
+    incompleteCustomBoxes.length,
+    deliveryAddressValidationError,
+    isScheduleBelowMinimum,
+    cancelPendingDeliveryQuote
   ]);
+
+  useEffect(() => {
+    if (form.fulfillmentMode === 'DELIVERY' && hasActiveDeliveryQuoteToken) return;
+    clearDeliveryQuoteConfirmationGuard();
+  }, [clearDeliveryQuoteConfirmationGuard, form.fulfillmentMode, hasActiveDeliveryQuoteToken]);
+
+  useEffect(() => () => {
+    cancelPendingDeliveryQuote();
+    clearDeliveryQuoteConfirmationGuard();
+  }, [cancelPendingDeliveryQuote, clearDeliveryQuoteConfirmationGuard]);
 
   useEffect(() => {
     if (form.fulfillmentMode !== 'PICKUP') return;
@@ -1024,13 +1625,19 @@ export function PublicOrderPage() {
     ) {
       return;
     }
-    setForm((current) =>
+      setForm((current) =>
       current.fulfillmentMode !== 'PICKUP'
         ? current
         : {
             ...current,
             address: PUBLIC_ORDER_PICKUP_ADDRESS,
+            addressLine1: '',
             placeId: '',
+            neighborhood: '',
+            city: '',
+            state: '',
+            postalCode: '',
+            country: '',
             lat: null,
             lng: null
           }
@@ -1050,13 +1657,14 @@ export function PublicOrderPage() {
         fallbackReason: null,
         breakdownLabel: 'Sem frete'
       });
+      setDeliveryQuoteFingerprint(null);
       setDeliveryQuoteError(null);
       return null;
     }
 
-    if (!form.address.trim()) {
+    if (deliveryAddressValidationError) {
       setDeliveryQuote(null);
-      setDeliveryQuoteError('Informe o endereco para calcular o frete.');
+      setDeliveryQuoteError(deliveryAddressValidationError);
       return null;
     }
 
@@ -1066,9 +1674,9 @@ export function PublicOrderPage() {
       return null;
     }
 
-    if (totalBroas <= 0) {
+    if (totalSelectedItems <= 0) {
       setDeliveryQuote(null);
-      setDeliveryQuoteError('Escolha ao menos 1 caixa antes de calcular o frete.');
+      setDeliveryQuoteError('Escolha ao menos 1 item antes de calcular o frete.');
       return null;
     }
 
@@ -1086,12 +1694,19 @@ export function PublicOrderPage() {
 
     if (minimumSchedule && parsedScheduledAt && parsedScheduledAt.getTime() < minimumSchedule.getTime()) {
       setDeliveryQuote(null);
+      setDeliveryQuoteFingerprint(null);
       setDeliveryQuoteError(buildPublicOrderScheduleErrorMessage(minimumSchedule));
       return null;
     }
 
     setIsQuotingDelivery(true);
     setDeliveryQuoteError(null);
+    deliveryQuoteAbortControllerRef.current?.abort();
+    const requestId = ++deliveryQuoteRequestIdRef.current;
+    const requestFingerprint = deliveryQuoteRequestFingerprint;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), DELIVERY_QUOTE_REQUEST_TIMEOUT_MS);
+    deliveryQuoteAbortControllerRef.current = controller;
     const analyticsSessionId = resolveAnalyticsSessionId();
     trackAnalyticsEvent({
       sessionId: analyticsSessionId,
@@ -1111,19 +1726,27 @@ export function PublicOrderPage() {
       const response = await fetch('/api/delivery-quote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           mode: form.fulfillmentMode,
           scheduledAt: scheduledAtIso,
           customer: {
             address: form.address.trim() || null,
+            addressLine1: form.addressLine1.trim() || null,
+            addressLine2: form.addressLine2.trim() || null,
+            neighborhood: form.neighborhood.trim() || null,
+            city: form.city.trim() || null,
+            state: form.state.trim() || null,
+            postalCode: form.postalCode.trim() || null,
+            country: form.country.trim() || null,
             placeId: form.placeId.trim() || null,
             lat: typeof form.lat === 'number' ? form.lat : null,
             lng: typeof form.lng === 'number' ? form.lng : null
           },
           manifest: {
-            items: flavorManifestItems,
+            items: deliveryManifestItems,
             subtotal: discountedSubtotal,
-            totalUnits: totalBroas
+            totalUnits: totalSelectedItems
           }
         })
       });
@@ -1133,9 +1756,14 @@ export function PublicOrderPage() {
       if (!response.ok || !data) {
         throw new Error(extractErrorMessage(data));
       }
+      if (requestId !== deliveryQuoteRequestIdRef.current) {
+        return data;
+      }
 
       setDeliveryQuote(data);
+      setDeliveryQuoteFingerprint(requestFingerprint);
       setDeliveryQuoteError(null);
+      armDeliveryQuoteConfirmationGuard();
       trackAnalyticsEvent({
         sessionId: analyticsSessionId,
         eventType: 'FUNNEL',
@@ -1150,9 +1778,17 @@ export function PublicOrderPage() {
       });
       return data;
     } catch (quoteError) {
+      if (requestId !== deliveryQuoteRequestIdRef.current) {
+        return null;
+      }
       const message =
-        quoteError instanceof Error ? quoteError.message : 'Nao foi possivel calcular o frete agora.';
+        quoteError instanceof Error && quoteError.name === 'AbortError'
+          ? 'A cotação do frete demorou mais que o esperado. Tente novamente.'
+          : quoteError instanceof Error
+            ? quoteError.message
+            : 'Não foi possível calcular o frete agora.';
       setDeliveryQuote(null);
+      setDeliveryQuoteFingerprint(null);
       setDeliveryQuoteError(message);
       trackAnalyticsEvent({
         sessionId: analyticsSessionId,
@@ -1166,17 +1802,29 @@ export function PublicOrderPage() {
       });
       return null;
     } finally {
-      setIsQuotingDelivery(false);
+      window.clearTimeout(timeoutId);
+      if (requestId === deliveryQuoteRequestIdRef.current) {
+        deliveryQuoteAbortControllerRef.current = null;
+        setIsQuotingDelivery(false);
+      }
     }
   }, [
+    armDeliveryQuoteConfirmationGuard,
     draftSessionId,
     discountedSubtotal,
     estimatedTotal,
     form.address,
+    form.addressLine1,
+    form.addressLine2,
+    form.city,
+    form.country,
     form.fulfillmentMode,
     form.lat,
     form.lng,
+    form.neighborhood,
+    form.postalCode,
     form.placeId,
+    form.state,
     form.timeWindow,
     incompleteCustomBoxes.length,
     isCouponApplied,
@@ -1185,12 +1833,15 @@ export function PublicOrderPage() {
     parsedScheduledAt,
     selectedWindowAvailability?.available,
     scheduledAtIso,
-    flavorManifestItems,
-    totalBroas
+    deliveryManifestItems,
+    deliveryQuoteRequestFingerprint,
+    totalBroas,
+    totalSelectedItems,
+    deliveryAddressValidationError
   ]);
 
   const hasDeliveryQuoteReady =
-    form.fulfillmentMode !== 'DELIVERY' || Boolean(deliveryQuote?.quoteToken);
+    form.fulfillmentMode !== 'DELIVERY' || hasActiveDeliveryQuoteToken;
   const primaryActionLabel = isSubmitting
     ? 'FINALIZANDO...'
     : isResolvingCoupon
@@ -1203,6 +1854,10 @@ export function PublicOrderPage() {
 
   const handlePrimaryAction = async () => {
     if (isSubmitting) return;
+    if (form.fulfillmentMode === 'DELIVERY' && isDeliveryQuoteConfirmationPending) {
+      setError('Frete calculado. Confira o total e toque em Finalizar Pedido.');
+      return;
+    }
     if (form.fulfillmentMode === 'DELIVERY' && !hasDeliveryQuoteReady) {
       await requestDeliveryQuote();
       return;
@@ -1223,8 +1878,9 @@ export function PublicOrderPage() {
       setError('Informe o telefone.');
       return;
     }
-    if (form.fulfillmentMode === 'DELIVERY' && !form.address.trim()) {
-      setError('Informe o endereco para entrega.');
+    const deliveryAddressError = validateRecognizedDeliveryAddress(form);
+    if (deliveryAddressError) {
+      setError(deliveryAddressError);
       return;
     }
     if (!form.date) {
@@ -1246,8 +1902,8 @@ export function PublicOrderPage() {
       setError(buildPublicOrderScheduleErrorMessage(currentMinimumSchedule));
       return;
     }
-    if (totalBroas <= 0) {
-      setError('Escolha ao menos 1 caixa.');
+    if (totalSelectedItems <= 0) {
+      setError('Escolha ao menos 1 item.');
       return;
     }
     if (incompleteCustomBoxes.length > 0) {
@@ -1266,8 +1922,12 @@ export function PublicOrderPage() {
         setError('Aguarde o frete terminar de calcular.');
         return;
       }
-      if (!deliveryQuote) {
-        setError(deliveryQuoteError || 'Nao foi possivel calcular o frete agora.');
+      if (isDeliveryQuoteConfirmationPending) {
+        setError('Frete calculado. Confira o total e toque em Finalizar Pedido.');
+        return;
+      }
+      if (!activeDeliveryQuote?.quoteToken) {
+        setError(deliveryQuoteError || 'Calcule o frete antes de finalizar o pedido.');
         return;
       }
     }
@@ -1278,10 +1938,17 @@ export function PublicOrderPage() {
         name: form.name.trim(),
         phone: form.phone.trim(),
         address: form.fulfillmentMode === 'DELIVERY' ? form.address.trim() : null,
+        addressLine1: form.fulfillmentMode === 'DELIVERY' ? form.addressLine1.trim() || null : null,
+        addressLine2: form.fulfillmentMode === 'DELIVERY' ? form.addressLine2.trim() || null : null,
+        neighborhood: form.fulfillmentMode === 'DELIVERY' ? form.neighborhood.trim() || null : null,
+        city: form.fulfillmentMode === 'DELIVERY' ? form.city.trim() || null : null,
+        state: form.fulfillmentMode === 'DELIVERY' ? form.state.trim() || null : null,
+        postalCode: form.fulfillmentMode === 'DELIVERY' ? form.postalCode.trim() || null : null,
+        country: form.fulfillmentMode === 'DELIVERY' ? form.country.trim() || null : null,
         placeId: form.fulfillmentMode === 'DELIVERY' ? form.placeId.trim() || null : null,
         lat: form.fulfillmentMode === 'DELIVERY' && typeof form.lat === 'number' ? form.lat : null,
         lng: form.fulfillmentMode === 'DELIVERY' && typeof form.lng === 'number' ? form.lng : null,
-        deliveryNotes: form.deliveryNotes.trim() || null
+        deliveryNotes: null
       },
       fulfillment: {
         mode: form.fulfillmentMode,
@@ -1290,20 +1957,20 @@ export function PublicOrderPage() {
         timeWindow: form.timeWindow
       },
       delivery:
-        form.fulfillmentMode === 'DELIVERY' && deliveryQuote
+        form.fulfillmentMode === 'DELIVERY' && activeDeliveryQuote
           ? ({
-              quoteToken: deliveryQuote.quoteToken,
-              fee: deliveryQuote.fee,
-              provider: deliveryQuote.provider,
-              source: deliveryQuote.source,
-              status: deliveryQuote.status,
-              expiresAt: deliveryQuote.expiresAt
+              quoteToken: activeDeliveryQuote.quoteToken,
+              fee: activeDeliveryQuote.fee,
+              provider: activeDeliveryQuote.provider,
+              source: activeDeliveryQuote.source,
+              status: activeDeliveryQuote.status,
+              expiresAt: activeDeliveryQuote.expiresAt
             } as ExternalOrderSubmission['delivery'])
           : undefined,
       flavors: legacyFlavorCounts,
       items: computedOrderItems,
       couponCode: isCouponApplied ? appliedCoupon?.code ?? null : null,
-      notes: form.notes.trim() || null,
+      notes: mergeOrderItemsSummaryIntoNotes(form.notes.trim() || null, orderItemsSummaryEntries),
       source: {
         channel: 'PUBLIC_FORM',
         originLabel: 'public-order-page',
@@ -1345,7 +2012,9 @@ export function PublicOrderPage() {
         const record = data && typeof data === 'object' ? (data as Record<string, unknown>) : null;
         if (record?.code === 'DELIVERY_QUOTE_REFRESH_REQUIRED' && record.delivery && typeof record.delivery === 'object') {
           setDeliveryQuote(record.delivery as DeliveryQuote);
+          setDeliveryQuoteFingerprint(deliveryQuoteRequestFingerprint);
           setDeliveryQuoteError('O frete foi atualizado. Confira o novo total e envie novamente.');
+          armDeliveryQuoteConfirmationGuard();
         }
         if (typeof record?.nextAvailableAt === 'string') {
           const suggestedSchedule = new Date(record.nextAvailableAt);
@@ -1361,9 +2030,10 @@ export function PublicOrderPage() {
         throw new Error(extractErrorMessage(data));
       }
       const storedOrderSnapshot: StoredPublicOrderSnapshot = {
-        version: 1,
+        version: 3,
         savedAt: new Date().toISOString(),
         boxes: sanitizeStoredBoxCounts(form.boxes),
+        companions: sanitizeStoredBoxCounts(form.companions),
         customBoxes: customBoxes.map((entry) => sanitizeStoredCustomBox(entry.flavors)),
         notes: form.notes.trim()
       };
@@ -1377,7 +2047,8 @@ export function PublicOrderPage() {
         returnLabel: 'Fazer novo pedido',
         productSubtotal: discountedSubtotal,
         order: {
-          ...result.order,
+          total: result.order.total ?? null,
+          scheduledAt: result.order.scheduledAt ?? null,
           deliveryWindowLabel: selectedTimeWindowLabel
         },
         intake: {
@@ -1392,7 +2063,6 @@ export function PublicOrderPage() {
         path: '/pedido',
         label: 'public_order_submitted',
         meta: {
-          orderId: result.order.id,
           total: result.order.total ?? displayTotal,
           fulfillmentMode: form.fulfillmentMode,
           orderDraftSessionId: draftSessionId
@@ -1400,7 +2070,7 @@ export function PublicOrderPage() {
       });
       router.push('/pedidofinalizado');
     } catch (submitError) {
-      const message = submitError instanceof Error ? submitError.message : 'Nao foi possivel enviar o pedido.';
+      const message = submitError instanceof Error ? submitError.message : 'Não foi possível enviar o pedido.';
       setError(message);
       trackAnalyticsEvent({
         sessionId: resolveAnalyticsSessionId(),
@@ -1422,6 +2092,12 @@ export function PublicOrderPage() {
     const nextMinimum = minimumSchedule ?? resolveExternalOrderMinimumSchedule();
     deliveryAddressDraftRef.current = {
       address: '',
+      addressLine1: '',
+      neighborhood: '',
+      city: '',
+      state: '',
+      postalCode: '',
+      country: '',
       placeId: '',
       lat: null,
       lng: null
@@ -1436,7 +2112,9 @@ export function PublicOrderPage() {
     setCustomBoxes([]);
     setError(null);
     setDeliveryQuote(null);
+    setDeliveryQuoteFingerprint(null);
     setDeliveryQuoteError(null);
+    clearDeliveryQuoteConfirmationGuard();
     setCouponInput('');
     setAppliedCoupon(null);
     setCouponError(null);
@@ -1497,12 +2175,6 @@ export function PublicOrderPage() {
                   <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">
                     Entrega ou retirada
                   </h2>
-                  {minimumScheduleLabel ? (
-                    <p className="mt-2 max-w-[44rem] text-sm leading-6 text-[color:var(--ink-muted)]">
-                      Próxima faixa a partir de
-                      <strong className="ml-1 text-[color:var(--ink-strong)]">{minimumScheduleLabel}</strong>.
-                    </p>
-                  ) : null}
                 </div>
 
                 <div className="public-order-mode-grid">
@@ -1510,7 +2182,7 @@ export function PublicOrderPage() {
                     {
                       value: 'DELIVERY' as const,
                       title: 'Entrega',
-                      description: 'Receber no endereco.'
+                      description: 'Receber no endereço.'
                     },
                     {
                       value: 'PICKUP' as const,
@@ -1557,7 +2229,7 @@ export function PublicOrderPage() {
                 <div className="public-order-schedule-grid mt-5">
                   <div className="public-order-schedule-grid__address">
                     <FormField
-                      label={form.fulfillmentMode === 'DELIVERY' ? 'Endereco para entrega' : 'Ponto de retirada'}
+                      label={form.fulfillmentMode === 'DELIVERY' ? 'Endereço para entrega' : 'Ponto de retirada'}
                     >
                       <GoogleAddressAutocompleteInput
                         className="app-input xl:h-14 xl:text-[1.02rem]"
@@ -1570,6 +2242,12 @@ export function PublicOrderPage() {
                             if (current.fulfillmentMode !== 'DELIVERY') return current;
                             rememberDeliveryLocation({
                               address: nextValue,
+                              addressLine1: '',
+                              neighborhood: '',
+                              city: '',
+                              state: '',
+                              postalCode: '',
+                              country: '',
                               placeId: '',
                               lat: null,
                               lng: null
@@ -1577,6 +2255,12 @@ export function PublicOrderPage() {
                             return {
                               ...current,
                               address: nextValue,
+                              addressLine1: '',
+                              neighborhood: '',
+                              city: '',
+                              state: '',
+                              postalCode: '',
+                              country: '',
                               placeId: '',
                               lat: null,
                               lng: null
@@ -1588,6 +2272,12 @@ export function PublicOrderPage() {
                           if (!nextAddress) return;
                           rememberDeliveryLocation({
                             address: nextAddress,
+                            addressLine1: `${patch.addressLine1 || ''}`.trim(),
+                            neighborhood: `${patch.neighborhood || ''}`.trim(),
+                            city: `${patch.city || ''}`.trim(),
+                            state: `${patch.state || ''}`.trim(),
+                            postalCode: `${patch.postalCode || ''}`.trim(),
+                            country: `${patch.country || ''}`.trim(),
                             placeId: `${patch.placeId || ''}`,
                             lat: typeof patch.lat === 'number' ? patch.lat : null,
                             lng: typeof patch.lng === 'number' ? patch.lng : null
@@ -1598,6 +2288,13 @@ export function PublicOrderPage() {
                             return {
                               ...current,
                               address: nextAddress,
+                              addressLine1: `${patch.addressLine1 || ''}`.trim(),
+                              addressLine2: current.addressLine2 || `${patch.addressLine2 || ''}`.trim(),
+                              neighborhood: `${patch.neighborhood || ''}`.trim(),
+                              city: `${patch.city || ''}`.trim(),
+                              state: `${patch.state || ''}`.trim(),
+                              postalCode: `${patch.postalCode || ''}`.trim(),
+                              country: `${patch.country || ''}`.trim(),
                               placeId: `${patch.placeId || ''}`,
                               lat: typeof patch.lat === 'number' ? patch.lat : null,
                               lng: typeof patch.lng === 'number' ? patch.lng : null
@@ -1624,8 +2321,8 @@ export function PublicOrderPage() {
                       <input
                         className="app-input xl:h-14 xl:text-[1.02rem]"
                         name="address-line2"
-                        value={form.deliveryNotes}
-                        onChange={(event) => setForm((current) => ({ ...current, deliveryNotes: event.target.value }))}
+                        value={form.addressLine2}
+                        onChange={(event) => setForm((current) => ({ ...current, addressLine2: event.target.value }))}
                         placeholder="Apto, Bloco, Casa"
                         autoComplete={form.fulfillmentMode === 'DELIVERY' ? 'address-line2' : 'off'}
                         autoCapitalize="sentences"
@@ -1695,17 +2392,13 @@ export function PublicOrderPage() {
                   </FormField>
                 </div>
 
-                {minimumScheduleLabel ? (
-                  <div className="mt-3 rounded-[18px] border border-[rgba(181,68,57,0.16)] bg-[rgb(255,244,240)] px-4 py-3 text-sm leading-6 text-[color:var(--ink-muted)]">
-                    <span className="block">
-                      Próxima faixa disponivel a partir de <strong>{minimumScheduleLabel}</strong>.
-                    </span>
-                  </div>
-                ) : null}
               </section>
             </div>
 
-            <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
+            <section
+              id="caixas"
+              className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white p-4 scroll-mt-6 sm:rounded-[28px] sm:p-6 xl:p-7"
+            >
               <div className="mb-4 flex flex-col gap-2 sm:mb-5 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
                 <div>
                   <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Caixas</h2>
@@ -1713,7 +2406,7 @@ export function PublicOrderPage() {
               </div>
 
               <div className="public-order-box-grid">
-                {runtimeBoxEntries.map((entry) => {
+                {singleBoxEntries.map((entry) => {
                   const quantity = parsedBoxCounts[entry.key] || 0;
                   const active = quantity > 0;
                   return (
@@ -1750,14 +2443,14 @@ export function PublicOrderPage() {
                         <button
                           type="button"
                           onClick={() => setBoxQuantity(entry.key, Math.max(quantity - 1, 0))}
-                          className="h-12 rounded-[16px] border border-white/85 bg-white text-2xl font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:h-14 sm:rounded-[18px] xl:h-16 xl:text-[2rem]"
+                          className="public-order-box-card__stepper rounded-[16px] border border-white/85 bg-white font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:rounded-[18px]"
                           aria-label={`Diminuir ${entry.label}`}
                         >
                           −
                         </button>
                         <div className="public-order-box-card__summary">
                           <input
-                            className="app-input h-12 text-center text-base font-semibold sm:h-14 sm:text-lg xl:h-16 xl:text-xl"
+                            className="app-input public-order-box-card__field text-center font-semibold"
                             inputMode="numeric"
                             value={quantity > 0 ? String(quantity) : ''}
                             onChange={(event) => setBoxQuantity(entry.key, event.target.value)}
@@ -1774,7 +2467,7 @@ export function PublicOrderPage() {
                         <button
                           type="button"
                           onClick={() => setBoxQuantity(entry.key, quantity + 1)}
-                          className="h-12 rounded-[16px] border border-white/85 bg-white text-2xl font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:h-14 sm:rounded-[18px] xl:h-16 xl:text-[2rem]"
+                          className="public-order-box-card__stepper rounded-[16px] border border-white/85 bg-white font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:rounded-[18px]"
                           aria-label={`Aumentar ${entry.label}`}
                         >
                           +
@@ -1785,7 +2478,86 @@ export function PublicOrderPage() {
                 })}
               </div>
 
-              <div className="mt-4 rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-[rgb(247,239,230)] p-4 sm:mt-5 sm:rounded-[26px] sm:p-5 xl:p-6">
+              {mixedBoxEntries.length ? (
+                <div
+                  id="caixas-mistas"
+                  className="mt-4 rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-[rgb(247,239,230)] p-4 scroll-mt-6 sm:mt-5 sm:rounded-[26px] sm:p-5 xl:p-6"
+                >
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between xl:items-center">
+                    <div>
+                      <h3 className="text-[1.1rem] font-semibold text-[color:var(--ink-strong)] sm:text-[1.35rem]">
+                        Caixas Mistas
+                      </h3>
+                      <p className="mt-1 text-[0.82rem] leading-5 text-[color:var(--ink-muted)] sm:text-sm">
+                        1 caixa = 4 tradicionais + 3 broas de um sabor
+                      </p>
+                      {mixedBoxStartingPrice != null ? (
+                        <p className="mt-1 text-sm font-semibold text-[color:var(--ink-strong)]">
+                          A partir de {formatCurrencyBRL(mixedBoxStartingPrice)}
+                        </p>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      className="app-button app-button-ghost w-full sm:w-auto"
+                      onClick={() => setIsMixedBoxesDrawerOpen(true)}
+                    >
+                      Escolher sabor
+                    </button>
+                  </div>
+
+                  {activeMixedBoxSelections.length ? (
+                    <div className="public-order-custom-grid mt-4">
+                      {activeMixedBoxSelections.map(({ entry, quantity }) => (
+                        <article
+                          key={entry.key}
+                          className="public-order-custom-card rounded-[20px] border border-[color:var(--tone-roast-line)] bg-white p-4 xl:p-5"
+                        >
+                          <div className="public-order-custom-card__header">
+                            <div>
+                              <p className="text-sm font-semibold text-[color:var(--ink-strong)]">
+                                {entry.label}
+                              </p>
+                              <p className="mt-1 text-[0.82rem] leading-5 text-[color:var(--ink-muted)]">
+                                {entry.detail}
+                              </p>
+                              <p className="mt-2 text-sm font-semibold text-[color:var(--ink-strong)]">
+                                {formatCurrencyBRL(entry.priceEstimate)}
+                              </p>
+                            </div>
+                            <div className="public-order-custom-card__meta">
+                              <span className="rounded-full border border-white/80 bg-white px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)] sm:text-xs">
+                                {quantity} {pluralize(quantity, 'caixa', 'caixas')}
+                              </span>
+                              <button
+                                type="button"
+                                className="app-button app-button-ghost px-3 py-2 text-xs"
+                                onClick={() => setIsMixedBoxesDrawerOpen(true)}
+                              >
+                                Editar
+                              </button>
+                            </div>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="mt-4 block w-full rounded-[20px] border border-transparent text-left transition hover:opacity-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(126,79,45,0.24)]"
+                      onClick={() => setIsMixedBoxesDrawerOpen(true)}
+                      aria-label="Escolher sabores das caixas mistas"
+                    >
+                      <PublicOrderSaboresCollage art={mixedBoxesCardArt} />
+                    </button>
+                  )}
+                </div>
+              ) : null}
+
+              <div
+                id="monte-sua-caixa"
+                className="mt-4 rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-[rgb(247,239,230)] p-4 scroll-mt-6 sm:mt-5 sm:rounded-[26px] sm:p-5 xl:p-6"
+              >
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between xl:items-center">
                   <div>
                     <h3 className="text-[1.1rem] font-semibold text-[color:var(--ink-strong)] sm:text-[1.35rem]">Monte Sua Caixa</h3>
@@ -1848,11 +2620,7 @@ export function PublicOrderPage() {
                         <div className="mt-3 grid gap-2">
                           {flavorProducts.map((product) => {
                             const quantity = box.flavors[String(product.id)] || 0;
-                            const productArt = {
-                              mode: 'single',
-                              src: product.imageUrl || '',
-                              objectPosition: 'center center'
-                            } as const;
+                            const productArt = resolveOrderCardArt(product);
                             return (
                               <div
                                 key={`${box.id}-${product.id}`}
@@ -1863,7 +2631,7 @@ export function PublicOrderPage() {
                                     <div className="relative h-full w-full overflow-hidden rounded-xl border border-white/80 bg-white shadow-[0_8px_18px_rgba(70,44,26,0.08)]">
                                       <OrderCardArtwork
                                         alt={product.label}
-                                        art={product.imageUrl ? productArt : saboresCardArt}
+                                        art={productArt}
                                         sizes="40px"
                                       />
                                     </div>
@@ -1914,6 +2682,108 @@ export function PublicOrderPage() {
               </div>
             </section>
 
+            <section
+              id="amigas-da-broa"
+              className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white p-4 scroll-mt-6 sm:rounded-[28px] sm:p-6 xl:p-7"
+            >
+              <div className="public-order-companion-header mb-4 flex flex-col gap-2 sm:mb-5 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
+                <div className="public-order-companion-header__copy">
+                  <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">
+                    AMIGAS DA BROA
+                  </h2>
+                  <p className="public-order-companion-header__note mt-1 text-[0.82rem] leading-5 text-[color:var(--ink-muted)] sm:text-sm">
+                    <span className="block">Clique no produto para mais detalhes.</span>
+                    <span className="block">Arraste para o lado para mais produtos!</span>
+                  </p>
+                </div>
+              </div>
+
+              {companionProducts.length ? (
+                <div className="public-order-box-rail-shell public-order-box-rail-shell--companion">
+                  <div className="public-order-box-rail public-order-box-rail--companion">
+                    {companionProducts.map((product) => {
+                      const quantity = parsedCompanionCounts[product.key] || 0;
+                      const active = quantity > 0;
+                      const companionLines = resolveCompanionProductPublicLines(product);
+                      const companionTitle = splitCompanionCardTitle(companionLines.title);
+                      return (
+                        <article
+                          key={product.key}
+                          className={`public-order-box-card public-order-box-card--rail public-order-box-card--companion group grid gap-3 overflow-hidden rounded-[22px] border p-3 shadow-[0_14px_28px_rgba(74,47,31,0.08)] sm:gap-4 sm:rounded-[26px] sm:p-4 sm:shadow-[0_16px_38px_rgba(74,47,31,0.08)] xl:gap-4 xl:p-5 border-[color:var(--tone-sage-line)] bg-[linear-gradient(165deg,var(--tone-sage-surface),rgba(251,253,252,0.98))] ${
+                            active ? 'ring-1 ring-[rgba(84,116,91,0.18)]' : ''
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            className="public-order-box-card__hero public-order-box-card__hero--companion public-order-box-card__hero-button"
+                            onClick={() => setExpandedCompanionProductKey(product.key)}
+                            aria-label={`Abrir detalhes de ${product.label}`}
+                          >
+                            <div className="public-order-box-card__media public-order-box-card__media--companion relative shrink-0">
+                              <div className="public-order-box-card__art-surface relative h-full w-full overflow-hidden rounded-[18px] bg-white sm:rounded-[22px] xl:rounded-[24px]">
+                                <OrderCardArtwork
+                                  alt={product.label}
+                                  art={resolveOrderCardArt(product)}
+                                  className="bg-white"
+                                  imageClassName="h-full w-full object-contain"
+                                  overlayClassName="absolute inset-0 bg-transparent"
+                                  managedUploadFit="contain-tight"
+                                  sizes="(max-width: 640px) 100px, (max-width: 1279px) 132px, (max-width: 1535px) 42vw, 22vw"
+                                />
+                              </div>
+                            </div>
+                            <div className="public-order-box-card__body public-order-box-card__body--companion">
+                              <h3 className="public-order-box-card__title public-order-box-card__title--companion text-[0.96rem] font-semibold leading-tight tracking-[-0.02em] text-[color:var(--ink-strong)] sm:text-lg xl:text-[1.08rem]">
+                                <span>{companionTitle.primary}</span>
+                                {companionTitle.secondary ? <span>{companionTitle.secondary}</span> : null}
+                              </h3>
+                              <div className="public-order-box-card__detail public-order-box-card__detail--companion mt-2 grid gap-0.5 text-[0.76rem] leading-[1.35] text-[color:var(--ink-muted)] sm:text-sm sm:leading-6 xl:text-[0.84rem] xl:leading-6">
+                                {companionLines.subtitleLine ? <p>{companionLines.subtitleLine}</p> : null}
+                                {companionLines.makerLine ? <p>{companionLines.makerLine}</p> : null}
+                              </div>
+                              <p className="public-order-box-card__price public-order-box-card__price--companion mt-1 text-sm font-semibold text-[color:var(--ink-strong)] xl:pt-3 xl:text-[1rem]">
+                                {formatCurrencyBRL(product.price)}
+                              </p>
+                            </div>
+                          </button>
+
+                          <div className="public-order-box-card__controls public-order-box-card__controls--companion">
+                            <button
+                              type="button"
+                              onClick={() => setCompanionQuantity(product.key, Math.max(quantity - 1, 0))}
+                              className="public-order-box-card__stepper public-order-box-card__stepper--companion rounded-[16px] border border-white/85 bg-white font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:rounded-[18px]"
+                              aria-label={`Diminuir ${product.label}`}
+                            >
+                              −
+                            </button>
+                            <div className="public-order-box-card__summary public-order-box-card__summary--companion">
+                              <div className="public-order-box-card__pill public-order-box-card__pill--companion rounded-[16px] border border-white/80 bg-white sm:rounded-[18px]">
+                                <span className="public-order-box-card__pill-count public-order-box-card__pill-count--companion">
+                                  {quantity}
+                                </span>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setCompanionQuantity(product.key, quantity + 1)}
+                              className="public-order-box-card__stepper public-order-box-card__stepper--companion rounded-[16px] border border-white/85 bg-white font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:rounded-[18px]"
+                              aria-label={`Aumentar ${product.label}`}
+                            >
+                              +
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-[22px] border border-dashed border-[color:var(--tone-sage-line)] bg-[color:var(--tone-sage-surface)] px-4 py-5 text-sm leading-6 text-[color:var(--ink-muted)] sm:px-5">
+                  EM BREVE MAIS PRODUTOS :)
+                </div>
+              )}
+            </section>
+
             <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
               <div className="mb-4">
                 <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Observacoes</h2>
@@ -1932,11 +2802,11 @@ export function PublicOrderPage() {
               <div className="mb-4">
                 <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Cupom</h2>
                 <p className="mt-2 text-sm leading-6 text-[color:var(--ink-muted)]">
-                  Se tiver um codigo de desconto, aplique antes de calcular o frete.
+                  Se tiver um código de desconto, aplique antes de calcular o frete. O desconto será aplicado sobre o total das broas.
                 </p>
               </div>
               <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto_auto] xl:items-end">
-                <FormField label="Codigo do cupom">
+                <FormField label="Código do cupom">
                   <input
                     className="app-input xl:h-14 xl:text-[1.02rem]"
                     value={couponInput}
@@ -1949,7 +2819,6 @@ export function PublicOrderPage() {
                         setAppliedCoupon(null);
                       }
                     }}
-                    placeholder="Ex.: BROA10"
                     autoCapitalize="characters"
                     spellCheck={false}
                   />
@@ -2007,7 +2876,7 @@ export function PublicOrderPage() {
               </div>
               <button
                 className="app-button app-button-primary"
-                disabled={isSubmitting || isQuotingDelivery || isResolvingCoupon}
+                disabled={isSubmitting || isQuotingDelivery || isResolvingCoupon || isDeliveryQuoteConfirmationPending}
                 onClick={() => {
                   void handlePrimaryAction();
                 }}
@@ -2045,9 +2914,19 @@ export function PublicOrderPage() {
                       </span>
                       <strong className="mt-1 block text-[1.35rem] text-[color:var(--ink-strong)]">{totalBroas}</strong>
                     </div>
+                    {companionProducts.length ? (
+                      <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white px-3 py-3">
+                        <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
+                          Amigas
+                        </span>
+                        <strong className="mt-1 block text-[1.35rem] text-[color:var(--ink-strong)]">
+                          {totalCompanionItems}
+                        </strong>
+                      </div>
+                    ) : null}
                     <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white px-3 py-3">
                       <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
-                        Produtos
+                        Subtotal
                       </span>
                       <strong className="mt-1 block text-base text-[color:var(--ink-strong)]">
                         {formatCurrencyBRL(estimatedTotal)}
@@ -2091,6 +2970,15 @@ export function PublicOrderPage() {
                   </div>
                 ) : null}
 
+                {form.fulfillmentMode === 'DELIVERY' &&
+                !deliveryQuoteError &&
+                isDeliveryQuoteConfirmationPending &&
+                activeDeliveryQuote?.quoteToken ? (
+                  <div className="app-inline-notice app-inline-notice--success rounded-[20px] px-4 py-3 sm:rounded-[24px]">
+                    Frete calculado. Confira o total e toque em Finalizar Pedido.
+                  </div>
+                ) : null}
+
                 {form.fulfillmentMode === 'DELIVERY' && !deliveryQuoteError && isScheduleBelowMinimum && minimumSchedule ? (
                   <div className="app-inline-notice app-inline-notice--warning rounded-[20px] px-4 py-3 sm:rounded-[24px]">
                     {buildPublicOrderScheduleErrorMessage(minimumSchedule)}
@@ -2114,37 +3002,34 @@ export function PublicOrderPage() {
                       ? `${form.date} • ${selectedTimeWindowLabel}`
                       : 'Escolha data e faixa de horario'}
                   </p>
-                  {minimumScheduleLabel ? (
-                    <p className="mt-2 text-sm leading-6 text-[color:var(--ink-muted)]">
-                      Próxima faixa a partir de <strong className="text-[color:var(--ink-strong)]">{minimumScheduleLabel}</strong>.
-                    </p>
-                  ) : null}
                 </div>
 
                 <div className="rounded-[20px] bg-white p-4 sm:rounded-[24px]">
                   <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)] sm:text-xs">
-                    Caixas escolhidas
+                    Itens escolhidos
                   </p>
-                  {selectedBoxes.length ? (
+                  {selectedProducts.length ? (
                     <ul className="mt-3 grid max-h-[260px] gap-2 overflow-y-auto pr-1">
-                      {selectedBoxes.map((entry) => (
+                      {selectedProducts.map((entry) => (
                         <li
                           key={entry.key}
                           className="rounded-2xl border border-[rgba(126,79,45,0.08)] bg-white px-3 py-2 text-sm text-[color:var(--ink-muted)]"
                         >
                           <div className="flex items-center justify-between gap-3">
-                            <span>{entry.label}</span>
+                            <span>{entry.displayLabel ?? entry.label}</span>
                             <strong className="text-[color:var(--ink-strong)]">{entry.quantityLabel}</strong>
                           </div>
-                          {entry.detail ? (
-                            <p className="mt-1 text-[0.78rem] leading-5 text-[color:var(--ink-muted)]">{entry.detail}</p>
+                          {entry.displayDetail || entry.detail ? (
+                            <p className="mt-1 text-[0.78rem] leading-5 text-[color:var(--ink-muted)]">
+                              {entry.displayDetail ?? entry.detail}
+                            </p>
                           ) : null}
                         </li>
                       ))}
                     </ul>
                   ) : (
                     <p className="mt-3 text-sm leading-6 text-[color:var(--ink-muted)]">
-                      Nenhuma caixa ainda.
+                      Nenhum item ainda.
                     </p>
                   )}
                 </div>
@@ -2161,7 +3046,7 @@ export function PublicOrderPage() {
                 <div className="grid gap-2 rounded-[20px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(160deg,#fff8f1,#f4e7d8)] p-4 shadow-[0_18px_34px_rgba(70,44,26,0.08)] sm:rounded-[24px]">
                   <button
                     className="app-button app-button-primary w-full"
-                    disabled={isSubmitting || isQuotingDelivery || isResolvingCoupon}
+                    disabled={isSubmitting || isQuotingDelivery || isResolvingCoupon || isDeliveryQuoteConfirmationPending}
                     onClick={() => {
                       void handlePrimaryAction();
                     }}
@@ -2178,6 +3063,216 @@ export function PublicOrderPage() {
           </aside>
         </section>
       </div>
+      {expandedCompanionProduct ? (
+        <div className="order-detail-modal" role="presentation" onClick={closeCompanionPreview}>
+          <div
+            className="order-detail-modal__dialog order-detail-modal__dialog--companion-preview"
+            ref={companionPreviewDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="public-order-companion-preview-title"
+            tabIndex={-1}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="public-order-companion-preview-title" className="sr-only">
+              Imagem ampliada de {expandedCompanionProduct.label}
+            </h2>
+            <button
+              ref={companionPreviewCloseRef}
+              type="button"
+              className="order-detail-modal__close"
+              onClick={closeCompanionPreview}
+            >
+              <AppIcon name="close" className="h-4 w-4" />
+              Fechar
+            </button>
+            <div className="app-panel order-detail-modal__panel public-order-image-drawer">
+              <div className="public-order-image-drawer__header">
+                <div className="grid gap-2">
+                  <p className="public-order-image-drawer__eyebrow">Amigas da Broa</p>
+                  <div className="grid gap-1">
+                    <h3 className="text-[1.22rem] font-semibold tracking-[-0.04em] text-[color:var(--ink-strong)] sm:text-[1.55rem]">
+                      {expandedCompanionProductLines.title}
+                    </h3>
+                    <div className="grid gap-0.5 text-sm leading-6 text-[color:var(--ink-muted)] sm:text-[0.96rem]">
+                      {expandedCompanionProductLines.subtitleLine ? (
+                        <p>{expandedCompanionProductLines.subtitleLine}</p>
+                      ) : null}
+                      {expandedCompanionProductLines.makerLine ? (
+                        <p>{expandedCompanionProductLines.makerLine}</p>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+                <span className="public-order-image-drawer__price">
+                  {formatCurrencyBRL(expandedCompanionProduct.price)}
+                </span>
+              </div>
+
+              <div className="public-order-image-drawer__media public-order-image-drawer__media--companion">
+                <OrderCardArtwork
+                  alt={expandedCompanionProduct.label}
+                  art={resolveOrderCardArt(expandedCompanionProduct)}
+                  className="rounded-[24px] bg-white"
+                  imageClassName="h-full w-full object-contain"
+                  managedUploadFit="contain-tight"
+                  overlayClassName="absolute inset-0 bg-transparent"
+                  sizes="(max-width: 768px) 92vw, (max-width: 1280px) 72vw, 760px"
+                />
+              </div>
+
+              <p className="whitespace-pre-line text-sm leading-6 text-[color:var(--ink-muted)]">
+                {resolveCompanionDrawerNote(expandedCompanionProduct)}
+              </p>
+
+              <div className="public-order-image-drawer__actions">
+                <button
+                  type="button"
+                  className="app-button app-button-ghost"
+                  onClick={() =>
+                    expandedCompanionProduct
+                      ? setCompanionQuantity(
+                          expandedCompanionProduct.key,
+                          Math.max(expandedCompanionQuantity - 1, 0)
+                        )
+                      : undefined
+                  }
+                  disabled={!expandedCompanionProduct || expandedCompanionQuantity <= 0}
+                >
+                  −
+                </button>
+                <div className="public-order-image-drawer__qty">
+                  <strong>{expandedCompanionQuantity}</strong>
+                  <span>{pluralize(expandedCompanionQuantity, 'item', 'itens')}</span>
+                </div>
+                <button
+                  type="button"
+                  className="app-button app-button-primary"
+                  onClick={() =>
+                    expandedCompanionProduct
+                      ? setCompanionQuantity(expandedCompanionProduct.key, expandedCompanionQuantity + 1)
+                      : undefined
+                  }
+                  disabled={!expandedCompanionProduct}
+                >
+                  Adicionar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {isMixedBoxesDrawerOpen && mixedBoxEntries.length ? (
+        <div className="order-detail-modal" role="presentation" onClick={closeMixedBoxesDrawer}>
+          <div
+            className="order-detail-modal__dialog order-detail-modal__dialog--quick-create order-detail-modal__dialog--mixed-boxes"
+            ref={mixedBoxesDrawerDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="public-order-mixed-boxes-title"
+            tabIndex={-1}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="public-order-mixed-boxes-title" className="sr-only">
+              Selecionar sabores das caixas mistas
+            </h2>
+            <button
+              ref={mixedBoxesDrawerCloseRef}
+              type="button"
+              className="order-detail-modal__close"
+              onClick={closeMixedBoxesDrawer}
+            >
+              <AppIcon name="close" className="h-4 w-4" />
+              Fechar
+            </button>
+            <div className="app-panel order-detail-modal__panel order-detail-modal__panel--mixed-boxes">
+              <div className="grid gap-4 p-4 sm:p-5 xl:p-6">
+                <div className="grid gap-2">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[0.72rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
+                        Caixas Mistas
+                      </p>
+                      <h3 className="text-[1.18rem] font-semibold tracking-[-0.03em] text-[color:var(--ink-strong)] sm:text-[1.4rem]">
+                        Escolha os sabores
+                      </h3>
+                    </div>
+                    <span className="rounded-full border border-[rgba(126,79,45,0.12)] bg-white px-3 py-1 text-[0.72rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
+                      {totalMixedBoxes} {pluralize(totalMixedBoxes, 'caixa', 'caixas')}
+                    </span>
+                  </div>
+                  <p className="text-sm leading-6 text-[color:var(--ink-muted)]">
+                    1 caixa = 4 tradicionais + 3 broas de um sabor
+                  </p>
+                </div>
+
+                <div className="grid gap-3">
+                  {mixedBoxEntries.map((entry) => {
+                    const quantity = parsedBoxCounts[entry.key] || 0;
+                    return (
+                      <article
+                        key={entry.key}
+                        className={`public-order-mixed-drawer-row rounded-[20px] border p-3 sm:p-4 ${
+                          quantity > 0
+                            ? 'border-[color:var(--tone-roast-line)] bg-[color:var(--tone-roast-surface)]'
+                            : 'border-[rgba(126,79,45,0.08)] bg-white'
+                        }`}
+                      >
+                        <div className="public-order-mixed-drawer-row__info">
+                          <div className="public-order-mixed-drawer-row__media">
+                            <div className="relative h-full w-full overflow-hidden rounded-[18px] border border-white/80 bg-white shadow-[0_12px_24px_rgba(74,47,31,0.1)]">
+                              <OrderCardArtwork
+                                alt={entry.label}
+                                art={entry.drawerArt ?? entry.art}
+                                sizes="88px"
+                              />
+                            </div>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-[color:var(--ink-strong)] sm:text-[1rem]">
+                              {entry.label}
+                            </p>
+                            <p className="mt-1 text-[0.82rem] leading-5 text-[color:var(--ink-muted)] sm:text-sm">
+                              {entry.detail}
+                            </p>
+                            <p className="mt-2 text-sm font-semibold text-[color:var(--ink-strong)]">
+                              {formatCurrencyBRL(entry.priceEstimate)}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="public-order-mixed-drawer-row__controls">
+                          <button
+                            type="button"
+                            className="public-order-custom-row__button h-11 rounded-[14px] border border-white/85 bg-white text-[1.15rem] font-semibold text-[color:var(--ink-strong)] transition hover:bg-white sm:text-xl"
+                            onClick={() => setMixedBoxQuantity(entry.key, quantity - 1)}
+                            disabled={quantity <= 0}
+                            aria-label={`Diminuir ${entry.label}`}
+                          >
+                            −
+                          </button>
+                          <div className="public-order-mixed-drawer-row__qty">
+                            <strong>{quantity}</strong>
+                            <span>{pluralize(quantity, 'caixa', 'caixas')}</span>
+                          </div>
+                          <button
+                            type="button"
+                            className="public-order-custom-row__button h-11 rounded-[14px] border border-white/85 bg-white text-[1.15rem] font-semibold text-[color:var(--ink-strong)] transition hover:bg-white sm:text-xl"
+                            onClick={() => setMixedBoxQuantity(entry.key, quantity + 1)}
+                            aria-label={`Aumentar ${entry.label}`}
+                          >
+                            +
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

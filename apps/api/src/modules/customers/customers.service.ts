@@ -165,7 +165,7 @@ export class CustomersService {
       where: { id },
       include: this.customerAddressInclude()
     });
-    if (!customer) throw new NotFoundException('Cliente nao encontrado');
+    if (!customer) throw new NotFoundException('Cliente não encontrado');
     return {
       ...this.normalizeCustomerAutofillView(customer),
       couponUsage: await this.buildCustomerCouponUsage(customer.id)
@@ -316,7 +316,7 @@ export class CustomersService {
       });
       if (conflict) {
         throw new BadRequestException(
-          `Telefone ja vinculado ao cliente #${resolveDisplayNumber(conflict) ?? conflict.id}.`
+          `Telefone já vinculado ao cliente #${resolveDisplayNumber(conflict) ?? conflict.id}.`
         );
       }
     }
@@ -377,7 +377,7 @@ export class CustomersService {
       include: this.customerAddressInclude()
     });
     if (!existing || existing.deletedAt) {
-      throw new NotFoundException('Cliente nao encontrado');
+      throw new NotFoundException('Cliente não encontrado');
     }
 
     const data = CustomerAddressSchema.omit({
@@ -396,9 +396,95 @@ export class CustomersService {
     });
   }
 
+  async updateAddress(customerId: number, addressId: number, payload: unknown) {
+    const existing = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      include: this.customerAddressInclude()
+    });
+    if (!existing || existing.deletedAt) {
+      throw new NotFoundException('Cliente não encontrado');
+    }
+
+    const address = existing.addresses.find((entry) => entry.id === addressId) || null;
+    if (!address) {
+      throw new NotFoundException('Endereço não encontrado');
+    }
+
+    const data = CustomerAddressSchema.omit({
+      id: true,
+      customerId: true,
+      createdAt: true,
+      updatedAt: true,
+      isPrimary: true
+    }).parse(payload) as CustomerAddressCreatePayload;
+    const normalized = normalizeCustomerAddressPayload(data);
+
+    return this.prisma.$transaction(async (tx) => {
+      const updatedAddress = await tx.customerAddress.update({
+        where: { id: addressId },
+        data: normalized
+      });
+
+      if (address.isPrimary) {
+        await tx.customer.update({
+          where: { id: customerId },
+          data: {
+            address: updatedAddress.address,
+            addressLine1: updatedAddress.addressLine1,
+            addressLine2: updatedAddress.addressLine2,
+            neighborhood: updatedAddress.neighborhood,
+            city: updatedAddress.city,
+            state: updatedAddress.state,
+            postalCode: updatedAddress.postalCode,
+            country: updatedAddress.country,
+            placeId: updatedAddress.placeId,
+            lat: updatedAddress.lat,
+            lng: updatedAddress.lng,
+            deliveryNotes: updatedAddress.deliveryNotes
+          }
+        });
+      }
+
+      return tx.customer.findUniqueOrThrow({
+        where: { id: customerId },
+        include: this.customerAddressInclude()
+      });
+    });
+  }
+
+  async removeAddress(customerId: number, addressId: number) {
+    const existing = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      include: this.customerAddressInclude()
+    });
+    if (!existing || existing.deletedAt) {
+      throw new NotFoundException('Cliente não encontrado');
+    }
+
+    const address = existing.addresses.find((entry) => entry.id === addressId) || null;
+    if (!address) {
+      throw new NotFoundException('Endereço não encontrado');
+    }
+
+    if (address.isPrimary) {
+      throw new BadRequestException('O endereço principal deve ser editado, não excluído.');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.customerAddress.delete({
+        where: { id: addressId }
+      });
+
+      return tx.customer.findUniqueOrThrow({
+        where: { id: customerId },
+        include: this.customerAddressInclude()
+      });
+    });
+  }
+
   async remove(id: number) {
     const customer = await this.prisma.customer.findUnique({ where: { id } });
-    if (!customer) throw new NotFoundException('Cliente nao encontrado');
+    if (!customer) throw new NotFoundException('Cliente não encontrado');
     if (customer.deletedAt) {
       return;
     }

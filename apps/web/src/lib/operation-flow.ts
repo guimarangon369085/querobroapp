@@ -1,4 +1,5 @@
 import {
+  normalizeOrderStatus,
   resolveDisplayNumber,
   roundMoney,
   type Bom,
@@ -21,7 +22,7 @@ export type FlowConnectionMode = 'loading' | 'online' | 'offline';
 export type FlowStepState = 'done' | 'current' | 'locked';
 
 export type FlowStep = {
-  key: 'catalog' | 'customer' | 'order' | 'confirm' | 'prepare' | 'deliver' | 'pay';
+  key: 'catalog' | 'customer' | 'order' | 'ready' | 'deliver' | 'pay';
   index: number;
   icon: string;
   title: string;
@@ -58,7 +59,16 @@ export const EMPTY_FLOW_RAW: OperationFlowRaw = {
 };
 
 export const OFFLINE_FALLBACK_FLOW_RAW: OperationFlowRaw = {
-  products: [{ id: 1, name: 'Broa classica', price: 12.5, active: true }],
+  products: [
+    {
+      id: 1,
+      name: 'Broa classica',
+      price: 12.5,
+      active: true,
+      salesLimitEnabled: false,
+      salesLimitExhausted: false
+    }
+  ],
   customers: [{ id: 1, name: 'Cliente demo' }],
   orders: [
     {
@@ -78,10 +88,8 @@ export const OFFLINE_FALLBACK_FLOW_RAW: OperationFlowRaw = {
 
 const statusRank: Record<string, number> = {
   ABERTO: 0,
-  CONFIRMADO: 1,
-  EM_PREPARACAO: 2,
-  PRONTO: 3,
-  ENTREGUE: 4,
+  PRONTO: 1,
+  ENTREGUE: 2,
   CANCELADO: -1
 };
 
@@ -93,7 +101,7 @@ function pickMainOrder(orders: Order[]) {
   const sorted = [...orders].sort(
     (a, b) => (resolveDisplayNumber(b) ?? b.id ?? 0) - (resolveDisplayNumber(a) ?? a.id ?? 0)
   );
-  return sorted.find((entry) => entry.status !== 'CANCELADO') || null;
+  return sorted.find((entry) => normalizeOrderStatus(entry.status) !== 'CANCELADO') || null;
 }
 
 function hasAnyData(raw: OperationFlowRaw) {
@@ -148,7 +156,8 @@ function resolveOrderBalance(order: Order, payments: Payment[]) {
 
 export function deriveOperationFlow(raw: OperationFlowRaw): OperationFlow {
   const currentOrder = pickMainOrder(raw.orders);
-  const orderRank = currentOrder ? statusRank[currentOrder.status || 'ABERTO'] ?? 0 : -1;
+  const normalizedOrderStatus = normalizeOrderStatus(currentOrder?.status) || 'ABERTO';
+  const orderRank = currentOrder ? statusRank[normalizedOrderStatus] ?? 0 : -1;
   const paymentStatus = currentOrder ? resolveOrderPaymentStatus(currentOrder, raw.payments) : 'PENDENTE';
   const pendingCurrentOrder = currentOrder ? resolveOrderBalance(currentOrder, raw.payments) : 0;
   const currentCustomer = currentOrder?.customerId
@@ -166,17 +175,14 @@ export function deriveOperationFlow(raw: OperationFlowRaw): OperationFlow {
   const hasCatalog = hasProducts && hasBom;
   const hasCustomer = raw.customers.length > 0;
   const hasOrder = Boolean(currentOrder);
-  const isConfirmed = orderRank >= 1;
-  const isPrepared = orderRank >= 3;
-  const isDelivered = orderRank >= 4;
+  const isReady = orderRank >= 1;
+  const isDelivered = orderRank >= 2;
   const isPaid = isDelivered && paymentStatus === 'PAGO';
-
-  const preparedDetail = orderRank >= 2 ? 'Producao iniciada. Avance ate pronto.' : 'Inicie o preparo.';
 
   const catalogAction = !hasProducts
     ? { label: 'Abrir base', href: '/base' }
     : !hasBom
-    ? { label: 'Abrir producao', href: '/producao' }
+    ? { label: 'Abrir produção', href: '/producao' }
     : { label: 'Revisar base', href: '/base' };
 
   const baseSteps: Omit<FlowStep, 'state'>[] = [
@@ -186,10 +192,10 @@ export function deriveOperationFlow(raw: OperationFlowRaw): OperationFlow {
       icon: 'R',
       title: 'Base pronta',
       compact: 'broa + receita',
-      question: 'A base da broa ja esta pronta para operar?',
+      question: 'A base da broa já está pronta para operar?',
       detail: hasCatalog
         ? `${raw.products.length} broas com receita base ativa.`
-        : 'Cadastre a broa e a receita antes de comecar o dia.',
+        : 'Cadastre a broa e a receita antes de começar o dia.',
       actionLabel: catalogAction.label,
       href: catalogAction.href,
       statusLabel: hasCatalog ? 'OK' : !hasProducts ? 'broa' : 'receita',
@@ -201,7 +207,7 @@ export function deriveOperationFlow(raw: OperationFlowRaw): OperationFlow {
       icon: 'U',
       title: 'Cliente pronto',
       compact: 'base de venda',
-      question: 'A base de clientes ja cobre o dia?',
+      question: 'A base de clientes já cobre o dia?',
       detail: hasCustomer ? `${raw.customers.length} clientes cadastrados.` : 'Cadastre o primeiro cliente.',
       actionLabel: hasCustomer ? 'Abrir base' : 'Criar cliente',
       href: '/base',
@@ -214,7 +220,7 @@ export function deriveOperationFlow(raw: OperationFlowRaw): OperationFlow {
       icon: 'P',
       title: 'Compromisso criado',
       compact: 'venda do dia',
-      question: 'O compromisso principal do dia ja entrou?',
+      question: 'O compromisso principal do dia já entrou?',
       detail: hasOrder
         ? `Pedido #${currentOrderNumber ?? '-'} para ${currentCustomerName}.`
         : 'Crie o primeiro compromisso.',
@@ -224,51 +230,38 @@ export function deriveOperationFlow(raw: OperationFlowRaw): OperationFlow {
       done: hasOrder
     },
     {
-      key: 'confirm',
+      key: 'ready',
       index: 4,
-      icon: 'C',
-      title: 'Dia confirmado',
-      compact: 'liberar producao',
-      question: 'A demanda do dia ja esta confirmada?',
-      detail: isConfirmed ? 'Demanda principal confirmada.' : 'Confirme o pedido principal.',
+      icon: 'P',
+      title: 'Pedido pronto',
+      compact: 'sacola pronta',
+      question: 'O pedido principal já está pronto para sair?',
+      detail: isReady ? 'Pedido principal pronto para retirada ou entrega.' : 'Avance o pedido para pronto.',
       actionLabel: 'Revisar hoje',
       href: '/hoje',
-      statusLabel: isConfirmed ? 'OK' : 'aguardando',
-      done: isConfirmed
-    },
-    {
-      key: 'prepare',
-      index: 5,
-      icon: 'F',
-      title: 'Producao em dia',
-      compact: 'forno e acabamento',
-      question: 'A broa ja esta pronta para sair?',
-      detail: isPrepared ? 'Pedido pronto para saida.' : preparedDetail,
-      actionLabel: 'Abrir producao',
-      href: '/producao',
-      statusLabel: isPrepared ? 'OK' : 'aguardando',
-      done: isPrepared
+      statusLabel: isReady ? 'OK' : 'aguardando',
+      done: isReady
     },
     {
       key: 'deliver',
-      index: 6,
+      index: 5,
       icon: 'E',
-      title: 'Saida concluida',
+      title: 'Saída concluída',
       compact: 'retirada ou entrega',
-      question: 'A saida principal ja foi concluida?',
-      detail: isDelivered ? `Entregue para ${currentCustomerName}.` : 'Conclua a saida do pedido.',
-      actionLabel: 'Abrir saidas',
+      question: 'A saída principal já foi concluída?',
+      detail: isDelivered ? `Entregue para ${currentCustomerName}.` : 'Conclua a saída do pedido.',
+      actionLabel: 'Abrir saídas',
       href: '/saidas',
       statusLabel: isDelivered ? 'OK' : 'aguardando',
       done: isDelivered
     },
     {
       key: 'pay',
-      index: 7,
+      index: 6,
       icon: '$',
       title: 'Caixa fechado',
       compact: 'venda encerrada',
-      question: 'O dinheiro do dia ja entrou?',
+      question: 'O dinheiro do dia já entrou?',
       detail: isPaid ? 'Venda encerrada com pagamento confirmado.' : `Saldo restante ${formatCurrencyBR(pendingCurrentOrder)}.`,
       actionLabel: 'Abrir caixa',
       href: '/caixa',
@@ -289,14 +282,19 @@ export function deriveOperationFlow(raw: OperationFlowRaw): OperationFlow {
   const nextStep = steps.find((entry) => !entry.done) || null;
 
   const pendingValue = raw.orders.reduce((sum, order) => {
-    if (order.status === 'CANCELADO') return sum;
+    if (normalizeOrderStatus(order.status) === 'CANCELADO') return sum;
     return sum + resolveOrderBalance(order, raw.payments);
   }, 0);
 
   const openOrders = raw.orders.filter(
-    (entry) => entry.status !== 'ENTREGUE' && entry.status !== 'CANCELADO'
+    (entry) => {
+      const normalizedStatus = normalizeOrderStatus(entry.status);
+      return normalizedStatus !== 'ENTREGUE' && normalizedStatus !== 'CANCELADO';
+    }
   ).length;
-  const deliveredOrders = raw.orders.filter((entry) => entry.status === 'ENTREGUE').length;
+  const deliveredOrders = raw.orders.filter(
+    (entry) => normalizeOrderStatus(entry.status) === 'ENTREGUE'
+  ).length;
 
   return {
     steps,

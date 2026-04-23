@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     body = await request.json();
   } catch {
     return buildErrorResponse(400, {
-      message: 'Payload invalido para preview do formulario.'
+      message: 'Payload inválido para preview do formulário.'
     });
   }
 
@@ -54,8 +54,8 @@ export async function POST(request: Request) {
     return buildErrorResponse(502, {
       message:
         error instanceof Error
-          ? `Falha ao conectar o preview do formulario com a API: ${error.message}`
-          : 'Falha ao conectar o preview do formulario com a API.'
+          ? `Falha ao conectar o preview do formulário com a API: ${error.message}`
+          : 'Falha ao conectar o preview do formulário com a API.'
     });
   }
 }

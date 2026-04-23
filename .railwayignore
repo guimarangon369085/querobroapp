@@ -3,6 +3,7 @@
 .githooks
 .turbo
 .next
+.next-*
 node_modules
 **/node_modules
 output
@@ -11,8 +12,11 @@ coverage
 .tools
 .DS_Store
 apps/**/.next
+apps/**/.next-*
 apps/**/dist
 apps/**/build
+apps/**/.codex-temp
+**/*.tsbuildinfo
 apps/api/prisma/dev.db
 apps/api/prisma/dev.db-journal
 apps/api/dev.db

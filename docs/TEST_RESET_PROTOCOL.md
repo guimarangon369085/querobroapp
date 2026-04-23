@@ -23,11 +23,13 @@ Garantir que cada rodada de validacao manual ou E2E comece em estado limpo, com 
    - terminal 2: `pnpm --filter @querobroapp/web dev`
 3. Validar health:
    - `curl -fsS http://127.0.0.1:3001/health`
-   - `curl -I http://127.0.0.1:3000/pedidos`
+   - `curl -I http://127.0.0.1:3000/pedido`
+   - `curl -I http://127.0.0.1:3003/pedidos`
 4. Se quiser validar do zero, limpar dados de teste com API/Web ativos:
    - `pnpm cleanup:test-data`
 5. Abrir o app:
-   - `http://127.0.0.1:3000/pedidos`
+   - espelho publicado: `http://127.0.0.1:3000/pedido`
+   - operacao local: `http://127.0.0.1:3003/pedidos`
 6. Se o navegador ja estava aberto antes do reboot:
    - fazer hard refresh
 
@@ -75,5 +77,6 @@ Restart sem limpeza:
 - Nenhum pedido de teste residual, se a limpeza foi rodada.
 - Nenhum cliente de teste residual, se a limpeza foi rodada.
 - API em `http://127.0.0.1:3001/health` com `200`.
-- Web em `http://127.0.0.1:3000/pedidos` carregando normalmente.
+- Espelho em `http://127.0.0.1:3000/pedido` carregando normalmente.
+- Web operacional em `http://127.0.0.1:3003/pedidos` carregando normalmente.
 - `Pedidos` abrindo em `Dia`, sem erro de CORS e sem overlay de runtime.

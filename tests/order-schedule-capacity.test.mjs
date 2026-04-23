@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ensureApiServer, request } from './lib/api-server.mjs';
+import { ensureApiServer, request, requestExpectError } from './lib/api-server.mjs';
 
 function resolveScheduleDate(seed = Date.now()) {
   const baseDate = new Date(Date.UTC(2090, 0, 1, 0, 0, 0, 0));
@@ -276,4 +276,217 @@ test('public schedule exposes delivery windows while keeping exact internal allo
   assert.equal(availability.requestedWindowAvailable, true);
   assert.equal(availability.requestedWindowScheduledAt, localScheduleIso(scheduleDate, 9, 0));
   assert.equal(availability.windows.find((entry) => entry.key === 'MORNING')?.scheduledAt, localScheduleIso(scheduleDate, 9, 0));
+});
+
+test('public schedule blocks a day explicitly disabled in operations', async (t) => {
+  const { apiUrl, shutdown } = await ensureApiServer();
+
+  t.after(async () => {
+    await shutdown();
+  });
+
+  const scheduleDate = resolveScheduleDate(`blocked-day-${Date.now()}`);
+  const dayKey = scheduleDate.toISOString().slice(0, 10);
+
+  const blockedDay = await request(apiUrl, `/orders/schedule-days/${dayKey}`, {
+    method: 'PUT',
+    body: {
+      blockedWindows: ['MORNING', 'AFTERNOON', 'EVENING'],
+    },
+  });
+  assert.equal(blockedDay.dayKey, dayKey);
+  assert.deepEqual(blockedDay.blockedWindows, ['MORNING', 'AFTERNOON', 'EVENING']);
+
+  const availability = await request(
+    apiUrl,
+    `/orders/public-schedule?date=${encodeURIComponent(dayKey)}&timeWindow=MORNING&totalBroas=14`
+  );
+
+  assert.equal(availability.requestedWindowAvailable, false);
+  assert.equal(availability.requestedWindowReason, 'DAY_BLOCKED');
+  assert.equal(availability.windows.every((entry) => entry.reason === 'DAY_BLOCKED'), true);
+  assert.equal(String(availability.nextAvailableAt).startsWith(dayKey), false);
+
+  const reopenedDay = await request(apiUrl, `/orders/schedule-days/${dayKey}`, {
+    method: 'PUT',
+    body: {
+      blockedWindows: [],
+    },
+  });
+  assert.deepEqual(reopenedDay.blockedWindows, []);
+});
+
+test('public schedule blocks only the selected window when operations disables a single period', async (t) => {
+  const { apiUrl, shutdown } = await ensureApiServer();
+
+  t.after(async () => {
+    await shutdown();
+  });
+
+  const scheduleDate = resolveScheduleDate(`blocked-window-${Date.now()}`);
+  const dayKey = scheduleDate.toISOString().slice(0, 10);
+
+  const blockedWindow = await request(apiUrl, `/orders/schedule-days/${dayKey}`, {
+    method: 'PUT',
+    body: {
+      blockedWindows: ['MORNING'],
+    },
+  });
+  assert.deepEqual(blockedWindow.blockedWindows, ['MORNING']);
+
+  const morning = await request(
+    apiUrl,
+    `/orders/public-schedule?date=${encodeURIComponent(dayKey)}&timeWindow=MORNING&totalBroas=14`
+  );
+  const afternoon = await request(
+    apiUrl,
+    `/orders/public-schedule?date=${encodeURIComponent(dayKey)}&timeWindow=AFTERNOON&totalBroas=14`
+  );
+
+  assert.equal(morning.requestedWindowReason, 'DAY_BLOCKED');
+  assert.equal(morning.windows.find((entry) => entry.key === 'MORNING')?.reason, 'DAY_BLOCKED');
+  assert.equal(afternoon.windows.find((entry) => entry.key === 'AFTERNOON')?.available, true);
+  assert.equal(afternoon.windows.find((entry) => entry.key === 'EVENING')?.available, true);
+});
+
+test('customer-form intake rejects a day explicitly blocked in operations', async (t) => {
+  const { apiUrl, shutdown } = await ensureApiServer();
+  const created = {
+    productId: null,
+  };
+
+  t.after(async () => {
+    if (created.productId) {
+      try {
+        await request(apiUrl, `/inventory-products/${created.productId}`, { method: 'DELETE' });
+      } catch {}
+    }
+    await shutdown();
+  });
+
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const product = await createOrderProduct(apiUrl, `blocked-public-${suffix}`);
+  created.productId = product.id;
+
+  const scheduleDate = resolveScheduleDate(`blocked-public-${suffix}`.length + Date.now());
+  const dayKey = scheduleDate.toISOString().slice(0, 10);
+  const scheduledAt = localScheduleIso(scheduleDate, 9, 0);
+
+  await request(apiUrl, `/orders/schedule-days/${dayKey}`, {
+    method: 'PUT',
+    body: {
+      blockedWindows: ['MORNING', 'AFTERNOON', 'EVENING'],
+    },
+  });
+
+  const error = await requestExpectError(apiUrl, '/orders/intake/customer-form', 400, {
+    method: 'POST',
+    body: {
+      version: 1,
+      customer: {
+        name: `Cliente Bloqueado ${suffix}`,
+        phone: '11999999999',
+      },
+      fulfillment: {
+        mode: 'PICKUP',
+        date: dayKey,
+        timeWindow: 'MORNING',
+        scheduledAt,
+      },
+      items: [{ productId: product.id, quantity: 7 }],
+      source: {
+        externalId: `blocked-public-${suffix}`,
+      },
+    },
+  });
+
+  assert.equal(error.reason, 'DAY_BLOCKED');
+  assert.equal(String(error.nextAvailableAt).startsWith(dayKey), false);
+});
+
+test('internal scheduling also rejects blocked days for new and moved orders', async (t) => {
+  const { apiUrl, shutdown } = await ensureApiServer();
+  const created = {
+    productId: null,
+    orderIds: [],
+    customerIds: []
+  };
+
+  t.after(async () => {
+    for (const orderId of created.orderIds) {
+      try {
+        await request(apiUrl, `/orders/${orderId}`, { method: 'DELETE' });
+      } catch {}
+    }
+    for (const customerId of created.customerIds) {
+      try {
+        await request(apiUrl, `/customers/${customerId}`, { method: 'DELETE' });
+      } catch {}
+    }
+    if (created.productId) {
+      try {
+        await request(apiUrl, `/inventory-products/${created.productId}`, { method: 'DELETE' });
+      } catch {}
+    }
+    await shutdown();
+  });
+
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const product = await createOrderProduct(apiUrl, `blocked-internal-${suffix}`);
+  created.productId = product.id;
+
+  const blockedDate = resolveScheduleDate(`blocked-internal-${suffix}`.length + Date.now());
+  const blockedDayKey = blockedDate.toISOString().slice(0, 10);
+  const blockedScheduledAt = localScheduleIso(blockedDate, 10, 0);
+
+  await request(apiUrl, `/orders/schedule-days/${blockedDayKey}`, {
+    method: 'PUT',
+    body: {
+      blockedWindows: ['MORNING'],
+    },
+  });
+
+  const createError = await requestExpectError(apiUrl, '/orders/intake', 400, {
+    method: 'POST',
+    body: {
+      version: 1,
+      intent: 'CONFIRMED',
+      customer: {
+        name: `Cliente Interno ${suffix}`,
+        phone: '11999999998',
+        address: `Rua Interna ${suffix}, 10`
+      },
+      fulfillment: {
+        mode: 'DELIVERY',
+        scheduledAt: blockedScheduledAt
+      },
+      order: {
+        items: [{ productId: product.id, quantity: 7 }]
+      },
+      payment: {
+        method: 'pix',
+        status: 'PENDENTE'
+      },
+      source: {
+        channel: 'INTERNAL_DASHBOARD',
+        originLabel: 'schedule-test'
+      }
+    },
+  });
+
+  assert.equal(createError.reason, 'DAY_BLOCKED');
+
+  const allowedScheduledAt = localScheduleIso(blockedDate, 13, 0);
+  const createdOrder = await createIntakeOrder(apiUrl, product.id, `${suffix}-allowed`, allowedScheduledAt, 7, 'INTERNAL_DASHBOARD');
+  created.orderIds.push(createdOrder.order.id);
+  created.customerIds.push(createdOrder.intake.customerId);
+
+  const moveError = await requestExpectError(apiUrl, `/orders/${createdOrder.order.id}`, 400, {
+    method: 'PUT',
+    body: {
+      scheduledAt: blockedScheduledAt
+    },
+  });
+
+  assert.equal(moveError.reason, 'DAY_BLOCKED');
 });

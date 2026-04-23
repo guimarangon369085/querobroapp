@@ -1,5 +1,6 @@
 import type {
   Customer,
+  ExternalOrderDeliveryWindowKey,
   OrderIntake,
   OrderIntakeMeta,
   PixCharge,
@@ -11,7 +12,8 @@ import type {
   DeliveryQuote,
   DeliveryTracking,
   OrderView,
-  ProductionBoard
+  ProductionBoard,
+  ScheduleDayAvailability
 } from './orders-model';
 
 export type OrdersWorkspaceData = {
@@ -57,6 +59,13 @@ export function fetchDeliveryQuote(payload: {
     name?: string | null;
     phone?: string | null;
     address?: string | null;
+    addressLine1?: string | null;
+    addressLine2?: string | null;
+    neighborhood?: string | null;
+    city?: string | null;
+    state?: string | null;
+    postalCode?: string | null;
+    country?: string | null;
     placeId?: string | null;
     lat?: number | null;
     lng?: number | null;
@@ -81,6 +90,13 @@ export function fetchInternalDeliveryQuote(payload: {
     name?: string | null;
     phone?: string | null;
     address?: string | null;
+    addressLine1?: string | null;
+    addressLine2?: string | null;
+    neighborhood?: string | null;
+    city?: string | null;
+    state?: string | null;
+    postalCode?: string | null;
+    country?: string | null;
     placeId?: string | null;
     lat?: number | null;
     lng?: number | null;
@@ -122,6 +138,17 @@ export function markOrderDeliveryComplete(orderId: number) {
 
 export function fetchProductionBoard() {
   return apiFetch<ProductionBoard>('/production/queue');
+}
+
+export function fetchScheduleDayAvailability(dayKey: string) {
+  return apiFetch<ScheduleDayAvailability>(`/orders/schedule-days/${encodeURIComponent(dayKey)}`);
+}
+
+export function updateScheduleDayAvailability(dayKey: string, blockedWindows: ExternalOrderDeliveryWindowKey[]) {
+  return apiFetch<ScheduleDayAvailability>(`/orders/schedule-days/${encodeURIComponent(dayKey)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ blockedWindows }),
+  });
 }
 
 export function startNextProductionBatch(payload?: {

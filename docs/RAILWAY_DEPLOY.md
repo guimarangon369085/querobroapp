@@ -98,10 +98,13 @@ Variaveis obrigatorias:
 - `BUSINESS_BANK_CODE=260`
 - `BUSINESS_BANK_BRANCH=0001`
 - `BUSINESS_BANK_ACCOUNT=770733822-0`
-- `BANK_SYNC_WEBHOOK_TOKEN=<token forte para a bridge de baixa PIX>`
 - `PIX_RECONCILIATION_LOOKBACK_DAYS=45`
 - `PIX_RECONCILIATION_ALLOW_UNIQUE_AMOUNT_FALLBACK=false`
 - `DELIVERY_MANUAL_FALLBACK_FEE=12`
+
+Observacao:
+
+- o dashboard financeiro agora e alimentado por importacao manual do extrato do Nu Empresas (`.eml`, `.csv` ou `.ofx`) diretamente no bloco `EXTRATO BANCARIO`; nao existe mais bridge local continua do Nubank no app
 
 Custom domain:
 

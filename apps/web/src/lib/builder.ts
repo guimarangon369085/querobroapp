@@ -52,5 +52,5 @@ export async function fetchBuilderConfigClient(): Promise<BuilderConfig> {
     return BuilderConfigSchema.parse(body);
   }
 
-  throw new Error(`Falha ao carregar configuracao interna: HTTP ${lastStatus || 0}`);
+  throw new Error(`Falha ao carregar configuração interna: HTTP ${lastStatus || 0}`);
 }

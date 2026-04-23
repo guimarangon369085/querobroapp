@@ -44,12 +44,12 @@ export class AuthGuard implements CanActivate {
     const bearerToken = extractBearerToken(request.headers);
     const token = appTokenHeader || bearerToken;
     if (!token) {
-      throw new UnauthorizedException('Autenticacao obrigatoria. Envie x-app-token ou Authorization Bearer.');
+      throw new UnauthorizedException('Autenticação obrigatória. Envie x-app-token ou Authorization Bearer.');
     }
 
     const principal = config.tokensBySecret.get(token);
     if (!principal) {
-      throw new UnauthorizedException('Token invalido.');
+      throw new UnauthorizedException('Token inválido.');
     }
 
     request.authPrincipal = principal;

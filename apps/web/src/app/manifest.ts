@@ -12,13 +12,13 @@ export default function manifest(): MetadataRoute.Manifest {
     theme_color: '#a15427',
     icons: [
       {
-        src: '/querobroa-brand/icons/querobroa-icon-192.png',
+        src: '/querobroa-brand/icons/home-shortcut-stack-v2-192.png',
         sizes: '192x192',
         type: 'image/png',
         purpose: 'maskable'
       },
       {
-        src: '/querobroa-brand/icons/querobroa-icon-512.png',
+        src: '/querobroa-brand/icons/home-shortcut-stack-v2-512.png',
         sizes: '512x512',
         type: 'image/png',
         purpose: 'maskable'

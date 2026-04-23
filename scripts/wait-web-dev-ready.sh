@@ -7,6 +7,11 @@ WEB_URL="${1:-http://127.0.0.1:3000/pedidos}"
 TIMEOUT_SECONDS="${2:-120}"
 ELAPSED=0
 WEB_BASE_URL="$(printf '%s' "$WEB_URL" | sed -E 's#(https?://[^/]+).*#\1#')"
+WEB_PORT="$(printf '%s' "$WEB_BASE_URL" | sed -E 's#https?://[^:/]+:([0-9]+)#\1#')"
+
+if [ -z "$WEB_PORT" ] || [ "$WEB_PORT" = "$WEB_BASE_URL" ]; then
+  WEB_PORT=80
+fi
 
 is_port_listening() {
   local port="$1"
@@ -39,10 +44,7 @@ are_next_assets_ready() {
 }
 
 while [ "$ELAPSED" -lt "$TIMEOUT_SECONDS" ]; do
-  if is_port_listening 3000 \
-    && [ -f "$WEB_DIR/.next/routes-manifest.json" ] \
-    && [ -f "$WEB_DIR/.next/server/app-paths-manifest.json" ] \
-    && are_next_assets_ready; then
+  if is_port_listening "$WEB_PORT" && are_next_assets_ready; then
     if curl -fsS "$WEB_URL" >/dev/null 2>&1; then
       echo "WEB online: $WEB_URL"
       exit 0

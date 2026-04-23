@@ -22,10 +22,15 @@ const PUBLIC_API_PREFIXES = [
   '/api/delivery-quote',
   '/api/google-form',
   '/api/ops-auth',
+  '/api/order-catalog',
   '/api/order-schedule',
   '/api/runtime-theme'
 ];
 const PUBLIC_METADATA_PATHS = new Set(['/favicon.ico', '/icon.png', '/manifest.webmanifest', '/robots.txt', '/sitemap.xml']);
+
+function isRouteMetadataAssetPath(pathname: string) {
+  return pathname === '/apple-icon' || pathname.endsWith('/apple-icon') || pathname.endsWith('/icon');
+}
 
 function parseBooleanEnv(value: string | undefined, fallback: boolean) {
   const normalized = String(value || '').trim().toLowerCase();
@@ -136,6 +141,7 @@ export function isProtectedInternalApiPath(pathname: string) {
 
 function isStaticAssetPath(pathname: string) {
   if (PUBLIC_METADATA_PATHS.has(pathname)) return true;
+  if (isRouteMetadataAssetPath(pathname)) return true;
   if (STATIC_PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return true;
   return /\.[a-z0-9]+$/i.test(pathname);
 }

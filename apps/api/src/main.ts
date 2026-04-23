@@ -235,7 +235,7 @@ async function bootstrap() {
     !(isProd && allowUnsafeAuthInProd)
   ) {
     throw new Error(
-      `Inicializacao bloqueada: APP_AUTH_ENABLED=false com HOST=${host} exporia a API sem autenticacao. Use HOST loopback (127.0.0.1/localhost) ou defina APP_ALLOW_UNSAFE_AUTH_ON_PUBLIC_HOST=true conscientemente.`
+      `Inicialização bloqueada: APP_AUTH_ENABLED=false com HOST=${host} exporia a API sem autenticação. Use HOST loopback (127.0.0.1/localhost) ou defina APP_ALLOW_UNSAFE_AUTH_ON_PUBLIC_HOST=true conscientemente.`
     );
   }
 
@@ -304,7 +304,7 @@ async function bootstrap() {
   const allowSwaggerInProd = parseBooleanEnv(process.env.APP_ALLOW_SWAGGER_IN_PROD, false);
   if (isProd && enableSwagger && !allowSwaggerInProd) {
     throw new Error(
-      'Swagger em producao esta bloqueado por padrao. Defina APP_ALLOW_SWAGGER_IN_PROD=true para liberar conscientemente.'
+      'Swagger em produção está bloqueado por padrão. Defina APP_ALLOW_SWAGGER_IN_PROD=true para liberar conscientemente.'
     );
   }
 

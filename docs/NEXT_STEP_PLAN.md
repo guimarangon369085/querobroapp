@@ -1,6 +1,6 @@
 # NEXT_STEP_PLAN
 
-Ultima atualizacao: 2026-03-31
+Ultima atualizacao: 2026-04-16
 
 ## Objetivo da fase atual
 
@@ -9,9 +9,11 @@ Consolidar o lancamento publico do app sobre o mesmo nucleo operacional:
 - landing publica em `/`
 - operacao interna autenticada em `Pedidos`
 - captura externa em `/pedido` e `Google Forms`
-- entrega com frete cotado antes do PIX, calculado internamente por raio
+- entrega com frete cotado antes do PIX, calculado internamente por raio com tabela operacional editavel em `/frete`, mantendo bloqueio acima de `30 km`
 - COGS calculado por pedido com preco historico de insumo, usando baseline pesquisada desde o primeiro pedido quando necessario
 - ficha tecnica oficial de broa recalibrada para `36 broas` por receita, com leitura por broa no dashboard e custo reprocessado sobre toda a base ativa
+- dashboard executivo em formato `board cockpit`, com linha do tempo automatica diaria/mensal, atribuicao por origem/referrer, meta mensal orientada por run rate e separacao explicita entre caixa recebido e COGS tecnico estimado
+- caixa real do dashboard alimentado por importacao do extrato semanal do Nu Empresas, sem dependencia de bridge local autenticada no navegador
 
 ## Gate operacional (concluido em 2026-03-11)
 
@@ -57,6 +59,9 @@ Criterio de pronto:
 - Continuar reduzindo densidade visual e scroll na visao `Dia`.
 - Continuar a extracao dos blocos grandes restantes de `orders-screen` para componentes menores.
 - Manter o catalogo de caixas/sabores centralizado entre `/pedido`, `quick create` e `/pedidos`.
+- Validar em uso real a sessao `AMIGAS DA BROA` publicada, mantendo estoque direto por produto, auto-inativacao por saldo e cupom incidindo apenas sobre Broas.
+- Manter o feed publico `meta-catalog.csv` sincronizado com o catalogo publicado do `/pedido`, incluindo `AMIGAS DA BROA` e `Caixa Mista de Romeu e Julieta`, e concluir no Commerce Manager autenticado a organizacao final dos conjuntos de produtos usando os labels ja publicados no feed.
+- Cadastrar os proximos itens de `AMIGAS DA BROA` de forma incremental, preservando o formato editorial dos cards/gavetas e evitando proliferacao de copy auxiliar desnecessaria.
 - Manter em `/pedido` a selecao manual de data/faixa estavel, sem resync da agenda sobrescrever a escolha do cliente durante a interacao com o calendario.
 - Manter a numeracao publica sequencial de clientes/pedidos como unico numero exposto na interface.
 - Validar em producao o CTA principal da home, o prefill local de `/pedido` e o fluxo `Refazer ultimo pedido`.
@@ -83,6 +88,10 @@ Criterio de pronto:
 - Manter `/dashboard` acessivel no menu principal sem voltar a aplicar trava de host no web por engano.
 - Manter `/pedidos`, `/clientes`, `/estoque`, `/dashboard` e `/api/internal/*` protegidos por sessao persistente no web, sem voltar a expor a operacao por URL direta.
 - Manter `/dashboard` no formato editorial didatico novo, sem regressao para cards genericos ou leitura mais tecnica do que humana.
+- Manter no `/dashboard` a granularidade automatica da linha do tempo (`diaria` abaixo de `120` dias, `mensal` acima disso) e a base temporal coerente por `createdAt`, sem voltar a misturar receita de um mes com COGS de outro.
+- Manter no `/dashboard` a atribuicao analitica por `origem` e `referrer`, com `share`, `chegou /pedido`, `envio` e indice relativo por canal, para leitura real de oportunidade comercial.
+- Manter no `/dashboard` o bloco de extrato bancario como unica fonte de caixa real, garantindo que importacao de `.eml/.csv/.ofx` continue conciliando PIX pendente e atualizando custos/fluxo imediatamente.
+- Fechado neste lote: o fluxo financeiro deixou de depender da bridge local do Nubank e passou a operar por importacao manual do extrato semanal direto no dashboard.
 - Manter `Novo pedido` de `/pedidos` estavel em mobile, sem popup deformado nem quebra no bloco de quantidade.
 - Manter `/pedidos` mobile sem FAB flutuante para `Novo pedido`, usando acao inline no proprio painel.
 - Manter a abertura do detalhe de pedido sem refetch global da workspace ao trocar `selectedOrder`, evitando flashes curtos de loading ao clicar em cards.

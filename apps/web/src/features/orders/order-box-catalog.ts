@@ -1,6 +1,9 @@
 import {
+  buildCompanionProductMakerLine,
+  buildCompanionProductName,
   moneyFromMinorUnits,
   moneyToMinorUnits,
+  resolveCompanionProductProfile,
   type Product
 } from '@querobroapp/shared';
 
@@ -23,6 +26,14 @@ export type OrderCardArt =
         src: string;
         objectPosition?: string;
       }>;
+    }
+  | {
+      mode: 'weighted-columns';
+      columns: ReadonlyArray<{
+        src: string;
+        objectPosition?: string;
+        span: number;
+      }>;
     };
 
 export type RuntimeOrderFlavorKind = 'TRADITIONAL' | 'GOIABADA' | 'PREMIUM';
@@ -39,12 +50,30 @@ export type RuntimeOrderFlavorProduct = {
   imageUrl: string | null;
 };
 
+export type RuntimeOrderCompanionProduct = {
+  id: number;
+  key: string;
+  name: string;
+  category: string | null;
+  active: boolean;
+  label: string;
+  displayTitle: string;
+  displayFlavor: string | null;
+  displayMakerLine: string | null;
+  imageUrl: string | null;
+  price: number;
+  unit: string | null;
+  measureLabel: string | null;
+  drawerNote: string | null;
+};
+
 export type RuntimeOrderBoxEntry = {
   key: string;
   kind: 'SINGLE' | 'MIXED';
   label: string;
   detail: string;
   art: OrderCardArt;
+  drawerArt?: OrderCardArt;
   accentClassName: string;
   priceEstimate: number;
   unitsByProductId: Record<number, number>;
@@ -57,6 +86,9 @@ export type RuntimeOrderCatalog = {
   flavorProductById: Map<number, RuntimeOrderFlavorProduct>;
   flavorProductByLegacyCode: Partial<Record<OrderFlavorCode, RuntimeOrderFlavorProduct>>;
   traditionalFlavor: RuntimeOrderFlavorProduct | null;
+  companionProducts: RuntimeOrderCompanionProduct[];
+  companionProductById: Map<number, RuntimeOrderCompanionProduct>;
+  companionProductByKey: Map<string, RuntimeOrderCompanionProduct>;
   boxEntries: RuntimeOrderBoxEntry[];
   boxEntryByKey: Map<string, RuntimeOrderBoxEntry>;
   boxKeyByLegacyCode: Partial<Record<OrderBoxCode, string>>;
@@ -75,7 +107,7 @@ const ORDER_BOX_PRICE_MIXED_GOIABADA_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_P
 const ORDER_BOX_PRICE_MIXED_OTHER_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRICE_MIXED_OTHER);
 const ORDER_BOX_PRICE_GOIABADA_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRICE_GOIABADA);
 
-export const ORDER_MISTA_SHORTCUT_CODES = ['G', 'D', 'Q', 'R'] as const;
+export const ORDER_MISTA_SHORTCUT_CODES = ['G', 'D', 'Q', 'R', 'RJ'] as const;
 export const ORDER_FLAVOR_CODES = ['T', 'G', 'D', 'Q', 'R', 'RJ'] as const;
 
 export type OrderMistaShortcutCode = (typeof ORDER_MISTA_SHORTCUT_CODES)[number];
@@ -97,7 +129,8 @@ export const ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE: Record<OrderMistaShortcutCod
   G: 'Caixa Mista de Goiabada',
   D: 'Caixa Mista de Doce de Leite',
   Q: 'Caixa Mista de Queijo do Serro',
-  R: 'Caixa Mista de Requeijão de Corte'
+  R: 'Caixa Mista de Requeijão de Corte',
+  RJ: 'Caixa Mista de Romeu e Julieta'
 };
 
 const ORDER_CARDAPIO_IMAGE_PATHS = {
@@ -106,12 +139,13 @@ const ORDER_CARDAPIO_IMAGE_PATHS = {
   doceDeLeite: '/querobroa-brand/cardapio/doce-de-leite.jpg',
   queijoDoSerro: '/querobroa-brand/cardapio/queijo-do-serro-camadas.jpg',
   requeijaoDeCorte: '/querobroa-brand/cardapio/requeijao-de-corte.jpg',
-  romeuEJulieta: '/querobroa-brand/cardapio/romeu-e-julieta.jpg',
+  romeuEJulieta: '/querobroa-brand/cardapio/romeu-e-julieta.jpg?v=20260422-rj3',
   mistaGoiabada: '/querobroa-brand/cardapio/mista-goiabada.jpg',
   mistaDoceDeLeite: '/querobroa-brand/cardapio/mista-doce-de-leite.jpg',
   mistaQueijoDoSerro: '/querobroa-brand/cardapio/mista-queijo-do-serro.jpg',
   mistaRequeijaoDeCorte: '/querobroa-brand/cardapio/mista-requeijao-de-corte.jpg',
-  sabores: '/querobroa-brand/cardapio/sabores-caixa.jpg'
+  mistaRomeuEJulieta: '/querobroa-brand/cardapio/mista-romeu-e-julieta.jpg',
+  sabores: '/querobroa-brand/cardapio/sabores-caixa.jpg?v=20260422-rj3'
 } as const;
 
 export const ORDER_SABORES_REFERENCE_IMAGE = ORDER_CARDAPIO_IMAGE_PATHS.sabores;
@@ -147,7 +181,7 @@ export const ORDER_FLAVOR_CARD_ART_BY_CODE: Record<
   },
   RJ: {
     mode: 'single',
-    src: ORDER_CARDAPIO_IMAGE_PATHS.romeuEJulieta,
+    src: ORDER_CARDAPIO_IMAGE_PATHS.mistaRomeuEJulieta,
     objectPosition: 'center center'
   }
 };
@@ -200,6 +234,44 @@ const ORDER_MISTA_CARD_ART_BY_CODE: Record<
     rightSrc: ORDER_CARDAPIO_IMAGE_PATHS.requeijaoDeCorte,
     leftObjectPosition: 'center center',
     rightObjectPosition: 'center center'
+  },
+  RJ: {
+    mode: 'split',
+    leftSrc: ORDER_CARDAPIO_IMAGE_PATHS.traditional,
+    rightSrc: ORDER_CARDAPIO_IMAGE_PATHS.romeuEJulieta,
+    leftObjectPosition: 'center center',
+    rightObjectPosition: 'center center'
+  }
+};
+
+const ORDER_MISTA_DRAWER_ART_BY_CODE: Record<
+  OrderMistaShortcutCode,
+  Extract<OrderCardArt, { mode: 'single' }>
+> = {
+  G: {
+    mode: 'single',
+    src: ORDER_CARDAPIO_IMAGE_PATHS.mistaGoiabada,
+    objectPosition: 'center center'
+  },
+  D: {
+    mode: 'single',
+    src: ORDER_CARDAPIO_IMAGE_PATHS.mistaDoceDeLeite,
+    objectPosition: 'center center'
+  },
+  Q: {
+    mode: 'single',
+    src: ORDER_CARDAPIO_IMAGE_PATHS.mistaQueijoDoSerro,
+    objectPosition: 'center center'
+  },
+  R: {
+    mode: 'single',
+    src: ORDER_CARDAPIO_IMAGE_PATHS.mistaRequeijaoDeCorte,
+    objectPosition: 'center center'
+  },
+  RJ: {
+    mode: 'single',
+    src: ORDER_CARDAPIO_IMAGE_PATHS.mistaRomeuEJulieta,
+    objectPosition: 'center center'
   }
 };
 
@@ -303,6 +375,16 @@ export const ORDER_BOX_CATALOG = {
       'border-[color:var(--tone-olive-line)] bg-[linear-gradient(165deg,var(--tone-olive-surface),rgba(250,244,232,0.98))]',
     units: { T: 4, G: 0, D: 0, Q: 0, R: 3, RJ: 0 },
     priceEstimate: 47
+  },
+  MRJ: {
+    label: 'Mista Romeu e Julieta',
+    codeLabel: 'MRJ',
+    detail: '1 caixa = 4 tradicionais + 3 romeu e julieta',
+    art: ORDER_MISTA_CARD_ART_BY_CODE.RJ,
+    accentClassName:
+      'border-[color:var(--tone-roast-line)] bg-[linear-gradient(165deg,var(--tone-roast-surface),rgba(253,246,242,0.98))]',
+    units: { T: 4, G: 0, D: 0, Q: 0, R: 0, RJ: 3 },
+    priceEstimate: 47
   }
 } as const;
 
@@ -392,6 +474,10 @@ export const ORDER_BRAND_GALLERY_IMAGES = [
 ] as const;
 
 export function compactOrderProductName(name: string) {
+  const normalized = normalizeOrderFlavorName(name);
+  if (normalized.includes('pascoa')) {
+    return 'Broas de Páscoa';
+  }
   const compacted = name
     .replace(/^Broa\s+/i, '')
     .replace(/\s*\(([A-Z]{1,3})\)\s*$/i, '')
@@ -413,6 +499,11 @@ export function normalizeOrderFlavorCategory(value?: string | null) {
   return normalizeOrderFlavorName(value);
 }
 
+export function isRuntimeOrderCompanionCategory(value?: string | null) {
+  const normalized = normalizeOrderFlavorCategory(value);
+  return normalized.includes('amigos da broa') || normalized.includes('amigas da broa');
+}
+
 export function resolveOrderFlavorCodeFromName(value?: string | null): OrderFlavorCode | null {
   const normalized = normalizeOrderFlavorName(value);
   if (!normalized) return null;
@@ -432,20 +523,59 @@ export function resolveRuntimeOrderFlavorKind(value?: string | null): RuntimeOrd
   return 'PREMIUM';
 }
 
-type OrderProductArtSource = Pick<Product, 'id' | 'name' | 'category' | 'imageUrl' | 'active'>;
+type OrderProductArtSource = Pick<
+  Product,
+  'id' | 'name' | 'category' | 'imageUrl' | 'active' | 'measureLabel' | 'drawerNote'
+> & {
+  price?: number | null;
+  unit?: string | null;
+  salesLimitExhausted?: boolean | null;
+};
+
+function isRuntimeOrderFlavorProductSource(
+  product?: Pick<OrderProductArtSource, 'name' | 'category'> | null
+) {
+  const normalizedName = normalizeOrderFlavorName(product?.name);
+  const normalizedCategory = normalizeOrderFlavorCategory(product?.category);
+  return (
+    normalizedName.startsWith('broa ') &&
+    !normalizedName.includes('mista') &&
+    (normalizedCategory === 'sabores' || !normalizedCategory)
+  );
+}
+
+function isRuntimeOrderFallbackFlavorProductSource(
+  product?: Pick<OrderProductArtSource, 'name' | 'category'> | null
+) {
+  const normalizedName = normalizeOrderFlavorName(product?.name);
+  return (
+    normalizedName.startsWith('broa ') &&
+    !normalizedName.includes('mista') &&
+    !isRuntimeOrderCompanionCategory(product?.category)
+  );
+}
+
+export function resolveRuntimeOrderItemGroup(
+  product?: Pick<OrderProductArtSource, 'name' | 'category'> | null
+): 'FLAVOR' | 'COMPANION' | 'OTHER' {
+  if (isRuntimeOrderCompanionCategory(product?.category)) {
+    return 'COMPANION';
+  }
+  if (isRuntimeOrderFlavorProductSource(product) || isRuntimeOrderFallbackFlavorProductSource(product)) {
+    return 'FLAVOR';
+  }
+  return 'OTHER';
+}
 
 function findOrderFlavorProductByCode(
   code: OrderFlavorCode,
   products?: ReadonlyArray<OrderProductArtSource> | null
 ) {
   return (products || []).find((product) => {
-    const normalizedName = normalizeOrderFlavorName(product.name);
-    return (
-      product.active !== false &&
-      normalizedName.startsWith('broa ') &&
-      !normalizedName.includes('mista') &&
-      resolveOrderFlavorCodeFromName(product.name) === code
-    );
+    return product.active !== false &&
+      product.salesLimitExhausted !== true &&
+      isRuntimeOrderFallbackFlavorProductSource(product) &&
+      resolveOrderFlavorCodeFromName(product.name) === code;
   });
 }
 
@@ -454,9 +584,6 @@ function applyProductImageToSingleArt(
   imageUrl?: string | null
 ) {
   const normalizedImageUrl = String(imageUrl || '').trim();
-  if (normalizedImageUrl.startsWith('/uploads/')) {
-    return art;
-  }
   return normalizedImageUrl ? { ...art, src: normalizedImageUrl } : art;
 }
 
@@ -512,16 +639,14 @@ export function buildRuntimeOrderBoxCatalog(products?: ReadonlyArray<OrderProduc
     MG: { ...ORDER_BOX_CATALOG.MG, art: resolveOrderMistaCardArt('G', products) },
     MD: { ...ORDER_BOX_CATALOG.MD, art: resolveOrderMistaCardArt('D', products) },
     MQ: { ...ORDER_BOX_CATALOG.MQ, art: resolveOrderMistaCardArt('Q', products) },
-    MR: { ...ORDER_BOX_CATALOG.MR, art: resolveOrderMistaCardArt('R', products) }
+    MR: { ...ORDER_BOX_CATALOG.MR, art: resolveOrderMistaCardArt('R', products) },
+    MRJ: { ...ORDER_BOX_CATALOG.MRJ, art: resolveOrderMistaCardArt('RJ', products) }
   };
 }
 
 export function resolveOrderCardImage(product?: OrderProductArtSource | string | null) {
   const productName = typeof product === 'string' ? product : product?.name;
-  const explicitImageUrl =
-    typeof product === 'string' || String(product?.imageUrl || '').trim().startsWith('/uploads/')
-      ? null
-      : product?.imageUrl;
+  const explicitImageUrl = typeof product === 'string' ? null : String(product?.imageUrl || '').trim() || null;
   if (explicitImageUrl) return explicitImageUrl;
   const code = resolveOrderFlavorCodeFromName(productName);
   if (!code) return ORDER_SABORES_REFERENCE_IMAGE;
@@ -531,10 +656,7 @@ export function resolveOrderCardImage(product?: OrderProductArtSource | string |
 
 export function resolveOrderCardArt(product?: OrderProductArtSource | string | null) {
   const productName = typeof product === 'string' ? product : product?.name;
-  const explicitImageUrl =
-    typeof product === 'string' || String(product?.imageUrl || '').trim().startsWith('/uploads/')
-      ? null
-      : product?.imageUrl;
+  const explicitImageUrl = typeof product === 'string' ? null : String(product?.imageUrl || '').trim() || null;
   if (explicitImageUrl) {
     return {
       mode: 'single',
@@ -561,6 +683,38 @@ export function resolveOrderMistaCardArt(
     rightSrc: pairedArt.src,
     leftObjectPosition: traditionalArt.objectPosition,
     rightObjectPosition: pairedArt.objectPosition
+  } satisfies OrderCardArt;
+}
+
+export function resolveOrderMistaDrawerArt(code: OrderMistaShortcutCode): OrderCardArt {
+  return ORDER_MISTA_DRAWER_ART_BY_CODE[code];
+}
+
+function resolveRuntimeOrderMixedCardArt(
+  traditionalFlavor: RuntimeOrderFlavorProduct,
+  product: RuntimeOrderFlavorProduct
+) {
+  return {
+    mode: 'split',
+    leftSrc: resolveOrderCardImage(traditionalFlavor),
+    rightSrc: resolveOrderCardImage(product),
+    leftObjectPosition: 'center center',
+    rightObjectPosition: 'center center'
+  } satisfies OrderCardArt;
+}
+
+function resolveRuntimeOrderMixedDrawerArt(product: RuntimeOrderFlavorProduct) {
+  if (
+    product.legacyCode &&
+    Object.prototype.hasOwnProperty.call(ORDER_MISTA_DRAWER_ART_BY_CODE, product.legacyCode)
+  ) {
+    return resolveOrderMistaDrawerArt(product.legacyCode as OrderMistaShortcutCode);
+  }
+
+  return {
+    mode: 'single',
+    src: resolveOrderCardImage(product),
+    objectPosition: 'center center'
   } satisfies OrderCardArt;
 }
 
@@ -598,21 +752,23 @@ function buildRuntimeOrderLegacyBoxCode(product: RuntimeOrderFlavorProduct, mode
   return `M${product.legacyCode}` as OrderBoxCode;
 }
 
+function resolveRuntimeOrderProductDetailLabel(product: Pick<RuntimeOrderFlavorProduct, 'name' | 'label'>) {
+  const normalized = normalizeOrderFlavorName(product.name);
+  if (normalized.includes('pascoa')) {
+    return 'broas de chocolate';
+  }
+  return `broas de ${product.label.toLowerCase()}`;
+}
+
 export function buildRuntimeOrderCatalog(
   products?: ReadonlyArray<OrderProductArtSource> | null
 ): RuntimeOrderCatalog {
   const activeProducts = (products || []).filter(
-    (product): product is OrderProductArtSource & { id: number } => typeof product.id === 'number' && product.active !== false
+    (product): product is OrderProductArtSource & { id: number } =>
+      typeof product.id === 'number' && product.active !== false && product.salesLimitExhausted !== true
   );
-  const canonicalProducts = activeProducts.filter((product) => {
-    const normalizedName = normalizeOrderFlavorName(product.name);
-    const normalizedCategory = normalizeOrderFlavorCategory(product.category);
-    return normalizedCategory === 'sabores' && normalizedName.startsWith('broa ') && !normalizedName.includes('mista');
-  });
-  const fallbackProducts = activeProducts.filter((product) => {
-    const normalizedName = normalizeOrderFlavorName(product.name);
-    return normalizedName.startsWith('broa ') && !normalizedName.includes('mista');
-  });
+  const canonicalProducts = activeProducts.filter((product) => isRuntimeOrderFlavorProductSource(product));
+  const fallbackProducts = activeProducts.filter((product) => isRuntimeOrderFallbackFlavorProductSource(product));
   const sourceProducts = canonicalProducts.length > 0 ? canonicalProducts : fallbackProducts;
 
   const flavorProducts = sourceProducts
@@ -657,6 +813,31 @@ export function buildRuntimeOrderCatalog(
   );
   const traditionalFlavor =
     flavorProducts.find((product) => product.kind === 'TRADITIONAL') || null;
+  const companionProducts = activeProducts
+    .filter((product) => resolveRuntimeOrderItemGroup(product) === 'COMPANION')
+    .map((product) => {
+      const profile = resolveCompanionProductProfile(product);
+      const label = buildCompanionProductName(profile) || compactOrderProductName(product.name);
+      return {
+        id: product.id,
+        key: `companion:${product.id}`,
+        name: product.name,
+        category: product.category ?? null,
+        active: true,
+        label,
+        displayTitle: profile?.title || compactOrderProductName(product.name),
+        displayFlavor: profile?.flavor ?? null,
+        displayMakerLine: buildCompanionProductMakerLine(profile),
+        imageUrl: product.imageUrl ?? null,
+        price: Number(product.price || 0),
+        unit: product.unit ?? null,
+        measureLabel: product.measureLabel ?? null,
+        drawerNote: product.drawerNote ?? null
+      } satisfies RuntimeOrderCompanionProduct;
+    })
+    .sort((left, right) => left.label.localeCompare(right.label, 'pt-BR'));
+  const companionProductById = new Map(companionProducts.map((product) => [product.id, product] as const));
+  const companionProductByKey = new Map(companionProducts.map((product) => [product.key, product] as const));
 
   const singleEntries = flavorProducts.map((product) => {
     const legacyCode = buildRuntimeOrderLegacyBoxCode(product, 'SINGLE');
@@ -667,7 +848,7 @@ export function buildRuntimeOrderCatalog(
       detail:
         product.kind === 'TRADITIONAL'
           ? '1 caixa = 7 broas tradicionais'
-          : `1 caixa = 7 broas de ${product.label.toLowerCase()}`,
+          : `1 caixa = 7 ${resolveRuntimeOrderProductDetailLabel(product)}`,
       art: resolveOrderCardArt(product),
       accentClassName: resolveRuntimeOrderAccentClass(product.kind, 'SINGLE'),
       priceEstimate: resolveRuntimeOrderSingleBoxPrice(product.kind),
@@ -684,18 +865,18 @@ export function buildRuntimeOrderCatalog(
           .filter((product) => product.id !== traditionalFlavor.id)
           .map((product) => {
             const legacyCode = buildRuntimeOrderLegacyBoxCode(product, 'MIXED');
+            const label =
+              product.legacyCode &&
+              Object.prototype.hasOwnProperty.call(ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE, product.legacyCode)
+                ? ORDER_MISTA_OFFICIAL_BOX_NAME_BY_CODE[product.legacyCode as OrderMistaShortcutCode]
+                : `Mista ${product.label}`;
             return {
               key: `mixed:${product.id}`,
               kind: 'MIXED' as const,
-              label: `Mista ${product.label}`,
-              detail: `1 caixa = 4 tradicionais + 3 ${product.label.toLowerCase()}`,
-              art: {
-                mode: 'split',
-                leftSrc: resolveOrderCardImage(traditionalFlavor),
-                rightSrc: resolveOrderCardImage(product),
-                leftObjectPosition: 'center center',
-                rightObjectPosition: 'center center'
-              } satisfies OrderCardArt,
+              label,
+              detail: `1 caixa = 4 tradicionais + 3 ${resolveRuntimeOrderProductDetailLabel(product)}`,
+              art: resolveRuntimeOrderMixedCardArt(traditionalFlavor, product),
+              drawerArt: resolveRuntimeOrderMixedDrawerArt(product),
               accentClassName: resolveRuntimeOrderAccentClass(product.kind, 'MIXED'),
               priceEstimate: resolveRuntimeOrderMixedBoxPrice(product.kind),
               unitsByProductId: {
@@ -724,6 +905,9 @@ export function buildRuntimeOrderCatalog(
     flavorProductById,
     flavorProductByLegacyCode,
     traditionalFlavor,
+    companionProducts,
+    companionProductById,
+    companionProductByKey,
     boxEntries,
     boxEntryByKey,
     boxKeyByLegacyCode
@@ -750,6 +934,22 @@ export function resolveRuntimeOrderFlavorProductId(
   }
   const legacyProduct = catalog.flavorProductByLegacyCode[normalized as OrderFlavorCode];
   return legacyProduct?.id ?? null;
+}
+
+export function resolveRuntimeOrderCompanionProductId(
+  key: string,
+  catalog: Pick<RuntimeOrderCatalog, 'companionProductById' | 'companionProductByKey'>
+) {
+  const normalized = String(key || '').trim();
+  if (catalog.companionProductByKey.has(normalized)) {
+    return catalog.companionProductByKey.get(normalized)?.id ?? null;
+  }
+  if (/^\d+$/.test(normalized)) {
+    const productId = Number(normalized);
+    return catalog.companionProductById.has(productId) ? productId : null;
+  }
+  const prefixedKey = `companion:${normalized}`;
+  return catalog.companionProductByKey.get(prefixedKey)?.id ?? null;
 }
 
 function sumTriplets(counts: number[]) {
@@ -789,19 +989,27 @@ function maxSameFlavorFullBoxesAfterTriplets(counts: number[], tripletsToUse: nu
 
 export function calculateOrderSubtotalFromProductItems(
   items: Array<{ productId: number; quantity: number }>,
-  productMap: ReadonlyMap<number, Pick<Product, 'id' | 'name'>>
+  productMap: ReadonlyMap<number, Pick<Product, 'id' | 'name' | 'category' | 'price'>>
 ) {
   const quantityByProductId = new Map<number, number>();
   let totalUnits = 0;
+  let directSubtotalMinorUnits = 0;
 
   for (const item of items) {
     const quantity = Math.max(Math.floor(item.quantity || 0), 0);
     if (quantity <= 0) continue;
-    totalUnits += quantity;
-    quantityByProductId.set(item.productId, (quantityByProductId.get(item.productId) || 0) + quantity);
+    const product = productMap.get(item.productId);
+    if (resolveRuntimeOrderItemGroup(product) === 'FLAVOR') {
+      totalUnits += quantity;
+      quantityByProductId.set(item.productId, (quantityByProductId.get(item.productId) || 0) + quantity);
+      continue;
+    }
+    directSubtotalMinorUnits += moneyToMinorUnits(Number(product?.price || 0)) * quantity;
   }
 
-  if (totalUnits <= 0) return 0;
+  if (totalUnits <= 0) {
+    return moneyFromMinorUnits(directSubtotalMinorUnits);
+  }
 
   const fullBoxes = Math.floor(totalUnits / ORDER_BOX_UNITS);
   const openUnits = totalUnits % ORDER_BOX_UNITS;
@@ -877,12 +1085,22 @@ export function calculateOrderSubtotalFromProductItems(
   const openSubtotal =
     openUnits > 0 ? Math.round((ORDER_BOX_PRICE_CUSTOM_MINOR_UNITS / ORDER_BOX_UNITS) * openUnits) : 0;
 
-  return moneyFromMinorUnits(fullBoxesSubtotal + openSubtotal);
+  return moneyFromMinorUnits(fullBoxesSubtotal + openSubtotal + directSubtotalMinorUnits);
+}
+
+export function calculateCouponEligibleSubtotalFromProductItems(
+  items: Array<{ productId: number; quantity: number }>,
+  productMap: ReadonlyMap<number, Pick<Product, 'id' | 'name' | 'category' | 'price'>>
+) {
+  return calculateOrderSubtotalFromProductItems(
+    items.filter((item) => resolveRuntimeOrderItemGroup(productMap.get(item.productId)) === 'FLAVOR'),
+    productMap
+  );
 }
 
 export function formatOrderProductComposition(
   items: Array<{ productId: number; quantity: number }>,
-  productMap: ReadonlyMap<number, Pick<Product, 'id' | 'name'>>
+  productMap: ReadonlyMap<number, Pick<Product, 'id' | 'name' | 'category'>>
 ) {
   const quantities = new Map<number, number>();
 
@@ -897,9 +1115,16 @@ export function formatOrderProductComposition(
       productId,
       quantity,
       label: compactOrderProductName(productMap.get(productId)?.name ?? `Produto ${productId}`),
-      kind: resolveRuntimeOrderFlavorKind(productMap.get(productId)?.name)
+      kind: resolveRuntimeOrderFlavorKind(productMap.get(productId)?.name),
+      group: resolveRuntimeOrderItemGroup(productMap.get(productId))
     }))
     .sort((left, right) => {
+      const groupWeight = { FLAVOR: 0, COMPANION: 1, OTHER: 2 } satisfies Record<
+        'FLAVOR' | 'COMPANION' | 'OTHER',
+        number
+      >;
+      const groupDelta = groupWeight[left.group] - groupWeight[right.group];
+      if (groupDelta !== 0) return groupDelta;
       const kindWeight = { TRADITIONAL: 0, GOIABADA: 1, PREMIUM: 2 } satisfies Record<RuntimeOrderFlavorKind, number>;
       const delta = kindWeight[left.kind] - kindWeight[right.kind];
       if (delta !== 0) return delta;
@@ -908,7 +1133,7 @@ export function formatOrderProductComposition(
 
   return entries.length
     ? entries.map((entry) => `${entry.quantity} ${entry.label}`).join(' • ')
-    : 'Nenhuma broa calculada ainda';
+    : 'Nenhum item calculado ainda';
 }
 
 export function resolveOrderVirtualBoxLabel(

@@ -68,11 +68,11 @@ test('soft delete customer still referenced by order and status rollback', async
   });
   assert.equal(delivered.status, 'ENTREGUE');
 
-  const backToConfirmado = await request(apiUrl, `/orders/${order.id}/status`, {
+  const backToPronto = await request(apiUrl, `/orders/${order.id}/status`, {
     method: 'PATCH',
-    body: { status: 'CONFIRMADO' }
+    body: { status: 'PRONTO' }
   });
-  assert.equal(backToConfirmado.status, 'CONFIRMADO');
+  assert.equal(backToPronto.status, 'PRONTO');
 
   const backToAberto = await request(apiUrl, `/orders/${order.id}/status`, {
     method: 'PATCH',

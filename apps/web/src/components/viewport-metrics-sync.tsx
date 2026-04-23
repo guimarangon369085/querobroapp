@@ -2,6 +2,8 @@
 
 import { useEffect } from 'react';
 
+let lastViewportMetricsKey = '';
+
 function setViewportMetrics() {
   if (typeof window === 'undefined') return;
 
@@ -15,6 +17,16 @@ function setViewportMetrics() {
   const offsetLeft = Math.max(Math.round(visualViewport?.offsetLeft || 0), 0);
   const offsetRight = Math.max(layoutWidth - viewportWidth - offsetLeft, 0);
   const offsetBottom = Math.max(layoutHeight - viewportHeight - offsetTop, 0);
+  const nextMetricsKey = [
+    viewportWidth,
+    viewportHeight,
+    offsetTop,
+    offsetRight,
+    offsetBottom,
+    offsetLeft
+  ].join(':');
+
+  if (lastViewportMetricsKey === nextMetricsKey) return;
 
   root.style.setProperty('--app-viewport-width', `${viewportWidth}px`);
   root.style.setProperty('--app-viewport-height', `${viewportHeight}px`);
@@ -22,6 +34,7 @@ function setViewportMetrics() {
   root.style.setProperty('--app-viewport-offset-right', `${offsetRight}px`);
   root.style.setProperty('--app-viewport-offset-bottom', `${offsetBottom}px`);
   root.style.setProperty('--app-viewport-offset-left', `${offsetLeft}px`);
+  lastViewportMetricsKey = nextMetricsKey;
 }
 
 export function ViewportMetricsSync() {

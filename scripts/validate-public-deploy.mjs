@@ -8,7 +8,69 @@ const OPS_URL = String(process.env.QBAPP_PUBLIC_OPS_URL || 'https://ops.querobro
   .trim()
   .replace(/\/+$/, '');
 
-function buildGoogleFormPreviewPayload() {
+async function resolveAvailablePublicSchedule() {
+  const pickAvailableWindow = (body) => {
+    const nextAvailableAt = typeof body?.nextAvailableAt === 'string' ? body.nextAvailableAt : null;
+    if (nextAvailableAt) {
+      return {
+        requestedDate: nextAvailableAt.slice(0, 10),
+        scheduledAt: nextAvailableAt
+      };
+    }
+
+    const requestedWindow = Array.isArray(body?.windows)
+      ? body.windows.find((window) => window && window.available)
+      : null;
+    const requestedDate = typeof body?.requestedDate === 'string' ? body.requestedDate : null;
+
+    if (!requestedWindow?.scheduledAt || !requestedDate) return null;
+    return {
+      requestedDate,
+      scheduledAt: requestedWindow.scheduledAt
+    };
+  };
+
+  const requestedDates = new Set();
+  const queue = [];
+
+  const enqueueDate = (value) => {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || requestedDates.has(value)) return;
+    requestedDates.add(value);
+    queue.push(value);
+  };
+
+  const initial = await expectJson(`${APP_URL}/api/order-schedule`);
+  if (!initial.response.ok) {
+    throw new Error(`GET /api/order-schedule -> ${initial.response.status} ${JSON.stringify(initial.body)}`);
+  }
+
+  const immediateMatch = pickAvailableWindow(initial.body);
+  if (immediateMatch) return immediateMatch;
+
+  if (typeof initial.body?.nextAvailableAt === 'string') {
+    enqueueDate(initial.body.nextAvailableAt.slice(0, 10));
+  }
+
+  const today = new Date();
+  for (let offset = 1; offset <= 21; offset += 1) {
+    const probe = new Date(today);
+    probe.setDate(probe.getDate() + offset);
+    enqueueDate(probe.toISOString().slice(0, 10));
+  }
+
+  for (const date of queue) {
+    const { response, body } = await expectJson(`${APP_URL}/api/order-schedule?date=${date}`);
+    if (!response.ok) {
+      throw new Error(`GET /api/order-schedule?date=${date} -> ${response.status} ${JSON.stringify(body)}`);
+    }
+    const match = pickAvailableWindow(body);
+    if (match) return match;
+  }
+
+  throw new Error('/api/order-schedule nao retornou uma faixa publica disponivel para validar o deploy.');
+}
+
+function buildGoogleFormPreviewPayload(schedule) {
   return {
     version: 1,
     customer: {
@@ -19,7 +81,7 @@ function buildGoogleFormPreviewPayload() {
     },
     fulfillment: {
       mode: 'DELIVERY',
-      scheduledAt: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString()
+      scheduledAt: schedule.scheduledAt
     },
     flavors: {
       T: 4,
@@ -96,6 +158,9 @@ async function main() {
   if (pedidoHtml.includes('127.0.0.1') || pedidoHtml.includes('localhost')) {
     throw new Error('/pedido publicou referencia local no HTML.');
   }
+  if (!pedidoHtml.includes('Tradicional') || !pedidoHtml.includes('Goiabada') || !pedidoHtml.includes('Monte Sua Caixa')) {
+    throw new Error('/pedido nao publicou as caixas oficiais esperadas no HTML.');
+  }
 
   await expectRedirect(OPS_URL, `${APP_URL}/pedidos`);
 
@@ -104,7 +169,18 @@ async function main() {
     throw new Error(`API health invalida: ${healthResponse.status} ${JSON.stringify(health)}`);
   }
 
-  const previewPayload = buildGoogleFormPreviewPayload();
+  const { response: catalogResponse, body: catalog } = await expectJson(`${APP_URL}/api/order-catalog`);
+  if (!catalogResponse.ok || !Array.isArray(catalog) || catalog.length === 0) {
+    throw new Error(`GET /api/order-catalog -> ${catalogResponse.status} ${JSON.stringify(catalog)}`);
+  }
+
+  const activeCatalogItems = catalog.filter((item) => item?.active !== false);
+  if (activeCatalogItems.length < 3) {
+    throw new Error(`/api/order-catalog retornou poucos itens ativos: ${activeCatalogItems.length}`);
+  }
+
+  const schedule = await resolveAvailablePublicSchedule();
+  const previewPayload = buildGoogleFormPreviewPayload(schedule);
   const { response: previewResponse, body: preview } = await expectJson(`${APP_URL}/api/google-form/preview`, {
     method: 'POST',
     headers: {
@@ -158,6 +234,11 @@ async function main() {
     fee: quote.fee ?? null,
     status: quote.status ?? null
   };
+  summary.catalog = {
+    totalItems: catalog.length,
+    activeItems: activeCatalogItems.length
+  };
+  summary.schedule = schedule;
 
   console.log(JSON.stringify(summary, null, 2));
 }

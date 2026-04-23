@@ -68,9 +68,9 @@ export function PublicOrderSuccessPage() {
     try {
       setIsCopyingPix(true);
       await navigator.clipboard.writeText(pixCharge.copyPasteCode);
-      notifyInfo('Codigo PIX copiado.');
+      notifyInfo('Código PIX copiado.');
     } catch {
-      notifyError('Nao foi possivel copiar o codigo PIX.');
+      notifyError('Não foi possível copiar o código PIX.');
     } finally {
       setIsCopyingPix(false);
     }
@@ -89,7 +89,7 @@ export function PublicOrderSuccessPage() {
           <div>
             <p className="text-[0.72rem] font-semibold uppercase tracking-[0.26em] text-[color:var(--tone-sage-ink)]">Pedido recebido</p>
             <h1 className="mt-1.5 text-[1.55rem] font-semibold text-[color:var(--ink-strong)] sm:mt-2 sm:text-3xl">
-              Obrigado pelo pedido! Ja recebemos sua solicitacao.
+              Obrigado pelo pedido! Já recebemos sua solicitação.
             </h1>
             <p className="mt-2 text-[0.88rem] leading-6 text-[color:var(--ink-muted)] sm:text-sm">
               Programado para a faixa {resolveDeliveryWindowLabel(order)}.
@@ -140,7 +140,7 @@ export function PublicOrderSuccessPage() {
                   onClick={copyPixCode}
                   type="button"
                 >
-                  {isCopyingPix ? 'Copiando...' : 'Copiar codigo PIX'}
+                  {isCopyingPix ? 'Copiando...' : 'Copiar código PIX'}
                 </button>
                 <button className="app-button app-button-ghost" onClick={startAnotherOrder} type="button">
                   {successPayload.returnLabel}

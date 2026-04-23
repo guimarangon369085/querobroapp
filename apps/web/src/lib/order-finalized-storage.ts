@@ -10,8 +10,6 @@ export type StoredOrderFinalized = {
   returnLabel: string;
   productSubtotal: number;
   order: {
-    id: number;
-    publicNumber?: number | null;
     total?: number | null;
     scheduledAt?: string | null;
     deliveryWindowLabel?: string | null;
@@ -22,6 +20,16 @@ export type StoredOrderFinalized = {
 function readStorageValue(storage: Storage, key: string) {
   const raw = storage.getItem(key);
   return raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
+}
+
+function parseStoredIntakeStage(value: unknown): StoredOrderFinalized['intake']['stage'] {
+  return value === 'DRAFT' ||
+    value === 'CONFIRMED' ||
+    value === 'PIX_PENDING' ||
+    value === 'PAID' ||
+    value === 'SCHEDULED'
+    ? value
+    : 'CONFIRMED';
 }
 
 export function writeStoredOrderFinalized(payload: StoredOrderFinalized) {
@@ -39,7 +47,9 @@ export function readStoredOrderFinalized(): StoredOrderFinalized | null {
     if (!parsed.order || typeof parsed.order !== 'object') return null;
     if (!parsed.intake || typeof parsed.intake !== 'object') return null;
 
-    return {
+    const parsedOrder = parsed.order as Record<string, unknown>;
+    const parsedIntake = parsed.intake as Record<string, unknown>;
+    const sanitized: StoredOrderFinalized = {
       version: 1,
       origin: parsed.origin === 'INTERNAL_DASHBOARD' ? 'INTERNAL_DASHBOARD' : 'PUBLIC_FORM',
       savedAt: String(parsed.savedAt || '').trim(),
@@ -49,9 +59,29 @@ export function readStoredOrderFinalized(): StoredOrderFinalized | null {
           ? String(parsed.returnLabel || '').trim() || 'Voltar para pedidos'
           : String(parsed.returnLabel || '').trim() || 'Fazer novo pedido',
       productSubtotal: parsed.productSubtotal,
-      order: parsed.order as StoredOrderFinalized['order'],
-      intake: parsed.intake as StoredOrderFinalized['intake']
+      order: {
+        total:
+          typeof parsedOrder.total === 'number' && Number.isFinite(parsedOrder.total)
+            ? parsedOrder.total
+            : null,
+        scheduledAt: typeof parsedOrder.scheduledAt === 'string' ? parsedOrder.scheduledAt : null,
+        deliveryWindowLabel:
+          typeof parsedOrder.deliveryWindowLabel === 'string'
+            ? parsedOrder.deliveryWindowLabel
+            : null
+      },
+      intake: {
+        stage: parseStoredIntakeStage(parsedIntake.stage),
+        deliveryFee:
+          typeof parsedIntake.deliveryFee === 'number' && Number.isFinite(parsedIntake.deliveryFee)
+            ? parsedIntake.deliveryFee
+            : 0,
+        pixCharge: (parsedIntake.pixCharge ?? null) as StoredOrderFinalized['intake']['pixCharge']
+      }
     };
+
+    window.sessionStorage.setItem(ORDER_FINALIZED_STORAGE_KEY, JSON.stringify(sanitized));
+    return sanitized;
   } catch {
     return null;
   }

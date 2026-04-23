@@ -57,13 +57,13 @@ async function proxyRequest(request: Request, context: { params: Promise<{ path:
 
   const method = request.method.toUpperCase();
   if (!ALLOWED_METHODS.has(method)) {
-    return buildErrorResponse(405, { message: 'Metodo nao suportado pelo bridge interno.' });
+    return buildErrorResponse(405, { message: 'Método não suportado pelo bridge interno.' });
   }
 
   const params = await context.params;
   const path = Array.isArray(params.path) ? params.path.filter(Boolean) : [];
   if (!path.length) {
-    return buildErrorResponse(404, { message: 'Rota interna nao encontrada.' });
+    return buildErrorResponse(404, { message: 'Rota interna não encontrada.' });
   }
 
   const upstreamUrl = buildUpstreamUrl(request, path);

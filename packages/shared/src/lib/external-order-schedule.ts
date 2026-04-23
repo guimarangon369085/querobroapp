@@ -36,7 +36,12 @@ export const EXTERNAL_ORDER_DELIVERY_WINDOWS = [
 
 export type ExternalOrderDeliveryWindowKey = (typeof EXTERNAL_ORDER_DELIVERY_WINDOWS)[number]['key'];
 
-type ExternalOrderScheduleAvailabilityReason = 'AVAILABLE' | 'BEFORE_MINIMUM' | 'SLOT_TAKEN' | 'DAY_FULL';
+type ExternalOrderScheduleAvailabilityReason =
+  | 'AVAILABLE'
+  | 'BEFORE_MINIMUM'
+  | 'SLOT_TAKEN'
+  | 'DAY_FULL'
+  | 'DAY_BLOCKED';
 
 type ExternalOrderScheduleEntryInput = {
   scheduledAt: Date | string | null | undefined;
@@ -58,6 +63,8 @@ type OccupiedWindow = {
   startAt: Date;
   endAt: Date;
 };
+
+type BlockedWindowsByDay = Map<string, Set<ExternalOrderDeliveryWindowKey>>;
 
 function getFormatter(timeZone = EXTERNAL_ORDER_TIME_ZONE) {
   return new Intl.DateTimeFormat('en-CA', {
@@ -200,8 +207,10 @@ function findFirstAvailableAtWithinRange(input: {
   occupiedWindows: OccupiedWindow[];
   dayOrderCount: number;
   dailyLimit: number;
+  blocked: boolean;
   timeZone: string;
 }) {
+  if (input.blocked) return null;
   if (input.dayOrderCount >= input.dailyLimit) return null;
 
   const initialStart =
@@ -227,6 +236,8 @@ function findNextAvailableAtFrom(input: {
   requestedDurationMinutes: number;
   occupiedWindows: OccupiedWindow[];
   dayCounts: Map<string, number>;
+  blockedDayKeys?: Set<string>;
+  blockedWindowsByDay?: BlockedWindowsByDay;
   dailyLimit: number;
   timeZone: string;
 }) {
@@ -237,6 +248,22 @@ function findNextAvailableAtFrom(input: {
 
   while (true) {
     const candidateDayKey = formatExternalOrderDayKey(nextAvailableAt, input.timeZone);
+    const candidateWindowKey = resolveExternalOrderDeliveryWindowKeyForDate(nextAvailableAt, input.timeZone);
+    const blockedWindows = input.blockedWindowsByDay?.get(candidateDayKey);
+    const dayFullyBlocked =
+      input.blockedDayKeys?.has(candidateDayKey) ||
+      (blockedWindows?.size ?? 0) >= EXTERNAL_ORDER_DELIVERY_WINDOWS.length;
+
+    if (dayFullyBlocked) {
+      nextAvailableAt = resolveNextScheduleDayStart(nextAvailableAt, input.timeZone);
+      continue;
+    }
+
+    if (candidateWindowKey && blockedWindows?.has(candidateWindowKey)) {
+      nextAvailableAt = new Date(nextAvailableAt.getTime() + EXTERNAL_ORDER_SLOT_MINUTES * 60_000);
+      continue;
+    }
+
     const candidateDayCount = input.dayCounts.get(candidateDayKey) || 0;
 
     if (candidateDayCount >= input.dailyLimit) {
@@ -418,6 +445,10 @@ export function resolveExternalOrderScheduleAvailability(input: {
   requestedDate?: string | null;
   requestedWindowKey?: ExternalOrderDeliveryWindowKey | string | null;
   requestedTotalBroas?: number | null;
+  blockedDayKeys?: Iterable<string> | null;
+  blockedWindows?:
+    | Iterable<{ dayKey: string; windowKey: ExternalOrderDeliveryWindowKey | string | null | undefined }>
+    | null;
   reference?: Date;
   timeZone?: string;
   dailyLimit?: number;
@@ -432,6 +463,25 @@ export function resolveExternalOrderScheduleAvailability(input: {
 
   const dayCounts = new Map<string, number>();
   const occupiedWindows: OccupiedWindow[] = [];
+  const blockedDayKeys = new Set(
+    Array.from(input.blockedDayKeys || [])
+      .map((value) => parseDayKey(value))
+      .filter((value): value is CalendarDateParts => Boolean(value))
+      .map((value) => `${value.year}-${`${value.month}`.padStart(2, '0')}-${`${value.day}`.padStart(2, '0')}`),
+  );
+  const blockedWindowsByDay: BlockedWindowsByDay = new Map();
+
+  for (const entry of input.blockedWindows || []) {
+    const normalizedDay = parseDayKey(entry?.dayKey);
+    const parsedWindowKey = EXTERNAL_ORDER_DELIVERY_WINDOWS.some((window) => window.key === entry?.windowKey)
+      ? (entry?.windowKey as ExternalOrderDeliveryWindowKey)
+      : null;
+    if (!normalizedDay || !parsedWindowKey) continue;
+    const dayKey = `${normalizedDay.year}-${`${normalizedDay.month}`.padStart(2, '0')}-${`${normalizedDay.day}`.padStart(2, '0')}`;
+    const bucket = blockedWindowsByDay.get(dayKey) || new Set<ExternalOrderDeliveryWindowKey>();
+    bucket.add(parsedWindowKey);
+    blockedWindowsByDay.set(dayKey, bucket);
+  }
 
   for (const value of input.scheduledOrders) {
     if (!value?.scheduledAt) continue;
@@ -466,12 +516,20 @@ export function resolveExternalOrderScheduleAvailability(input: {
 
   if (requestedAt) {
     const requestedDayKey = formatExternalOrderDayKey(requestedAt, timeZone);
+    const requestedWindowKeyAt = resolveExternalOrderDeliveryWindowKeyForDate(requestedAt, timeZone);
+    const blockedWindows = blockedWindowsByDay.get(requestedDayKey);
+    const requestedDayFullyBlocked =
+      blockedDayKeys.has(requestedDayKey) ||
+      (blockedWindows?.size ?? 0) >= EXTERNAL_ORDER_DELIVERY_WINDOWS.length;
     dayOrderCount = dayCounts.get(requestedDayKey) || 0;
     const requestedStartAt = new Date(requestedAt.getTime() - requestedDurationMinutes * 60_000);
     slotTaken = overlapsWindow(requestedStartAt, requestedAt, occupiedWindows);
 
     if (requestedAt.getTime() < minimumAllowedAt.getTime()) {
       reason = 'BEFORE_MINIMUM';
+      requestedAvailable = false;
+    } else if (requestedDayFullyBlocked || (requestedWindowKeyAt && blockedWindows?.has(requestedWindowKeyAt))) {
+      reason = 'DAY_BLOCKED';
       requestedAvailable = false;
     } else if (dayOrderCount >= dailyLimit) {
       reason = 'DAY_FULL';
@@ -488,6 +546,8 @@ export function resolveExternalOrderScheduleAvailability(input: {
     requestedDurationMinutes,
     occupiedWindows,
     dayCounts,
+    blockedDayKeys,
+    blockedWindowsByDay,
     dailyLimit,
     timeZone
   });
@@ -500,6 +560,10 @@ export function resolveExternalOrderScheduleAvailability(input: {
     ? (input.requestedWindowKey as ExternalOrderDeliveryWindowKey)
     : null;
   const requestedDateDayCount = dayCounts.get(requestedDateKey) || dayOrderCount;
+  const requestedDateBlockedWindows = blockedWindowsByDay.get(requestedDateKey);
+  const requestedDateBlocked =
+    blockedDayKeys.has(requestedDateKey) ||
+    (requestedDateBlockedWindows?.size ?? 0) >= EXTERNAL_ORDER_DELIVERY_WINDOWS.length;
 
   const windows = EXTERNAL_ORDER_DELIVERY_WINDOWS.map((window) => {
     const range = resolveWindowRange(requestedCalendarDateParts, window.key, timeZone);
@@ -522,17 +586,21 @@ export function resolveExternalOrderScheduleAvailability(input: {
       minimumAllowedAt,
       requestedDurationMinutes,
       occupiedWindows,
-      dayOrderCount: requestedDateDayCount,
+      dayOrderCount: requestedDateBlocked ? dailyLimit : requestedDateDayCount,
       dailyLimit,
+      blocked: requestedDateBlocked || Boolean(requestedDateBlockedWindows?.has(window.key)),
       timeZone
     });
 
     const windowFinishedBeforeMinimum = range.endInclusive
       ? range.endAt.getTime() < minimumAllowedAt.getTime()
       : range.endAt.getTime() <= minimumAllowedAt.getTime();
+    const windowBlocked = requestedDateBlocked || Boolean(requestedDateBlockedWindows?.has(window.key));
     const windowReason: ExternalOrderScheduleAvailabilityReason =
       availableAt
         ? 'AVAILABLE'
+        : windowBlocked
+          ? 'DAY_BLOCKED'
         : requestedDateDayCount >= dailyLimit
           ? 'DAY_FULL'
           : windowFinishedBeforeMinimum
@@ -563,6 +631,8 @@ export function resolveExternalOrderScheduleAvailability(input: {
           requestedDurationMinutes,
           occupiedWindows,
           dayCounts,
+          blockedDayKeys,
+          blockedWindowsByDay,
           dailyLimit,
           timeZone
         });

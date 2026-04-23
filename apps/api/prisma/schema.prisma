@@ -62,16 +62,23 @@ model CustomerAddress {
 }
 
 model Product {
-  id        Int      @id @default(autoincrement())
-  name      String
-  category  String?
-  unit      String?
-  price     Float
-  imageUrl  String?
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  items     OrderItem[]
-  boms      Bom[]
+  id                   Int      @id @default(autoincrement())
+  name                 String
+  category             String?
+  unit                 String?
+  price                Float
+  imageUrl             String?
+  drawerNote           String?
+  inventoryItemId      Int?     @unique
+  inventoryQtyPerSaleUnit Float?
+  active               Boolean  @default(true)
+  salesLimitEnabled    Boolean  @default(false)
+  salesLimitBoxes      Int?
+  salesLimitActivatedAt DateTime?
+  createdAt            DateTime @default(now())
+  items                OrderItem[]
+  boms                 Bom[]
+  inventoryItem        InventoryItem? @relation("CompanionInventoryItem", fields: [inventoryItemId], references: [id])
 
   @@index([name])
   @@index([category])
@@ -171,10 +178,18 @@ model InventoryItem {
   unit             String
   purchasePackSize Float
   purchasePackCost Float     @default(0)
+  leadTimeDays     Int?
+  safetyStockQty   Float?
+  reorderPointQty  Float?
+  targetStockQty   Float?
+  perishabilityDays Int?
+  criticality      String?
+  preferredSupplier String?
   createdAt        DateTime @default(now())
   movements        InventoryMovement[]
   bomItems         BomItem[]
   priceEntries     InventoryPriceEntry[]
+  companionProduct Product?  @relation("CompanionInventoryItem")
 
   @@index([name])
   @@index([category])
@@ -291,4 +306,86 @@ model SiteAnalyticsEvent {
 model PublicSequenceCounter {
   name      String @id
   nextValue Int
+}
+
+model OrderScheduleDayAvailability {
+  id        Int      @id @default(autoincrement())
+  dayKey    String
+  windowKey String   @default("ALL_DAY")
+  isOpen    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([dayKey, windowKey])
+  @@index([dayKey, windowKey, isOpen])
+}
+
+model BankStatementImport {
+  id                    Int      @id @default(autoincrement())
+  source                String
+  sourceLabel           String?
+  fileName              String
+  fileKind              String
+  checksum              String   @unique
+  emailSubject          String?
+  periodStart           DateTime?
+  periodEnd             DateTime?
+  transactionCount      Int      @default(0)
+  matchedPaymentsCount  Int      @default(0)
+  unmatchedInflowsCount Int      @default(0)
+  inflowTotal           Float    @default(0)
+  outflowTotal          Float    @default(0)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  latestTransactions    BankStatementTransaction[] @relation("LatestImport")
+
+  @@index([createdAt])
+  @@index([periodEnd])
+}
+
+model BankStatementClassificationOption {
+  id            Int      @id @default(autoincrement())
+  code          String   @unique
+  label         String
+  baseCategory  String
+  tone          String
+  isOperational Boolean  @default(true)
+  active        Boolean  @default(true)
+  system        Boolean  @default(false)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([active, sortOrder])
+}
+
+model BankStatementTransaction {
+  id                    Int      @id @default(autoincrement())
+  latestImportId        Int?
+  bookedAt              DateTime
+  amount                Float
+  externalId            String   @unique
+  description           String
+  normalizedDescription String
+  direction             String
+  transactionKind       String
+  category              String
+  classificationCode    String?
+  manualClassification  Boolean  @default(false)
+  manualMatch           Boolean  @default(false)
+  counterpartyName      String?
+  isOperational         Boolean  @default(true)
+  matchedPaymentId      Int?
+  matchedOrderId        Int?
+  rawJson               String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  latestImport          BankStatementImport? @relation("LatestImport", fields: [latestImportId], references: [id], onDelete: SetNull)
+
+  @@index([latestImportId])
+  @@index([bookedAt])
+  @@index([category, bookedAt])
+  @@index([classificationCode, bookedAt])
+  @@index([matchedPaymentId])
+  @@index([matchedOrderId])
 }

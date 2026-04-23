@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Delete, Inject, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Delete, Inject, UploadedFile, UseInterceptors, Query } from '@nestjs/common';
 import { InventoryService } from './inventory.service.js';
 import {
   InventoryProductsService,
@@ -108,8 +108,8 @@ export class InventoryController {
   }
 
   @Get('inventory-movements')
-  listMovements() {
-    return this.service.listMovements();
+  listMovements(@Query('limit') limit?: string) {
+    return this.service.listMovements(limit ? parseWithSchema(idSchema, limit) : undefined);
   }
 
   @Post('inventory-movements')

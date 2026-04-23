@@ -31,7 +31,7 @@ export function OpsLoginForm({ authEnabled, authReady }: OpsLoginFormProps) {
       return;
     }
     if (!authReady) {
-      setErrorMessage('Acesso operacional indisponivel neste ambiente.');
+      setErrorMessage('Acesso operacional indisponível neste ambiente.');
       return;
     }
 
@@ -52,7 +52,7 @@ export function OpsLoginForm({ authEnabled, authReady }: OpsLoginFormProps) {
 
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setErrorMessage(String(payload?.message || 'Nao foi possivel autenticar agora.'));
+        setErrorMessage(String(payload?.message || 'Não foi possível autenticar agora.'));
         return;
       }
 
@@ -60,24 +60,23 @@ export function OpsLoginForm({ authEnabled, authReady }: OpsLoginFormProps) {
       router.replace(resolveSafeNextPath(payload?.next || nextPath));
       router.refresh();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Nao foi possivel autenticar agora.');
+      setErrorMessage(error instanceof Error ? error.message : 'Não foi possível autenticar agora.');
     } finally {
       setIsPending(false);
     }
   }
 
   return (
-    <form className="grid gap-4" onSubmit={handleSubmit}>
+    <form className="mt-6 grid gap-4" onSubmit={handleSubmit}>
       <label className="grid gap-2">
-        <span className="text-sm font-semibold text-[color:var(--ink-strong)]">Senha operacional</span>
         <input
           type="password"
           autoComplete="current-password"
           enterKeyHint="go"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
-          className="h-12 rounded-[18px] border border-[rgba(126,79,45,0.16)] bg-white px-4 text-[15px] text-[color:var(--ink-strong)] outline-none transition focus:border-[rgba(161,84,39,0.45)] focus:ring-2 focus:ring-[rgba(161,84,39,0.14)]"
-          placeholder="Digite a senha"
+          className="h-12 rounded-[18px] border border-[rgba(126,79,45,0.16)] bg-white px-4 text-[15px] text-[color:var(--ink-strong)] outline-none transition placeholder:text-[color:var(--ink-muted)] focus:border-[rgba(161,84,39,0.45)] focus:ring-2 focus:ring-[rgba(161,84,39,0.14)]"
+          placeholder="Quem ama o Maridinho dela?"
           disabled={isPending || !authEnabled || !authReady}
           required
         />

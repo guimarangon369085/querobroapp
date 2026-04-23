@@ -17,6 +17,9 @@ import {
   OrderItemSchema,
   OrderSchema,
   OrderStatusEnum,
+  normalizeOrderStatus,
+  parseMarketingSamplesDiscountPct,
+  parseMarketingSamplesSponsoredDeliveryFee,
   preserveOrderNoteMetadata,
   PixChargeSchema,
   roundMoney,
@@ -37,6 +40,8 @@ import {
   resolveInventoryDefinition,
   resolveInventoryFamilyItemIds
 } from '../inventory/inventory-formulas.js';
+import { syncCompanionProductActiveStateByProductIds } from '../inventory/companion-product-availability.js';
+import { loadProductSalesLimitStates } from '../inventory/product-sales-limit.js';
 import { normalizePhone, normalizeText, normalizeTitle } from '../../common/normalize.js';
 import {
   customerAddressIdentityKey,
@@ -45,6 +50,7 @@ import {
   normalizeNeighborhood
 } from '../../common/customer-profile.js';
 import {
+  EXTERNAL_ORDER_DELIVERY_WINDOWS,
   externalOrderScheduleAvailabilityErrorMessage,
   externalOrderScheduleErrorMessage,
   resolveExternalOrderDeliveryWindowKeyForDate,
@@ -52,7 +58,14 @@ import {
   isExternalOrderScheduleAllowed,
   resolveExternalOrderScheduleAvailability
 } from '../../common/external-order-schedule.js';
-import { countCouponUsageForCustomer, mergeAppliedCouponIntoNotes, normalizeCouponCode } from '../../common/coupons.js';
+import {
+  countCouponUsageForCustomer,
+  findCouponByNormalizedCode,
+  mergeAppliedCouponIntoNotes,
+  normalizeCouponCode,
+  parseAppliedCouponFromNotes,
+  resolveStoredCouponCode
+} from '../../common/coupons.js';
 import { allocateNextPublicNumber } from '../../common/public-sequence.js';
 import { PaymentsService } from '../payments/payments.service.js';
 import { DeliveriesService } from '../deliveries/deliveries.service.js';
@@ -75,22 +88,46 @@ const markPaidSchema = z.object({
   paid: z.boolean().optional().default(true),
   paidAt: z.string().datetime().optional().nullable()
 });
+const orderScheduleDayKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 const statusTransitions: Record<string, string[]> = {
-  ABERTO: ['CONFIRMADO', 'CANCELADO'],
-  CONFIRMADO: ['ABERTO', 'EM_PREPARACAO', 'CANCELADO'],
-  EM_PREPARACAO: ['CONFIRMADO', 'PRONTO', 'CANCELADO'],
-  PRONTO: ['EM_PREPARACAO', 'ENTREGUE', 'CANCELADO'],
+  ABERTO: ['PRONTO', 'CANCELADO'],
+  PRONTO: ['ABERTO', 'ENTREGUE', 'CANCELADO'],
   ENTREGUE: ['PRONTO', 'CANCELADO'],
   CANCELADO: []
 };
-const ORDER_WORKFLOW_STATUSES = ['ABERTO', 'CONFIRMADO', 'EM_PREPARACAO', 'PRONTO', 'ENTREGUE'] as const;
+const ORDER_WORKFLOW_STATUSES = ['ABERTO', 'PRONTO', 'ENTREGUE'] as const;
+const STREET_NUMBER_IN_ADDRESS_LINE_PATTERN =
+  /(?:,\s*|^)(?:(?:n(?:[.o]|o|umero)?\s*)?\d+[a-z]?(?:[-/]\d+[a-z]?)?|s\/?n|sem numero)$/i;
 
 type OrderStatusValue = z.infer<typeof OrderStatusEnum>;
 type OrderWorkflowStatus = (typeof ORDER_WORKFLOW_STATUSES)[number];
 
 function isOrderWorkflowStatus(status: string): status is OrderWorkflowStatus {
   return ORDER_WORKFLOW_STATUSES.includes(status as OrderWorkflowStatus);
+}
+
+function normalizeOrderPricingLookup(value?: string | null) {
+  return (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function isCouponCompanionCategory(value?: string | null) {
+  const normalized = normalizeOrderPricingLookup(value);
+  return normalized.includes('amigos da broa') || normalized.includes('amigas da broa');
+}
+
+function isCouponEligibleBroaProduct(product?: { name?: string | null; category?: string | null } | null) {
+  const normalizedName = normalizeOrderPricingLookup(product?.name);
+  const normalizedCategory = normalizeOrderPricingLookup(product?.category);
+  return (
+    normalizedName.startsWith('broa ') &&
+    !normalizedName.includes('mista') &&
+    (normalizedCategory === 'sabores' || (!normalizedCategory && !isCouponCompanionCategory(product?.category)))
+  );
 }
 
 function resolveOrderStatusPath(currentStatus: string, targetStatus: OrderStatusValue) {
@@ -104,13 +141,13 @@ function resolveOrderStatusPath(currentStatus: string, targetStatus: OrderStatus
   }
 
   if (!isOrderWorkflowStatus(currentStatus) || !isOrderWorkflowStatus(targetStatus)) {
-    throw new BadRequestException(`Transicao invalida: ${currentStatus} -> ${targetStatus}`);
+    throw new BadRequestException(`Transição inválida: ${currentStatus} -> ${targetStatus}`);
   }
 
   const currentIndex = ORDER_WORKFLOW_STATUSES.indexOf(currentStatus);
   const targetIndex = ORDER_WORKFLOW_STATUSES.indexOf(targetStatus);
   if (currentIndex < 0 || targetIndex < 0) {
-    throw new BadRequestException(`Transicao invalida: ${currentStatus} -> ${targetStatus}`);
+    throw new BadRequestException(`Transição inválida: ${currentStatus} -> ${targetStatus}`);
   }
 
   const direction = targetIndex > currentIndex ? 1 : -1;
@@ -129,7 +166,7 @@ function resolveOrderStatusPath(currentStatus: string, targetStatus: OrderStatus
 
     const allowedTransitions = statusTransitions[cursor] || [];
     if (!allowedTransitions.includes(candidate)) {
-      throw new BadRequestException(`Transicao invalida: ${currentStatus} -> ${targetStatus}`);
+      throw new BadRequestException(`Transição inválida: ${currentStatus} -> ${targetStatus}`);
     }
 
     path.push(candidate);
@@ -137,7 +174,7 @@ function resolveOrderStatusPath(currentStatus: string, targetStatus: OrderStatus
   }
 
   if (path[path.length - 1] !== targetStatus) {
-    throw new BadRequestException(`Transicao invalida: ${currentStatus} -> ${targetStatus}`);
+    throw new BadRequestException(`Transição inválida: ${currentStatus} -> ${targetStatus}`);
   }
 
   return path;
@@ -158,10 +195,12 @@ const ORDER_FORMULA_SOURCE_LABEL_PREFIX = 'ORDER_';
 const ORDER_FORMULA_SOURCE_MASS_READY = 'MASS_READY';
 const ORDER_FORMULA_SOURCE_FILLING = 'ORDER_FILLING';
 const ORDER_FORMULA_SOURCE_PACKAGING = 'ORDER_PACKAGING';
+const ORDER_FORMULA_SOURCE_COMPANION = 'ORDER_COMPANION';
 const ORDER_FORMULA_SOURCES = [
   ORDER_FORMULA_SOURCE_MASS_READY,
   ORDER_FORMULA_SOURCE_FILLING,
-  ORDER_FORMULA_SOURCE_PACKAGING
+  ORDER_FORMULA_SOURCE_PACKAGING,
+  ORDER_FORMULA_SOURCE_COMPANION
 ] as const;
 
 const orderWithRelationsInclude = Prisma.validator<Prisma.OrderInclude>()({
@@ -180,7 +219,10 @@ type OrderWithRelations = Prisma.OrderGetPayload<{
   include: typeof orderWithRelationsInclude;
 }>;
 type TransactionClient = Prisma.TransactionClient;
-type OrderScheduleQueryClient = Pick<PrismaService | TransactionClient, 'order'>;
+type OrderScheduleQueryClient = Pick<
+  PrismaService | TransactionClient,
+  'order' | 'orderScheduleDayAvailability'
+>;
 type OrderIntakePayload = z.infer<typeof OrderIntakeSchema>;
 type OrderIntakeMeta = z.infer<typeof OrderIntakeMetaSchema>;
 type PixCharge = z.infer<typeof PixChargeSchema>;
@@ -188,6 +230,18 @@ type ExternalOrderSubmissionPayload = z.infer<typeof ExternalOrderSubmissionSche
 type ExternalOrderSubmissionPreview = z.infer<typeof ExternalOrderSubmissionPreviewSchema>;
 type ExternalOrderDeliveryWindowKey = z.infer<typeof ExternalOrderDeliveryWindowKeyEnum>;
 type OrderCustomerSnapshotPayload = z.infer<typeof OrderCustomerSnapshotSchema>;
+type OrderScheduleDayAvailabilitySummary = {
+  dayKey: string;
+  blockedWindows: ExternalOrderDeliveryWindowKey[];
+  windows: Array<{
+    key: ExternalOrderDeliveryWindowKey;
+    label: string;
+    startLabel: string;
+    endLabel: string;
+    isOpen: boolean;
+  }>;
+  updatedAt: string | null;
+};
 type OrderFlavorCode = 'T' | 'G' | 'D' | 'Q' | 'R' | 'RJ';
 type FillingFlavorCode = Exclude<OrderFlavorCode, 'T'>;
 type OrderPricingFlavorKind = 'TRADITIONAL' | 'GOIABADA' | 'PREMIUM';
@@ -200,6 +254,24 @@ type InventoryLookupItem = {
   purchasePackCost: number;
   createdAt: Date;
 };
+
+function formatScheduleDayKeyFromDate(date: Date) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    })
+      .formatToParts(date)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value])
+  );
+
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+const ORDER_SCHEDULE_BLOCK_ALL_DAY_WINDOW_KEY = 'ALL_DAY';
 
 @Injectable()
 export class OrdersService {
@@ -261,7 +333,7 @@ export class OrdersService {
     const discountAmountFromPct = this.toMoney((subtotal * discountPct) / 100);
 
     if (hasDiscountAmount && hasDiscountPct && compareMoney(discountAmount, discountAmountFromPct) !== 0) {
-      throw new BadRequestException('Informe o desconto em reais ou em percentual, nao os dois com valores diferentes.');
+      throw new BadRequestException('Informe o desconto em reais ou em percentual, não os dois com valores diferentes.');
     }
 
     if (hasDiscountPct) {
@@ -391,7 +463,9 @@ export class OrdersService {
         productUnit === 'caixas' ||
         productName.includes('caixa');
 
-      return sum + quantity * (looksLikeOfficialBroa ? 1 : looksLikeBox ? ORDER_BOX_UNITS : 1);
+      if (looksLikeOfficialBroa) return sum + quantity;
+      if (looksLikeBox) return sum + quantity * ORDER_BOX_UNITS;
+      return sum;
     }, 0);
   }
 
@@ -544,28 +618,170 @@ export class OrdersService {
     tx: TransactionClient | PrismaService,
     items: Array<{ productId: number; quantity: number }>
   ) {
-    if (items.length <= 0) return 0;
+    return (await this.calculateOrderSubtotalsFromItems(tx, items)).subtotal;
+  }
+
+  private async calculateOrderSubtotalsFromItems(
+    tx: TransactionClient | PrismaService,
+    items: Array<{ productId: number; quantity: number }>
+  ) {
+    if (items.length <= 0) {
+      return {
+        subtotal: 0,
+        couponEligibleSubtotal: 0
+      };
+    }
     const productIds = Array.from(new Set(items.map((item) => item.productId)));
     const products = await tx.product.findMany({
       where: { id: { in: productIds } },
-      select: { id: true, name: true }
+      select: { id: true, name: true, category: true, price: true }
     });
     const productNameById = new Map(products.map((product) => [product.id, product.name]));
+    const productById = new Map(products.map((product) => [product.id, product]));
     const quantityByProductId = new Map<number, number>();
     let totalUnits = 0;
+    let directSubtotalMinorUnits = 0;
 
     for (const item of items) {
       const quantity = Math.max(Math.floor(item.quantity || 0), 0);
       if (quantity <= 0) continue;
-      totalUnits += quantity;
-      quantityByProductId.set(item.productId, (quantityByProductId.get(item.productId) || 0) + quantity);
+      const product = productById.get(item.productId);
+      if (isCouponEligibleBroaProduct(product)) {
+        totalUnits += quantity;
+        quantityByProductId.set(item.productId, (quantityByProductId.get(item.productId) || 0) + quantity);
+        continue;
+      }
+      directSubtotalMinorUnits += moneyToMinorUnits(Number(product?.price || 0)) * quantity;
     }
 
-    return this.calculateSubtotalFromProductQuantities({
+    const broaSubtotal = this.calculateSubtotalFromProductQuantities({
       totalUnits,
       quantityByProductId,
       productNameById
     });
+
+    return {
+      subtotal: moneyFromMinorUnits(moneyToMinorUnits(broaSubtotal) + directSubtotalMinorUnits),
+      couponEligibleSubtotal: broaSubtotal
+    };
+  }
+
+  private async resolveExistingOrderItemsPricing(
+    tx: TransactionClient | PrismaService,
+    order: {
+      id: number;
+      customerId: number;
+      customer?: {
+        name?: string | null;
+        phone?: string | null;
+        address?: string | null;
+        addressLine1?: string | null;
+        addressLine2?: string | null;
+        neighborhood?: string | null;
+        city?: string | null;
+        state?: string | null;
+        postalCode?: string | null;
+        country?: string | null;
+        placeId?: string | null;
+        lat?: number | null;
+        lng?: number | null;
+        deliveryNotes?: string | null;
+      } | null;
+      customerName?: string | null;
+      customerPhone?: string | null;
+      customerAddress?: string | null;
+      customerAddressLine1?: string | null;
+      customerAddressLine2?: string | null;
+      customerNeighborhood?: string | null;
+      customerCity?: string | null;
+      customerState?: string | null;
+      customerPostalCode?: string | null;
+      customerCountry?: string | null;
+      customerPlaceId?: string | null;
+      customerLat?: number | null;
+      customerLng?: number | null;
+      customerDeliveryNotes?: string | null;
+      discount?: number | null;
+      deliveryFee?: number | null;
+      couponCode?: string | null;
+      notes?: string | null;
+    },
+    items: Array<{ productId: number; quantity: number }>
+  ) {
+    const { subtotal, couponEligibleSubtotal } = await this.calculateOrderSubtotalsFromItems(tx, items);
+    const storedCouponCode = resolveStoredCouponCode(order.couponCode, order.notes);
+    const customerSnapshot = this.extractOrderCustomerSnapshot(order);
+    const storedCouponNote = parseAppliedCouponFromNotes(order.notes ?? null);
+    const resolvedCoupon =
+      storedCouponCode &&
+      storedCouponNote?.code === storedCouponCode &&
+      typeof storedCouponNote.discountPct === 'number' &&
+      storedCouponNote.discountPct > 0
+        ? {
+            code: storedCouponCode,
+            discountPct: this.toMoney(storedCouponNote.discountPct),
+            discountAmount: this.toMoney(
+              (couponEligibleSubtotal * this.toMoney(storedCouponNote.discountPct)) / 100
+            ),
+            subtotalAfterDiscount: this.toMoney(
+              Math.max(
+                couponEligibleSubtotal -
+                  this.toMoney((couponEligibleSubtotal * this.toMoney(storedCouponNote.discountPct)) / 100),
+                0
+              )
+            )
+          }
+        : storedCouponCode
+          ? await this.resolveCouponDiscount({
+              couponCode: storedCouponCode,
+              subtotal: couponEligibleSubtotal,
+              customerId: order.customerId ?? null,
+              customerPhone: customerSnapshot.phone ?? null,
+              client: tx,
+              excludeOrderId: order.id
+            })
+          : null;
+    const storedMarketingDiscountPct = this.toMoney(
+      Math.max(parseMarketingSamplesDiscountPct(order.notes ?? null) ?? 0, 0)
+    );
+    const manualDiscountResolution = resolvedCoupon
+      ? null
+      : compareMoney(storedMarketingDiscountPct, 0) > 0
+        ? this.resolveOrderDiscountInput(subtotal, { discountPct: storedMarketingDiscountPct })
+        : this.resolveOrderDiscountInput(subtotal, { discount: order.discount ?? 0 });
+    const discount = resolvedCoupon ? resolvedCoupon.discountAmount : manualDiscountResolution?.discount ?? 0;
+    const discountPct = resolvedCoupon ? resolvedCoupon.discountPct : manualDiscountResolution?.discountPct ?? 0;
+    const deliveryFee = this.toMoney(order.deliveryFee ?? 0);
+    const total = this.computeOrderTotal(subtotal, discount, deliveryFee);
+
+    let notes = mergeAppliedCouponIntoNotes(
+      order.notes ?? null,
+      resolvedCoupon?.code
+        ? {
+            code: resolvedCoupon.code,
+            discountPct: resolvedCoupon.discountPct
+          }
+        : null
+    );
+    notes = mergeMarketingSamplesIntoNotes(
+      notes,
+      !resolvedCoupon && compareMoney(discountPct, 0) > 0
+        ? {
+            discountPct,
+            sponsoredDeliveryFee: parseMarketingSamplesSponsoredDeliveryFee(order.notes ?? null)
+          }
+        : null
+    );
+
+    return {
+      subtotal,
+      discount,
+      discountPct,
+      deliveryFee,
+      total,
+      couponCode: resolvedCoupon?.code ?? null,
+      notes
+    };
   }
 
   private async ensureInventoryItemByAliases(
@@ -673,12 +889,12 @@ export class OrdersService {
     tx: TransactionClient,
     order: Pick<OrderWithRelations, 'id' | 'status'>
   ) {
-    if (!['ABERTO', 'CONFIRMADO'].includes(order.status)) {
-      throw new BadRequestException('Pedido nao permite alterar itens neste status');
+    if (normalizeOrderStatus(order.status) !== 'ABERTO') {
+      throw new BadRequestException('Pedido não permite alterar itens neste status');
     }
     if (await this.hasPhysicalInventoryMovements(tx, order.id)) {
       throw new BadRequestException(
-        'Pedido nao permite alterar itens apos gerar movimentacoes fisicas de estoque.'
+        'Pedido não permite alterar itens após gerar movimentações físicas de estoque.'
       );
     }
   }
@@ -686,7 +902,7 @@ export class OrdersService {
   private async assertOrderRemovable(tx: TransactionClient, orderId: number) {
     if (await this.hasPhysicalInventoryMovements(tx, orderId)) {
       throw new BadRequestException(
-        'Pedido com movimentacoes fisicas de estoque nao pode ser excluido.'
+        'Pedido com movimentações físicas de estoque não pode ser excluído.'
       );
     }
   }
@@ -792,10 +1008,16 @@ export class OrdersService {
     const products = productIds.length
       ? await tx.product.findMany({
           where: { id: { in: productIds } },
-          select: { id: true, name: true }
+          select: {
+            id: true,
+            name: true,
+            inventoryItemId: true,
+            inventoryQtyPerSaleUnit: true
+          }
         })
       : [];
     const productNameById = new Map(products.map((product) => [product.id, product.name]));
+    const productById = new Map(products.map((product) => [product.id, product]));
 
     const massReadyItem = await this.ensureInventoryItemByAliases(tx, inventoryByLookup, {
       canonicalName: MASS_READY_ITEM_NAME,
@@ -908,6 +1130,28 @@ export class OrdersService {
       });
     }
 
+    for (const orderItem of order.items || []) {
+      const product = productById.get(orderItem.productId);
+      if (!product?.inventoryItemId || !product.inventoryQtyPerSaleUnit) continue;
+
+      const companionQty = this.toQty(
+        Math.max(orderItem.quantity || 0, 0) * product.inventoryQtyPerSaleUnit
+      );
+      if (companionQty <= 0) continue;
+
+      await tx.inventoryMovement.create({
+        data: {
+          itemId: product.inventoryItemId,
+          orderId: order.id,
+          type: 'OUT',
+          quantity: companionQty,
+          reason: `Reserva direta do produto ${product.name}`,
+          source: ORDER_FORMULA_SOURCE_COMPANION,
+          sourceLabel
+        }
+      });
+    }
+
     return {
       massReadyItem,
       requiredMassRecipes: massReadyRecipes
@@ -952,7 +1196,7 @@ export class OrdersService {
     const normalizedAmountPaid = moneyToMinorUnits(amountPaid);
     if (normalizedAmountPaid > normalizedTotal) {
       throw new BadRequestException(
-        `Total do pedido nao pode ficar abaixo do valor ja pago. Total=${moneyFromMinorUnits(normalizedTotal)} Pago=${moneyFromMinorUnits(normalizedAmountPaid)}`
+        `Total do pedido não pode ficar abaixo do valor já pago. Total=${moneyFromMinorUnits(normalizedTotal)} Pago=${moneyFromMinorUnits(normalizedAmountPaid)}`
       );
     }
   }
@@ -961,9 +1205,102 @@ export class OrdersService {
     if (value == null) return null;
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime())) {
-      throw new BadRequestException('Data/hora do pedido invalida.');
+      throw new BadRequestException('Data/hora do pedido inválida.');
     }
     return parsed;
+  }
+
+  private normalizeScheduleDayKey(dayKey: string) {
+    return orderScheduleDayKeySchema.parse(String(dayKey || '').trim());
+  }
+
+  private async loadBlockedScheduleWindows(client: OrderScheduleQueryClient) {
+    const blockedEntries = await client.orderScheduleDayAvailability.findMany({
+      where: { isOpen: false },
+      select: {
+        dayKey: true,
+        windowKey: true
+      },
+      orderBy: [{ dayKey: 'asc' }, { windowKey: 'asc' }],
+    });
+
+    const blockedByDay = new Map<string, Set<ExternalOrderDeliveryWindowKey>>();
+
+    for (const entry of blockedEntries) {
+      let normalizedDayKey: string | null = null;
+      try {
+        normalizedDayKey = this.normalizeScheduleDayKey(entry.dayKey);
+      } catch {
+        normalizedDayKey = null;
+      }
+      if (!normalizedDayKey) continue;
+
+      const bucket = blockedByDay.get(normalizedDayKey) || new Set<ExternalOrderDeliveryWindowKey>();
+      if (entry.windowKey === ORDER_SCHEDULE_BLOCK_ALL_DAY_WINDOW_KEY) {
+        for (const window of EXTERNAL_ORDER_DELIVERY_WINDOWS) {
+          bucket.add(window.key);
+        }
+        blockedByDay.set(normalizedDayKey, bucket);
+        continue;
+      }
+
+      const parsedWindowKey = ExternalOrderDeliveryWindowKeyEnum.safeParse(entry.windowKey);
+      if (!parsedWindowKey.success) continue;
+      bucket.add(parsedWindowKey.data);
+      blockedByDay.set(normalizedDayKey, bucket);
+    }
+
+    return blockedByDay;
+  }
+
+  private async resolveScheduleDayAvailability(
+    client: Pick<PrismaService | TransactionClient, 'orderScheduleDayAvailability'>,
+    dayKey: string,
+  ) {
+    const normalizedDayKey = this.normalizeScheduleDayKey(dayKey);
+    const existing = await client.orderScheduleDayAvailability.findMany({
+      where: { dayKey: normalizedDayKey },
+      select: {
+        windowKey: true,
+        isOpen: true,
+        updatedAt: true,
+      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }]
+    });
+    const blockedWindows = new Set<ExternalOrderDeliveryWindowKey>();
+    let latestUpdatedAt: Date | null = null;
+
+    for (const entry of existing) {
+      if (entry.updatedAt && (!latestUpdatedAt || entry.updatedAt.getTime() > latestUpdatedAt.getTime())) {
+        latestUpdatedAt = entry.updatedAt;
+      }
+      if (entry.isOpen !== false) continue;
+      if (entry.windowKey === ORDER_SCHEDULE_BLOCK_ALL_DAY_WINDOW_KEY) {
+        for (const window of EXTERNAL_ORDER_DELIVERY_WINDOWS) {
+          blockedWindows.add(window.key);
+        }
+        continue;
+      }
+      const parsedWindowKey = ExternalOrderDeliveryWindowKeyEnum.safeParse(entry.windowKey);
+      if (parsedWindowKey.success) {
+        blockedWindows.add(parsedWindowKey.data);
+      }
+    }
+
+    return {
+      dayKey: normalizedDayKey,
+      blockedWindows: EXTERNAL_ORDER_DELIVERY_WINDOWS.filter((window) => blockedWindows.has(window.key)).map(
+        (window) => window.key
+      ),
+      windows: EXTERNAL_ORDER_DELIVERY_WINDOWS.map((window) => ({
+        key: window.key,
+        label: window.label,
+        startLabel: `${window.startHour}h`,
+        endLabel: `${window.endHour}h`,
+        isOpen: !blockedWindows.has(window.key),
+      })),
+      updatedAt: latestUpdatedAt?.toISOString() ?? null,
+    } satisfies OrderScheduleDayAvailabilitySummary;
   }
 
   private async buildExternalOrderScheduleAvailability(
@@ -977,6 +1314,7 @@ export class OrdersService {
       reference?: Date;
     }
   ) {
+    const blockedWindowsByDay = await this.loadBlockedScheduleWindows(client);
     const scheduledOrders = await client.order.findMany({
       where: {
         scheduledAt: { not: null },
@@ -1017,6 +1355,12 @@ export class OrdersService {
       requestedDate: options.requestedDate ?? null,
       requestedWindowKey,
       requestedTotalBroas: options.requestedTotalBroas ?? null,
+      blockedWindows: Array.from(blockedWindowsByDay.entries()).flatMap(([dayKey, windowKeys]) =>
+        Array.from(windowKeys).map((windowKey) => ({
+          dayKey,
+          windowKey
+        }))
+      ),
       reference: options.reference
     });
 
@@ -1071,8 +1415,10 @@ export class OrdersService {
     const reason = availability.requestedWindowReason ?? availability.reason;
     const message =
       reason === 'DAY_FULL'
-        ? `Esse dia ja atingiu ${availability.dailyLimit} pedidos agendados. Próxima faixa: ${nextLabel}.`
-        : `Essa faixa nao comporta o tempo de forno necessario. Próxima faixa: ${nextLabel}.`;
+        ? `Esse dia já atingiu ${availability.dailyLimit} pedidos agendados. Próxima faixa: ${nextLabel}.`
+        : reason === 'DAY_BLOCKED'
+          ? `Essa faixa foi fechada para novos agendamentos. Próxima faixa: ${nextLabel}.`
+          : `Essa faixa não comporta o tempo de forno necessário. Próxima faixa: ${nextLabel}.`;
 
     return new BadRequestException({
       message,
@@ -1112,7 +1458,7 @@ export class OrdersService {
 
       const scheduledAt = this.parseOptionalDateTime(availability.requestedWindowScheduledAt);
       if (!scheduledAt) {
-        throw new BadRequestException('Faixa de horario invalida para o pedido.');
+        throw new BadRequestException('Faixa de horário inválida para o pedido.');
       }
 
       return {
@@ -1149,7 +1495,7 @@ export class OrdersService {
     } = {}
   ) {
     if (!scheduledAt) {
-      throw new BadRequestException('Data/hora do pedido invalida.');
+      throw new BadRequestException('Data/hora do pedido inválida.');
     }
     const availability = await this.buildExternalOrderScheduleAvailability(client, {
       requestedAt: scheduledAt,
@@ -1175,7 +1521,7 @@ export class OrdersService {
     } = {}
   ) {
     if (!scheduledAt) {
-      throw new BadRequestException('Data/hora do pedido invalida.');
+      throw new BadRequestException('Data/hora do pedido inválida.');
     }
     if (!isExternalOrderScheduleAllowed(scheduledAt, options.reference)) {
       throw new BadRequestException(externalOrderScheduleErrorMessage(options.reference));
@@ -1184,6 +1530,38 @@ export class OrdersService {
       ...options,
       requestedTotalBroas: options.requestedTotalBroas ?? null
     });
+  }
+
+  private async ensureScheduleDayIsOpen(
+    client: OrderScheduleQueryClient,
+    scheduledAt: Date | null,
+    options: {
+      requestedTotalBroas?: number | null;
+      currentScheduledAt?: Date | null;
+      reference?: Date;
+    } = {}
+  ) {
+    if (!scheduledAt) return;
+
+    const requestedDayKey = formatScheduleDayKeyFromDate(scheduledAt);
+    const requestedWindowKey = resolveExternalOrderDeliveryWindowKeyForDate(scheduledAt);
+    const currentDayKey = options.currentScheduledAt ? formatScheduleDayKeyFromDate(options.currentScheduledAt) : null;
+    const currentWindowKey = options.currentScheduledAt
+      ? resolveExternalOrderDeliveryWindowKeyForDate(options.currentScheduledAt)
+      : null;
+    if (currentDayKey && currentDayKey === requestedDayKey && currentWindowKey === requestedWindowKey) {
+      return;
+    }
+
+    const availability = await this.buildExternalOrderScheduleAvailability(client, {
+      requestedAt: scheduledAt,
+      requestedTotalBroas: options.requestedTotalBroas ?? null,
+      reference: options.reference
+    });
+
+    if (availability.reason === 'DAY_BLOCKED') {
+      throw this.buildPublicWindowAvailabilityError(availability);
+    }
   }
 
   async getPublicScheduleAvailability(
@@ -1201,13 +1579,49 @@ export class OrdersService {
     });
   }
 
+  async getScheduleDayAvailability(dayKey: string) {
+    return this.resolveScheduleDayAvailability(this.prisma, dayKey);
+  }
+
+  async updateScheduleDayAvailability(dayKey: string, blockedWindows: ExternalOrderDeliveryWindowKey[]) {
+    const normalizedDayKey = this.normalizeScheduleDayKey(dayKey);
+    const normalizedBlockedWindows = Array.from(
+      new Set(
+        blockedWindows
+          .map((windowKey) => ExternalOrderDeliveryWindowKeyEnum.safeParse(windowKey))
+          .filter((result) => result.success)
+          .map((result) => result.data)
+      )
+    );
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.orderScheduleDayAvailability.deleteMany({
+        where: { dayKey: normalizedDayKey },
+      });
+
+      if (!normalizedBlockedWindows.length) return;
+
+      await tx.orderScheduleDayAvailability.createMany({
+        data: normalizedBlockedWindows.map((windowKey) => ({
+          dayKey: normalizedDayKey,
+          windowKey,
+          isOpen: false,
+        }))
+      });
+    });
+
+    return this.resolveScheduleDayAvailability(this.prisma, normalizedDayKey);
+  }
+
   private withFinancial(order: OrderWithRelations) {
+    const normalizedStatus = normalizeOrderStatus(order.status) || 'ABERTO';
     const total = this.toMoney(order.total ?? 0);
     const amountPaid = this.getPaidAmount(order.payments || []);
     const balanceDue = moneyFromMinorUnits(Math.max(moneyToMinorUnits(total) - moneyToMinorUnits(amountPaid), 0));
     const paymentStatus = this.deriveOrderPaymentStatus(total, amountPaid);
     return {
       ...order,
+      status: normalizedStatus,
       deliveryProvider: this.normalizeDeliveryProvider(order.deliveryProvider),
       deliveryFeeSource: this.normalizeDeliveryFeeSource(order.deliveryFeeSource),
       deliveryQuoteStatus: this.normalizeDeliveryQuoteStatus(order.deliveryQuoteStatus),
@@ -1296,7 +1710,7 @@ export class OrdersService {
       where: { id },
       include: orderWithRelationsInclude
     });
-    if (!order) throw new NotFoundException('Pedido nao encontrado');
+    if (!order) throw new NotFoundException('Pedido não encontrado');
     return order;
   }
 
@@ -1337,6 +1751,35 @@ export class OrdersService {
     });
   }
 
+  private assertPublicFormDeliveryAddress(customer: ExternalOrderSubmissionPayload['customer'], fulfillmentMode: 'DELIVERY' | 'PICKUP') {
+    if (fulfillmentMode !== 'DELIVERY') return;
+
+    if (!normalizeText(customer.address ?? undefined)) {
+      throw new BadRequestException('Informe o endereço para entrega.');
+    }
+
+    if (!normalizeText(customer.placeId ?? undefined)) {
+      throw new BadRequestException('Selecione um endereço reconhecido pelo Google Maps.');
+    }
+
+    const addressLine1 = normalizeTitle(customer.addressLine1 ?? undefined) ?? inferAddressLine1(customer.address ?? undefined) ?? '';
+    if (!addressLine1) {
+      throw new BadRequestException('Selecione um endereço com rua e número.');
+    }
+
+    if (!STREET_NUMBER_IN_ADDRESS_LINE_PATTERN.test(addressLine1)) {
+      throw new BadRequestException('O endereço precisa incluir o número da rua.');
+    }
+
+    if (!normalizeNeighborhood(customer.neighborhood ?? undefined)) {
+      throw new BadRequestException('O endereço precisa incluir o bairro.');
+    }
+
+    if (!normalizeTitle(customer.addressLine2 ?? undefined)) {
+      throw new BadRequestException('Informe o complemento do endereço.');
+    }
+  }
+
   private async resolveActiveFlavorProductIdByCode() {
     const products = await this.prisma.product.findMany({
       where: { active: true },
@@ -1364,7 +1807,7 @@ export class OrdersService {
         if (quantity <= 0) return null;
         const productId = productIdByCode.get(code);
         if (!productId) {
-          throw new BadRequestException(`Produto ativo nao encontrado para o sabor ${code}.`);
+          throw new BadRequestException(`Produto ativo não encontrado para o sabor ${code}.`);
         }
         return { productId, quantity };
       })
@@ -1407,6 +1850,7 @@ export class OrdersService {
     customerId?: number | null;
     customerPhone?: string | null;
     client?: PrismaService | TransactionClient;
+    excludeOrderId?: number | null;
   }) {
     const client = input.client ?? this.prisma;
     const normalizedCode = normalizeCouponCode(input.couponCode);
@@ -1421,17 +1865,7 @@ export class OrdersService {
       };
     }
 
-    const coupon = await client.coupon.findFirst({
-      where: {
-        code: normalizedCode
-      },
-      select: {
-        code: true,
-        discountPct: true,
-        active: true,
-        usageLimitPerCustomer: true
-      }
-    });
+    const coupon = await findCouponByNormalizedCode(client, normalizedCode);
 
     if (!coupon) {
       const activeCouponsCount = await client.coupon.count({
@@ -1441,7 +1875,7 @@ export class OrdersService {
       });
       throw new BadRequestException(
         activeCouponsCount > 0
-          ? `Cupom ${normalizedCode} nao encontrado entre os cupons ativos.`
+          ? `Cupom ${normalizedCode} não encontrado entre os cupons ativos.`
           : 'Nenhum cupom ativo cadastrado no momento.'
       );
     }
@@ -1456,18 +1890,19 @@ export class OrdersService {
         : null;
     if (usageLimitPerCustomer) {
       if (!(input.customerId || String(input.customerPhone || '').trim())) {
-        throw new BadRequestException(`Informe um telefone valido para usar o cupom ${coupon.code}.`);
+        throw new BadRequestException(`Informe um telefone válido para usar o cupom ${coupon.code}.`);
       }
 
       const customerUsageCount = await countCouponUsageForCustomer(client, {
         couponCode: coupon.code,
         customerId: input.customerId ?? null,
-        customerPhone: input.customerPhone ?? null
+        customerPhone: input.customerPhone ?? null,
+        excludeOrderId: input.excludeOrderId ?? null
       });
 
       if (customerUsageCount >= usageLimitPerCustomer) {
         throw new BadRequestException(
-          `Cupom ${coupon.code} ja atingiu o limite de ${usageLimitPerCustomer} uso(s) para este cliente.`
+          `Cupom ${coupon.code} já atingiu o limite de ${usageLimitPerCustomer} uso(s) para este cliente.`
         );
       }
     }
@@ -1495,7 +1930,7 @@ export class OrdersService {
     });
     const coupon = await this.resolveCouponDiscount({
       couponCode: data.couponCode ?? null,
-      subtotal: pricedOrder.subtotal,
+      subtotal: pricedOrder.couponEligibleSubtotal,
       customerPhone: data.customer.phone ?? null
     });
 
@@ -1506,6 +1941,13 @@ export class OrdersService {
         name: data.customer.name,
         phone: data.customer.phone ?? null,
         address: data.customer.address ?? null,
+        addressLine1: data.customer.addressLine1 ?? null,
+        addressLine2: data.customer.addressLine2 ?? null,
+        neighborhood: data.customer.neighborhood ?? null,
+        city: data.customer.city ?? null,
+        state: data.customer.state ?? null,
+        postalCode: data.customer.postalCode ?? null,
+        country: data.customer.country ?? null,
         placeId: data.customer.placeId ?? null,
         lat: data.customer.lat ?? null,
         lng: data.customer.lng ?? null,
@@ -1558,7 +2000,7 @@ export class OrdersService {
     });
     const coupon = await this.resolveCouponDiscount({
       couponCode: data.couponCode ?? null,
-      subtotal: pricedOrder.subtotal,
+      subtotal: pricedOrder.couponEligibleSubtotal,
       customerPhone: data.customer.phone ?? null
     });
     const scheduledAt = resolvedSchedule.scheduledAt;
@@ -1582,7 +2024,7 @@ export class OrdersService {
         customerLng: data.customer.lng ?? null,
         customerDeliveryNotes: data.customer.deliveryNotes ?? null,
         items: pricedOrder.manifestItems,
-        subtotal: coupon.subtotalAfterDiscount
+        subtotal: this.toMoney(Math.max(pricedOrder.subtotal - coupon.discountAmount, 0))
       }),
       {
         enforceExternalSchedule: true,
@@ -1999,9 +2441,9 @@ export class OrdersService {
   ) {
     if ('customerId' in customer) {
       const existing = await tx.customer.findUnique({ where: { id: customer.customerId } });
-      if (!existing) throw new NotFoundException('Cliente nao encontrado');
+      if (!existing) throw new NotFoundException('Cliente não encontrado');
       if (existing.deletedAt) {
-        throw new BadRequestException('Cliente foi excluido e nao pode receber novos pedidos.');
+        throw new BadRequestException('Cliente foi excluído e não pode receber novos pedidos.');
       }
       return this.ensureCustomerPublicNumber(tx, existing);
     }
@@ -2133,8 +2575,8 @@ export class OrdersService {
   private async resolveDeliveryQuoteCustomer(customer: OrderIntakePayload['customer']) {
     if ('customerId' in customer) {
       const existing = await this.prisma.customer.findUnique({ where: { id: customer.customerId } });
-      if (!existing) throw new NotFoundException('Cliente nao encontrado');
-      return {
+      if (!existing) throw new NotFoundException('Cliente não encontrado');
+      return this.buildOrderCustomerSnapshot({
         name: existing.name,
         phone: existing.phone ?? null,
         address: ('address' in customer ? customer.address : null) ?? existing.address ?? null,
@@ -2149,10 +2591,10 @@ export class OrdersService {
         lat: ('lat' in customer ? customer.lat : null) ?? existing.lat ?? null,
         lng: ('lng' in customer ? customer.lng : null) ?? existing.lng ?? null,
         deliveryNotes: ('deliveryNotes' in customer ? customer.deliveryNotes : null) ?? existing.deliveryNotes ?? null
-      };
+      });
     }
 
-    return {
+    return this.buildOrderCustomerSnapshot({
       name: customer.name,
       phone: customer.phone ?? null,
       address: customer.address ?? null,
@@ -2167,12 +2609,16 @@ export class OrdersService {
       lat: 'lat' in customer ? customer.lat ?? null : null,
       lng: 'lng' in customer ? customer.lng ?? null : null,
       deliveryNotes: customer.deliveryNotes ?? null
-    };
+    });
   }
 
   private async priceOrderItems(
     tx: TransactionClient | PrismaService,
-    items: Array<{ productId: number; quantity: number }>
+    items: Array<{ productId: number; quantity: number }>,
+    options?: {
+      allowInactiveProductIds?: ReadonlySet<number>;
+      excludeOrderId?: number | null;
+    }
   ) {
     const parsedItems = items.map((item) =>
       OrderItemSchema.pick({ productId: true, quantity: true }).parse(item)
@@ -2180,13 +2626,43 @@ export class OrdersService {
     const productIds = Array.from(new Set(parsedItems.map((item) => item.productId)));
     const products = await tx.product.findMany({ where: { id: { in: productIds } } });
     const productMap = new Map(products.map((product) => [product.id, product]));
+    const allowInactiveProductIds = options?.allowInactiveProductIds ?? new Set<number>();
+    const salesLimitStates = await loadProductSalesLimitStates(tx, products, {
+      excludeOrderId: options?.excludeOrderId ?? null
+    });
+    const requestedQuantityByProductId = new Map<number, number>();
+    for (const item of parsedItems) {
+      requestedQuantityByProductId.set(
+        item.productId,
+        (requestedQuantityByProductId.get(item.productId) || 0) + item.quantity
+      );
+    }
+
+    for (const [productId, requestedQuantity] of requestedQuantityByProductId.entries()) {
+      const product = productMap.get(productId);
+      if (!product) throw new NotFoundException('Produto não encontrado');
+      if (product.active === false && !allowInactiveProductIds.has(product.id)) {
+        throw new BadRequestException('Produto indisponível.');
+      }
+      const salesLimitState = salesLimitStates.get(product.id);
+      if (salesLimitState && requestedQuantity > salesLimitState.remainingUnits) {
+        throw new BadRequestException(
+          salesLimitState.remainingUnits > 0
+            ? `Limite de ${product.name} excedido. Restam ${salesLimitState.remainingBoxes.toLocaleString('pt-BR', {
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 2
+              })} caixa(s).`
+            : `${product.name} esgotou o limite configurado e ficou indisponível.`
+        );
+      }
+    }
 
     const itemsData: Array<{ productId: number; quantity: number; unitPrice: number; total: number }> = [];
     const manifestItems: Array<{ productId: number; quantity: number; name: string }> = [];
     const productionItems: Array<{ quantity: number; productName: string; productUnit: string | null }> = [];
     for (const item of parsedItems) {
       const product = productMap.get(item.productId);
-      if (!product) throw new NotFoundException('Produto nao encontrado');
+      if (!product) throw new NotFoundException('Produto não encontrado');
       const unitPrice = this.toUnitPrice(product.price);
       const total = this.toMoney(unitPrice * item.quantity);
       itemsData.push({ productId: item.productId, quantity: item.quantity, unitPrice, total });
@@ -2202,14 +2678,66 @@ export class OrdersService {
       });
     }
 
-    const subtotal = await this.calculateOrderSubtotalFromItems(tx, parsedItems);
+    const { subtotal, couponEligibleSubtotal } = await this.calculateOrderSubtotalsFromItems(tx, parsedItems);
     return {
       parsedItems,
       itemsData,
       subtotal,
+      couponEligibleSubtotal,
       manifestItems,
       productionTotalBroas: this.resolveOrderProductionBroaCount(productionItems)
     };
+  }
+
+  private async syncLimitedProductsAfterOrderChange(
+    tx: TransactionClient,
+    productIds: number[]
+  ) {
+    const uniqueProductIds = Array.from(new Set(productIds)).filter((id) => Number.isFinite(id));
+    if (uniqueProductIds.length === 0) return;
+
+    const products = await tx.product.findMany({
+      where: {
+        id: { in: uniqueProductIds },
+        salesLimitEnabled: true,
+        salesLimitBoxes: { gt: 0 },
+        salesLimitActivatedAt: { not: null },
+        active: true
+      },
+      select: {
+        id: true,
+        salesLimitEnabled: true,
+        salesLimitBoxes: true,
+        salesLimitActivatedAt: true
+      }
+    });
+    if (products.length === 0) return;
+
+    const states = await loadProductSalesLimitStates(tx, products);
+    const exhaustedIds = products
+      .filter((product) => states.get(product.id)?.exhausted)
+      .map((product) => product.id);
+    if (exhaustedIds.length === 0) return;
+
+    await tx.product.updateMany({
+      where: {
+        id: { in: exhaustedIds },
+        active: true
+      },
+      data: {
+        active: false
+      }
+    });
+  }
+
+  private async syncProductAvailabilityAfterInventoryChange(
+    tx: TransactionClient,
+    productIds: number[]
+  ) {
+    const uniqueProductIds = Array.from(new Set(productIds)).filter((id) => Number.isFinite(id));
+    if (uniqueProductIds.length === 0) return;
+    await syncCompanionProductActiveStateByProductIds(tx, uniqueProductIds);
+    await this.syncLimitedProductsAfterOrderChange(tx, uniqueProductIds);
   }
 
   private intakeStageFrom(
@@ -2354,8 +2882,20 @@ export class OrdersService {
     const quoteCustomer = await this.resolveDeliveryQuoteCustomer(data.customer);
     const pricedOrder = await this.priceOrderItems(this.prisma, data.order.items);
     const { discount, discountPct } = this.resolveOrderDiscountInput(pricedOrder.subtotal, data.order);
-    const quoteSubtotal = this.toMoney(Math.max(pricedOrder.subtotal - discount, 0));
+    const preflightResolvedCoupon = normalizeCouponCode(data.order.couponCode)
+      ? await this.resolveCouponDiscount({
+          couponCode: data.order.couponCode,
+          subtotal: pricedOrder.couponEligibleSubtotal,
+          customerId: 'customerId' in data.customer ? data.customer.customerId : null,
+          customerPhone: quoteCustomer.phone ?? null
+        })
+      : null;
+    const quoteDiscount = preflightResolvedCoupon ? preflightResolvedCoupon.discountAmount : discount;
+    const quoteSubtotal = this.toMoney(Math.max(pricedOrder.subtotal - quoteDiscount, 0));
     const scheduledAt = this.parseOptionalDateTime(data.fulfillment.scheduledAt);
+    await this.ensureScheduleDayIsOpen(this.prisma, scheduledAt, {
+      requestedTotalBroas: pricedOrder.productionTotalBroas
+    });
     const deliveryQuote = await this.deliveriesService.resolveDeliverySelection(
       data.delivery,
       this.buildDeliveryQuoteDraft({
@@ -2464,7 +3004,7 @@ export class OrdersService {
       const resolvedCoupon = appliedCoupon
         ? await this.resolveCouponDiscount({
             couponCode: appliedCoupon,
-            subtotal,
+            subtotal: pricedOrder.couponEligibleSubtotal,
             customerId: customer.id,
             customerPhone: customer.phone ?? null,
             client: tx
@@ -2561,15 +3101,19 @@ export class OrdersService {
         where: { id: createdOrder.id },
         include: orderWithRelationsInclude
       });
-      if (!hydratedOrder) throw new NotFoundException('Pedido nao encontrado');
+      if (!hydratedOrder) throw new NotFoundException('Pedido não encontrado');
 
       await this.syncOrderInventoryArtifacts(tx, hydratedOrder);
+      await this.syncProductAvailabilityAfterInventoryChange(
+        tx,
+        itemsData.map((item) => item.productId)
+      );
 
       const freshOrder = await tx.order.findUnique({
         where: { id: createdOrder.id },
         include: orderWithRelationsInclude
       });
-      if (!freshOrder) throw new NotFoundException('Pedido nao encontrado');
+      if (!freshOrder) throw new NotFoundException('Pedido não encontrado');
 
       const order = this.withFinancial(freshOrder);
       const productNameById =
@@ -2637,6 +3181,7 @@ export class OrdersService {
       defaultChannel: 'PUBLIC_FORM',
       defaultOriginLabel: 'customer-form'
     });
+    this.assertPublicFormDeliveryAddress(data.customer, data.fulfillment.mode);
     return this.intakeExternalSubmission(data, {
       intakeChannel: 'CUSTOMER_LINK'
     });
@@ -2647,6 +3192,7 @@ export class OrdersService {
       defaultChannel: 'PUBLIC_FORM',
       defaultOriginLabel: 'customer-form'
     });
+    this.assertPublicFormDeliveryAddress(data.customer, data.fulfillment.mode);
     return this.previewExternalSubmission(data, {
       intakeChannel: 'CUSTOMER_LINK'
     });
@@ -2760,7 +3306,7 @@ export class OrdersService {
     }).parse(payload);
     const items = data.items ?? [];
     if (items.length === 0) {
-      throw new BadRequestException('Itens sao obrigatorios');
+      throw new BadRequestException('Itens são obrigatórios');
     }
     const result = await this.intake({
       version: 1,
@@ -2800,7 +3346,7 @@ export class OrdersService {
         where: { id },
         include: orderWithRelationsInclude
       });
-      if (!existing) throw new NotFoundException('Pedido nao encontrado');
+      if (!existing) throw new NotFoundException('Pedido não encontrado');
       const previousTargetDate = this.orderTargetDate(existing).date;
 
       const nextScheduledAt = Object.prototype.hasOwnProperty.call(data, 'scheduledAt')
@@ -2812,7 +3358,11 @@ export class OrdersService {
         existing.items.map((item) => ({
           productId: item.productId,
           quantity: item.quantity
-        }))
+        })),
+        {
+          allowInactiveProductIds: new Set(existing.items.map((item) => item.productId)),
+          excludeOrderId: existing.id
+        }
       );
       const subtotal = pricedOrder.subtotal;
       const shouldUpdateDiscount =
@@ -2892,6 +3442,10 @@ export class OrdersService {
         throw new BadRequestException('Nome do cliente e obrigatorio.');
       }
       const quoteScheduledAt = nextScheduledAt ?? existing.scheduledAt;
+      await this.ensureScheduleDayIsOpen(tx, quoteScheduledAt, {
+        requestedTotalBroas: pricedOrder.productionTotalBroas,
+        currentScheduledAt: existing.scheduledAt
+      });
       const deliveryQuote = await this.deliveriesService.resolveDeliverySelection(
         undefined,
         this.buildDeliveryQuoteDraft({
@@ -2976,7 +3530,7 @@ export class OrdersService {
         include: orderWithRelationsInclude
       });
       if (!refreshedUpdated) {
-        throw new NotFoundException('Pedido nao encontrado');
+        throw new NotFoundException('Pedido não encontrado');
       }
 
       await this.syncOrderInventoryArtifacts(tx, refreshedUpdated);
@@ -2996,12 +3550,16 @@ export class OrdersService {
 
   async remove(id: number) {
     await this.prisma.$transaction(async (tx) => {
-      const order = await tx.order.findUnique({ where: { id } });
-      if (!order) throw new NotFoundException('Pedido nao encontrado');
+      const order = await tx.order.findUnique({ where: { id }, include: { items: true } });
+      if (!order) throw new NotFoundException('Pedido não encontrado');
       const targetDate = this.orderTargetDate(order).date;
       await this.assertOrderRemovable(tx, id);
 
       await this.clearOrderFormulaArtifacts(tx, id);
+      await this.syncProductAvailabilityAfterInventoryChange(
+        tx,
+        order.items.map((item) => item.productId)
+      );
       await tx.order.delete({ where: { id } });
       await this.syncPaperBagReservationsForCustomerDateGroup(tx, {
         customerId: order.customerId,
@@ -3014,11 +3572,32 @@ export class OrdersService {
     const data = OrderItemSchema.pick({ productId: true, quantity: true }).parse(payload);
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({ where: { id: orderId }, include: { items: true } });
-      if (!order) throw new NotFoundException('Pedido nao encontrado');
+      if (!order) throw new NotFoundException('Pedido não encontrado');
       await this.assertOrderItemsMutable(tx, order);
 
       const product = await tx.product.findUnique({ where: { id: data.productId } });
-      if (!product) throw new NotFoundException('Produto nao encontrado');
+      if (!product) throw new NotFoundException('Produto não encontrado');
+      if (product.active === false) {
+        throw new BadRequestException('Produto indisponível.');
+      }
+
+      await this.priceOrderItems(
+        tx,
+        [
+          ...order.items.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity
+          })),
+          {
+            productId: data.productId,
+            quantity: data.quantity
+          }
+        ],
+        {
+          allowInactiveProductIds: new Set(order.items.map((item) => item.productId)),
+          excludeOrderId: order.id
+        }
+      );
 
       const unitPrice = this.toUnitPrice(product.price);
       const total = this.toMoney(unitPrice * data.quantity);
@@ -3043,16 +3622,28 @@ export class OrdersService {
           quantity: data.quantity
         }
       ];
-      const newSubtotal = await this.calculateOrderSubtotalFromItems(tx, nextSubtotalItems);
-      const newTotal = this.computeOrderTotal(newSubtotal, order.discount, this.toMoney(order.deliveryFee ?? 0));
-      await tx.order.update({ where: { id: orderId }, data: { subtotal: newSubtotal, total: newTotal } });
+      const pricing = await this.resolveExistingOrderItemsPricing(tx, order, nextSubtotalItems);
+      await tx.order.update({
+        where: { id: orderId },
+        data: {
+          subtotal: pricing.subtotal,
+          discount: pricing.discount,
+          couponCode: pricing.couponCode,
+          notes: pricing.notes,
+          total: pricing.total
+        }
+      });
 
       const updatedOrder = await tx.order.findUnique({
         where: { id: orderId },
         include: orderWithRelationsInclude
       });
-      if (!updatedOrder) throw new NotFoundException('Pedido nao encontrado');
+      if (!updatedOrder) throw new NotFoundException('Pedido não encontrado');
       await this.syncOrderInventoryArtifacts(tx, updatedOrder);
+      await this.syncProductAvailabilityAfterInventoryChange(
+        tx,
+        updatedOrder.items.map((item) => item.productId)
+      );
       return this.withFinancial(updatedOrder);
     });
   }
@@ -3064,7 +3655,7 @@ export class OrdersService {
         where: { id: orderId },
         include: { items: true, payments: true }
       });
-      if (!order) throw new NotFoundException('Pedido nao encontrado');
+      if (!order) throw new NotFoundException('Pedido não encontrado');
       await this.assertOrderItemsMutable(tx, order);
 
       const quantityByProductId = new Map<number, number>();
@@ -3077,26 +3668,34 @@ export class OrdersService {
         .map(([productId, quantity]) => ({ productId, quantity }))
         .filter((item) => item.quantity > 0);
       if (normalizedItems.length === 0) {
-        throw new BadRequestException('Itens sao obrigatorios');
+        throw new BadRequestException('Itens são obrigatórios');
       }
 
       const productIds = normalizedItems.map((item) => item.productId);
       const products = await tx.product.findMany({ where: { id: { in: productIds } } });
       const productMap = new Map(products.map((product) => [product.id, product]));
+      const allowInactiveProductIds = new Set(order.items.map((item) => item.productId));
+
+      await this.priceOrderItems(tx, normalizedItems, {
+        allowInactiveProductIds,
+        excludeOrderId: order.id
+      });
 
       const itemsData = [] as Array<{ productId: number; quantity: number; unitPrice: number; total: number }>;
       for (const item of normalizedItems) {
         const product = productMap.get(item.productId);
-        if (!product) throw new NotFoundException('Produto nao encontrado');
+        if (!product) throw new NotFoundException('Produto não encontrado');
+        if (product.active === false && !allowInactiveProductIds.has(product.id)) {
+          throw new BadRequestException('Produto indisponível.');
+        }
         const unitPrice = this.toUnitPrice(product.price);
         const total = this.toMoney(unitPrice * item.quantity);
         itemsData.push({ productId: item.productId, quantity: item.quantity, unitPrice, total });
       }
 
-      const subtotal = await this.calculateOrderSubtotalFromItems(tx, normalizedItems);
-      const total = this.computeOrderTotal(subtotal, order.discount, this.toMoney(order.deliveryFee ?? 0));
+      const pricing = await this.resolveExistingOrderItemsPricing(tx, order, normalizedItems);
       const amountPaid = this.getPaidAmount(order.payments || []);
-      this.ensureOrderTotalCoversPaid(total, amountPaid);
+      this.ensureOrderTotalCoversPaid(pricing.total, amountPaid);
 
       await tx.orderItem.deleteMany({ where: { orderId } });
       await tx.orderItem.createMany({
@@ -3108,11 +3707,21 @@ export class OrdersService {
 
       const updatedOrder = await tx.order.update({
         where: { id: orderId },
-        data: { subtotal, total },
+        data: {
+          subtotal: pricing.subtotal,
+          discount: pricing.discount,
+          couponCode: pricing.couponCode,
+          notes: pricing.notes,
+          total: pricing.total
+        },
         include: orderWithRelationsInclude
       });
 
       await this.syncOrderInventoryArtifacts(tx, updatedOrder);
+      await this.syncProductAvailabilityAfterInventoryChange(
+        tx,
+        updatedOrder.items.map((item) => item.productId)
+      );
       return this.withFinancial(updatedOrder);
     });
   }
@@ -3123,34 +3732,47 @@ export class OrdersService {
         where: { id: orderId },
         include: { items: true, payments: true }
       });
-      if (!order) throw new NotFoundException('Pedido nao encontrado');
+      if (!order) throw new NotFoundException('Pedido não encontrado');
       await this.assertOrderItemsMutable(tx, order);
 
       const item = await tx.orderItem.findUnique({ where: { id: itemId } });
-      if (!item || item.orderId !== orderId) throw new NotFoundException('Item nao encontrado');
+      if (!item || item.orderId !== orderId) throw new NotFoundException('Item não encontrado');
 
       await tx.orderItem.delete({ where: { id: itemId } });
 
       const remaining = order.items.filter((i) => i.id !== itemId);
-      const newSubtotal = await this.calculateOrderSubtotalFromItems(
+      const pricing = await this.resolveExistingOrderItemsPricing(
         tx,
+        order,
         remaining.map((entry) => ({
           productId: entry.productId,
           quantity: entry.quantity
         }))
       );
-      const newTotal = this.computeOrderTotal(newSubtotal, order.discount, this.toMoney(order.deliveryFee ?? 0));
       const amountPaid = this.getPaidAmount(order.payments || []);
-      this.ensureOrderTotalCoversPaid(newTotal, amountPaid);
+      this.ensureOrderTotalCoversPaid(pricing.total, amountPaid);
 
-      await tx.order.update({ where: { id: orderId }, data: { subtotal: newSubtotal, total: newTotal } });
+      await tx.order.update({
+        where: { id: orderId },
+        data: {
+          subtotal: pricing.subtotal,
+          discount: pricing.discount,
+          couponCode: pricing.couponCode,
+          notes: pricing.notes,
+          total: pricing.total
+        }
+      });
 
       const updatedOrder = await tx.order.findUnique({
         where: { id: orderId },
         include: orderWithRelationsInclude
       });
-      if (!updatedOrder) throw new NotFoundException('Pedido nao encontrado');
+      if (!updatedOrder) throw new NotFoundException('Pedido não encontrado');
       await this.syncOrderInventoryArtifacts(tx, updatedOrder);
+      await this.syncProductAvailabilityAfterInventoryChange(
+        tx,
+        updatedOrder.items.map((entry) => entry.productId)
+      );
       return this.withFinancial(updatedOrder);
     });
   }
@@ -3164,11 +3786,20 @@ export class OrdersService {
         include: orderWithRelationsInclude
       });
       if (!existingOrder) {
-        throw new NotFoundException('Pedido nao encontrado');
+        throw new NotFoundException('Pedido não encontrado');
       }
 
-      const path = resolveOrderStatusPath(existingOrder.status, status);
+      const currentStatus = normalizeOrderStatus(existingOrder.status) || 'ABERTO';
+      const path = resolveOrderStatusPath(currentStatus, status);
       if (path.length === 0) {
+        if (existingOrder.status !== currentStatus) {
+          const normalizedOrder = await tx.order.update({
+            where: { id: orderId },
+            data: { status: currentStatus },
+            include: orderWithRelationsInclude
+          });
+          return this.withFinancial(normalizedOrder);
+        }
         return this.withFinancial(existingOrder);
       }
 
@@ -3182,6 +3813,10 @@ export class OrdersService {
         });
         if (stepStatus === 'CANCELADO') {
           await this.clearOrderFormulaArtifacts(tx, orderId);
+          await this.syncProductAvailabilityAfterInventoryChange(
+            tx,
+            updatedOrder.items.map((item) => item.productId)
+          );
           await this.syncPaperBagReservationsForCustomerDateGroup(tx, {
             customerId: updatedOrder.customerId,
             targetDate: this.orderTargetDate(updatedOrder).date
@@ -3201,9 +3836,9 @@ export class OrdersService {
         where: { id: orderId },
         include: orderWithRelationsInclude
       });
-      if (!order) throw new NotFoundException('Pedido nao encontrado');
+      if (!order) throw new NotFoundException('Pedido não encontrado');
       if (order.status === 'CANCELADO') {
-        throw new BadRequestException('Nao e possivel registrar pagamento para pedido cancelado.');
+        throw new BadRequestException('Não é possível registrar pagamento para pedido cancelado.');
       }
 
       if (!data.paid) {
@@ -3229,7 +3864,7 @@ export class OrdersService {
           where: { id: orderId },
           include: orderWithRelationsInclude
         });
-        if (!updated) throw new NotFoundException('Pedido nao encontrado');
+        if (!updated) throw new NotFoundException('Pedido não encontrado');
         return this.withFinancial(updated);
       }
 
@@ -3282,7 +3917,7 @@ export class OrdersService {
         where: { id: orderId },
         include: orderWithRelationsInclude
       });
-      if (!updated) throw new NotFoundException('Pedido nao encontrado');
+      if (!updated) throw new NotFoundException('Pedido não encontrado');
       return this.withFinancial(updated);
     });
   }

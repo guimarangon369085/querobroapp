@@ -11,7 +11,7 @@ function buildErrorResponse(status: number, payload: unknown) {
 
 export async function POST(request: Request) {
   if (!isTrustedSameOriginBridgeRequest(request)) {
-    return buildErrorResponse(404, { message: 'Nao encontrado.' });
+    return buildErrorResponse(404, { message: 'Não encontrado.' });
   }
 
   let body: unknown;
@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     body = await request.json();
   } catch {
     return buildErrorResponse(400, {
-      message: 'Payload invalido para validacao do cupom.'
+      message: 'Payload inválido para validação do cupom.'
     });
   }
 

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   EXTERNAL_ORDER_DELIVERY_WINDOWS,
   resolveExternalOrderDeliveryWindowKeyForDate,
@@ -16,9 +16,11 @@ import { OrderCardArtwork } from './order-card-artwork';
 import type { DeliveryQuote } from './orders-model';
 import {
   ORDER_BOX_UNITS,
+  ORDER_BOX_PRICE_CUSTOM,
   buildRuntimeOrderCatalog,
   compactOrderProductName,
   resolveOrderCardArt,
+  resolveRuntimeOrderItemGroup,
   resolveOrderVirtualBoxLabel
 } from './order-box-catalog';
 
@@ -45,11 +47,6 @@ type OrderQuickCreateProps = {
   selectedCustomerId: number | '';
   selectedCustomerAddressKey: string;
   selectedCustomerAddressLabel: string;
-  restoredFromLastOrder?: {
-    orderId: number;
-    customerName: string;
-    referenceLabel: string;
-  } | null;
   newOrderScheduledAt: string;
   newOrderDiscountPct: string;
   newOrderNotes: string;
@@ -80,6 +77,7 @@ type OrderQuickCreateProps = {
   onClearDraft: () => void;
   onDecrementProduct: (productId: number) => void;
   onAddProductUnits: (productId: number, units: number) => void;
+  onSetProductQuantity: (productId: number, quantity: number) => void;
 };
 
 function formatDateInputValue(date: Date) {
@@ -259,7 +257,6 @@ export function OrderQuickCreate({
   selectedCustomerId,
   selectedCustomerAddressKey,
   selectedCustomerAddressLabel,
-  restoredFromLastOrder,
   newOrderScheduledAt,
   newOrderDiscountPct,
   newOrderNotes,
@@ -289,9 +286,16 @@ export function OrderQuickCreate({
   onRefreshDeliveryQuote,
   onClearDraft,
   onDecrementProduct,
-  onAddProductUnits
+  onAddProductUnits,
+  onSetProductQuantity
 }: OrderQuickCreateProps) {
   const [mistaShortcutStack, setMistaShortcutStack] = useState<number[]>([]);
+  const [isFulfillmentModeCoolingDown, setIsFulfillmentModeCoolingDown] = useState(false);
+  const fulfillmentModeCooldownTimeoutRef = useRef<number | null>(null);
+  const quickCreateProductMap = useMemo(
+    () => new Map(productsForCards.map((product) => [product.id!, product] as const)),
+    [productsForCards]
+  );
   const quantityByProductId = new Map(
     newOrderItems.map((item) => [item.productId, item.quantity] as const)
   );
@@ -314,11 +318,31 @@ export function OrderQuickCreate({
         : 'Calcular frete';
   const primaryActionDisabled =
     isCreatingOrder ||
+    isFulfillmentModeCoolingDown ||
     (requiresDeliveryQuote && isQuotingDelivery) ||
     (hasReadyDeliveryQuote
       ? !canCreateOrder
       : !selectedCustomerId || newOrderItems.length === 0);
   const runtimeCatalog = useMemo(() => buildRuntimeOrderCatalog(productsForCards), [productsForCards]);
+  const flavorProductsForCards = useMemo(
+    () =>
+      runtimeCatalog.flavorProducts
+        .map((product) => quickCreateProductMap.get(product.id))
+        .filter((product): product is Product => Boolean(product)),
+    [quickCreateProductMap, runtimeCatalog]
+  );
+  const companionProductsForCards = useMemo(
+    () =>
+      runtimeCatalog.companionProducts
+        .map((product) => ({
+          runtime: product,
+          product: quickCreateProductMap.get(product.id) ?? productMap.get(product.id)
+        }))
+        .filter((entry): entry is { runtime: (typeof runtimeCatalog.companionProducts)[number]; product: Product } =>
+          Boolean(entry.product)
+        ),
+    [productMap, quickCreateProductMap, runtimeCatalog]
+  );
   const mistaShortcutOptions = useMemo(
     () =>
       runtimeCatalog.boxEntries.filter((entry) => entry.kind === 'MIXED'),
@@ -326,7 +350,9 @@ export function OrderQuickCreate({
   );
   const virtualBoxPartitions = useMemo(() => {
     const remainingByProductId = new Map<number, number>(
-      newOrderItems.map((item) => [item.productId, Math.max(Math.floor(item.quantity || 0), 0)] as const)
+      newOrderItems
+        .filter((item) => resolveRuntimeOrderItemGroup(productMap.get(item.productId)) === 'FLAVOR')
+        .map((item) => [item.productId, Math.max(Math.floor(item.quantity || 0), 0)] as const)
     );
     const mistaBoxes: VirtualBoxPart[][] = [];
 
@@ -372,6 +398,14 @@ export function OrderQuickCreate({
     : virtualBoxRemainingUnits;
   const hasOpenVirtualBox = computedTotalUnits > 0 && remainingUnitsToCloseBox > 0;
   const displayTotalUnits = Math.max(draftTotalUnits, computedTotalUnits);
+  const companionUnits = useMemo(
+    () =>
+      newOrderItems.reduce((sum, item) => {
+        if (resolveRuntimeOrderItemGroup(productMap.get(item.productId)) !== 'COMPANION') return sum;
+        return sum + Math.max(Math.floor(item.quantity || 0), 0);
+      }, 0),
+    [newOrderItems, productMap]
+  );
   const scheduledPickerParts = useMemo(
     () => splitDateTimeLocalPickerParts(newOrderScheduledAt),
     [newOrderScheduledAt]
@@ -396,12 +430,81 @@ export function OrderQuickCreate({
       })
       .slice(0, 6);
   }, [customerOptions, customerSearch]);
+  const singleBoxEntries = useMemo(
+    () => runtimeCatalog.boxEntries.filter((entry) => entry.kind === 'SINGLE'),
+    [runtimeCatalog]
+  );
+  const mixedBoxEntries = useMemo(
+    () => runtimeCatalog.boxEntries.filter((entry) => entry.kind === 'MIXED'),
+    [runtimeCatalog]
+  );
+  const mixedBoxCountsByFlavorId = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const flavorId of mistaShortcutStack) {
+      counts.set(flavorId, (counts.get(flavorId) || 0) + 1);
+    }
+    return counts;
+  }, [mistaShortcutStack]);
+  const mixedReservedUnitsByProductId = useMemo(() => {
+    const reserved = new Map<number, number>();
+    const traditionalId = runtimeCatalog.traditionalFlavor?.id;
+    for (const flavorId of mistaShortcutStack) {
+      if (traditionalId) {
+        reserved.set(traditionalId, (reserved.get(traditionalId) || 0) + 4);
+      }
+      reserved.set(flavorId, (reserved.get(flavorId) || 0) + 3);
+    }
+    return reserved;
+  }, [mistaShortcutStack, runtimeCatalog.traditionalFlavor?.id]);
+  const singleBoxCountByProductId = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const entry of singleBoxEntries) {
+      const totalUnits = quantityByProductId.get(entry.productId) || 0;
+      const mixedReservedUnits = mixedReservedUnitsByProductId.get(entry.productId) || 0;
+      const eligibleUnits = Math.max(totalUnits - mixedReservedUnits, 0);
+      counts.set(entry.productId, Math.floor(eligibleUnits / BOX_UNITS));
+    }
+    return counts;
+  }, [mixedReservedUnitsByProductId, quantityByProductId, singleBoxEntries]);
+  const customUnitsByProductId = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const product of flavorProductsForCards) {
+      const totalUnits = quantityByProductId.get(product.id!) || 0;
+      const mixedReservedUnits = mixedReservedUnitsByProductId.get(product.id!) || 0;
+      const singleBoxUnits = (singleBoxCountByProductId.get(product.id!) || 0) * BOX_UNITS;
+      counts.set(product.id!, Math.max(totalUnits - mixedReservedUnits - singleBoxUnits, 0));
+    }
+    return counts;
+  }, [flavorProductsForCards, mixedReservedUnitsByProductId, quantityByProductId, singleBoxCountByProductId]);
 
   useEffect(() => {
     if (newOrderItems.length === 0 && mistaShortcutStack.length > 0) {
       setMistaShortcutStack([]);
     }
   }, [mistaShortcutStack.length, newOrderItems.length]);
+
+  useEffect(() => {
+    return () => {
+      if (fulfillmentModeCooldownTimeoutRef.current !== null) {
+        window.clearTimeout(fulfillmentModeCooldownTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const armFulfillmentModeCooldown = () => {
+    if (typeof window === 'undefined') return;
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    if (fulfillmentModeCooldownTimeoutRef.current !== null) {
+      window.clearTimeout(fulfillmentModeCooldownTimeoutRef.current);
+    }
+    setIsFulfillmentModeCoolingDown(true);
+    fulfillmentModeCooldownTimeoutRef.current = window.setTimeout(() => {
+      setIsFulfillmentModeCoolingDown(false);
+      fulfillmentModeCooldownTimeoutRef.current = null;
+    }, 420);
+  };
 
   const applyMistaShortcut = (flavorId: number) => {
     const traditionalId = runtimeCatalog.traditionalFlavor?.id;
@@ -412,7 +515,43 @@ export function OrderQuickCreate({
     setMistaShortcutStack((current) => [...current, flavorId]);
   };
 
+  const removeMistaShortcut = (flavorId: number) => {
+    const traditionalId = runtimeCatalog.traditionalFlavor?.id;
+    if (!traditionalId || !flavorId) return;
+    const currentTraditionalQty = quantityByProductId.get(traditionalId) || 0;
+    const currentFlavorQty = quantityByProductId.get(flavorId) || 0;
+    if (currentTraditionalQty < 4 || currentFlavorQty < 3) return;
+    const nextIndex = mistaShortcutStack.lastIndexOf(flavorId);
+    if (nextIndex < 0) return;
+
+    onSetProductQuantity(traditionalId, currentTraditionalQty - 4);
+    onSetProductQuantity(flavorId, currentFlavorQty - 3);
+    setMistaShortcutStack((current) => {
+      const next = [...current];
+      next.splice(nextIndex, 1);
+      return next;
+    });
+  };
+
+  const setSingleBoxCount = (productId: number, nextBoxCountRaw: number) => {
+    const normalizedBoxCount = Math.max(Math.floor(nextBoxCountRaw), 0);
+    const mixedReservedUnits = mixedReservedUnitsByProductId.get(productId) || 0;
+    const customUnits = customUnitsByProductId.get(productId) || 0;
+    onSetProductQuantity(productId, mixedReservedUnits + normalizedBoxCount * BOX_UNITS + customUnits);
+  };
+
+  const adjustCustomFlavorUnits = (productId: number, delta: number) => {
+    const normalizedDelta = Math.trunc(delta);
+    if (normalizedDelta === 0) return;
+    const mixedReservedUnits = mixedReservedUnitsByProductId.get(productId) || 0;
+    const singleBoxUnits = (singleBoxCountByProductId.get(productId) || 0) * BOX_UNITS;
+    const customUnits = customUnitsByProductId.get(productId) || 0;
+    const nextCustomUnits = Math.max(customUnits + normalizedDelta, 0);
+    onSetProductQuantity(productId, mixedReservedUnits + singleBoxUnits + nextCustomUnits);
+  };
+
   const handlePrimaryAction = () => {
+    if (isFulfillmentModeCoolingDown) return;
     if (!hasReadyDeliveryQuote) {
       onRefreshDeliveryQuote();
       return;
@@ -437,520 +576,801 @@ export function OrderQuickCreate({
         </button>
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3 sm:col-span-2 xl:col-span-1">
-          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">Atendimento</p>
-          <div className="mt-2 inline-flex rounded-full border border-[color:var(--line-soft)] bg-[rgba(255,251,246,0.92)] p-1">
-            {(['DELIVERY', 'PICKUP'] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-                  fulfillmentMode === mode
-                    ? 'bg-[color:var(--ink-strong)] text-white'
-                    : 'text-neutral-600'
-                }`}
-                onClick={() => onFulfillmentModeChange(mode)}
-              >
-                {mode === 'DELIVERY' ? 'Entrega' : 'Retirada'}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">Cliente</p>
-          <p className="mt-1 text-base font-semibold text-neutral-900">{draftCustomerLabel}</p>
-        </div>
-        <div className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">Caixas</p>
-          <p className="mt-1 text-base font-semibold text-neutral-900">
-            {virtualBoxPartitions.boxes.length} fechada(s)
-            {virtualBoxPartitions.openBoxUnits > 0
-              ? ` • ${virtualBoxPartitions.openBoxUnits}/7 aberta`
-              : ''}
-          </p>
-        </div>
-        <div className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">Frete</p>
-          <p className="mt-1 text-base font-semibold text-neutral-900">
-            {!requiresDeliveryQuote
-              ? 'Sem frete'
-              : isQuotingDelivery
-              ? 'Cotando...'
-              : deliveryQuote
-                ? sponsoredDeliveryFee > 0
-                  ? `Marketing • ${formatCurrencyBR(sponsoredDeliveryFee)}`
-                  : formatCurrencyBR(deliveryFee)
-                : 'A confirmar'}
-          </p>
-        </div>
-        <div className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">Total</p>
-          <p className="mt-1 text-base font-semibold text-neutral-900">{formatCurrencyBR(draftGrandTotal)}</p>
-        </div>
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-2">
-        <div className="grid gap-2 text-sm text-neutral-700">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-[0.9rem] font-semibold text-neutral-700">Cliente</span>
-            <Link href="/clientes" className="app-button app-button-ghost text-xs">
-              Novo cliente
-            </Link>
-          </div>
-          <input
-            className="app-input"
-            list="customers-list"
-            placeholder="Cliente"
-            value={customerSearch}
-            onChange={(e) => onCustomerSearchChange(e.target.value)}
-          />
-          <datalist id="customers-list">
-            {customerOptions.map((customer) => (
-              <option key={customer.id} value={customer.label} />
-            ))}
-          </datalist>
-          {!selectedCustomerId && customerSuggestions.length > 0 ? (
-            <div className="grid gap-2 rounded-2xl border border-[color:var(--line-soft)] bg-white/85 p-2">
-              {customerSuggestions.map((option) => (
-                <button
-                  key={option.id}
-                  type="button"
-                  className="app-button app-button-ghost w-full justify-start text-left normal-case tracking-[0.02em]"
-                  onClick={() => onCustomerOptionPick(option)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          {!selectedCustomerId && customerSearch.trim() ? (
-            <p className="text-xs text-neutral-500">
-              Selecione um cliente da lista para vincular o pedido corretamente.
-            </p>
-          ) : null}
-          {selectedCustomerId ? (
-            <div className="grid gap-2">
-              {customerAddressOptions.length > 0 ? (
-                <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.1em] text-neutral-500">
-                  Endereço do pedido
-                  <select
-                    className="app-input text-sm normal-case tracking-normal text-neutral-800"
-                    value={selectedCustomerAddressKey}
-                    onChange={(event) => onCustomerAddressKeyChange(event.target.value)}
-                  >
-                    {customerAddressOptions.map((option) => (
-                      <option key={option.key} value={option.key}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-              <p className="text-xs text-neutral-500">
-                {selectedCustomerAddressLabel || 'Endereco nao informado.'}
-              </p>
-            </div>
-          ) : null}
-        </div>
-        <FormField label="Data">
-          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px]">
-            <input
-              className="app-input"
-              type="date"
-              value={scheduledPickerParts.date}
-              onChange={(event) =>
-                onScheduledAtChange(
-                  mergeDateTimeLocalPickerParts({
-                    ...scheduledPickerParts,
-                    date: event.target.value
-                  })
-                )
-              }
-            />
-            <input
-              className="app-input"
-              type="time"
-              step={900}
-              value={`${scheduledPickerParts.hour}:${scheduledPickerParts.minute}`}
-              onChange={(event) =>
-                onScheduledAtChange(
-                  normalizeDateTimeLocalToAllowedQuarter(
-                    mergeDateTimeLocalPickerParts({
-                      ...scheduledPickerParts,
-                      hour: event.target.value.split(':')[0] || scheduledPickerParts.hour,
-                      minute: event.target.value.split(':')[1] || scheduledPickerParts.minute
-                    })
-                  )
-                )
-              }
-            />
-          </div>
-          <div className="mt-2 grid gap-2">
-            <div className="flex flex-wrap gap-2">
-              {EXTERNAL_ORDER_DELIVERY_WINDOWS.map((window) => (
-                <button
-                  key={window.key}
-                  type="button"
-                  className={`app-button ${
-                    scheduledWindowKey === window.key ? 'app-button-primary' : 'app-button-ghost'
-                  } min-h-[38px] px-3 text-xs normal-case tracking-[0.02em]`}
-                  onClick={() => onScheduledWindowPick(window.key)}
-                >
-                  {window.label}
-                </button>
-              ))}
-            </div>
-            <p className="text-xs text-neutral-500">
-              {scheduledWindowLabel
-                ? `Faixa pública atual: ${scheduledWindowLabel}.`
-                : 'Horario fora das 3 faixas publicas de /pedido.'}
-            </p>
-          </div>
-        </FormField>
-      </div>
-
-      {restoredFromLastOrder ? (
-        <div className="rounded-2xl border border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)] px-4 py-3 text-sm text-[color:var(--tone-gold-ink)]">
-          <div className="flex items-start gap-3">
-            <AppIcon name="refresh" className="mt-0.5 h-5 w-5 shrink-0" />
-            <div className="min-w-0">
-              <p className="font-semibold">Ultimo pedido.</p>
-              <p className="mt-1 text-xs opacity-80">
-                {restoredFromLastOrder.customerName} • pedido #{restoredFromLastOrder.orderId}
-                {restoredFromLastOrder.referenceLabel ? ` • ${restoredFromLastOrder.referenceLabel}` : ''}
-              </p>
-              <p className="mt-1 text-xs opacity-80">Revise e crie.</p>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      <details className="app-details">
-        <summary>
-          <span className="inline-flex items-center gap-2">
-            <AppIcon name="tools" className="h-4 w-4" />
-            Mais
-          </span>
-        </summary>
-        <div className="mt-3 grid gap-3 md:grid-cols-2">
-          <FormField label="Desconto (%)">
-            <input
-              className="app-input"
-              placeholder="0 a 100"
-              value={newOrderDiscountPct}
-              inputMode="decimal"
-              onChange={(e) => onDiscountChange(e.target.value)}
-              onBlur={onDiscountBlur}
-            />
-          </FormField>
-          <FormField label="Obs.">
-            <input
-              className="app-input"
-              placeholder="Obs."
-              value={newOrderNotes}
-              onChange={(e) => onNotesChange(e.target.value)}
-            />
-          </FormField>
-        </div>
-      </details>
-
-      <div
-        className={`rounded-2xl border px-4 py-3 text-sm ${
-          hasOpenVirtualBox
-            ? 'border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)] text-[color:var(--tone-gold-ink)]'
-            : draftTotalUnits > 0
-              ? 'border-[color:var(--tone-sage-line)] bg-[color:var(--tone-sage-surface)] text-[color:var(--tone-sage-ink)]'
-              : 'border-[color:var(--tone-cream-line)] bg-white text-[color:var(--ink-muted)]'
-        }`}
-      >
-        <p className="text-xs font-semibold uppercase tracking-[0.1em] opacity-70">Caixas</p>
-        <p className="mt-1 font-semibold">
-          {formatVirtualBoxProgress(displayTotalUnits, remainingUnitsToCloseBox)}
-        </p>
-        {hasOpenVirtualBox ? (
-          <p className="mt-1 text-xs opacity-75">
-            Faltam {remainingUnitsToCloseBox} un para fechar a caixa.
-          </p>
-        ) : displayTotalUnits > 0 ? (
-          <p className="mt-1 text-xs opacity-75">Todas as caixas estao fechadas.</p>
-        ) : null}
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3">
-        {productsForCards.map((product) => {
-          const selectedQty = quantityByProductId.get(product.id!) || 0;
-          const isSelected = selectedQty > 0;
-          const productArt = resolveOrderCardArt(product);
-          return (
-            <div
-              key={product.id}
-              data-quick-order-product-id={product.id}
-              className={`order-quick-create__product-card rounded-2xl border p-3 transition ${
-                isSelected
-                  ? 'border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)] shadow-[0_10px_26px_rgba(168,112,42,0.12)]'
-                  : 'border-white/80 bg-white/80'
-              }`}
-            >
-              <div className="grid grid-cols-[84px_minmax(0,1fr)] items-start gap-4">
-                <div className="relative h-[84px] w-[84px] shrink-0">
-                  <div className="relative h-full w-full overflow-hidden rounded-[22px] border border-white/80 bg-white/80 shadow-[0_12px_28px_rgba(70,44,26,0.1)]">
-                    <OrderCardArtwork
-                      alt={compactOrderProductName(product.name)}
-                      art={productArt}
-                      sizes="84px"
-                    />
-                  </div>
+      <div className="public-order-layout">
+        <div className="grid gap-4 rounded-[26px] border border-[rgba(126,79,45,0.1)] bg-[rgb(255,253,250)] p-4 shadow-[0_22px_60px_rgba(70,44,26,0.1)] sm:gap-5 sm:rounded-[32px] sm:p-6 sm:shadow-[0_26px_90px_rgba(70,44,26,0.1)] xl:rounded-none xl:border-0 xl:bg-transparent xl:p-0 xl:shadow-none">
+          <div className="public-order-intake-grid">
+            <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white p-4 sm:rounded-[28px] sm:p-6 xl:h-full xl:p-7">
+              <div className="mb-4 flex items-center justify-between gap-4 sm:mb-5">
+                <div>
+                  <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Dados</h2>
                 </div>
-                <div className="min-w-0">
-                  <p className="text-[0.96rem] font-semibold leading-tight text-[color:var(--ink-strong)]">
-                    {compactOrderProductName(product.name)}
-                  </p>
-                </div>
+                <Link href="/clientes" className="app-button app-button-ghost text-xs">
+                  Novo cliente
+                </Link>
               </div>
-              <div className="mt-4 grid gap-2 border-t border-[rgba(126,79,45,0.08)] pt-4">
-                <div className="order-quick-create__product-primary grid grid-cols-[54px_minmax(0,1fr)_54px] items-center gap-2">
-                  <button
-                    type="button"
-                    className="order-quick-create__qty-button app-button app-button-ghost"
-                    onClick={() => onDecrementProduct(product.id!)}
-                    disabled={selectedQty <= 0}
-                  >
-                    -
-                  </button>
-                  <span className="order-quick-create__qty-value rounded-2xl border border-white/80 bg-white/88 px-3 py-2.5 text-center text-sm font-semibold text-neutral-900">
-                    {selectedQty}
-                  </span>
-                  <button
-                    type="button"
-                    className="order-quick-create__qty-button app-button app-button-ghost"
-                    onClick={() => onAddProductUnits(product.id!, 1)}
-                  >
-                    +1
-                  </button>
-                </div>
-                <div className="order-quick-create__product-secondary grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    className="order-quick-create__qty-button app-button app-button-ghost"
-                    onClick={() => onAddProductUnits(product.id!, 3)}
-                  >
-                    +3
-                  </button>
-                  <button
-                    type="button"
-                    className="order-quick-create__qty-button app-button app-button-ghost"
-                    onClick={() => onAddProductUnits(product.id!, 4)}
-                  >
-                    +4
-                  </button>
-                  <button
-                    type="button"
-                    className="order-quick-create__qty-button order-quick-create__qty-button--primary app-button app-button-primary"
-                    onClick={() => onAddProductUnits(product.id!, BOX_UNITS)}
-                  >
-                    +1 cx
-                  </button>
-                </div>
-                {hasOpenVirtualBox ? (
-                  <button
-                    type="button"
-                    className="order-quick-create__close-box app-button app-button-ghost w-full"
-                    onClick={() => onAddProductUnits(product.id!, remainingUnitsToCloseBox)}
-                  >
-                    Fechar (+{remainingUnitsToCloseBox})
-                  </button>
-                ) : displayTotalUnits > 0 ? (
-                  <div className="rounded-full border border-[color:var(--tone-sage-line)] bg-[color:var(--tone-sage-surface)] px-3 py-2 text-center text-xs font-semibold text-[color:var(--tone-sage-ink)]">
-                    Fechada
+              <div className="grid gap-4 xl:grid-cols-1">
+                <FormField label="Cliente">
+                  <input
+                    className="app-input xl:h-14 xl:text-[1.02rem]"
+                    list="customers-list"
+                    placeholder="Nome do cliente"
+                    value={customerSearch}
+                    onChange={(event) => onCustomerSearchChange(event.target.value)}
+                    autoCapitalize="words"
+                  />
+                </FormField>
+                <datalist id="customers-list">
+                  {customerOptions.map((customer) => (
+                    <option key={customer.id} value={customer.label} />
+                  ))}
+                </datalist>
+                {!selectedCustomerId && customerSuggestions.length > 0 ? (
+                  <div className="grid gap-2 rounded-2xl border border-[color:var(--line-soft)] bg-white p-2">
+                    {customerSuggestions.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        className="app-button app-button-ghost w-full justify-start text-left normal-case tracking-[0.02em]"
+                        onClick={() => onCustomerOptionPick(option)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
                   </div>
                 ) : null}
+                {selectedCustomerId ? (
+                  <div className="grid gap-3">
+                    {customerAddressOptions.length > 0 ? (
+                      <FormField
+                        label={fulfillmentMode === 'DELIVERY' ? 'Endereço do pedido' : 'Ponto de retirada'}
+                      >
+                        <select
+                          className="app-input xl:h-14 xl:text-[1.02rem]"
+                          value={selectedCustomerAddressKey}
+                          onChange={(event) => onCustomerAddressKeyChange(event.target.value)}
+                        >
+                          {customerAddressOptions.map((option) => (
+                            <option key={option.key} value={option.key}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </FormField>
+                    ) : null}
+                    <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-[rgb(250,245,239)] px-4 py-3 text-sm text-[color:var(--ink-muted)]">
+                      {selectedCustomerAddressLabel || 'Endereço não informado.'}
+                    </div>
+                  </div>
+                ) : customerSearch.trim() ? (
+                  <p className="text-xs text-[color:var(--ink-muted)]">
+                    Selecione um cliente da lista para vincular o pedido corretamente.
+                  </p>
+                ) : (
+                  <p className="text-xs text-[color:var(--ink-muted)]">Escolha um cliente para começar.</p>
+                )}
+              </div>
+            </section>
+
+            <section className="public-order-fulfillment-section rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
+              <div className="mb-4 sm:mb-5">
+                <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">
+                  Entrega ou retirada
+                </h2>
+              </div>
+
+              <div className="public-order-mode-grid">
+                {([
+                  {
+                    value: 'DELIVERY' as const,
+                    title: 'Entrega',
+                    description: 'Receber no endereço do cliente.'
+                  },
+                  {
+                    value: 'PICKUP' as const,
+                    title: 'Retirada',
+                    description: 'Buscar no local combinado.'
+                  }
+                ] as const).map((option) => {
+                  const active = fulfillmentMode === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => {
+                        if (fulfillmentMode === option.value) return;
+                        armFulfillmentModeCooldown();
+                        onFulfillmentModeChange(option.value);
+                      }}
+                      className={`public-order-mode-card rounded-[24px] border px-4 py-4 text-left xl:min-h-[112px] xl:px-5 ${
+                        active
+                          ? 'border-[rgba(181,68,57,0.32)] bg-[rgb(255,245,241)] shadow-[0_16px_34px_rgba(181,68,57,0.12)]'
+                          : 'border-[rgba(126,79,45,0.08)] bg-[rgb(250,245,239)] hover:border-[rgba(126,79,45,0.18)] hover:bg-[rgb(255,252,248)]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="public-order-mode-card__title text-base font-semibold text-[color:var(--ink-strong)] xl:text-[1.05rem]">
+                            {option.title}
+                          </p>
+                          <p className="public-order-mode-card__description mt-1 text-sm text-[color:var(--ink-muted)] xl:text-[0.95rem]">
+                            {option.description}
+                          </p>
+                        </div>
+                        <span
+                          className={`grid h-6 w-6 place-items-center rounded-full border text-xs ${
+                            active
+                              ? 'border-[rgba(181,68,57,0.3)] bg-[rgb(255,234,228)] text-[rgb(160,20,26)]'
+                              : 'border-[rgba(126,79,45,0.14)] bg-white text-[color:var(--ink-muted)]'
+                          }`}
+                        >
+                          {active ? '✓' : ''}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="public-order-schedule-grid mt-5">
+                <div className="public-order-schedule-grid__address">
+                  <FormField label={fulfillmentMode === 'DELIVERY' ? 'Endereço para entrega' : 'Ponto de retirada'}>
+                    <div className="app-input flex min-h-[56px] items-center xl:text-[1.02rem]">
+                      {selectedCustomerAddressLabel || 'Selecione um cliente para ver o endereço.'}
+                    </div>
+                  </FormField>
+                </div>
+                <div className="public-order-schedule-grid__complement">
+                  <FormField label="Data">
+                    <input
+                      className="app-input xl:h-14 xl:text-[1.02rem]"
+                      type="date"
+                      value={scheduledPickerParts.date}
+                      onChange={(event) =>
+                        onScheduledAtChange(
+                          mergeDateTimeLocalPickerParts({
+                            ...scheduledPickerParts,
+                            date: event.target.value
+                          })
+                        )
+                      }
+                    />
+                  </FormField>
+                </div>
+                <FormField label="Horario">
+                  <input
+                    className="app-input xl:h-14 xl:text-[1.02rem]"
+                    type="time"
+                    step={900}
+                    value={`${scheduledPickerParts.hour}:${scheduledPickerParts.minute}`}
+                    onChange={(event) =>
+                      onScheduledAtChange(
+                        normalizeDateTimeLocalToAllowedQuarter(
+                          mergeDateTimeLocalPickerParts({
+                            ...scheduledPickerParts,
+                            hour: event.target.value.split(':')[0] || scheduledPickerParts.hour,
+                            minute: event.target.value.split(':')[1] || scheduledPickerParts.minute
+                          })
+                        )
+                      )
+                    }
+                  />
+                </FormField>
+                <FormField label="Faixa de horario">
+                  <div className="grid gap-2.5">
+                    {EXTERNAL_ORDER_DELIVERY_WINDOWS.map((window) => {
+                      const active = scheduledWindowKey === window.key;
+                      return (
+                        <button
+                          key={window.key}
+                          type="button"
+                          onClick={() => onScheduledWindowPick(window.key)}
+                          className={`rounded-[18px] border px-4 py-3 text-left transition ${
+                            active
+                              ? 'border-[rgba(181,68,57,0.28)] bg-[rgb(255,245,241)] shadow-[0_14px_28px_rgba(181,68,57,0.12)]'
+                              : 'border-[rgba(126,79,45,0.12)] bg-[rgb(252,248,242)] hover:border-[rgba(126,79,45,0.22)]'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold text-[color:var(--ink-strong)] xl:text-[1rem]">
+                                {window.label}
+                              </p>
+                              <p className="mt-1 text-xs text-[color:var(--ink-muted)] xl:text-[0.9rem]">
+                                {active ? 'Faixa escolhida' : 'Usar esta faixa'}
+                              </p>
+                            </div>
+                            {active ? (
+                              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[rgb(255,234,228)] text-[rgb(160,20,26)]">
+                                ✓
+                              </span>
+                            ) : null}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </FormField>
+              </div>
+
+              <p className="mt-4 text-xs text-[color:var(--ink-muted)]">
+                {scheduledWindowLabel
+                  ? `Faixa publica atual: ${scheduledWindowLabel}.`
+                  : 'Horario fora das 3 faixas publicas de /pedido.'}
+              </p>
+            </section>
+          </div>
+
+          <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
+            <div className="mb-4 flex flex-col gap-2 sm:mb-5 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
+              <div>
+                <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">
+                  Caixas
+                </h2>
               </div>
             </div>
-          );
-        })}
-      </div>
 
-      <div
-        data-quick-order-product-id="mista"
-        className={`order-quick-create__product-card rounded-2xl border p-4 transition ${
-          mistaShortcutStack.length > 0
-            ? 'border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)] shadow-[0_10px_26px_rgba(168,112,42,0.12)]'
-            : 'border-white/80 bg-white/80'
-        }`}
-      >
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-[0.96rem] font-semibold text-[color:var(--ink-strong)]">Caixas mistas</p>
-          </div>
-          <span className="rounded-full border border-white/80 bg-white/86 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
-            {mistaShortcutStack.length} mista{mistaShortcutStack.length === 1 ? '' : 's'}
-          </span>
-        </div>
-        <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          {mistaShortcutOptions.map((entry) => {
-            const canApplyShortcut = Boolean(runtimeCatalog.traditionalFlavor && runtimeCatalog.flavorProductById.get(entry.productId));
-            return (
-              <button
-                key={`mista-shortcut-${entry.productId}`}
-                type="button"
-                className="flex items-center gap-3 rounded-2xl border border-white/80 bg-white/82 px-3 py-3 text-left transition hover:border-[rgba(126,79,45,0.18)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-55"
-                onClick={() => applyMistaShortcut(entry.productId)}
-                disabled={!canApplyShortcut}
-              >
-                <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-2xl border border-white/85 bg-white shadow-[0_10px_22px_rgba(70,44,26,0.08)]">
-                  <OrderCardArtwork alt={entry.label} art={entry.art} sizes="48px" />
+            <div className="public-order-box-grid">
+              {singleBoxEntries.map((entry) => {
+                const boxCount = singleBoxCountByProductId.get(entry.productId) || 0;
+                const active = boxCount > 0;
+                return (
+                  <article
+                    key={entry.key}
+                    data-quick-order-product-id={entry.productId}
+                    className={`public-order-box-card group grid gap-3 overflow-hidden rounded-[22px] border p-3 shadow-[0_14px_28px_rgba(74,47,31,0.08)] transition-transform duration-300 hover:-translate-y-1 sm:gap-4 sm:rounded-[26px] sm:p-4 sm:shadow-[0_16px_38px_rgba(74,47,31,0.08)] xl:gap-4 xl:p-5 ${
+                      entry.accentClassName
+                    } ${active ? 'ring-1 ring-[rgba(181,68,57,0.16)]' : ''}`}
+                  >
+                    <div className="public-order-box-card__hero">
+                      <div className="public-order-box-card__media relative shrink-0">
+                        <div className="relative h-full w-full overflow-hidden rounded-[18px] border border-white/80 bg-white shadow-[0_12px_24px_rgba(74,47,31,0.12)] transition-transform duration-300 group-hover:translate-y-[-2px] sm:rounded-[22px] sm:shadow-[0_14px_28px_rgba(74,47,31,0.12)] xl:rounded-[24px]">
+                          <OrderCardArtwork
+                            alt={entry.label}
+                            art={entry.art}
+                            sizes="(max-width: 640px) 96px, (max-width: 1279px) 118px, (max-width: 1535px) 42vw, 22vw"
+                          />
+                        </div>
+                      </div>
+                      <div className="public-order-box-card__body">
+                        <h3 className="public-order-box-card__title text-[0.96rem] font-semibold leading-tight tracking-[-0.02em] text-[color:var(--ink-strong)] sm:text-lg xl:text-[1.08rem]">
+                          {entry.label}
+                        </h3>
+                        <p className="public-order-box-card__detail mt-2 text-[0.76rem] leading-[1.35] text-[color:var(--ink-muted)] sm:text-sm sm:leading-6 xl:text-[0.84rem] xl:leading-6">
+                          {entry.detail}
+                        </p>
+                        <p className="public-order-box-card__price mt-1 text-sm font-semibold text-[color:var(--ink-strong)] xl:pt-3 xl:text-[1rem]">
+                          {formatCurrencyBR(entry.priceEstimate)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="public-order-box-card__controls">
+                      <button
+                        type="button"
+                        onClick={() => setSingleBoxCount(entry.productId, Math.max(boxCount - 1, 0))}
+                        className="public-order-box-card__stepper rounded-[16px] border border-white/85 bg-white font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:rounded-[18px]"
+                        aria-label={`Diminuir ${entry.label}`}
+                      >
+                        −
+                      </button>
+                      <div className="public-order-box-card__summary">
+                        <input
+                          className="app-input public-order-box-card__field text-center font-semibold"
+                          inputMode="numeric"
+                          value={boxCount > 0 ? String(boxCount) : ''}
+                          onChange={(event) => {
+                            const normalized = event.target.value.replace(/[^\d]/g, '');
+                            setSingleBoxCount(entry.productId, normalized ? Number(normalized) : 0);
+                          }}
+                          placeholder="0"
+                          aria-label={entry.label}
+                        />
+                        <div className="public-order-box-card__pill rounded-[16px] border border-white/80 bg-white sm:rounded-[18px]">
+                          <span className="public-order-box-card__pill-count">{boxCount}</span>
+                          <span className="public-order-box-card__pill-label">
+                            {boxCount === 1 ? 'caixa' : 'caixas'}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSingleBoxCount(entry.productId, boxCount + 1)}
+                        className="public-order-box-card__stepper rounded-[16px] border border-white/85 bg-white font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:rounded-[18px]"
+                        aria-label={`Aumentar ${entry.label}`}
+                      >
+                        +
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+
+          {mixedBoxEntries.length ? (
+            <section
+              data-quick-order-product-id="mista"
+              className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white p-4 sm:rounded-[28px] sm:p-6 xl:p-7"
+            >
+              <div className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-[rgb(247,239,230)] p-4 sm:rounded-[26px] sm:p-5 xl:p-6">
+                <div className="mb-4 flex flex-col gap-2 sm:mb-5 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
+                  <div>
+                    <h2 className="text-[1.1rem] font-semibold text-[color:var(--ink-strong)] sm:text-[1.35rem]">
+                      Caixas Mistas
+                    </h2>
+                    <p className="mt-1 text-[0.82rem] leading-5 text-[color:var(--ink-muted)] sm:text-sm">
+                      1 caixa = 4 tradicionais + 3 broas de um sabor
+                    </p>
+                  </div>
                 </div>
-                <div className="min-w-0">
-                  <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
-                    M
+                <div className="public-order-box-grid">
+                  {mixedBoxEntries.map((entry) => {
+                    const mixedQty = mixedBoxCountsByFlavorId.get(entry.productId) || 0;
+                    const canApplyShortcut = Boolean(
+                      runtimeCatalog.traditionalFlavor && runtimeCatalog.flavorProductById.get(entry.productId)
+                    );
+                    return (
+                      <article
+                        key={`mista-shortcut-${entry.productId}`}
+                        className={`public-order-box-card group grid gap-3 overflow-hidden rounded-[22px] border p-3 shadow-[0_14px_28px_rgba(74,47,31,0.08)] transition-transform duration-300 hover:-translate-y-1 sm:gap-4 sm:rounded-[26px] sm:p-4 sm:shadow-[0_16px_38px_rgba(74,47,31,0.08)] xl:gap-4 xl:p-5 ${entry.accentClassName} ${
+                          mixedQty > 0 ? 'ring-1 ring-[rgba(181,68,57,0.16)]' : ''
+                        }`}
+                      >
+                        <div className="public-order-box-card__hero">
+                          <div className="public-order-box-card__media relative shrink-0">
+                            <div className="relative h-full w-full overflow-hidden rounded-[18px] border border-white/80 bg-white shadow-[0_12px_24px_rgba(74,47,31,0.12)] transition-transform duration-300 group-hover:translate-y-[-2px] sm:rounded-[22px] sm:shadow-[0_14px_28px_rgba(74,47,31,0.12)] xl:rounded-[24px]">
+                              <OrderCardArtwork
+                                alt={entry.label}
+                                art={entry.art}
+                                sizes="(max-width: 640px) 96px, (max-width: 1279px) 118px, (max-width: 1535px) 42vw, 22vw"
+                              />
+                            </div>
+                          </div>
+                          <div className="public-order-box-card__body">
+                            <h3 className="public-order-box-card__title text-[0.96rem] font-semibold leading-tight tracking-[-0.02em] text-[color:var(--ink-strong)] sm:text-lg xl:text-[1.08rem]">
+                              {entry.label}
+                            </h3>
+                            <p className="public-order-box-card__detail mt-2 text-[0.76rem] leading-[1.35] text-[color:var(--ink-muted)] sm:text-sm sm:leading-6 xl:text-[0.84rem] xl:leading-6">
+                              {entry.detail}
+                            </p>
+                            <p className="public-order-box-card__price mt-1 text-sm font-semibold text-[color:var(--ink-strong)] xl:pt-3 xl:text-[1rem]">
+                              {formatCurrencyBR(entry.priceEstimate)}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="public-order-box-card__controls">
+                          <button
+                            type="button"
+                            onClick={() => removeMistaShortcut(entry.productId)}
+                            className="public-order-box-card__stepper rounded-[16px] border border-white/85 bg-white font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:rounded-[18px]"
+                            disabled={mixedQty <= 0}
+                            aria-label={`Diminuir ${entry.label}`}
+                          >
+                            −
+                          </button>
+                          <div className="public-order-box-card__summary">
+                            <div className="public-order-box-card__pill rounded-[16px] border border-white/80 bg-white sm:rounded-[18px]">
+                              <span className="public-order-box-card__pill-count">{mixedQty}</span>
+                              <span className="public-order-box-card__pill-label">
+                                {mixedQty === 1 ? 'caixa' : 'caixas'}
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => applyMistaShortcut(entry.productId)}
+                            className="public-order-box-card__stepper rounded-[16px] border border-white/85 bg-white font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:rounded-[18px]"
+                            disabled={!canApplyShortcut}
+                            aria-label={`Aumentar ${entry.label}`}
+                          >
+                            +
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
+            <div className="mt-0 rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-[rgb(247,239,230)] p-4 sm:rounded-[26px] sm:p-5 xl:p-6">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between xl:items-center">
+                <div>
+                  <h3 className="text-[1.1rem] font-semibold text-[color:var(--ink-strong)] sm:text-[1.35rem]">
+                    Monte Sua Caixa
+                  </h3>
+                  <p className="mt-1 text-[0.82rem] leading-5 text-[color:var(--ink-muted)] sm:text-sm">
+                    Monte sua caixa com 7 broas como quiser!
                   </p>
-                  <p className="line-clamp-2 text-sm font-semibold text-[color:var(--ink-strong)]">
-                    {entry.label.replace(/^Mista\s+/i, '')}
+                  <p className="mt-1 text-sm font-semibold text-[color:var(--ink-strong)]">
+                    {formatCurrencyBR(ORDER_BOX_PRICE_CUSTOM)}
                   </p>
                 </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+              </div>
 
-      <div className="grid gap-2 text-sm text-[color:var(--ink-muted)]">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
-          Resumo
-        </p>
-        <div className="grid gap-3 rounded-[24px] border border-white/75 bg-[linear-gradient(160deg,rgba(255,251,246,0.94),rgba(243,231,216,0.9))] p-4 shadow-[0_14px_34px_rgba(70,44,26,0.08)]">
-          <div className="grid gap-2 rounded-[20px] bg-white/80 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <span>Caixas fechadas</span>
-              <strong className="text-[color:var(--ink-strong)]">{virtualBoxPartitions.boxes.length}</strong>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span>Broas calculadas</span>
-              <strong className="text-[color:var(--ink-strong)]">{displayTotalUnits}</strong>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span>Produtos</span>
-              <strong className="text-[color:var(--ink-strong)]">{formatCurrencyBR(draftSubtotal)}</strong>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span>Investimento marketing</span>
-              <strong className="text-[color:var(--ink-strong)]">
-                {`${newOrderDiscountPct && newOrderDiscountPct !== '0' ? `${newOrderDiscountPct}%` : '0%'} • ${formatCurrencyBR(marketingInvestmentTotal)}`}
-              </strong>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span>Frete estimado</span>
-              <strong className="text-[color:var(--ink-strong)]">
-                {!requiresDeliveryQuote
-                  ? 'Sem frete'
-                  : isQuotingDelivery
-                  ? 'Calculando...'
-                  : deliveryQuote
-                    ? sponsoredDeliveryFee > 0
-                      ? `Marketing • ${formatCurrencyBR(sponsoredDeliveryFee)}`
-                      : formatCurrencyBR(deliveryFee)
-                    : 'A confirmar'}
-              </strong>
-            </div>
-            <div className="flex items-center justify-between gap-3 border-t border-[rgba(126,79,45,0.08)] pt-3">
-              <span className="font-semibold text-[color:var(--ink-strong)]">Total</span>
-              <strong className="text-base text-[color:var(--ink-strong)]">
-                {formatCurrencyBR(draftGrandTotal)}
-              </strong>
-            </div>
-            <p className="text-xs leading-5 text-[color:var(--ink-muted)]">
-              O percentual vira investimento de marketing em amostras. Com 100% de desconto, o frete tambem zera para recebimento e entra como marketing.
-            </p>
-          </div>
-
-          {virtualBoxPartitions.boxes.length > 0 || virtualBoxPartitions.openBox.length > 0 ? (
-            <div className="grid gap-2 rounded-2xl border border-white/70 bg-white/80 p-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
-                Caixas
-              </p>
-              {virtualBoxPartitions.boxes.map((box, index) => (
-                <div
-                  key={`virtual-box-${index + 1}`}
-                  className="rounded-2xl border border-[color:var(--tone-sage-line)] bg-[color:var(--tone-sage-surface)] px-3 py-2"
+              <div className="public-order-custom-grid mt-4">
+                <article
+                  className={`public-order-custom-card rounded-[20px] border p-4 xl:p-5 ${
+                    hasOpenVirtualBox
+                      ? 'border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)]'
+                      : draftTotalUnits > 0
+                        ? 'border-[color:var(--tone-sage-line)] bg-[color:var(--tone-sage-surface)]'
+                        : 'border-white/80 bg-white'
+                  }`}
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--tone-sage-ink)]">
-                        #{index + 1}
-                      </span>
-                      <span className="truncate text-xs font-semibold text-[color:var(--tone-sage-ink)]">
-                        {resolveVirtualBoxOfficialName(box)}
+                  <div className="public-order-custom-card__header">
+                    <div>
+                      <p className="text-sm font-semibold text-[color:var(--ink-strong)]">Monte Sua Caixa #1</p>
+                      <p className="mt-1 text-[0.82rem] leading-5 text-[color:var(--ink-muted)]">
+                        {displayTotalUnits === 0
+                          ? 'Monte sua caixa com 7 broas.'
+                          : hasOpenVirtualBox
+                            ? `Faltam ${remainingUnitsToCloseBox}.`
+                            : 'Fechada.'}
+                      </p>
+                    </div>
+                    <div className="public-order-custom-card__meta">
+                      <span className="rounded-full border border-white/80 bg-white px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)] sm:text-xs">
+                        {displayTotalUnits}/7
                       </span>
                     </div>
-                    <span className="text-xs font-semibold text-[color:var(--tone-sage-ink)]">1 cx</span>
                   </div>
-                  <p className="mt-1 text-sm font-medium text-[color:var(--tone-sage-ink)]">
-                    {formatVirtualBoxParts(box)}
-                  </p>
-                </div>
-              ))}
-              {virtualBoxPartitions.openBox.length > 0 ? (
-                <div className="rounded-2xl border border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)] px-3 py-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--tone-gold-ink)]">
-                      Aberta
-                    </span>
-                    <span className="text-xs font-semibold text-[color:var(--tone-gold-ink)]">
-                      {virtualBoxPartitions.openBoxUnits}/7 cx
-                    </span>
-                  </div>
-                  <p className="mt-1 text-sm font-medium text-[color:var(--tone-gold-ink)]">
-                    {formatVirtualBoxParts(virtualBoxPartitions.openBox)}
-                  </p>
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-white/70 bg-white/80 px-4 py-3 text-sm">
-              Nenhuma caixa ainda.
-            </div>
-          )}
 
-          {requiresDeliveryQuote && deliveryQuoteError ? (
-            <div className="app-inline-notice app-inline-notice--warning rounded-[20px] px-4 py-3">
-              {deliveryQuoteError}
+                  <div className="mt-3 grid gap-2">
+                    {flavorProductsForCards.map((product) => {
+                      const quantity = customUnitsByProductId.get(product.id!) || 0;
+                      const productArt = resolveOrderCardArt(product);
+                      return (
+                        <div
+                          key={`custom-row-${product.id}`}
+                          className="public-order-custom-row rounded-[16px] border border-white/80 bg-white px-3 py-2.5"
+                        >
+                          <div className="public-order-custom-row__info">
+                            <div className="relative h-10 w-10 shrink-0">
+                              <div className="relative h-full w-full overflow-hidden rounded-xl border border-white/80 bg-white shadow-[0_8px_18px_rgba(70,44,26,0.08)]">
+                                <OrderCardArtwork
+                                  alt={compactOrderProductName(product.name)}
+                                  art={productArt}
+                                  sizes="40px"
+                                />
+                              </div>
+                            </div>
+                            <p className="public-order-custom-row__label text-[0.82rem] font-semibold text-[color:var(--ink-strong)] sm:text-sm">
+                              {compactOrderProductName(product.name)}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="public-order-custom-row__button h-10 rounded-[14px] border border-white/85 bg-white text-[1.15rem] font-semibold text-[color:var(--ink-strong)] transition hover:bg-white sm:text-xl"
+                            onClick={() => adjustCustomFlavorUnits(product.id!, -1)}
+                            disabled={quantity <= 0}
+                            aria-label={`Diminuir ${compactOrderProductName(product.name)} na Monte Sua Caixa`}
+                          >
+                            −
+                          </button>
+                          <div className="public-order-custom-row__qty text-center text-[0.82rem] font-semibold text-[color:var(--ink-strong)] sm:text-sm">
+                            {quantity}
+                          </div>
+                          <button
+                            type="button"
+                            className="public-order-custom-row__button h-10 rounded-[14px] border border-white/85 bg-white text-[1.15rem] font-semibold text-[color:var(--ink-strong)] transition hover:bg-white sm:text-xl"
+                            onClick={() => adjustCustomFlavorUnits(product.id!, 1)}
+                            aria-label={`Aumentar ${compactOrderProductName(product.name)} na Monte Sua Caixa`}
+                          >
+                            +
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </article>
+              </div>
             </div>
-          ) : requiresDeliveryQuote && deliveryQuote ? (
-            <div className="rounded-[20px] border border-[rgba(126,79,45,0.08)] bg-white/80 px-4 py-3 text-xs leading-5 text-[color:var(--ink-muted)]">
-              {deliveryQuote.expiresAt ? 'Frete calculado e pronto para uso neste pedido.' : 'Frete calculado para este pedido.'}
+          </section>
+
+          {companionProductsForCards.length ? (
+            <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
+              <div className="public-order-companion-header mb-4 flex flex-col gap-2 sm:mb-5 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
+                <div className="public-order-companion-header__copy">
+                  <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">
+                    AMIGAS DA BROA
+                  </h2>
+                  <p className="public-order-companion-header__note mt-1 text-[0.82rem] leading-5 text-[color:var(--ink-muted)] sm:text-sm">
+                    Selecione os adicionais sem misturar a regra de desconto das broas.
+                  </p>
+                </div>
+              </div>
+
+              <div className="public-order-box-rail-shell public-order-box-rail-shell--companion">
+                <div className="public-order-box-rail public-order-box-rail--companion">
+                  {companionProductsForCards.map(({ runtime, product }) => {
+                    const selectedQty = quantityByProductId.get(product.id!) || 0;
+                    const isSelected = selectedQty > 0;
+                    const productArt = resolveOrderCardArt(product);
+                    const secondaryLine = [runtime.displayFlavor, runtime.measureLabel].filter(Boolean).join(' • ');
+                    return (
+                      <article
+                        key={`companion-${product.id}`}
+                        data-quick-order-product-id={`companion-${product.id}`}
+                        className={`public-order-box-card public-order-box-card--rail public-order-box-card--companion group grid gap-3 overflow-hidden rounded-[22px] border p-3 shadow-[0_14px_28px_rgba(74,47,31,0.08)] sm:gap-4 sm:rounded-[26px] sm:p-4 sm:shadow-[0_16px_38px_rgba(74,47,31,0.08)] xl:gap-4 xl:p-5 border-[color:var(--tone-sage-line)] bg-[linear-gradient(165deg,var(--tone-sage-surface),rgba(251,253,252,0.98))] ${
+                          isSelected ? 'ring-1 ring-[rgba(84,116,91,0.18)]' : ''
+                        }`}
+                      >
+                        <div className="public-order-box-card__hero public-order-box-card__hero--companion">
+                          <div className="public-order-box-card__media public-order-box-card__media--companion relative shrink-0">
+                            <div className="public-order-box-card__art-surface relative h-full w-full overflow-hidden rounded-[18px] bg-white sm:rounded-[22px] xl:rounded-[24px]">
+                              <OrderCardArtwork
+                                alt={runtime.label}
+                                art={productArt}
+                                className="bg-white"
+                                imageClassName="h-full w-full object-contain"
+                                overlayClassName="absolute inset-0 bg-transparent"
+                                managedUploadFit="contain-tight"
+                                sizes="(max-width: 640px) 100px, (max-width: 1279px) 132px, (max-width: 1535px) 42vw, 22vw"
+                              />
+                            </div>
+                          </div>
+                          <div className="public-order-box-card__body public-order-box-card__body--companion">
+                            <h3 className="public-order-box-card__title public-order-box-card__title--companion text-[0.96rem] font-semibold leading-tight tracking-[-0.02em] text-[color:var(--ink-strong)] sm:text-lg xl:text-[1.08rem]">
+                              <span>{runtime.displayTitle || compactOrderProductName(product.name)}</span>
+                            </h3>
+                            <div className="public-order-box-card__detail public-order-box-card__detail--companion mt-2 grid gap-0.5 text-[0.76rem] leading-[1.35] text-[color:var(--ink-muted)] sm:text-sm sm:leading-6 xl:text-[0.84rem] xl:leading-6">
+                              {secondaryLine ? <p>{secondaryLine}</p> : null}
+                              {runtime.displayMakerLine ? <p>{runtime.displayMakerLine}</p> : null}
+                            </div>
+                            <p className="public-order-box-card__price public-order-box-card__price--companion mt-1 text-sm font-semibold text-[color:var(--ink-strong)] xl:pt-3 xl:text-[1rem]">
+                              {formatCurrencyBR(Number(product.price || 0))}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="public-order-box-card__controls public-order-box-card__controls--companion">
+                          <button
+                            type="button"
+                            onClick={() => onDecrementProduct(product.id!)}
+                            className="public-order-box-card__stepper public-order-box-card__stepper--companion rounded-[16px] border border-white/85 bg-white font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:rounded-[18px]"
+                            disabled={selectedQty <= 0}
+                            aria-label={`Diminuir ${runtime.label}`}
+                          >
+                            −
+                          </button>
+                          <div className="public-order-box-card__summary public-order-box-card__summary--companion">
+                            <div className="public-order-box-card__pill public-order-box-card__pill--companion rounded-[16px] border border-white/80 bg-white sm:rounded-[18px]">
+                              <span className="public-order-box-card__pill-count public-order-box-card__pill-count--companion">
+                                {selectedQty}
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => onAddProductUnits(product.id!, 1)}
+                            className="public-order-box-card__stepper public-order-box-card__stepper--companion rounded-[16px] border border-white/85 bg-white font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:rounded-[18px]"
+                            aria-label={`Aumentar ${runtime.label}`}
+                          >
+                            +
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
+            <div className="mb-4">
+              <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Observacoes</h2>
             </div>
-          ) : !requiresDeliveryQuote ? (
-            <div className="rounded-[20px] border border-[rgba(126,79,45,0.08)] bg-white/80 px-4 py-3 text-xs leading-5 text-[color:var(--ink-muted)]">
-              Pedido de retirada sem frete.
+            <FormField label="Observacoes do pedido">
+              <textarea
+                className="app-textarea min-h-[120px]"
+                value={newOrderNotes}
+                onChange={(event) => onNotesChange(event.target.value)}
+                placeholder="Ex.: tocar o interfone, confirmar retirada antes, evitar atraso."
+              />
+            </FormField>
+          </section>
+
+          <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
+            <div className="mb-4">
+                  <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Desconto</h2>
+                  <p className="mt-2 text-sm leading-6 text-[color:var(--ink-muted)]">
+                    O desconto interno segue a regra operacional e pode zerar o frete quando atingir 100%.
+                  </p>
+                </div>
+              <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
+                <FormField label="Desconto (%)">
+                  <input
+                    className="app-input xl:h-14 xl:text-[1.02rem]"
+                    placeholder="0 a 100"
+                    value={newOrderDiscountPct}
+                    inputMode="decimal"
+                    onChange={(event) => onDiscountChange(event.target.value)}
+                    onBlur={onDiscountBlur}
+                  />
+                </FormField>
+                <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-[rgb(250,245,239)] px-4 py-3 text-sm font-semibold text-[color:var(--ink-strong)]">
+                  {newOrderDiscountPct && newOrderDiscountPct !== '0' ? `${newOrderDiscountPct}%` : '0%'}
+                </div>
+              </div>
+          </section>
+
+          {orderError ? (
+            <div className="app-inline-notice app-inline-notice--error rounded-[24px] px-5 py-4 shadow-[0_14px_32px_rgba(157,31,44,0.08)]">
+              {orderError}
             </div>
           ) : null}
         </div>
-      </div>
 
-      <div className="app-form-actions">
-        <button
-          className="order-quick-create__submit app-button app-button-primary w-full disabled:cursor-not-allowed disabled:opacity-60"
-          onClick={handlePrimaryAction}
-          disabled={primaryActionDisabled}
-        >
-          {primaryActionLabel}
-        </button>
+        <aside className="grid gap-4 self-start sm:gap-5 xl:sticky xl:top-6">
+          <section className="order-1 overflow-hidden rounded-[24px] border border-[rgba(126,79,45,0.1)] bg-[linear-gradient(165deg,#fffcf8,#f3e7d8)] p-4 shadow-[0_18px_40px_rgba(70,44,26,0.1)] sm:rounded-[30px] sm:p-5 sm:shadow-[0_26px_80px_rgba(70,44,26,0.12)] xl:max-h-[calc(var(--app-vh,1vh)*100-10rem)] xl:overflow-y-auto xl:p-4 2xl:p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Pedido</h2>
+              </div>
+              <div className="rounded-full bg-white px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)] sm:text-xs">
+                {fulfillmentMode === 'DELIVERY' ? 'Entrega' : 'Retirada'}
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:mt-5">
+              <div className="grid gap-2 rounded-[20px] bg-white p-4 sm:rounded-[24px]">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white px-3 py-3">
+                    <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
+                      Caixas
+                    </span>
+                    <strong className="mt-1 block text-[1.35rem] text-[color:var(--ink-strong)]">
+                      {virtualBoxPartitions.boxes.length}
+                    </strong>
+                  </div>
+                  <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white px-3 py-3">
+                    <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
+                      Broas
+                    </span>
+                    <strong className="mt-1 block text-[1.35rem] text-[color:var(--ink-strong)]">{displayTotalUnits}</strong>
+                  </div>
+                  <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white px-3 py-3">
+                    <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
+                      Amigas
+                    </span>
+                    <strong className="mt-1 block text-[1.35rem] text-[color:var(--ink-strong)]">{companionUnits}</strong>
+                  </div>
+                  <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white px-3 py-3">
+                    <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
+                      Subtotal
+                    </span>
+                    <strong className="mt-1 block text-base text-[color:var(--ink-strong)]">
+                      {formatCurrencyBR(draftSubtotal)}
+                    </strong>
+                  </div>
+                  <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white px-3 py-3 sm:col-span-2">
+                    <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
+                      Investimento marketing
+                    </span>
+                    <strong className="mt-1 block text-base text-[color:var(--ink-strong)]">
+                      {`${newOrderDiscountPct && newOrderDiscountPct !== '0' ? `${newOrderDiscountPct}%` : '0%'} • ${formatCurrencyBR(marketingInvestmentTotal)}`}
+                    </strong>
+                  </div>
+                  <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white px-3 py-3 sm:col-span-2">
+                    <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
+                      Frete estimado
+                    </span>
+                    <strong className="mt-1 block text-base text-[color:var(--ink-strong)]">
+                      {!requiresDeliveryQuote
+                        ? 'Sem frete'
+                        : isQuotingDelivery
+                          ? 'Calculando...'
+                          : deliveryQuote
+                            ? sponsoredDeliveryFee > 0
+                              ? `Marketing • ${formatCurrencyBR(sponsoredDeliveryFee)}`
+                              : formatCurrencyBR(deliveryFee)
+                            : 'A confirmar'}
+                    </strong>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-3 border-t border-[rgba(126,79,45,0.08)] pt-3">
+                  <span className="font-semibold text-[color:var(--ink-strong)]">Total</span>
+                  <strong className="text-base text-[color:var(--ink-strong)]">
+                    {formatCurrencyBR(draftGrandTotal)}
+                  </strong>
+                </div>
+                <p className="text-xs leading-5 text-[color:var(--ink-muted)]">
+                  O percentual vira investimento de marketing em amostras. Com 100% de desconto, o frete tambem zera para recebimento e entra como marketing.
+                </p>
+              </div>
+
+              {virtualBoxPartitions.boxes.length > 0 || virtualBoxPartitions.openBox.length > 0 ? (
+                <div className="grid gap-2 rounded-2xl border border-white/70 bg-white/80 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
+                    Caixas
+                  </p>
+                  {virtualBoxPartitions.boxes.map((box, index) => (
+                    <div
+                      key={`virtual-box-${index + 1}`}
+                      className="rounded-2xl border border-[color:var(--tone-sage-line)] bg-[color:var(--tone-sage-surface)] px-3 py-2"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--tone-sage-ink)]">
+                            #{index + 1}
+                          </span>
+                          <span className="truncate text-xs font-semibold text-[color:var(--tone-sage-ink)]">
+                            {resolveVirtualBoxOfficialName(box)}
+                          </span>
+                        </div>
+                        <span className="text-xs font-semibold text-[color:var(--tone-sage-ink)]">1 cx</span>
+                      </div>
+                      <p className="mt-1 text-sm font-medium text-[color:var(--tone-sage-ink)]">
+                        {formatVirtualBoxParts(box)}
+                      </p>
+                    </div>
+                  ))}
+                  {virtualBoxPartitions.openBox.length > 0 ? (
+                    <div className="rounded-2xl border border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)] px-3 py-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--tone-gold-ink)]">
+                          Aberta
+                        </span>
+                        <span className="text-xs font-semibold text-[color:var(--tone-gold-ink)]">
+                          {virtualBoxPartitions.openBoxUnits}/7 cx
+                        </span>
+                      </div>
+                      <p className="mt-1 text-sm font-medium text-[color:var(--tone-gold-ink)]">
+                        {formatVirtualBoxParts(virtualBoxPartitions.openBox)}
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-white/70 bg-white/80 px-4 py-3 text-sm">
+                  Nenhuma caixa ainda.
+                </div>
+              )}
+
+              {requiresDeliveryQuote && deliveryQuoteError ? (
+                <div className="app-inline-notice app-inline-notice--warning rounded-[20px] px-4 py-3">
+                  {deliveryQuoteError}
+                </div>
+              ) : requiresDeliveryQuote && deliveryQuote ? (
+                <div className="rounded-[20px] border border-[rgba(126,79,45,0.08)] bg-white/80 px-4 py-3 text-xs leading-5 text-[color:var(--ink-muted)]">
+                  {deliveryQuote.expiresAt ? 'Frete calculado e pronto para uso neste pedido.' : 'Frete calculado para este pedido.'}
+                </div>
+              ) : !requiresDeliveryQuote ? (
+                <div className="rounded-[20px] border border-[rgba(126,79,45,0.08)] bg-white/80 px-4 py-3 text-xs leading-5 text-[color:var(--ink-muted)]">
+                  Pedido de retirada sem frete.
+                </div>
+              ) : null}
+
+              <button
+                type="button"
+                className="app-button app-button-primary w-full disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={handlePrimaryAction}
+                disabled={primaryActionDisabled}
+              >
+                {primaryActionLabel}
+              </button>
+
+              {!canCreateOrder && !orderError && !tutorialMode ? (
+                <p className="text-xs text-neutral-500">
+                  {!selectedCustomerId
+                    ? 'Escolha um cliente.'
+                    : newOrderItems.length === 0
+                      ? 'Escolha ao menos um item.'
+                      : requiresDeliveryQuote && isQuotingDelivery
+                        ? 'Aguarde a cotação do frete.'
+                        : requiresDeliveryQuote && !hasReadyDeliveryQuote
+                          ? 'Calcule o frete para liberar a criação.'
+                          : 'Revise o pedido.'}
+                </p>
+              ) : null}
+            </div>
+          </section>
+        </aside>
       </div>
-      {orderError ? <p className="text-xs text-[color:var(--tone-roast-ink)]">{orderError}</p> : null}
-      {!canCreateOrder && !orderError && !tutorialMode ? (
-        <p className="text-xs text-neutral-500">
-          {!selectedCustomerId
-            ? 'Escolha um cliente.'
-            : newOrderItems.length === 0
-              ? 'Escolha ao menos uma caixa.'
-              : requiresDeliveryQuote && isQuotingDelivery
-                ? 'Aguarde a cotacao do frete.'
-                : requiresDeliveryQuote && !hasReadyDeliveryQuote
-                  ? 'Calcule o frete para liberar a criacao.'
-                  : 'Revise o pedido.'}
-        </p>
-      ) : null}
     </div>
   );
 }

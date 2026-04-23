@@ -256,7 +256,7 @@ export async function fetchInventorySourcePrice(
           : extractTrelaPrice(html);
 
     if (extracted == null || extracted <= 0) {
-      throw new Error('Preco nao encontrado no HTML da pagina.');
+      throw new Error('Preço não encontrado no HTML da página.');
     }
 
     return {

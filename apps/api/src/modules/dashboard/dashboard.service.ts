@@ -4,7 +4,7 @@ import {
   Inject,
   Injectable,
   Logger,
-  NotFoundException
+  NotFoundException,
 } from '@nestjs/common';
 import {
   CouponResolveRequestSchema,
@@ -13,19 +13,31 @@ import {
   CouponUpsertSchema,
   parseMarketingSamplesDiscountPct,
   parseMarketingSamplesSponsoredDeliveryFee,
+  normalizeOrderStatus,
   resolveDisplayNumber,
-  roundMoney
+  roundMoney,
 } from '@querobroapp/shared';
 import { PrismaService } from '../../prisma.service.js';
 import { readBusinessRuntimeProfile } from '../../common/business-profile.js';
-import { countCouponUsageForCustomer, normalizeCouponCode } from '../../common/coupons.js';
+import {
+  APPLIED_COUPON_NOTE_PREFIX,
+  countCouponUsageForCustomer,
+  findCouponByNormalizedCode,
+  normalizeCouponCode,
+  parseAppliedCouponFromNotes,
+  resolveStoredCouponCode,
+} from '../../common/coupons.js';
 import {
   OFFICIAL_BROA_FLAVOR_CODES,
   ORDER_BOX_UNITS,
   emptyOfficialBroaFlavorCounts,
   resolveOfficialBroaFlavorCodeFromProductName,
-  type OfficialBroaFlavorCode
+  type OfficialBroaFlavorCode,
 } from '../inventory/inventory-formulas.js';
+import {
+  BankStatementsService,
+  type BankStatementDashboardSummary,
+} from './bank-statements.service.js';
 
 type LoadedOrder = Awaited<ReturnType<DashboardService['loadOrders']>>[number];
 type LoadedAnalyticsEvent = Awaited<ReturnType<DashboardService['loadAnalyticsEvents']>>[number];
@@ -59,6 +71,8 @@ type LoadedProduct = {
   name: string;
   category: string | null;
   active: boolean;
+  inventoryItemId: number | null;
+  inventoryQtyPerSaleUnit: number | null;
 };
 type OfficialBroaFlavorCounts = Record<OfficialBroaFlavorCode, number>;
 
@@ -146,7 +160,7 @@ const SAO_PAULO_TIMEZONE = 'America/Sao_Paulo';
 const LEGACY_IMPORTED_ORDER_MARKER = '[IMPORTADO_PLANILHA_LEGADA]';
 const LEGACY_HISTORICAL_BOX_PRODUCT_KEY = 'CAIXA HISTORICA SEM COMPOSICAO';
 const LEGACY_PREMIUM_BROA_FLAVOR_CODES = OFFICIAL_BROA_FLAVOR_CODES.filter(
-  (code): code is Exclude<OfficialBroaFlavorCode, 'T'> => code !== 'T'
+  (code): code is Exclude<OfficialBroaFlavorCode, 'T'> => code !== 'T',
 );
 const SUPPORTED_DASHBOARD_WINDOW_DAYS: DashboardWindowDays[] = [1, 7, 30];
 const saoPauloFormatter = new Intl.DateTimeFormat('en-CA', {
@@ -157,7 +171,7 @@ const saoPauloFormatter = new Intl.DateTimeFormat('en-CA', {
   hour: '2-digit',
   minute: '2-digit',
   second: '2-digit',
-  hourCycle: 'h23'
+  hourCycle: 'h23',
 });
 
 type ZonedDateParts = {
@@ -177,6 +191,10 @@ function round3(value: number) {
   return Math.round((Number(value) || 0) * 1000) / 1000;
 }
 
+function formatNumber(value: number) {
+  return Number(value || 0).toLocaleString('pt-BR');
+}
+
 function normalizeDashboardWindowDays(value?: string | number | null): DashboardWindowDays {
   const parsed = Math.floor(Number(value || 0));
   return SUPPORTED_DASHBOARD_WINDOW_DAYS.includes(parsed as DashboardWindowDays)
@@ -184,13 +202,16 @@ function normalizeDashboardWindowDays(value?: string | number | null): Dashboard
     : 7;
 }
 
-function buildDashboardWindowSelection(reference: Date, value?: string | number | null): DashboardWindowSelection {
+function buildDashboardWindowSelection(
+  reference: Date,
+  value?: string | number | null,
+): DashboardWindowSelection {
   const days = normalizeDashboardWindowDays(value);
   return {
     key: days === 1 ? '24h' : days === 7 ? '7d' : '30d',
     days,
     label: days === 1 ? 'Ultimas 24h' : days === 7 ? 'Ultimos 7 dias' : 'Ultimos 30 dias',
-    startsAt: new Date(reference.getTime() - days * 24 * 60 * 60 * 1000)
+    startsAt: new Date(reference.getTime() - days * 24 * 60 * 60 * 1000),
   };
 }
 
@@ -212,7 +233,7 @@ function isLegacyHistoricalBoxName(value?: string | null) {
 }
 
 function cloneFlavorCounts(
-  source?: Partial<Record<OfficialBroaFlavorCode, number>> | null
+  source?: Partial<Record<OfficialBroaFlavorCode, number>> | null,
 ): OfficialBroaFlavorCounts {
   const counts = emptyOfficialBroaFlavorCounts();
   for (const code of OFFICIAL_BROA_FLAVOR_CODES) {
@@ -224,13 +245,13 @@ function cloneFlavorCounts(
 function sumFlavorCounts(source?: Partial<Record<OfficialBroaFlavorCode, number>> | null) {
   return OFFICIAL_BROA_FLAVOR_CODES.reduce(
     (sum, code) => sum + Math.max(Math.floor(Number(source?.[code] || 0)), 0),
-    0
+    0,
   );
 }
 
 function addFlavorCounts(
   target: OfficialBroaFlavorCounts,
-  source?: Partial<Record<OfficialBroaFlavorCode, number>> | null
+  source?: Partial<Record<OfficialBroaFlavorCode, number>> | null,
 ) {
   for (const code of OFFICIAL_BROA_FLAVOR_CODES) {
     target[code] += Math.max(Math.floor(Number(source?.[code] || 0)), 0);
@@ -267,7 +288,10 @@ function allocateWeightedFlavorCounts(params: {
 
   const weightedCodes = availableCodes.filter((code) => Number(params.weights?.[code] || 0) > 0);
   const candidateCodes = weightedCodes.length > 0 ? weightedCodes : availableCodes;
-  const totalWeight = candidateCodes.reduce((sum, code) => sum + Number(params.weights?.[code] || 0), 0);
+  const totalWeight = candidateCodes.reduce(
+    (sum, code) => sum + Number(params.weights?.[code] || 0),
+    0,
+  );
   const useEqualShare = totalWeight <= 0;
   const rawEntries = candidateCodes.map((code, index) => {
     const raw = useEqualShare
@@ -278,15 +302,13 @@ function allocateWeightedFlavorCounts(params: {
     return {
       code,
       index,
-      remainder: raw - floor
+      remainder: raw - floor,
     };
   });
 
   let allocated = sumFlavorCounts(counts);
   let remaining = Math.max(totalUnits - allocated, 0);
-  rawEntries.sort(
-    (left, right) => right.remainder - left.remainder || left.index - right.index
-  );
+  rawEntries.sort((left, right) => right.remainder - left.remainder || left.index - right.index);
 
   while (remaining > 0 && rawEntries.length > 0) {
     for (const entry of rawEntries) {
@@ -323,7 +345,7 @@ function parseLegacyBoxSegment(params: {
     return allocateWeightedFlavorCounts({
       weights: params.genericProxyWeights,
       totalUnits: ORDER_BOX_UNITS,
-      availableCodes: params.availableCodes
+      availableCodes: params.availableCodes,
     });
   }
 
@@ -332,7 +354,7 @@ function parseLegacyBoxSegment(params: {
     return allocateWeightedFlavorCounts({
       weights: params.premiumProxyWeights,
       totalUnits: ORDER_BOX_UNITS,
-      availableCodes: premiumAvailableCodes
+      availableCodes: premiumAvailableCodes,
     });
   }
 
@@ -342,7 +364,9 @@ function parseLegacyBoxSegment(params: {
 
   const exactMixedMatch = normalizedSegment.match(/^M([GDQR])$/);
   if (exactMixedMatch) {
-    return buildExactMixedFlavorBoxCounts(exactMixedMatch[1] as Exclude<OfficialBroaFlavorCode, 'T'>);
+    return buildExactMixedFlavorBoxCounts(
+      exactMixedMatch[1] as Exclude<OfficialBroaFlavorCode, 'T'>,
+    );
   }
 
   const mixedWithModifierMatch = normalizedSegment.match(/^M([GDQR])(?:\s*[-+]\s*(.+))$/);
@@ -353,7 +377,7 @@ function parseLegacyBoxSegment(params: {
     const replacementCodes = [
       ...modifierText.matchAll(/\b(\d+)\s*([TGDQR])\b/g),
       ...modifierText.matchAll(/\b([TGDQR])\s*x\s*(\d+)\b/g),
-      ...modifierText.matchAll(/\b(\d+)([TGDQR])\b/g)
+      ...modifierText.matchAll(/\b(\d+)([TGDQR])\b/g),
     ].flatMap((match) => {
       if (match.length < 3) return [];
       const left = match[1] || '';
@@ -388,10 +412,11 @@ function parseLegacyBoxSegment(params: {
 
   const explicitCounts = emptyOfficialBroaFlavorCounts();
   const explicitWeights = emptyOfficialBroaFlavorCounts();
-  const mentionOrder = replaceLegacyFlavorNamesWithCodes(normalizedSegment)
-    .match(/[TGDQR]/g)
-    ?.map((entry) => entry as OfficialBroaFlavorCode)
-    .filter((code, index, values) => values.indexOf(code) === index) || [];
+  const mentionOrder =
+    replaceLegacyFlavorNamesWithCodes(normalizedSegment)
+      .match(/[TGDQR]/g)
+      ?.map((entry) => entry as OfficialBroaFlavorCode)
+      .filter((code, index, values) => values.indexOf(code) === index) || [];
   let codeText = replaceLegacyFlavorNamesWithCodes(normalizedSegment)
     .replace(/\bCOLOCAR\b/g, ' ')
     .replace(/\bEXTRAS?\b/g, ' ');
@@ -432,28 +457,32 @@ function parseLegacyBoxSegment(params: {
   }
 
   const baseUnits = sumFlavorCounts(explicitCounts);
-  const orderedExplicitCodes = mentionOrder.filter((code) => Number(explicitWeights[code] || 0) > 0);
+  const orderedExplicitCodes = mentionOrder.filter(
+    (code) => Number(explicitWeights[code] || 0) > 0,
+  );
   if (baseUnits >= ORDER_BOX_UNITS) {
     return allocateWeightedFlavorCounts({
       weights: explicitCounts,
       totalUnits: ORDER_BOX_UNITS,
-      availableCodes: orderedExplicitCodes.length > 0 ? orderedExplicitCodes : params.availableCodes
+      availableCodes:
+        orderedExplicitCodes.length > 0 ? orderedExplicitCodes : params.availableCodes,
     });
   }
 
-  const allocationSource = sumFlavorCounts(explicitWeights) > 0 ? explicitWeights : params.genericProxyWeights;
-  const weightedAvailableCodes = params.availableCodes.filter((code) => Number(allocationSource[code] || 0) > 0);
+  const allocationSource =
+    sumFlavorCounts(explicitWeights) > 0 ? explicitWeights : params.genericProxyWeights;
+  const weightedAvailableCodes = params.availableCodes.filter(
+    (code) => Number(allocationSource[code] || 0) > 0,
+  );
   const allocationCodes =
-    orderedExplicitCodes.length > 0
-      ? orderedExplicitCodes
-      : weightedAvailableCodes;
+    orderedExplicitCodes.length > 0 ? orderedExplicitCodes : weightedAvailableCodes;
   addFlavorCounts(
     explicitCounts,
     allocateWeightedFlavorCounts({
       weights: allocationSource,
       totalUnits: ORDER_BOX_UNITS - baseUnits,
-      availableCodes: allocationCodes.length > 0 ? allocationCodes : params.availableCodes
-    })
+      availableCodes: allocationCodes.length > 0 ? allocationCodes : params.availableCodes,
+    }),
   );
   return explicitCounts;
 }
@@ -481,8 +510,8 @@ function buildLegacyHistoricalFlavorCounts(params: {
           rawSegment,
           genericProxyWeights: params.genericProxyWeights,
           premiumProxyWeights: params.premiumProxyWeights,
-          availableCodes: params.availableCodes
-        })
+          availableCodes: params.availableCodes,
+        }),
       );
     }
   }
@@ -491,7 +520,7 @@ function buildLegacyHistoricalFlavorCounts(params: {
   for (const code of OFFICIAL_BROA_FLAVOR_CODES) {
     unresolvedFlavorCounts[code] = Math.max(
       parsedFlavorCounts[code] - Math.max(Math.floor(params.actualFlavorCounts[code] || 0), 0),
-      0
+      0,
     );
   }
 
@@ -504,7 +533,7 @@ function buildLegacyHistoricalFlavorCounts(params: {
     return allocateWeightedFlavorCounts({
       weights: unresolvedFlavorCounts,
       totalUnits: targetUnits,
-      availableCodes: params.availableCodes
+      availableCodes: params.availableCodes,
     });
   }
 
@@ -512,7 +541,7 @@ function buildLegacyHistoricalFlavorCounts(params: {
     weights:
       sumFlavorCounts(parsedFlavorCounts) > 0 ? parsedFlavorCounts : params.genericProxyWeights,
     totalUnits: targetUnits,
-    availableCodes: params.availableCodes
+    availableCodes: params.availableCodes,
   });
 }
 
@@ -525,20 +554,36 @@ function readSaoPauloParts(reference: Date): ZonedDateParts {
     day: Number(map.day),
     hour: Number(map.hour),
     minute: Number(map.minute),
-    second: Number(map.second)
+    second: Number(map.second),
   };
 }
 
 function resolveSaoPauloOffsetMilliseconds(reference: Date) {
   const zoned = readSaoPauloParts(reference);
-  const zonedAsUtc = Date.UTC(zoned.year, zoned.month - 1, zoned.day, zoned.hour, zoned.minute, zoned.second, 0);
+  const zonedAsUtc = Date.UTC(
+    zoned.year,
+    zoned.month - 1,
+    zoned.day,
+    zoned.hour,
+    zoned.minute,
+    zoned.second,
+    0,
+  );
   return zonedAsUtc - reference.getTime();
 }
 
 function saoPauloDateTimeToUtc(
-  parts: Pick<ZonedDateParts, 'year' | 'month' | 'day' | 'hour' | 'minute'> & { second?: number }
+  parts: Pick<ZonedDateParts, 'year' | 'month' | 'day' | 'hour' | 'minute'> & { second?: number },
 ) {
-  const utcGuess = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second ?? 0, 0);
+  const utcGuess = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second ?? 0,
+    0,
+  );
   const firstOffset = resolveSaoPauloOffsetMilliseconds(new Date(utcGuess));
   let adjusted = utcGuess - firstOffset;
   const secondOffset = resolveSaoPauloOffsetMilliseconds(new Date(adjusted));
@@ -553,7 +598,7 @@ function toDayKey(value: Date) {
     timeZone: SAO_PAULO_TIMEZONE,
     year: 'numeric',
     month: '2-digit',
-    day: '2-digit'
+    day: '2-digit',
   }).format(value);
 }
 
@@ -608,21 +653,31 @@ function perOrderedUnitQty(
     qtyPerSaleUnit?: number | null;
     qtyPerUnit?: number | null;
     qtyPerRecipe?: number | null;
-  }
+  },
 ) {
   if (bomItem.qtyPerUnit != null && bomItem.qtyPerUnit > 0) return bomItem.qtyPerUnit;
   const unitsPerSale = parseSaleUnits(bom.saleUnitLabel);
   if (bomItem.qtyPerSaleUnit != null && bomItem.qtyPerSaleUnit > 0) {
     return unitsPerSale > 0 ? bomItem.qtyPerSaleUnit / unitsPerSale : bomItem.qtyPerSaleUnit;
   }
-  if (bomItem.qtyPerRecipe != null && bomItem.qtyPerRecipe > 0 && bom.yieldUnits && bom.yieldUnits > 0) {
+  if (
+    bomItem.qtyPerRecipe != null &&
+    bomItem.qtyPerRecipe > 0 &&
+    bom.yieldUnits &&
+    bom.yieldUnits > 0
+  ) {
     return bomItem.qtyPerRecipe / bom.yieldUnits;
   }
   return null;
 }
 
 function unitCostFromPack(purchasePackCost: number, purchasePackSize: number) {
-  if (!Number.isFinite(purchasePackCost) || !Number.isFinite(purchasePackSize) || purchasePackSize <= 0) return 0;
+  if (
+    !Number.isFinite(purchasePackCost) ||
+    !Number.isFinite(purchasePackSize) ||
+    purchasePackSize <= 0
+  )
+    return 0;
   return purchasePackCost / purchasePackSize;
 }
 
@@ -635,7 +690,73 @@ function formatSourceLabel(event: LoadedAnalyticsEvent) {
   return 'Direto';
 }
 
-type IntegrationStatus = 'READY' | 'PENDING';
+function buildAttributedSessionSummary(params: {
+  firstPageViewBySession: Map<string, LoadedAnalyticsEvent>;
+  labelResolver: (event: LoadedAnalyticsEvent) => string;
+  orderSessions: Set<string>;
+  quoteSuccessSessions: Set<string>;
+  submittedSessions: Set<string>;
+}) {
+  const totalsByLabel = new Map<
+    string,
+    {
+      sessions: number;
+      orderSessions: number;
+      quoteSuccessSessions: number;
+      submittedSessions: number;
+    }
+  >();
+
+  for (const [sessionId, firstView] of params.firstPageViewBySession.entries()) {
+    const label = params.labelResolver(firstView);
+    const current = totalsByLabel.get(label) || {
+      sessions: 0,
+      orderSessions: 0,
+      quoteSuccessSessions: 0,
+      submittedSessions: 0,
+    };
+    current.sessions += 1;
+    if (params.orderSessions.has(sessionId)) current.orderSessions += 1;
+    if (params.quoteSuccessSessions.has(sessionId)) current.quoteSuccessSessions += 1;
+    if (params.submittedSessions.has(sessionId)) current.submittedSessions += 1;
+    totalsByLabel.set(label, current);
+  }
+
+  const totalSessions = params.firstPageViewBySession.size;
+  const totalSubmittedSessions = params.submittedSessions.size;
+
+  return [...totalsByLabel.entries()]
+    .map(([label, stats]) => ({
+      label,
+      sessions: stats.sessions,
+      orderSessions: stats.orderSessions,
+      quoteSuccessSessions: stats.quoteSuccessSessions,
+      submittedSessions: stats.submittedSessions,
+      sessionSharePct: toPercent(stats.sessions, totalSessions),
+      orderReachPct: toPercent(stats.orderSessions, stats.sessions),
+      quoteRatePct: toPercent(stats.quoteSuccessSessions, stats.sessions),
+      submitRatePct: toPercent(stats.submittedSessions, stats.sessions),
+      submitSharePct: toPercent(stats.submittedSessions, totalSubmittedSessions),
+    }))
+    .sort(
+      (left, right) =>
+        right.submittedSessions - left.submittedSessions ||
+        right.orderSessions - left.orderSessions ||
+        right.sessions - left.sessions ||
+        left.label.localeCompare(right.label, 'pt-BR'),
+    )
+    .slice(0, 10);
+}
+
+type IntegrationStatus = 'RUNNING' | 'ATTENTION' | 'PENDING';
+
+type IntegrationFactTone = 'positive' | 'neutral' | 'warning';
+
+type IntegrationFact = {
+  label: string;
+  value: string;
+  tone: IntegrationFactTone;
+};
 
 type IntegrationRail = {
   id: string;
@@ -643,13 +764,17 @@ type IntegrationRail = {
   status: IntegrationStatus;
   detail: string;
   nextStep: string;
+  facts: IntegrationFact[];
 };
 
 @Injectable()
 export class DashboardService {
   private readonly logger = new Logger(DashboardService.name);
 
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(BankStatementsService) private readonly bankStatementsService: BankStatementsService,
+  ) {}
 
   private formatCouponRecord(coupon: {
     id: number;
@@ -670,23 +795,407 @@ export class DashboardService {
           : null,
       active: coupon.active,
       createdAt: coupon.createdAt.toISOString(),
-      updatedAt: coupon.updatedAt.toISOString()
+      updatedAt: coupon.updatedAt.toISOString(),
     });
   }
 
-  private hasEnv(name: string) {
-    return Boolean(String(process.env[name] || '').trim());
-  }
+  private buildBankStatementRail(params: {
+    summary: BankStatementDashboardSummary;
+  }): IntegrationRail {
+    const latestImport = params.summary.latestImport;
 
-  private hasAnyEnv(names: string[]) {
-    return names.some((name) => this.hasEnv(name));
+    if (latestImport.status === 'PENDING') {
+      return {
+        id: 'bank_statement_import',
+        label: 'Extrato bancário',
+        status: 'PENDING',
+        detail:
+          'Nenhum extrato do Nu Empresas foi importado ainda, então o caixa real ainda não está refletido no dashboard.',
+        nextStep:
+          'Enviar o .eml, .csv ou .ofx do extrato semanal e clicar em ATUALIZAR EXTRATO.',
+        facts: [
+          { label: 'Última importação', value: 'nenhuma', tone: 'warning' },
+          { label: 'Cobertura', value: 'sem periodo importado', tone: 'neutral' },
+        ],
+      };
+    }
+
+    const baseFacts: IntegrationFact[] = [
+      {
+        label: 'Última importação',
+        value: latestImport.importedAt
+          ? new Date(latestImport.importedAt).toLocaleString('pt-BR')
+          : 'sem data',
+        tone: latestImport.status === 'RUNNING' ? 'positive' : 'warning',
+      },
+      {
+        label: 'Cobertura',
+        value:
+          latestImport.periodStart && latestImport.periodEnd
+            ? `${new Date(latestImport.periodStart).toLocaleDateString('pt-BR')} → ${new Date(latestImport.periodEnd).toLocaleDateString('pt-BR')}`
+            : 'período não identificado',
+        tone: latestImport.status === 'RUNNING' ? 'positive' : 'warning',
+      },
+      {
+        label: 'Movimentacoes',
+        value: `${formatNumber(latestImport.transactionCount)} linhas`,
+        tone: 'neutral',
+      },
+      {
+        label: 'Conciliação',
+        value: `${formatNumber(latestImport.matchedPaymentsCount)} match · ${formatNumber(latestImport.unmatchedInflowsCount)} sem match`,
+        tone: latestImport.unmatchedInflowsCount > 0 ? 'warning' : 'positive',
+      },
+    ];
+
+    if (latestImport.status === 'ATTENTION') {
+      return {
+        id: 'bank_statement_import',
+        label: 'Extrato bancário',
+        status: 'ATTENTION',
+        detail:
+          'O último extrato importado já envelheceu e o caixa real pode estar atrasado em relação ao banco.',
+        nextStep:
+          'Importar o extrato semanal mais novo para atualizar recebimentos, saídas e fluxo de caixa.',
+        facts: baseFacts,
+      };
+    }
+
+    return {
+      id: 'bank_statement_import',
+      label: 'Extrato bancário',
+      status: 'RUNNING',
+      detail:
+        'Os cálculos financeiros do dashboard estão alimentados pelo último extrato importado do Nu Empresas.',
+      nextStep:
+        latestImport.unmatchedInflowsCount > 0
+          ? 'Revisar as entradas sem match para fechar recebimentos pendentes com mais precisão.'
+          : 'Importar o proximo extrato semanal quando ele chegar por email.',
+      facts: baseFacts,
+    };
   }
 
   async listCoupons() {
     const coupons = await this.prisma.coupon.findMany({
-      orderBy: [{ active: 'desc' }, { code: 'asc' }]
+      orderBy: [{ active: 'desc' }, { code: 'asc' }],
     });
     return coupons.map((coupon) => this.formatCouponRecord(coupon));
+  }
+
+  async listCouponAnalytics() {
+    const [coupons, orders] = await Promise.all([
+      this.prisma.coupon.findMany({
+        orderBy: [{ active: 'desc' }, { code: 'asc' }],
+      }),
+      this.prisma.order.findMany({
+        where: {
+          status: { not: 'CANCELADO' },
+          OR: [{ couponCode: { not: null } }, { notes: { contains: APPLIED_COUPON_NOTE_PREFIX } }],
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: {
+          id: true,
+          publicNumber: true,
+          customerId: true,
+          customerName: true,
+          customerPhone: true,
+          subtotal: true,
+          discount: true,
+          total: true,
+          createdAt: true,
+          scheduledAt: true,
+          couponCode: true,
+          notes: true,
+          customer: {
+            select: {
+              id: true,
+              publicNumber: true,
+              name: true,
+              phone: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    const analyticsByCode = new Map<
+      string,
+      {
+        coupon: {
+          id?: number;
+          code: string;
+          discountPct: number;
+          usageLimitPerCustomer: number | null;
+          active: boolean;
+          createdAt: string | null;
+          updatedAt: string | null;
+          historicalOnly: boolean;
+        };
+        metrics: {
+          uses: number;
+          discountInvestmentTotal: number;
+          subtotalTotal: number;
+          netRevenueTotal: number;
+          lastUsedAt: string | null;
+        };
+        customers: Map<
+          string,
+          {
+            customerId: number | null;
+            customerDisplayNumber: number | null;
+            customerName: string | null;
+            customerPhone: string | null;
+            uses: number;
+            discountInvestmentTotal: number;
+            subtotalTotal: number;
+            netRevenueTotal: number;
+            lastUsedAt: string | null;
+          }
+        >;
+        recentOrders: Array<{
+          orderId: number;
+          orderDisplayNumber: number | null;
+          customerId: number | null;
+          customerDisplayNumber: number | null;
+          customerName: string | null;
+          customerPhone: string | null;
+          createdAt: string;
+          scheduledAt: string | null;
+          subtotal: number;
+          discountAmount: number;
+          total: number;
+        }>;
+      }
+    >();
+
+    const ensureCouponEntry = (params: {
+      code: string;
+      id?: number;
+      discountPct?: number | null;
+      usageLimitPerCustomer?: number | null;
+      active?: boolean;
+      createdAt?: Date | string | null;
+      updatedAt?: Date | string | null;
+      historicalOnly?: boolean;
+    }) => {
+      const code = normalizeCouponCode(params.code);
+      if (!code) return null;
+
+      const existing = analyticsByCode.get(code);
+      if (existing) {
+        if (typeof params.id === 'number' && !existing.coupon.id) {
+          existing.coupon.id = params.id;
+        }
+        if (typeof params.discountPct === 'number' && params.discountPct > 0) {
+          existing.coupon.discountPct = round2(params.discountPct);
+        }
+        if (
+          typeof params.usageLimitPerCustomer === 'number' &&
+          params.usageLimitPerCustomer > 0
+        ) {
+          existing.coupon.usageLimitPerCustomer = Math.floor(params.usageLimitPerCustomer);
+        }
+        if (typeof params.active === 'boolean') {
+          existing.coupon.active = params.active;
+        }
+        if (params.createdAt) {
+          existing.coupon.createdAt =
+            params.createdAt instanceof Date
+              ? params.createdAt.toISOString()
+              : String(params.createdAt || '').trim() || existing.coupon.createdAt;
+        }
+        if (params.updatedAt) {
+          existing.coupon.updatedAt =
+            params.updatedAt instanceof Date
+              ? params.updatedAt.toISOString()
+              : String(params.updatedAt || '').trim() || existing.coupon.updatedAt;
+        }
+        if (params.historicalOnly === false) {
+          existing.coupon.historicalOnly = false;
+        }
+        return existing;
+      }
+
+      const next = {
+        coupon: {
+          id: params.id,
+          code,
+          discountPct: typeof params.discountPct === 'number' ? round2(params.discountPct) : 0,
+          usageLimitPerCustomer:
+            typeof params.usageLimitPerCustomer === 'number' && params.usageLimitPerCustomer > 0
+              ? Math.floor(params.usageLimitPerCustomer)
+              : null,
+          active: Boolean(params.active),
+          createdAt:
+            params.createdAt instanceof Date
+              ? params.createdAt.toISOString()
+              : String(params.createdAt || '').trim() || null,
+          updatedAt:
+            params.updatedAt instanceof Date
+              ? params.updatedAt.toISOString()
+              : String(params.updatedAt || '').trim() || null,
+          historicalOnly: params.historicalOnly ?? false,
+        },
+        metrics: {
+          uses: 0,
+          discountInvestmentTotal: 0,
+          subtotalTotal: 0,
+          netRevenueTotal: 0,
+          lastUsedAt: null,
+        },
+        customers: new Map<
+          string,
+          {
+            customerId: number | null;
+            customerDisplayNumber: number | null;
+            customerName: string | null;
+            customerPhone: string | null;
+            uses: number;
+            discountInvestmentTotal: number;
+            subtotalTotal: number;
+            netRevenueTotal: number;
+            lastUsedAt: string | null;
+          }
+        >(),
+        recentOrders: [] as Array<{
+          orderId: number;
+          orderDisplayNumber: number | null;
+          customerId: number | null;
+          customerDisplayNumber: number | null;
+          customerName: string | null;
+          customerPhone: string | null;
+          createdAt: string;
+          scheduledAt: string | null;
+          subtotal: number;
+          discountAmount: number;
+          total: number;
+        }>,
+      };
+      analyticsByCode.set(code, next);
+      return next;
+    };
+
+    for (const coupon of coupons) {
+      ensureCouponEntry({
+        id: coupon.id,
+        code: coupon.code,
+        discountPct: coupon.discountPct,
+        usageLimitPerCustomer: coupon.usageLimitPerCustomer,
+        active: coupon.active,
+        createdAt: coupon.createdAt,
+        updatedAt: coupon.updatedAt,
+        historicalOnly: false,
+      });
+    }
+
+    for (const order of orders) {
+      const resolvedCode = resolveStoredCouponCode(order.couponCode, order.notes);
+      if (!resolvedCode) continue;
+
+      const noteCoupon = parseAppliedCouponFromNotes(order.notes);
+      const entry =
+        ensureCouponEntry({
+          code: resolvedCode,
+          discountPct: noteCoupon?.discountPct ?? null,
+          historicalOnly: true,
+          active: false,
+        }) || null;
+      if (!entry) continue;
+
+      const createdAtIso = order.createdAt.toISOString();
+      const subtotal = round2(order.subtotal || 0);
+      const discountAmount = round2(order.discount || 0);
+      const total = round2(order.total || Math.max(subtotal - discountAmount, 0));
+      const customerName = String(order.customerName || order.customer?.name || '').trim() || null;
+      const customerPhone =
+        String(order.customerPhone || order.customer?.phone || '').trim() || null;
+      const customerDisplayNumber = resolveDisplayNumber(order.customer);
+
+      entry.metrics.uses += 1;
+      entry.metrics.discountInvestmentTotal = round2(
+        entry.metrics.discountInvestmentTotal + discountAmount,
+      );
+      entry.metrics.subtotalTotal = round2(entry.metrics.subtotalTotal + subtotal);
+      entry.metrics.netRevenueTotal = round2(entry.metrics.netRevenueTotal + total);
+      if (!entry.metrics.lastUsedAt || createdAtIso > entry.metrics.lastUsedAt) {
+        entry.metrics.lastUsedAt = createdAtIso;
+      }
+
+      entry.recentOrders.push({
+        orderId: order.id,
+        orderDisplayNumber: resolveDisplayNumber(order),
+        customerId: order.customerId ?? null,
+        customerDisplayNumber,
+        customerName,
+        customerPhone,
+        createdAt: createdAtIso,
+        scheduledAt: order.scheduledAt?.toISOString() || null,
+        subtotal,
+        discountAmount,
+        total,
+      });
+
+      const customerKey =
+        typeof order.customerId === 'number' && order.customerId > 0
+          ? `customer:${order.customerId}`
+          : `${customerPhone || customerName || `pedido:${order.id}`}`;
+      const currentCustomer = entry.customers.get(customerKey) || {
+        customerId: order.customerId ?? null,
+        customerDisplayNumber,
+        customerName,
+        customerPhone,
+        uses: 0,
+        discountInvestmentTotal: 0,
+        subtotalTotal: 0,
+        netRevenueTotal: 0,
+        lastUsedAt: null,
+      };
+
+      currentCustomer.uses += 1;
+      currentCustomer.discountInvestmentTotal = round2(
+        currentCustomer.discountInvestmentTotal + discountAmount,
+      );
+      currentCustomer.subtotalTotal = round2(currentCustomer.subtotalTotal + subtotal);
+      currentCustomer.netRevenueTotal = round2(currentCustomer.netRevenueTotal + total);
+      if (!currentCustomer.lastUsedAt || createdAtIso > currentCustomer.lastUsedAt) {
+        currentCustomer.lastUsedAt = createdAtIso;
+      }
+      entry.customers.set(customerKey, currentCustomer);
+    }
+
+    return Array.from(analyticsByCode.values())
+      .map((entry) => ({
+          ...entry.coupon,
+          metrics: {
+            uses: entry.metrics.uses,
+            distinctCustomers: entry.customers.size,
+            discountInvestmentTotal: round2(entry.metrics.discountInvestmentTotal),
+            subtotalTotal: round2(entry.metrics.subtotalTotal),
+            netRevenueTotal: round2(entry.metrics.netRevenueTotal),
+            averageDiscountAmount:
+              entry.metrics.uses > 0
+                ? round2(entry.metrics.discountInvestmentTotal / entry.metrics.uses)
+                : 0,
+            lastUsedAt: entry.metrics.lastUsedAt,
+          },
+          customers: Array.from(entry.customers.values()).sort(
+            (left, right) =>
+              right.uses - left.uses ||
+              String(right.lastUsedAt || '').localeCompare(String(left.lastUsedAt || '')) ||
+              String(left.customerName || '').localeCompare(String(right.customerName || ''), 'pt-BR'),
+          ),
+          recentOrders: entry.recentOrders.sort(
+            (left, right) =>
+              String(right.createdAt).localeCompare(String(left.createdAt)) || right.orderId - left.orderId,
+          ),
+        }))
+      .sort(
+        (left, right) =>
+          Number(right.active) - Number(left.active) ||
+          Number(left.historicalOnly) - Number(right.historicalOnly) ||
+          right.metrics.uses - left.metrics.uses ||
+          left.code.localeCompare(right.code, 'pt-BR'),
+      );
   }
 
   async createCoupon(payload: unknown) {
@@ -697,7 +1206,11 @@ export class DashboardService {
     const data = parsed.data;
     const code = normalizeCouponCode(data.code);
     if (!code) {
-      throw new BadRequestException('Codigo do cupom obrigatorio.');
+      throw new BadRequestException('Código do cupom obrigatório.');
+    }
+    const conflictingCoupon = await findCouponByNormalizedCode(this.prisma, code);
+    if (conflictingCoupon) {
+      throw new ConflictException('Código do cupom já cadastrado.');
     }
     try {
       const created = await this.prisma.coupon.create({
@@ -708,13 +1221,13 @@ export class DashboardService {
             typeof data.usageLimitPerCustomer === 'number' && data.usageLimitPerCustomer > 0
               ? Math.floor(data.usageLimitPerCustomer)
               : null,
-          active: data.active
-        }
+          active: data.active,
+        },
       });
       return this.formatCouponRecord(created);
     } catch (error) {
       if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
-        throw new ConflictException('Codigo do cupom ja cadastrado.');
+        throw new ConflictException('Código do cupom já cadastrado.');
       }
       throw error;
     }
@@ -728,13 +1241,17 @@ export class DashboardService {
     const data = parsed.data;
     const code = normalizeCouponCode(data.code);
     if (!code) {
-      throw new BadRequestException('Codigo do cupom obrigatorio.');
+      throw new BadRequestException('Código do cupom obrigatório.');
     }
     const existing = await this.prisma.coupon.findUnique({
-      where: { id }
+      where: { id },
     });
     if (!existing) {
-      throw new NotFoundException('Cupom nao encontrado.');
+      throw new NotFoundException('Cupom não encontrado.');
+    }
+    const conflictingCoupon = await findCouponByNormalizedCode(this.prisma, code, { excludeId: id });
+    if (conflictingCoupon) {
+      throw new ConflictException('Código do cupom já cadastrado.');
     }
     try {
       const updated = await this.prisma.coupon.update({
@@ -746,13 +1263,13 @@ export class DashboardService {
             typeof data.usageLimitPerCustomer === 'number' && data.usageLimitPerCustomer > 0
               ? Math.floor(data.usageLimitPerCustomer)
               : null,
-          active: data.active
-        }
+          active: data.active,
+        },
       });
       return this.formatCouponRecord(updated);
     } catch (error) {
       if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
-        throw new ConflictException('Codigo do cupom ja cadastrado.');
+        throw new ConflictException('Código do cupom já cadastrado.');
       }
       throw error;
     }
@@ -761,11 +1278,11 @@ export class DashboardService {
   async removeCoupon(id: number) {
     try {
       await this.prisma.coupon.delete({
-        where: { id }
+        where: { id },
       });
     } catch (error) {
       if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') {
-        throw new NotFoundException('Cupom nao encontrado.');
+        throw new NotFoundException('Cupom não encontrado.');
       }
       throw error;
     }
@@ -779,23 +1296,13 @@ export class DashboardService {
     const data = parsed.data;
     const code = normalizeCouponCode(data.code);
     if (!code) {
-      throw new BadRequestException('Informe um codigo de cupom valido.');
+      throw new BadRequestException('Informe um código de cupom válido.');
     }
-    const coupon = await this.prisma.coupon.findFirst({
-      where: {
-        code
-      },
-      select: {
-        code: true,
-        discountPct: true,
-        active: true,
-        usageLimitPerCustomer: true
-      }
-    });
+    const coupon = await findCouponByNormalizedCode(this.prisma, code);
     const activeCouponsCount = await this.prisma.coupon.count({
       where: {
-        active: true
-      }
+        active: true,
+      },
     });
     if (!coupon) {
       this.logger.warn(
@@ -804,13 +1311,13 @@ export class DashboardService {
           reason: activeCouponsCount > 0 ? 'CODE_NOT_FOUND' : 'NO_ACTIVE_COUPONS',
           code,
           subtotal: round2(data.subtotal),
-          activeCouponsCount
-        })
+          activeCouponsCount,
+        }),
       );
       throw new BadRequestException(
         activeCouponsCount > 0
-          ? `Cupom ${code} nao encontrado entre os cupons ativos.`
-          : 'Nenhum cupom ativo cadastrado no momento.'
+          ? `Cupom ${code} não encontrado entre os cupons ativos.`
+          : 'Nenhum cupom ativo cadastrado no momento.',
       );
     }
     if (!coupon.active) {
@@ -820,8 +1327,8 @@ export class DashboardService {
           reason: 'COUPON_INACTIVE',
           code,
           subtotal: round2(data.subtotal),
-          activeCouponsCount
-        })
+          activeCouponsCount,
+        }),
       );
       throw new BadRequestException(`Cupom ${code} esta inativo.`);
     }
@@ -832,13 +1339,15 @@ export class DashboardService {
         : null;
     if (usageLimitPerCustomer) {
       if (!(data.customerId || String(data.customerPhone || '').trim())) {
-        throw new BadRequestException(`Informe um telefone valido para usar o cupom ${coupon.code}.`);
+        throw new BadRequestException(
+          `Informe um telefone válido para usar o cupom ${coupon.code}.`,
+        );
       }
 
       const customerUsageCount = await countCouponUsageForCustomer(this.prisma, {
         couponCode: coupon.code,
         customerId: data.customerId ?? null,
-        customerPhone: data.customerPhone ?? null
+        customerPhone: data.customerPhone ?? null,
       });
 
       if (customerUsageCount >= usageLimitPerCustomer) {
@@ -852,11 +1361,11 @@ export class DashboardService {
             customerUsageCount,
             customerId: data.customerId ?? null,
             customerPhone: data.customerPhone ?? null,
-            activeCouponsCount
-          })
+            activeCouponsCount,
+          }),
         );
         throw new BadRequestException(
-          `Cupom ${coupon.code} ja atingiu o limite de ${usageLimitPerCustomer} uso(s) para este cliente.`
+          `Cupom ${coupon.code} já atingiu o limite de ${usageLimitPerCustomer} uso(s) para este cliente.`,
         );
       }
     }
@@ -867,7 +1376,7 @@ export class DashboardService {
       discountPct: round2(coupon.discountPct),
       subtotal,
       discountAmount,
-      subtotalAfterDiscount: round2(Math.max(subtotal - discountAmount, 0))
+      subtotalAfterDiscount: round2(Math.max(subtotal - discountAmount, 0)),
     });
   }
 
@@ -881,28 +1390,22 @@ export class DashboardService {
       officialPhoneDisplay: profile.officialPhoneDisplay,
       pixKey: profile.pixKey,
       pickupAddressDisplay: profile.pickupAddressDisplay,
-      bank: profile.bank
+      bank: profile.bank,
     };
   }
 
-  private buildIntegrationRails() {
-    const hasRealtimeBankWebhook = this.hasAnyEnv(['BANK_SYNC_WEBHOOK_TOKEN']);
+  private buildIntegrationRails(statementSummary: BankStatementDashboardSummary) {
     const rails: IntegrationRail[] = [
-      {
-        id: 'pix_settlement_bridge',
-        label: 'Bridge Nubank Web',
-        status: hasRealtimeBankWebhook ? 'READY' : 'PENDING',
-        detail: hasRealtimeBankWebhook
-          ? 'Bridge local do Nubank PJ armado para ler o webapp autenticado e reconciliar PIX no backend.'
-          : 'Backend pronto para receber conciliacao segura a partir do webapp autenticado do Nubank PJ.',
-        nextStep: 'Definir BANK_SYNC_WEBHOOK_TOKEN e manter a sessao autenticada do Nubank PJ no Mac operacional.'
-      }
+      this.buildBankStatementRail({
+        summary: statementSummary,
+      }),
     ];
 
     return {
-      readyCount: rails.filter((item) => item.status === 'READY').length,
+      runningCount: rails.filter((item) => item.status === 'RUNNING').length,
+      attentionCount: rails.filter((item) => item.status === 'ATTENTION').length,
       pendingCount: rails.filter((item) => item.status === 'PENDING').length,
-      items: rails
+      items: rails,
     };
   }
 
@@ -922,6 +1425,7 @@ export class DashboardService {
     }
 
     const inventoryItemById = new Map(inventoryItems.map((item) => [item.id, item]));
+    const productById = new Map(products.map((product) => [product.id, product]));
     const priceEntriesByItemId = new Map<number, LoadedInventoryPriceEntry[]>();
     for (const entry of priceEntries) {
       const current = priceEntriesByItemId.get(entry.itemId) || [];
@@ -929,7 +1433,10 @@ export class DashboardService {
       priceEntriesByItemId.set(entry.itemId, current);
     }
 
-    const resolveIngredientUnitCost = (inventoryItem: LoadedInventoryItem, orderCreatedAt: Date) => {
+    const resolveIngredientUnitCost = (
+      inventoryItem: LoadedInventoryItem,
+      orderCreatedAt: Date,
+    ) => {
       const itemPriceEntries = priceEntriesByItemId.get(inventoryItem.id) || [];
       const applicablePriceEntry =
         [...itemPriceEntries]
@@ -938,12 +1445,16 @@ export class DashboardService {
       const averageHistoricalUnitCost =
         itemPriceEntries.length > 0
           ? itemPriceEntries.reduce(
-              (sum, entry) => sum + unitCostFromPack(entry.purchasePackCost, entry.purchasePackSize),
-              0
+              (sum, entry) =>
+                sum + unitCostFromPack(entry.purchasePackCost, entry.purchasePackSize),
+              0,
             ) / itemPriceEntries.length
           : 0;
       return applicablePriceEntry
-        ? unitCostFromPack(applicablePriceEntry.purchasePackCost, applicablePriceEntry.purchasePackSize)
+        ? unitCostFromPack(
+            applicablePriceEntry.purchasePackCost,
+            applicablePriceEntry.purchasePackSize,
+          )
         : averageHistoricalUnitCost > 0
           ? averageHistoricalUnitCost
           : unitCostFromPack(inventoryItem.purchasePackCost, inventoryItem.purchasePackSize);
@@ -955,12 +1466,48 @@ export class DashboardService {
       orderCreatedAt: Date;
       ingredientMap: Map<number, DashboardOrderIngredientCost>;
     }) => {
+      const product = productById.get(params.productId) || null;
+      if (product?.inventoryItemId && product.inventoryQtyPerSaleUnit) {
+        const inventoryItem = inventoryItemById.get(product.inventoryItemId);
+        if (!inventoryItem) {
+          return {
+            cogs: 0,
+            hasBom: false,
+            hasMissingQty: false,
+            mode: 'DIRECT' as const,
+          };
+        }
+
+        const ingredientQty = product.inventoryQtyPerSaleUnit * params.units;
+        const unitCost = resolveIngredientUnitCost(inventoryItem, params.orderCreatedAt);
+        const amount = ingredientQty * unitCost;
+        const ingredientEntry = params.ingredientMap.get(inventoryItem.id) || {
+          ingredientId: inventoryItem.id,
+          ingredientName: inventoryItem.name,
+          unit: inventoryItem.unit,
+          quantity: 0,
+          unitCost: round3(unitCost),
+          amount: 0,
+        };
+        ingredientEntry.quantity = round3(ingredientEntry.quantity + ingredientQty);
+        ingredientEntry.amount = round2(ingredientEntry.amount + amount);
+        params.ingredientMap.set(inventoryItem.id, ingredientEntry);
+
+        return {
+          cogs: round2(amount),
+          hasBom: true,
+          hasMissingQty: false,
+          mode: 'DIRECT' as const,
+        };
+      }
+
       const bom = latestBomByProductId.get(params.productId);
       if (!bom) {
         return {
           cogs: 0,
           hasBom: false,
-          hasMissingQty: false
+          hasMissingQty: false,
+          mode: 'BOM' as const,
         };
       }
 
@@ -989,7 +1536,7 @@ export class DashboardService {
           unit: inventoryItem.unit,
           quantity: 0,
           unitCost: round3(unitCost),
-          amount: 0
+          amount: 0,
         };
         ingredientEntry.quantity = round3(ingredientEntry.quantity + ingredientQty);
         ingredientEntry.amount = round2(ingredientEntry.amount + amount);
@@ -999,7 +1546,8 @@ export class DashboardService {
       return {
         cogs: round2(totalAmount),
         hasBom: true,
-        hasMissingQty
+        hasMissingQty,
+        mode: 'BOM' as const,
       };
     };
 
@@ -1007,19 +1555,20 @@ export class DashboardService {
       .map((product) => ({
         product,
         flavorCode: resolveOfficialBroaFlavorCodeFromProductName(product.name),
-        hasBom: latestBomByProductId.has(product.id)
+        hasBom: latestBomByProductId.has(product.id),
       }))
       .filter(
         (
-          entry
+          entry,
         ): entry is {
           product: LoadedProduct;
           flavorCode: OfficialBroaFlavorCode;
           hasBom: boolean;
-        } => Boolean(entry.flavorCode)
+        } => Boolean(entry.flavorCode),
       )
       .sort((left, right) => {
-        const activeDelta = Number(right.product.active !== false) - Number(left.product.active !== false);
+        const activeDelta =
+          Number(right.product.active !== false) - Number(left.product.active !== false);
         if (activeDelta !== 0) return activeDelta;
         const categoryDelta =
           Number(normalizeLegacyText(right.product.category) === 'SABORES') -
@@ -1041,11 +1590,11 @@ export class DashboardService {
       if (!candidate.hasBom || officialFlavorProductByCode.has(candidate.flavorCode)) continue;
       officialFlavorProductByCode.set(candidate.flavorCode, {
         productId: candidate.product.id,
-        productName: candidate.product.name
+        productName: candidate.product.name,
       });
     }
     const availableOfficialFlavorCodes = OFFICIAL_BROA_FLAVOR_CODES.filter((code) =>
-      officialFlavorProductByCode.has(code)
+      officialFlavorProductByCode.has(code),
     );
 
     const genericLegacyProxyWeights = emptyOfficialBroaFlavorCounts();
@@ -1086,7 +1635,7 @@ export class DashboardService {
         code: DashboardCogsWarningCode,
         productId: number,
         productName: string,
-        message: string
+        message: string,
       ) => {
         const key = `${code}:${productId}`;
         if (warningKeys.has(key)) return;
@@ -1098,7 +1647,7 @@ export class DashboardService {
           orderDisplayNumber,
           productId,
           productName,
-          message
+          message,
         });
       };
 
@@ -1127,7 +1676,7 @@ export class DashboardService {
               actualFlavorCounts,
               genericProxyWeights: genericLegacyProxyWeights,
               premiumProxyWeights: premiumLegacyProxyWeights,
-              availableCodes: availableOfficialFlavorCodes
+              availableCodes: availableOfficialFlavorCodes,
             })
           : emptyOfficialBroaFlavorCounts();
       const legacyHistoricalUnits = sumFlavorCounts(legacyHistoricalFlavorCounts);
@@ -1142,12 +1691,13 @@ export class DashboardService {
           productName,
           quantity: 0,
           revenue: 0,
-          cogs: 0
+          cogs: 0,
         };
         productEntry.quantity += quantity;
         productEntry.revenue = round2(productEntry.revenue + revenue);
 
-        const legacyHistoricalItem = legacyImportedOrder && isLegacyHistoricalBoxName(item.product?.name);
+        const legacyHistoricalItem =
+          legacyImportedOrder && isLegacyHistoricalBoxName(item.product?.name);
         if (legacyHistoricalItem) {
           if (!legacyHistoricalCostApplied) {
             totalUnits += legacyHistoricalUnits;
@@ -1163,14 +1713,17 @@ export class DashboardService {
                 productId: officialProduct.productId,
                 units,
                 orderCreatedAt: order.createdAt,
-                ingredientMap
+                ingredientMap,
               });
               if (!costResult.hasBom) {
+                const officialProductRecord = productById.get(officialProduct.productId) || null;
                 pushWarning(
                   'BOM_MISSING',
                   officialProduct.productId,
                   officialProduct.productName,
-                  'Produto sem ficha técnica ativa no COGS.'
+                  officialProductRecord?.inventoryItemId && officialProductRecord?.inventoryQtyPerSaleUnit
+                    ? 'Produto Amigas da Broa sem estoque direto ativo no COGS.'
+                    : 'Produto sem ficha técnica ativa no COGS.',
                 );
                 continue;
               }
@@ -1179,7 +1732,7 @@ export class DashboardService {
                   'BOM_ITEM_MISSING_QTY',
                   officialProduct.productId,
                   officialProduct.productName,
-                  'Ficha técnica com ingrediente sem quantidade suficiente para o COGS.'
+                  'Ficha técnica com ingrediente sem quantidade suficiente para o COGS.',
                 );
               }
               legacyItemCogs = round2(legacyItemCogs + costResult.cogs);
@@ -1192,19 +1745,24 @@ export class DashboardService {
           continue;
         }
 
-        totalUnits += quantity;
+        if (resolveOfficialBroaFlavorCodeFromProductName(item.product?.name)) {
+          totalUnits += quantity;
+        }
         const costResult = accumulateProductUnitsCost({
           productId: item.productId,
           units: quantity,
           orderCreatedAt: order.createdAt,
-          ingredientMap
+          ingredientMap,
         });
         if (!costResult.hasBom) {
+          const productRecord = productById.get(item.productId) || null;
           pushWarning(
             'BOM_MISSING',
             item.productId,
             productName,
-            'Produto sem ficha técnica ativa no COGS.'
+            productRecord?.inventoryItemId && productRecord?.inventoryQtyPerSaleUnit
+              ? 'Produto Amigas da Broa sem estoque direto ativo no COGS.'
+              : 'Produto sem ficha técnica ativa no COGS.',
           );
           productMap.set(item.productId, productEntry);
           continue;
@@ -1215,7 +1773,7 @@ export class DashboardService {
             'BOM_ITEM_MISSING_QTY',
             item.productId,
             productName,
-            'Ficha técnica com ingrediente sem quantidade suficiente para o COGS.'
+            'Ficha técnica com ingrediente sem quantidade suficiente para o COGS.',
           );
         }
 
@@ -1228,9 +1786,13 @@ export class DashboardService {
           ...entry,
           quantity: round3(entry.quantity),
           unitCost: round3(entry.unitCost),
-          amount: round2(entry.amount)
+          amount: round2(entry.amount),
         }))
-        .sort((left, right) => right.amount - left.amount || left.ingredientName.localeCompare(right.ingredientName, 'pt-BR'));
+        .sort(
+          (left, right) =>
+            right.amount - left.amount ||
+            left.ingredientName.localeCompare(right.ingredientName, 'pt-BR'),
+        );
 
       for (const ingredient of orderIngredients) {
         const aggregate = ingredientTotals.get(ingredient.ingredientId) || {
@@ -1240,7 +1802,7 @@ export class DashboardService {
           quantity: 0,
           unitCost: ingredient.unitCost,
           amount: 0,
-          orderCount: 0
+          orderCount: 0,
         };
         aggregate.quantity = round3(aggregate.quantity + ingredient.quantity);
         aggregate.amount = round2(aggregate.amount + ingredient.amount);
@@ -1256,7 +1818,7 @@ export class DashboardService {
         customerName,
         createdAt: order.createdAt.toISOString(),
         scheduledAt: order.scheduledAt?.toISOString() || null,
-        status: order.status,
+        status: normalizeOrderStatus(order.status) || 'ABERTO',
         itemsCount: order.items.length,
         units: totalUnits,
         revenue: round2(orderRevenue),
@@ -1266,11 +1828,11 @@ export class DashboardService {
           .map((entry) => ({
             ...entry,
             cogs: round2(entry.cogs),
-            revenue: round2(entry.revenue)
+            revenue: round2(entry.revenue),
           }))
           .sort((left, right) => right.cogs - left.cogs || right.revenue - left.revenue),
         ingredients: orderIngredients,
-        warnings: orderWarnings
+        warnings: orderWarnings,
       });
     }
 
@@ -1278,23 +1840,27 @@ export class DashboardService {
       orders: orderEntries.sort(
         (left, right) =>
           new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime() ||
-          right.orderId - left.orderId
+          right.orderId - left.orderId,
       ),
       ingredients: [...ingredientTotals.values()]
         .map((entry) => ({
           ...entry,
           quantity: round3(entry.quantity),
           unitCost: round3(entry.unitCost),
-          amount: round2(entry.amount)
+          amount: round2(entry.amount),
         }))
-        .sort((left, right) => right.amount - left.amount || left.ingredientName.localeCompare(right.ingredientName, 'pt-BR')),
-      warnings
+        .sort(
+          (left, right) =>
+            right.amount - left.amount ||
+            left.ingredientName.localeCompare(right.ingredientName, 'pt-BR'),
+        ),
+      warnings,
     };
   }
 
   private loadAnalyticsEvents() {
     return this.prisma.siteAnalyticsEvent.findMany({
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
   }
 
@@ -1305,44 +1871,55 @@ export class DashboardService {
         payments: true,
         items: {
           include: {
-            product: true
-          }
-        }
+            product: true,
+          },
+        },
       },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
   }
 
   async getSummary(options?: { days?: string | number | null }) {
     const asOf = new Date();
     const selectedWindow = buildDashboardWindowSelection(asOf, options?.days);
-    const [events, orders, customers, boms, inventoryItems, priceEntries, products] = await Promise.all([
-      this.loadAnalyticsEvents(),
-      this.loadOrders(),
-      this.prisma.customer.findMany({
-        where: { deletedAt: null },
-        orderBy: { createdAt: 'asc' }
-      }),
-      this.prisma.bom.findMany({
-        include: { items: true },
-        orderBy: { id: 'desc' }
-      }),
-      this.prisma.inventoryItem.findMany({
-        orderBy: { id: 'asc' }
-      }),
-      this.prisma.inventoryPriceEntry.findMany({
-        orderBy: [{ effectiveAt: 'asc' }, { id: 'asc' }]
-      }),
-      this.prisma.product.findMany({
-        select: {
-          id: true,
-          name: true,
-          category: true,
-          active: true
-        },
-        orderBy: { id: 'asc' }
-      })
-    ]);
+    const [events, orders, customers, boms, inventoryItems, priceEntries, products, statementDataset] =
+      await Promise.all([
+        this.loadAnalyticsEvents(),
+        this.loadOrders(),
+        this.prisma.customer.findMany({
+          where: { deletedAt: null },
+          orderBy: { createdAt: 'asc' },
+        }),
+        this.prisma.bom.findMany({
+          include: { items: true },
+          orderBy: { id: 'desc' },
+        }),
+        this.prisma.inventoryItem.findMany({
+          orderBy: { id: 'asc' },
+        }),
+        this.prisma.inventoryPriceEntry.findMany({
+          orderBy: [{ effectiveAt: 'asc' }, { id: 'asc' }],
+        }),
+        this.prisma.product.findMany({
+          select: {
+            id: true,
+            name: true,
+            category: true,
+            active: true,
+            inventoryItemId: true,
+            inventoryQtyPerSaleUnit: true,
+          },
+          orderBy: { id: 'asc' },
+        }),
+        this.bankStatementsService.loadDataset(),
+      ]);
+
+    const bankStatementSummary = this.bankStatementsService.buildDashboardSummary({
+      asOf,
+      latestImport: statementDataset.latestImport,
+      transactions: statementDataset.transactions,
+    });
+    const integrations = this.buildIntegrationRails(bankStatementSummary);
 
     const traffic = this.buildTrafficSummary(events, { windowLabel: 'Base inteira' });
     const business = this.buildBusinessSummary({
@@ -1353,14 +1930,17 @@ export class DashboardService {
       priceEntries,
       products,
       windowLabel: 'Base inteira',
-      asOf
+      asOf,
+      bankStatementSummary,
     });
     const selectedTraffic = this.buildTrafficSummary(
       events.filter((event) => event.createdAt.getTime() >= selectedWindow.startsAt.getTime()),
-      { windowLabel: selectedWindow.label }
+      { windowLabel: selectedWindow.label },
     );
     const selectedBusiness = this.buildBusinessSummary({
-      orders: orders.filter((order) => order.createdAt.getTime() >= selectedWindow.startsAt.getTime()),
+      orders: orders.filter(
+        (order) => order.createdAt.getTime() >= selectedWindow.startsAt.getTime(),
+      ),
       customers,
       boms,
       inventoryItems,
@@ -1368,13 +1948,27 @@ export class DashboardService {
       products,
       windowLabel: selectedWindow.label,
       rangeStartsAt: selectedWindow.startsAt,
-      asOf
+      asOf,
+      bankStatementSummary: this.bankStatementsService.buildDashboardSummary({
+        asOf,
+        startsAt: selectedWindow.startsAt,
+        latestImport: statementDataset.latestImport,
+        transactions: statementDataset.transactions,
+      }),
     });
+    const normalizedSelectedBusiness = {
+      ...selectedBusiness,
+      kpis: {
+        ...selectedBusiness.kpis,
+        ordersAllTime: business.kpis.ordersAllTime,
+        grossRevenueAllTime: business.kpis.grossRevenueAllTime,
+      },
+    };
 
     return {
       asOf: asOf.toISOString(),
       identity: this.buildIdentitySummary(),
-      integrations: this.buildIntegrationRails(),
+      integrations,
       traffic,
       business,
       selectedPeriod: {
@@ -1382,15 +1976,17 @@ export class DashboardService {
         days: selectedWindow.days,
         label: selectedWindow.label,
         traffic: selectedTraffic,
-        business: selectedBusiness
-      }
+        business: normalizedSelectedBusiness,
+      },
     };
   }
 
   private buildTrafficSummary(events: LoadedAnalyticsEvent[], options?: { windowLabel?: string }) {
     const pageViews = events.filter((event) => event.eventType === 'PAGE_VIEW');
     const linkClicks = events.filter((event) => event.eventType === 'LINK_CLICK');
-    const webVitals = events.filter((event) => event.eventType === 'WEB_VITAL' && typeof event.metricValue === 'number');
+    const webVitals = events.filter(
+      (event) => event.eventType === 'WEB_VITAL' && typeof event.metricValue === 'number',
+    );
     const funnelEvents = events.filter((event) => event.eventType === 'FUNNEL');
 
     const firstPageViewBySession = new Map<string, LoadedAnalyticsEvent>();
@@ -1406,10 +2002,10 @@ export class DashboardService {
 
     const sessions = new Set(pageViews.map((event) => event.sessionId));
     const publicSessions = new Set(
-      pageViews.filter((event) => isPublicPath(event.path)).map((event) => event.sessionId)
+      pageViews.filter((event) => isPublicPath(event.path)).map((event) => event.sessionId),
     );
     const internalSessions = new Set(
-      pageViews.filter((event) => !isPublicPath(event.path)).map((event) => event.sessionId)
+      pageViews.filter((event) => !isPublicPath(event.path)).map((event) => event.sessionId),
     );
 
     const pathStats = new Map<string, { views: number; sessions: Set<string> }>();
@@ -1426,7 +2022,7 @@ export class DashboardService {
         path,
         views: stats.views,
         sessions: stats.sessions.size,
-        surface: isPublicPath(path) ? 'public' : 'internal'
+        surface: isPublicPath(path) ? 'public' : 'internal',
       }))
       .sort((left, right) => right.views - left.views)
       .slice(0, 10);
@@ -1455,15 +2051,19 @@ export class DashboardService {
       referrerCounts.set(referrer, (referrerCounts.get(referrer) || 0) + 1);
     }
 
-    const topLinks = [...linkClicks.reduce((map, event) => {
-      const key = `${event.href || '(sem href)'}__${event.label || ''}`;
-      map.set(key, {
-        href: event.href || '(sem href)',
-        label: event.label || 'Sem rótulo',
-        clicks: (map.get(key)?.clicks || 0) + 1
-      });
-      return map;
-    }, new Map<string, { href: string; label: string; clicks: number }>()).values()]
+    const topLinks = [
+      ...linkClicks
+        .reduce((map, event) => {
+          const key = `${event.href || '(sem href)'}__${event.label || ''}`;
+          map.set(key, {
+            href: event.href || '(sem href)',
+            label: event.label || 'Sem rótulo',
+            clicks: (map.get(key)?.clicks || 0) + 1,
+          });
+          return map;
+        }, new Map<string, { href: string; label: string; clicks: number }>())
+        .values(),
+    ]
       .sort((left, right) => right.clicks - left.clicks)
       .slice(0, 10);
 
@@ -1483,7 +2083,7 @@ export class DashboardService {
         unit: name === 'CLS' ? 'score' : 'ms',
         median: median(values),
         p75: percentile(values, 75),
-        sampleSize: values.length
+        sampleSize: values.length,
       }))
       .sort((left, right) => left.name.localeCompare(right.name, 'pt-BR'));
 
@@ -1495,7 +2095,7 @@ export class DashboardService {
           metricName,
           median: median(values),
           p75: percentile(values, 75),
-          sampleSize: values.length
+          sampleSize: values.length,
         };
       })
       .sort((left, right) => right.p75 - left.p75)
@@ -1508,6 +2108,10 @@ export class DashboardService {
         publicPageViews: number;
         internalPageViews: number;
         sessions: Set<string>;
+        homeSessions: Set<string>;
+        orderSessions: Set<string>;
+        quoteSuccessSessions: Set<string>;
+        submittedSessions: Set<string>;
       }
     >();
     for (const event of pageViews) {
@@ -1516,7 +2120,11 @@ export class DashboardService {
         pageViews: 0,
         publicPageViews: 0,
         internalPageViews: 0,
-        sessions: new Set<string>()
+        sessions: new Set<string>(),
+        homeSessions: new Set<string>(),
+        orderSessions: new Set<string>(),
+        quoteSuccessSessions: new Set<string>(),
+        submittedSessions: new Set<string>(),
       };
       current.pageViews += 1;
       if (isPublicPath(event.path)) {
@@ -1525,6 +2133,33 @@ export class DashboardService {
         current.internalPageViews += 1;
       }
       current.sessions.add(event.sessionId);
+      if (event.path === '/') {
+        current.homeSessions.add(event.sessionId);
+      }
+      if (isPublicPath(event.path) && event.path !== '/') {
+        current.orderSessions.add(event.sessionId);
+      }
+      dailyMap.set(dateKey, current);
+    }
+
+    for (const event of funnelEvents) {
+      const dateKey = toDayKey(event.createdAt);
+      const current = dailyMap.get(dateKey) || {
+        pageViews: 0,
+        publicPageViews: 0,
+        internalPageViews: 0,
+        sessions: new Set<string>(),
+        homeSessions: new Set<string>(),
+        orderSessions: new Set<string>(),
+        quoteSuccessSessions: new Set<string>(),
+        submittedSessions: new Set<string>(),
+      };
+      if (event.label === 'public_order_quote_success') {
+        current.quoteSuccessSessions.add(event.sessionId);
+      }
+      if (event.label === 'public_order_submitted') {
+        current.submittedSessions.add(event.sessionId);
+      }
       dailyMap.set(dateKey, current);
     }
 
@@ -1534,26 +2169,49 @@ export class DashboardService {
         pageViews: stats.pageViews,
         publicPageViews: stats.publicPageViews,
         internalPageViews: stats.internalPageViews,
-        sessions: stats.sessions.size
+        sessions: stats.sessions.size,
+        homeSessions: stats.homeSessions.size,
+        orderSessions: stats.orderSessions.size,
+        quoteSuccessSessions: stats.quoteSuccessSessions.size,
+        submittedSessions: stats.submittedSessions.size,
       }))
       .sort((left, right) => left.date.localeCompare(right.date, 'pt-BR'));
 
     const homeSessions = new Set(
-      pageViews.filter((event) => event.path === '/').map((event) => event.sessionId)
+      pageViews.filter((event) => event.path === '/').map((event) => event.sessionId),
     );
     const orderSessions = new Set(
-      pageViews.filter((event) => isPublicPath(event.path) && event.path !== '/').map((event) => event.sessionId)
+      pageViews
+        .filter((event) => isPublicPath(event.path) && event.path !== '/')
+        .map((event) => event.sessionId),
     );
     const quoteSuccessSessions = new Set(
       funnelEvents
         .filter((event) => event.label === 'public_order_quote_success')
-        .map((event) => event.sessionId)
+        .map((event) => event.sessionId),
     );
     const submittedSessions = new Set(
       funnelEvents
         .filter((event) => event.label === 'public_order_submitted')
-        .map((event) => event.sessionId)
+        .map((event) => event.sessionId),
     );
+    const homeToOrderPct = toPercent(orderSessions.size, homeSessions.size);
+    const orderToSubmitPct = toPercent(submittedSessions.size, orderSessions.size);
+    const quoteToSubmitPct = toPercent(submittedSessions.size, quoteSuccessSessions.size);
+    const attributedSources = buildAttributedSessionSummary({
+      firstPageViewBySession,
+      labelResolver: formatSourceLabel,
+      orderSessions,
+      quoteSuccessSessions,
+      submittedSessions,
+    });
+    const attributedReferrers = buildAttributedSessionSummary({
+      firstPageViewBySession,
+      labelResolver: (event) => event.referrerHost || 'Direto',
+      orderSessions,
+      quoteSuccessSessions,
+      submittedSessions,
+    });
 
     return {
       windowLabel: options?.windowLabel || 'Base inteira',
@@ -1565,7 +2223,7 @@ export class DashboardService {
         publicPageViews: pageViews.filter((event) => isPublicPath(event.path)).length,
         internalPageViews: pageViews.filter((event) => !isPublicPath(event.path)).length,
         avgPagesPerSession: round2(pageViews.length / Math.max(sessions.size, 1)),
-        bounceRatePct: toPercent(bounceSessions.size, sessions.size)
+        bounceRatePct: toPercent(bounceSessions.size, sessions.size),
       },
       topPaths,
       topSources: [...sourceCounts.entries()]
@@ -1576,6 +2234,8 @@ export class DashboardService {
         .map(([label, sessionsCount]) => ({ label, sessions: sessionsCount }))
         .sort((left, right) => right.sessions - left.sessions)
         .slice(0, 8),
+      attributedSources,
+      attributedReferrers,
       topLinks,
       deviceMix: [...deviceCounts.entries()]
         .map(([label, sessionsCount]) => ({ label, sessions: sessionsCount }))
@@ -1596,9 +2256,11 @@ export class DashboardService {
         orderSessions: orderSessions.size,
         quoteSuccessSessions: quoteSuccessSessions.size,
         submittedSessions: submittedSessions.size,
-        orderPageConversionPct: toPercent(submittedSessions.size, orderSessions.size),
-        quoteToSubmitPct: toPercent(submittedSessions.size, quoteSuccessSessions.size)
-      }
+        homeToOrderPct,
+        orderToSubmitPct,
+        orderPageConversionPct: orderToSubmitPct,
+        quoteToSubmitPct,
+      },
     };
   }
 
@@ -1617,6 +2279,7 @@ export class DashboardService {
     windowLabel?: string;
     rangeStartsAt?: Date;
     asOf?: Date;
+    bankStatementSummary: BankStatementDashboardSummary;
   }) {
     const {
       orders,
@@ -1627,7 +2290,8 @@ export class DashboardService {
       products,
       windowLabel,
       rangeStartsAt,
-      asOf
+      asOf,
+      bankStatementSummary,
     } = params;
     const activeOrders = orders.filter((order) => order.status !== 'CANCELADO');
     const totalCogsBreakdown = this.buildOrderCogsBreakdown({
@@ -1635,9 +2299,11 @@ export class DashboardService {
       boms,
       inventoryItems,
       priceEntries,
-      products
+      products,
     });
-    const orderCogsByOrderId = new Map(totalCogsBreakdown.orders.map((entry) => [entry.orderId, entry.cogs]));
+    const orderCogsByOrderId = new Map(
+      totalCogsBreakdown.orders.map((entry) => [entry.orderId, entry.cogs]),
+    );
     const todayKey = toDayKey(asOf || new Date());
     const activeCustomerIds = new Set<number>();
 
@@ -1650,6 +2316,7 @@ export class DashboardService {
     const statusMix = new Map<string, number>();
     const fulfillmentMix = new Map<string, number>();
     const quoteMix = new Map<string, number>();
+    const deliveryOrdersTotal = activeOrders.filter((order) => order.fulfillmentMode === 'DELIVERY').length;
 
     let paidRevenueTotal = 0;
     const paidRevenueByDay = new Map<string, number>();
@@ -1657,7 +2324,10 @@ export class DashboardService {
 
     for (const order of activeOrders) {
       statusMix.set(order.status, (statusMix.get(order.status) || 0) + 1);
-      fulfillmentMix.set(order.fulfillmentMode, (fulfillmentMix.get(order.fulfillmentMode) || 0) + 1);
+      fulfillmentMix.set(
+        order.fulfillmentMode,
+        (fulfillmentMix.get(order.fulfillmentMode) || 0) + 1,
+      );
       if (order.fulfillmentMode === 'DELIVERY') {
         const label = order.deliveryQuoteStatus || 'NOT_REQUIRED';
         quoteMix.set(label, (quoteMix.get(label) || 0) + 1);
@@ -1665,7 +2335,7 @@ export class DashboardService {
 
       const paidAmount = sumBy(
         order.payments.filter((payment) => payment.status === 'PAGO' || Boolean(payment.paidAt)),
-        (payment) => payment.amount || 0
+        (payment) => payment.amount || 0,
       );
       const balanceDue = Math.max(round2(order.total || 0) - round2(paidAmount), 0);
 
@@ -1676,12 +2346,13 @@ export class DashboardService {
             order.customer?.name ||
             `Cliente #${resolveDisplayNumber(order.customer) ?? order.customerId}`,
           amount: round2(balanceDue),
-          status: order.status,
+          status: normalizeOrderStatus(order.status) || 'ABERTO',
           dueDate:
             order.payments
               .map((payment) => payment.dueDate)
               .filter((value): value is Date => Boolean(value))
-              .sort((left, right) => left.getTime() - right.getTime())[0]?.toISOString() || null
+              .sort((left, right) => left.getTime() - right.getTime())[0]
+              ?.toISOString() || null,
         });
       }
 
@@ -1690,32 +2361,65 @@ export class DashboardService {
         if (!isPaid || !payment.paidAt) continue;
         paidRevenueTotal += payment.amount || 0;
         const dayKey = toDayKey(payment.paidAt);
-        paidRevenueByDay.set(dayKey, round2((paidRevenueByDay.get(dayKey) || 0) + (payment.amount || 0)));
+        paidRevenueByDay.set(
+          dayKey,
+          round2((paidRevenueByDay.get(dayKey) || 0) + (payment.amount || 0)),
+        );
       }
     }
 
     const totalOrderCost = round2(sumBy(totalCogsBreakdown.orders, (order) => order.cogs));
     const grossRevenueTotal = sumBy(activeOrders, (order) => order.total || 0);
-    const productNetRevenueTotal = sumBy(
-      activeOrders,
-      (order) => Math.max(round2(order.subtotal || 0) - round2(order.discount || 0), 0)
+    const productNetRevenueTotal = sumBy(activeOrders, (order) =>
+      Math.max(round2(order.subtotal || 0) - round2(order.discount || 0), 0),
     );
     const deliveryRevenueTotal = sumBy(activeOrders, (order) => order.deliveryFee || 0);
     const discountTotal = sumBy(activeOrders, (order) => order.discount || 0);
     const marketingSamplesInvestmentTotal = sumBy(activeOrders, (order) =>
       parseMarketingSamplesDiscountPct(order.notes) != null
         ? round2((order.discount || 0) + parseMarketingSamplesSponsoredDeliveryFee(order.notes))
-        : 0
+        : 0,
     );
     const outstandingBalance = sumBy(pendingReceivables, (entry) => entry.amount);
     const grossProfitTotal = round2(productNetRevenueTotal - totalOrderCost);
     const contributionAfterFreightTotal = round2(grossRevenueTotal - totalOrderCost);
-    const ordersToday = activeOrders.filter((order) => toDayKey(order.createdAt) === todayKey).length;
+    const bankInflowTotal = round2(
+      sumBy(bankStatementSummary.dailySeries, (entry) => entry.bankInflow),
+    );
+    const actualExpensesTotal = round2(
+      sumBy(bankStatementSummary.dailySeries, (entry) => entry.actualExpenses),
+    );
+    const ingredientExpensesTotal = round2(
+      sumBy(bankStatementSummary.dailySeries, (entry) => entry.ingredientExpenses),
+    );
+    const deliveryExpensesTotal = round2(
+      sumBy(bankStatementSummary.dailySeries, (entry) => entry.deliveryExpenses),
+    );
+    const deliveryMarginTotal = round2(deliveryRevenueTotal - deliveryExpensesTotal);
+    const deliveryCoveragePct = toPercent(deliveryRevenueTotal, deliveryExpensesTotal);
+    const packagingExpensesTotal = round2(
+      sumBy(bankStatementSummary.dailySeries, (entry) => entry.packagingExpenses),
+    );
+    const softwareExpensesTotal = round2(
+      sumBy(bankStatementSummary.dailySeries, (entry) => entry.softwareExpenses),
+    );
+    const marketplaceAdjustmentsTotal = round2(
+      sumBy(bankStatementSummary.dailySeries, (entry) => entry.marketplaceAdjustments),
+    );
+    const netCashFlowTotal = round2(
+      sumBy(bankStatementSummary.dailySeries, (entry) => entry.netCashFlow),
+    );
+    const unmatchedInflowsTotal = round2(
+      sumBy(bankStatementSummary.dailySeries, (entry) => entry.unmatchedInflows),
+    );
+    const ordersToday = activeOrders.filter(
+      (order) => toDayKey(order.createdAt) === todayKey,
+    ).length;
     const grossRevenueToday = round2(
       sumBy(
         activeOrders.filter((order) => toDayKey(order.createdAt) === todayKey),
-        (order) => order.total || 0
-      )
+        (order) => order.total || 0,
+      ),
     );
 
     const dailySeriesMap = new Map<
@@ -1724,6 +2428,7 @@ export class DashboardService {
         orders: number;
         grossRevenue: number;
         paidRevenue: number;
+        deliveryRevenue: number;
         cogs: number;
         grossProfit: number;
       }
@@ -1735,13 +2440,18 @@ export class DashboardService {
         orders: 0,
         grossRevenue: 0,
         paidRevenue: 0,
+        deliveryRevenue: 0,
         cogs: 0,
-        grossProfit: 0
+        grossProfit: 0,
       };
       const orderCost = round2(orderCogsByOrderId.get(order.id) || 0);
-      const orderNetRevenue = Math.max(round2(order.subtotal || 0) - round2(order.discount || 0), 0);
+      const orderNetRevenue = Math.max(
+        round2(order.subtotal || 0) - round2(order.discount || 0),
+        0,
+      );
       current.orders += 1;
       current.grossRevenue = round2(current.grossRevenue + (order.total || 0));
+      current.deliveryRevenue = round2(current.deliveryRevenue + (order.deliveryFee || 0));
       current.cogs = round2(current.cogs + orderCost);
       current.grossProfit = round2(current.grossProfit + (orderNetRevenue - orderCost));
       dailySeriesMap.set(dayKey, current);
@@ -1752,8 +2462,9 @@ export class DashboardService {
         orders: 0,
         grossRevenue: 0,
         paidRevenue: 0,
+        deliveryRevenue: 0,
         cogs: 0,
-        grossProfit: 0
+        grossProfit: 0,
       };
       current.paidRevenue = round2(current.paidRevenue + paidRevenue);
       dailySeriesMap.set(dayKey, current);
@@ -1765,8 +2476,9 @@ export class DashboardService {
         orders: stats.orders,
         grossRevenue: stats.grossRevenue,
         paidRevenue: stats.paidRevenue,
+        deliveryRevenue: stats.deliveryRevenue,
         cogs: stats.cogs,
-        grossProfit: stats.grossProfit
+        grossProfit: stats.grossProfit,
       }))
       .sort((left, right) => left.date.localeCompare(right.date, 'pt-BR'));
 
@@ -1781,7 +2493,7 @@ export class DashboardService {
           productName: product.productName,
           units: 0,
           revenue: 0,
-          cogs: 0
+          cogs: 0,
         };
         current.units += product.quantity;
         current.revenue = round2(current.revenue + product.revenue);
@@ -1794,14 +2506,17 @@ export class DashboardService {
       .map((entry) => ({
         ...entry,
         profit: round2(entry.revenue - entry.cogs),
-        marginPct: toPercent(entry.revenue - entry.cogs, entry.revenue)
+        marginPct: toPercent(entry.revenue - entry.cogs, entry.revenue),
       }))
       .sort((left, right) => right.revenue - left.revenue)
       .slice(0, 8);
 
-    const returningCustomersCount = customers.filter((customer) => (customerOrderCount.get(customer.id) || 0) >= 2).length;
+    const returningCustomersCount = customers.filter(
+      (customer) => (customerOrderCount.get(customer.id) || 0) >= 2,
+    ).length;
     const newCustomersInRange = rangeStartsAt
-      ? customers.filter((customer) => customer.createdAt.getTime() >= rangeStartsAt.getTime()).length
+      ? customers.filter((customer) => customer.createdAt.getTime() >= rangeStartsAt.getTime())
+          .length
       : customers.length;
     const repeatRateBase = rangeStartsAt ? activeCustomerIds.size : customers.length;
     const auditRevenue = round2(sumBy(totalCogsBreakdown.orders, (entry) => entry.revenue));
@@ -1812,7 +2527,7 @@ export class DashboardService {
       warningsCount: totalCogsBreakdown.warnings.length,
       revenue: auditRevenue,
       cogs: totalOrderCost,
-      grossProfit: round2(auditRevenue - totalOrderCost)
+      grossProfit: round2(auditRevenue - totalOrderCost),
     };
 
     return {
@@ -1831,19 +2546,31 @@ export class DashboardService {
         discountsInRange: round2(discountTotal),
         marketingSamplesInvestmentInRange: round2(marketingSamplesInvestmentTotal),
         deliveryRevenueInRange: round2(deliveryRevenueTotal),
+        deliveryOrdersInRange: deliveryOrdersTotal,
+        deliveryMarginInRange: round2(deliveryMarginTotal),
+        deliveryCoveragePctInRange: deliveryCoveragePct,
         productNetRevenueInRange: round2(productNetRevenueTotal),
         estimatedCogsInRange: round2(totalOrderCost),
         costedOrdersInRange: totalCogsBreakdown.orders.length,
         cogsWarningsInRange: totalCogsBreakdown.warnings.length,
         grossProfitInRange: round2(grossProfitTotal),
         grossMarginPctInRange: toPercent(grossProfitTotal, productNetRevenueTotal),
-        contributionAfterFreightInRange: round2(contributionAfterFreightTotal)
+        contributionAfterFreightInRange: round2(contributionAfterFreightTotal),
+        bankInflowInRange: bankInflowTotal,
+        actualExpensesInRange: actualExpensesTotal,
+        ingredientExpensesInRange: ingredientExpensesTotal,
+        deliveryExpensesInRange: deliveryExpensesTotal,
+        packagingExpensesInRange: packagingExpensesTotal,
+        softwareExpensesInRange: softwareExpensesTotal,
+        marketplaceAdjustmentsInRange: marketplaceAdjustmentsTotal,
+        netCashFlowInRange: netCashFlowTotal,
+        unmatchedInflowsInRange: unmatchedInflowsTotal,
       },
       cogsAudit,
       customerMetrics: {
         newCustomersInRange,
         returningCustomersInRange: returningCustomersCount,
-        repeatRatePct: toPercent(returningCustomersCount, repeatRateBase)
+        repeatRatePct: toPercent(returningCustomersCount, repeatRateBase),
       },
       statusMix: [...statusMix.entries()]
         .map(([label, value]) => ({ label, value }))
@@ -1861,7 +2588,21 @@ export class DashboardService {
       topProducts,
       recentReceivables: pendingReceivables
         .sort((left, right) => right.amount - left.amount)
-        .slice(0, 10)
+        .slice(0, 10),
+      statement: {
+        ...bankStatementSummary,
+        kpis: {
+          bankInflowInRange: bankInflowTotal,
+          actualExpensesInRange: actualExpensesTotal,
+          ingredientExpensesInRange: ingredientExpensesTotal,
+          deliveryExpensesInRange: deliveryExpensesTotal,
+          packagingExpensesInRange: packagingExpensesTotal,
+          softwareExpensesInRange: softwareExpensesTotal,
+          marketplaceAdjustmentsInRange: marketplaceAdjustmentsTotal,
+          netCashFlowInRange: netCashFlowTotal,
+          unmatchedInflowsInRange: unmatchedInflowsTotal,
+        },
+      },
     };
   }
 }

@@ -9,6 +9,9 @@
   "scripts": {
     "predev": "pnpm --filter @querobroapp/shared build",
     "dev": "turbo run dev --parallel",
+    "dev:web:published-local": "node scripts/public-site-mirror.mjs",
+    "dev:web:ops-local": "pnpm --filter @querobroapp/web dev:ops-local",
+    "dev:web:amigas-lab": "pnpm --filter @querobroapp/web dev:amigas-lab",
     "build": "turbo run build",
     "build:ci": "pnpm --filter '!@querobroapp/mobile' build",
     "lint": "turbo run lint",
@@ -33,9 +36,6 @@
     "qa:smoke": "node scripts/qa-smoke.mjs",
     "validate:public-deploy": "node scripts/validate-public-deploy.mjs",
     "validate:delivery-quote": "node scripts/validate-delivery-quote.mjs",
-    "bank:pix:bridge": "node scripts/nubank-pix-bridge.mjs",
-    "bank:pix:bridge:once": "node scripts/nubank-pix-bridge.mjs --once",
-    "bank:pix:bridge:install": "node scripts/install-nubank-pix-bridge-launch-agent.mjs",
     "test": "node --test --test-concurrency=1 tests/*.test.mjs && pnpm -r --if-present test"
   },
   "devDependencies": {

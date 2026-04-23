@@ -20,6 +20,20 @@ export type CustomerAutofillPatch = Partial<
   >
 >;
 
+export function extractStreetNumberFromAddressLine1(value?: string | null) {
+  const normalized = compactWhitespace(value || '');
+  if (!normalized) return '';
+
+  const commaMatch = normalized.match(/,\s*([^,]+)$/);
+  const candidate = compactWhitespace(commaMatch?.[1] || '');
+  if (candidate && STREET_NUMBER_PATTERN.test(candidate)) {
+    return candidate;
+  }
+
+  const inlineMatch = normalized.match(/\b(\d+[a-z]?(?:[-/]\d+[a-z]?)?)\b/i);
+  return compactWhitespace(inlineMatch?.[1] || '');
+}
+
 export type GooglePlaceAddressComponentLike = {
   long_name?: string;
   longText?: string;
@@ -98,6 +112,7 @@ export function buildCustomerAddressAutofill(address?: string | null): CustomerA
   const normalized = compactWhitespace(address || '');
   const fallback: CustomerAutofillPatch = {
     addressLine1: '',
+    addressLine2: '',
     neighborhood: '',
     city: '',
     state: '',
@@ -116,10 +131,22 @@ export function buildCustomerAddressAutofill(address?: string | null): CustomerA
     .map((segment) => compactWhitespace(segment))
     .filter(Boolean);
 
+  let inferredNeighborhoodFromStreetSegment = '';
+  const secondSegment = segments[1] || '';
+  const secondSegmentParts = secondSegment.match(
+    /^((?:(?:n(?:[.o]|o|umero)?\s*)?\d+[a-z]?(?:[-/]\d+[a-z]?)?|s\/?n|sem numero))\s*[-/]\s*(.+)$/i
+  );
+
   const normalizedSegments =
-    segments.length > 1 && STREET_NUMBER_PATTERN.test(segments[1] || '')
-      ? [`${segments[0]}, ${segments[1]}`, ...segments.slice(2)]
-      : segments;
+    segments.length > 1 && STREET_NUMBER_PATTERN.test(secondSegment)
+      ? [`${segments[0]}, ${secondSegment}`, ...segments.slice(2)]
+      : secondSegmentParts
+        ? [`${segments[0]}, ${compactWhitespace(secondSegmentParts[1])}`, compactWhitespace(secondSegmentParts[2]), ...segments.slice(2)]
+        : segments;
+
+  if (secondSegmentParts) {
+    inferredNeighborhoodFromStreetSegment = normalizeNeighborhoodSegment(secondSegmentParts[2]);
+  }
 
   if (normalizedSegments.length === 0) {
     return {
@@ -153,10 +180,16 @@ export function buildCustomerAddressAutofill(address?: string | null): CustomerA
   }
 
   let neighborhood = '';
+  let addressLine2 = '';
   if (cityIndex > 1) {
     for (let index = cityIndex - 1; index >= 1; index -= 1) {
       const candidate = normalizedSegments[index];
-      if (looksLikeComplement(candidate)) continue;
+      if (looksLikeComplement(candidate)) {
+        if (!addressLine2) {
+          addressLine2 = normalizeSegment(candidate);
+        }
+        continue;
+      }
       neighborhood = normalizeNeighborhoodSegment(candidate);
       if (neighborhood) break;
     }
@@ -164,7 +197,8 @@ export function buildCustomerAddressAutofill(address?: string | null): CustomerA
 
   return {
     addressLine1,
-    neighborhood,
+    addressLine2,
+    neighborhood: neighborhood || inferredNeighborhoodFromStreetSegment,
     city,
     state,
     postalCode
@@ -200,8 +234,8 @@ export function buildCustomerAddressAutofillFromGooglePlace(
 
   const components = place.address_components || place.addressComponents || [];
   const street = normalizeGoogleAddressComponent(components, ['route']);
-  const streetNumber = normalizeGoogleAddressComponent(components, ['street_number'], 'short');
-  const neighborhood = normalizeNeighborhoodSegment(
+  const componentStreetNumber = normalizeGoogleAddressComponent(components, ['street_number'], 'short');
+  const componentNeighborhood = normalizeNeighborhoodSegment(
     normalizeGoogleAddressComponent(components, ['sublocality_level_1', 'neighborhood'])
   );
   const city = normalizeGoogleAddressComponent(components, ['locality', 'administrative_area_level_2']);
@@ -211,17 +245,23 @@ export function buildCustomerAddressAutofillFromGooglePlace(
   );
   const country = normalizeGoogleAddressComponent(components, ['country']);
 
-  const addressLine1 = [street, streetNumber].filter(Boolean).join(', ');
+  const formattedAddress = compactWhitespace(place.formatted_address || place.formattedAddress || '');
+  const inferred = buildCustomerAddressAutofill(formattedAddress);
+  const inferredStreetNumber = extractStreetNumberFromAddressLine1(inferred.addressLine1 || '');
+  const streetNumber = componentStreetNumber || inferredStreetNumber;
+  const addressLine1 = [street || inferred.addressLine1?.split(',')[0] || '', streetNumber].filter(Boolean).join(', ');
+  const neighborhood = componentNeighborhood || normalizeNeighborhoodSegment(inferred.neighborhood);
   const coordinates = place.geometry?.location || place.location;
   const lat = coordinates?.lat?.();
   const lng = coordinates?.lng?.();
 
   const patch: CustomerAutofillPatch = {
     addressLine1,
+    addressLine2: inferred.addressLine2 || '',
     neighborhood,
-    city,
-    state,
-    postalCode,
+    city: city || inferred.city || '',
+    state: state || inferred.state || '',
+    postalCode: postalCode || inferred.postalCode || '',
     country,
     placeId: place.place_id || place.id || '',
     ...(Number.isFinite(lat) ? { lat } : {}),
@@ -229,8 +269,7 @@ export function buildCustomerAddressAutofillFromGooglePlace(
   };
 
   const addressFromSummary = buildCustomerAddressSummary(patch);
-  patch.address =
-    compactWhitespace(place.formatted_address || place.formattedAddress || '') || addressFromSummary || '';
+  patch.address = formattedAddress || addressFromSummary || '';
   return patch;
 }
 

@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     body = await request.json();
   } catch {
     return buildErrorResponse(400, {
-      message: 'Payload invalido para o bridge do Google Forms.'
+      message: 'Payload inválido para o bridge do Google Forms.'
     });
   }
 

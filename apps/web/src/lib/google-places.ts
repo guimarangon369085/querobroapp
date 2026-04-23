@@ -127,7 +127,7 @@ export async function loadGooglePlacesLibrary(options: LoadGooglePlacesOptions) 
             resolve(google);
             return;
           }
-          reject(new Error('Google Places indisponivel apos carregar script.'));
+          reject(new Error('Google Places indisponível após carregar script.'));
         })
         .catch((error) => {
           reject(error instanceof Error ? error : new Error('Falha ao inicializar Google Places.'));
@@ -192,5 +192,5 @@ export async function loadGooglePlacesAutocompleteDataLibrary(options: LoadGoogl
     await sleep(120);
   }
 
-  throw new Error('Autocomplete Data indisponivel no Google Places atual.');
+  throw new Error('Autocomplete Data indisponível no Google Places atual.');
 }

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Inject, Param, Post, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Inject, Param, Post, Put, UnauthorizedException } from '@nestjs/common';
 import { z } from 'zod';
 import { parseWithSchema } from '../../common/validation.js';
 import { DeliveriesService } from './deliveries.service.js';
@@ -24,12 +24,12 @@ export class DeliveriesController {
 
     if (configuredToken) {
       if (providedToken === configuredToken) return;
-      throw new UnauthorizedException('Token do bridge de frete invalido.');
+      throw new UnauthorizedException('Token do bridge de frete inválido.');
     }
 
     if (getSecurityRuntimeConfig().enabled) {
       throw new UnauthorizedException(
-        'ORDER_FORM_BRIDGE_TOKEN obrigatorio para expor a cotacao publica de frete com auth ligada.'
+        'ORDER_FORM_BRIDGE_TOKEN obrigatório para expor a cotação pública de frete com auth ligada.'
       );
     }
   }
@@ -51,6 +51,16 @@ export class DeliveriesController {
       enforceExternalSchedule: false,
       allowManualFallback: false
     });
+  }
+
+  @Get('pricing-config')
+  getPricingConfig() {
+    return this.service.getPricingConfig();
+  }
+
+  @Put('pricing-config')
+  updatePricingConfig(@Body() body: unknown) {
+    return this.service.updatePricingConfig(body);
   }
 
   @Get('orders/:id/readiness')

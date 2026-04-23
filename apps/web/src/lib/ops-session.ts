@@ -11,7 +11,7 @@ type OpsSessionPayload = {
 function getSubtleCrypto() {
   const cryptoLike = globalThis.crypto;
   if (!cryptoLike?.subtle) {
-    throw new Error('Web Crypto indisponivel para assinar sessao operacional.');
+    throw new Error('Web Crypto indisponível para assinar sessão operacional.');
   }
   return cryptoLike.subtle;
 }
@@ -70,7 +70,7 @@ async function signPayload(serializedPayload: string, secret: string) {
 export async function createOpsSessionCookieValue(input: { role: OpsAccessRole; label: string }) {
   const config = getOpsAccessConfig();
   if (!config.signingSecret) {
-    throw new Error('Segredo de sessao operacional nao configurado.');
+    throw new Error('Segredo de sessão operacional não configurado.');
   }
 
   const now = Date.now();
