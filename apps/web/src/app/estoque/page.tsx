@@ -208,7 +208,7 @@ function StockPageContent() {
   );
   const isOperationMode = viewMode === 'operation';
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const [productsData, ordersData, itemsData, movementsData, bomsData] = await Promise.all([
       apiFetch<Product[]>('/products'),
       apiFetch<Order[]>('/orders'),
@@ -221,11 +221,11 @@ function StockPageContent() {
     setItems(itemsData);
     setMovements(movementsData);
     setBoms(bomsData as Bom[]);
-  };
+  }, []);
 
   useEffect(() => {
     load().catch(console.error);
-  }, []);
+  }, [load]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -268,7 +268,7 @@ function StockPageContent() {
     });
   }, [advancedSlots, isOperationMode, searchParams]);
 
-  const loadD1 = async (targetDate: string) => {
+  const loadD1 = useCallback(async (targetDate: string) => {
     setD1Loading(true);
     setD1Error(null);
     try {
@@ -285,11 +285,20 @@ function StockPageContent() {
     } finally {
       setD1Loading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadD1(d1Date).catch(console.error);
-  }, [d1Date]);
+  }, [d1Date, loadD1]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      load().catch(console.error);
+      loadD1(d1Date).catch(console.error);
+    }, 30000);
+
+    return () => window.clearInterval(interval);
+  }, [d1Date, load, loadD1]);
 
   const applyBroaPreset = async () => {
     try {
@@ -532,7 +541,7 @@ function StockPageContent() {
     openBomForProduct(parsed)
       .then(() => load())
       .catch(console.error);
-  }, [searchParams, openBomForProduct]);
+  }, [searchParams, openBomForProduct, load]);
 
   const addBomItem = () => {
     setBomItems((prev) => [...prev, { itemId: '', qtyPerRecipe: '', qtyPerSaleUnit: '', qtyPerUnit: '' }]);
@@ -864,6 +873,24 @@ function StockPageContent() {
     return { ingredients, internalPackaging, externalPackaging };
   }, [d1ShortagesByCategory]);
 
+  const ingredientShortages = useMemo(
+    () => d1ShortagesByCategory.filter((row) => row.category === 'INGREDIENTE'),
+    [d1ShortagesByCategory]
+  );
+
+  const purchaseAlertItems = useMemo(() => {
+    const source = ingredientShortages.length > 0 ? ingredientShortages : d1ShortagesByCategory;
+    return source.slice(0, 4);
+  }, [d1ShortagesByCategory, ingredientShortages]);
+
+  const purchaseAlertHiddenCount = Math.max(
+    0,
+    (ingredientShortages.length > 0 ? ingredientShortages.length : d1ShortagesByCategory.length) -
+      purchaseAlertItems.length
+  );
+
+  const hasImmediatePurchaseAlert = plannedOrders.length > 0 && purchaseAlertItems.length > 0;
+
   const plannerExtra = useMemo(() => {
     const parsed = parseLocaleNumber(plannerExtraBroas);
     if (parsed === null || parsed < 0) return 0;
@@ -1104,6 +1131,58 @@ function StockPageContent() {
         <div className="stock-flag stock-flag--warning">
           {inventoryKpis.negativeBalanceItems} item(ns) com saldo negativo precisam de ajuste.
         </div>
+      ) : null}
+      {hasImmediatePurchaseAlert ? (
+        <section className="stock-alert-card" role="alert" aria-live="polite">
+          <div className="stock-alert-card__head">
+            <div>
+              <p className="stock-alert-card__eyebrow">Alerta de compra imediata</p>
+              <h3 className="stock-alert-card__title">Novos pedidos sem estoque completo</h3>
+              <p className="stock-alert-card__subtitle">
+                {plannedOrders.length} pedido(s) na fila para {d1Date} com falta de insumo.
+              </p>
+            </div>
+            <div className="stock-alert-card__kpi">
+              <span>{purchaseAlertItems.length} item(ns)</span>
+              <small>comprar agora</small>
+            </div>
+          </div>
+
+          <div className="stock-alert-card__list">
+            {purchaseAlertItems.map((row) => (
+              <div key={`alert-${row.ingredientId}`} className="stock-alert-card__item">
+                <p className="stock-alert-card__item-name">{row.name}</p>
+                <p className="stock-alert-card__item-qty">
+                  falta {formatQty(row.shortageQty)} {row.unit}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          {purchaseAlertHiddenCount > 0 ? (
+            <p className="stock-alert-card__more">+{purchaseAlertHiddenCount} item(ns) no quadro completo</p>
+          ) : null}
+
+          <div className="stock-alert-card__actions">
+            <button
+              type="button"
+              className="app-button app-button-primary"
+              onClick={() => {
+                selectAllShortages();
+                jumpToExecutionStep('buy', 'auto');
+              }}
+            >
+              Ir para compras agora
+            </button>
+            <button
+              type="button"
+              className="app-button app-button-ghost"
+              onClick={() => scrollToLayoutSlot('d1', { focus: true })}
+            >
+              Ver quadro completo
+            </button>
+          </div>
+        </section>
       ) : null}
       {isOperationMode ? (
         <section className="stock-exec" aria-label="Modo execucao">
