@@ -1,7 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException, Inject } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException, Inject } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
 import {
+  CardCheckoutSchema,
   moneyToMinorUnits,
   PaymentSchema,
   PaymentStatusEnum,
@@ -61,6 +62,20 @@ type HumanNameMatchSummary = {
   strongFirstAndLast: boolean;
 };
 
+type SumUpCheckoutPayload = {
+  id: string;
+  checkout_reference: string;
+  status: 'PENDING' | 'FAILED' | 'PAID';
+  hosted_checkout_url: string | null;
+  valid_until: string | null;
+  redirect_url: string | null;
+};
+
+type SumUpWebhookPayload = {
+  event_type?: string;
+  id?: string;
+};
+
 const PIX_RECONCILIATION_NAME_STOPWORDS = new Set(['DA', 'DAS', 'DE', 'DI', 'DO', 'DOS', 'DU', 'E']);
 const PIX_RECONCILIATION_NAME_WEAK_TOKENS = new Set(['FILHO', 'NETO', 'JUNIOR', 'JR', 'SOBRINHO']);
 const PIX_RECONCILIATION_DAY_MS = 24 * 60 * 60 * 1000;
@@ -87,6 +102,194 @@ export class PaymentsService {
         (process.env.PIX_RECEIVER_NAME || '').trim() &&
         (process.env.PIX_RECEIVER_CITY || '').trim()
     );
+  }
+
+  private getSumUpConfig() {
+    const apiKey = String(process.env.SUMUP_API_KEY || '').trim();
+    const merchantCode = String(process.env.SUMUP_MERCHANT_CODE || '').trim();
+    const baseUrl = String(process.env.SUMUP_API_BASE_URL || 'https://api.sumup.com').trim().replace(/\/+$/, '');
+    return {
+      enabled: Boolean(apiKey && merchantCode),
+      apiKey,
+      merchantCode,
+      baseUrl
+    };
+  }
+
+  isSumUpEnabled() {
+    return this.getSumUpConfig().enabled;
+  }
+
+  private assertSumUpEnabled() {
+    const config = this.getSumUpConfig();
+    if (!config.enabled) {
+      throw new InternalServerErrorException('Integração SumUp indisponível.');
+    }
+    return config;
+  }
+
+  private buildSumUpProviderRef(checkoutId: string) {
+    return `SUMUP:${checkoutId}`;
+  }
+
+  private parseSumUpProviderRef(providerRef?: string | null) {
+    const raw = String(providerRef || '').trim();
+    if (!raw) return null;
+    const match = raw.match(/^SUMUP:(.+)$/i);
+    return match?.[1]?.trim() || null;
+  }
+
+  private normalizePublicAppOrigin(value?: string | null) {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    try {
+      const url = new URL(raw);
+      return url.origin;
+    } catch {
+      return null;
+    }
+  }
+
+  private resolvePublicAppOrigin(preferred?: string | null) {
+    const candidates = [
+      preferred,
+      process.env.APP_PUBLIC_BASE_URL,
+      process.env.NEXT_PUBLIC_APP_URL,
+      process.env.VERCEL_PROJECT_PRODUCTION_URL,
+      process.env.VERCEL_URL
+    ];
+
+    for (const candidate of candidates) {
+      const origin = this.normalizePublicAppOrigin(candidate);
+      if (origin) return origin;
+    }
+
+    return null;
+  }
+
+  private buildSumUpCheckoutReference(input: { orderId: number; paymentId: number }) {
+    return `qb-order-${input.orderId}-payment-${input.paymentId}`.slice(0, 90);
+  }
+
+  private buildSumUpOrderDescription(input: { orderPublicNumber: number | null; orderId: number }) {
+    const displayNumber = input.orderPublicNumber ?? input.orderId;
+    return `Pedido #${displayNumber} - Querobroa`.slice(0, 120);
+  }
+
+  private parseSumUpCheckoutPayload(payload: unknown): SumUpCheckoutPayload {
+    if (!payload || typeof payload !== 'object') {
+      throw new BadRequestException('Resposta inválida da SumUp.');
+    }
+    const record = payload as Record<string, unknown>;
+    const id = String(record.id || '').trim();
+    const reference = String(record.checkout_reference || '').trim();
+    const status = String(record.status || '').trim().toUpperCase();
+    const hostedCheckoutUrl = String(record.hosted_checkout_url || '').trim();
+    const validUntil = String(record.valid_until || '').trim();
+    const redirectUrl = String(record.redirect_url || '').trim();
+
+    if (!id || !reference || (status !== 'PENDING' && status !== 'FAILED' && status !== 'PAID')) {
+      throw new BadRequestException('Checkout SumUp inválido.');
+    }
+
+    return {
+      id,
+      checkout_reference: reference,
+      status: status as SumUpCheckoutPayload['status'],
+      hosted_checkout_url: hostedCheckoutUrl || null,
+      valid_until: validUntil || null,
+      redirect_url: redirectUrl || null
+    };
+  }
+
+  private async fetchSumUp(pathname: string, init?: RequestInit) {
+    const config = this.assertSumUpEnabled();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12_000);
+
+    try {
+      const response = await fetch(`${config.baseUrl}${pathname}`, {
+        ...init,
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${config.apiKey}`,
+          ...(init?.headers || {})
+        },
+        signal: controller.signal
+      });
+      const raw = await response.text();
+      let payload: unknown = null;
+      try {
+        payload = raw ? JSON.parse(raw) : null;
+      } catch {
+        payload = raw || null;
+      }
+
+      if (!response.ok) {
+        const detail =
+          payload && typeof payload === 'object' && typeof (payload as Record<string, unknown>).message === 'string'
+            ? String((payload as Record<string, unknown>).message)
+            : raw.trim() || `HTTP ${response.status}`;
+        throw new BadRequestException(`SumUp: ${detail}`);
+      }
+
+      return payload;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private buildCardCheckout(input: SumUpCheckoutPayload) {
+    return CardCheckoutSchema.parse({
+      provider: 'SUMUP',
+      checkoutId: input.id,
+      reference: input.checkout_reference,
+      status: input.status,
+      hostedCheckoutUrl: input.hosted_checkout_url || `https://checkout.sumup.com/pay/${input.id}`,
+      expiresAt: input.valid_until,
+      redirectUrl: input.redirect_url
+    });
+  }
+
+  private async createSumUpHostedCheckout(input: {
+    paymentId: number;
+    orderId: number;
+    orderPublicNumber: number | null;
+    amount: number;
+    publicAppOrigin?: string | null;
+  }) {
+    const config = this.assertSumUpEnabled();
+    const publicAppOrigin = this.resolvePublicAppOrigin(input.publicAppOrigin);
+    const redirectUrl = publicAppOrigin ? `${publicAppOrigin}/pedidofinalizado` : null;
+    const returnUrl = publicAppOrigin ? `${publicAppOrigin}/api/payments/sumup/webhook` : null;
+    const payload = await this.fetchSumUp('/v0.1/checkouts', {
+      method: 'POST',
+      body: JSON.stringify({
+        amount: this.toMoney(input.amount),
+        checkout_reference: this.buildSumUpCheckoutReference({
+          orderId: input.orderId,
+          paymentId: input.paymentId
+        }),
+        currency: 'BRL',
+        description: this.buildSumUpOrderDescription({
+          orderPublicNumber: input.orderPublicNumber,
+          orderId: input.orderId
+        }),
+        merchant_code: config.merchantCode,
+        ...(returnUrl ? { return_url: returnUrl } : {}),
+        ...(redirectUrl ? { redirect_url: redirectUrl } : {}),
+        hosted_checkout: { enabled: true }
+      })
+    });
+
+    return this.parseSumUpCheckoutPayload(payload);
+  }
+
+  private async getSumUpCheckoutById(checkoutId: string) {
+    const payload = await this.fetchSumUp(`/v0.1/checkouts/${encodeURIComponent(checkoutId)}`, {
+      method: 'GET'
+    });
+    return this.parseSumUpCheckoutPayload(payload);
   }
 
   private pad2(value: number) {
@@ -559,12 +762,143 @@ export class PaymentsService {
 
     return PaymentSchema.parse({
       ...payment,
-      method: 'pix',
+      method: payment.method === 'card' ? 'card' : 'pix',
       paidAt: payment.paidAt?.toISOString() ?? null,
       dueDate: payment.dueDate?.toISOString() ?? null,
       providerRef: payment.providerRef,
       pixCharge
     });
+  }
+
+  async ensureSumUpHostedCheckoutOnRecord(
+    tx: TransactionClient,
+    payment: PaymentRecord,
+    input: {
+      orderPublicNumber: number | null;
+      publicAppOrigin?: string | null;
+    }
+  ) {
+    if (payment.method !== 'card' || payment.status === PaymentStatusEnum.enum.PAGO || payment.paidAt) {
+      throw new BadRequestException('Checkout SumUp só pode ser criado para pagamento de cartão pendente.');
+    }
+
+    const existingCheckoutId = this.parseSumUpProviderRef(payment.providerRef);
+    const existingCheckout = existingCheckoutId ? await this.getSumUpCheckoutById(existingCheckoutId) : null;
+    if (existingCheckout) {
+      return {
+        payment: payment.providerRef
+          ? payment
+          : ((await tx.payment.update({
+              where: { id: payment.id },
+              data: { providerRef: this.buildSumUpProviderRef(existingCheckout.id) }
+            })) as PaymentRecord),
+        cardCheckout: this.buildCardCheckout(existingCheckout)
+      };
+    }
+
+    const checkout = await this.createSumUpHostedCheckout({
+      paymentId: payment.id,
+      orderId: payment.orderId,
+      orderPublicNumber: input.orderPublicNumber,
+      amount: payment.amount,
+      publicAppOrigin: input.publicAppOrigin
+    });
+
+    const updated = (await tx.payment.update({
+      where: { id: payment.id },
+      data: {
+        providerRef: this.buildSumUpProviderRef(checkout.id)
+      }
+    })) as PaymentRecord;
+
+    return {
+      payment: updated,
+      cardCheckout: this.buildCardCheckout(checkout)
+    };
+  }
+
+  async syncSumUpCheckoutById(checkoutId: string) {
+    const normalizedCheckoutId = String(checkoutId || '').trim();
+    if (!normalizedCheckoutId) {
+      throw new BadRequestException('Checkout SumUp inválido.');
+    }
+
+    const checkout = await this.getSumUpCheckoutById(normalizedCheckoutId);
+    const payment = await this.prisma.payment.findFirst({
+      where: {
+        method: 'card',
+        providerRef: this.buildSumUpProviderRef(checkout.id)
+      },
+      orderBy: [{ id: 'desc' }]
+    });
+    if (!payment) {
+      throw new NotFoundException('Pagamento do checkout SumUp não encontrado.');
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const current = (await tx.payment.findUnique({
+        where: { id: payment.id }
+      })) as PaymentRecord | null;
+      if (!current) {
+        throw new NotFoundException('Pagamento não encontrado.');
+      }
+
+      if (checkout.status !== 'PAID') {
+        if (current.providerRef === this.buildSumUpProviderRef(checkout.id)) {
+          return current;
+        }
+        return (await tx.payment.update({
+          where: { id: current.id },
+          data: {
+            providerRef: this.buildSumUpProviderRef(checkout.id)
+          }
+        })) as PaymentRecord;
+      }
+
+      if (current.status === PaymentStatusEnum.enum.PAGO || current.paidAt) {
+        return current;
+      }
+
+      return (await tx.payment.update({
+        where: { id: current.id },
+        data: {
+          status: PaymentStatusEnum.enum.PAGO,
+          paidAt: new Date(),
+          providerRef: this.buildSumUpProviderRef(checkout.id)
+        }
+      })) as PaymentRecord;
+    });
+
+    return {
+      payment: this.normalizePayment(updated),
+      cardCheckout: this.buildCardCheckout(checkout)
+    };
+  }
+
+  async handleSumUpWebhook(payload: unknown) {
+    const record = payload && typeof payload === 'object' ? (payload as SumUpWebhookPayload) : null;
+    const eventType = String(record?.event_type || '').trim().toUpperCase();
+    const checkoutId = String(record?.id || '').trim();
+    if (!checkoutId) {
+      throw new BadRequestException('Webhook SumUp sem checkout.');
+    }
+    if (eventType && eventType !== 'CHECKOUT_STATUS_CHANGED') {
+      return {
+        ok: true,
+        ignored: true,
+        eventType,
+        checkoutId
+      };
+    }
+
+    const result = await this.syncSumUpCheckoutById(checkoutId);
+    return {
+      ok: true,
+      ignored: false,
+      checkoutId,
+      payment: result.payment,
+      cardCheckout: result.cardCheckout
+    };
   }
 
   private async getPaidTotal(
@@ -892,7 +1226,7 @@ export class PaymentsService {
         data: {
           orderId: data.orderId,
           amount,
-          method: 'pix',
+          method: data.method,
           status: isPaid ? PaymentStatusEnum.enum.PAGO : data.status,
           paidAt: isPaid ? (data.paidAt ? new Date(data.paidAt) : new Date()) : null,
           dueDate: data.dueDate ? new Date(data.dueDate) : null,
@@ -900,7 +1234,8 @@ export class PaymentsService {
         }
       })) as PaymentRecord;
 
-      const normalized = isPaid ? created : await this.ensurePixChargeOnRecord(tx, created);
+      const normalized =
+        isPaid || created.method !== 'pix' ? created : await this.ensurePixChargeOnRecord(tx, created);
       return this.normalizePayment(normalized);
     });
   }

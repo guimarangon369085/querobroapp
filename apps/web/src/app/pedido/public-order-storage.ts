@@ -11,7 +11,7 @@ export type PublicOrderResult = {
     scheduledAt?: string | null;
     deliveryWindowLabel?: string | null;
   };
-  intake: Pick<OrderIntakeMeta, 'stage' | 'deliveryFee' | 'pixCharge'>;
+  intake: Pick<OrderIntakeMeta, 'stage' | 'deliveryFee' | 'paymentMethod' | 'pixCharge' | 'cardCheckout'>;
 };
 
 export type StoredPublicOrderProfile = {

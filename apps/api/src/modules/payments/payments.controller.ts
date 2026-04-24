@@ -4,6 +4,7 @@ import { parseWithSchema } from '../../common/validation.js';
 import { z } from 'zod';
 
 const idSchema = z.coerce.number().int().positive();
+const checkoutIdSchema = z.string().trim().min(1).max(160);
 
 @Controller('payments')
 export class PaymentsController {
@@ -22,6 +23,16 @@ export class PaymentsController {
   @Get(':id/pix-charge')
   pixCharge(@Param('id') id: string) {
     return this.service.getPaymentPixCharge(parseWithSchema(idSchema, id));
+  }
+
+  @Post('sumup/webhook')
+  sumupWebhook(@Body() body: unknown) {
+    return this.service.handleSumUpWebhook(body);
+  }
+
+  @Post('sumup/checkouts/:checkoutId/sync')
+  syncSumUpCheckout(@Param('checkoutId') checkoutId: string) {
+    return this.service.syncSumUpCheckoutById(parseWithSchema(checkoutIdSchema, checkoutId));
   }
 
   @Delete(':id')

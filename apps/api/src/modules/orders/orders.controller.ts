@@ -110,10 +110,13 @@ export class OrdersController {
   intakeCustomerForm(
     @Body() body: unknown,
     @Headers('authorization') authorization?: string,
-    @Headers('x-order-form-token') formToken?: string
+    @Headers('x-order-form-token') formToken?: string,
+    @Headers('x-public-app-origin') publicAppOrigin?: string
   ) {
     this.assertExternalFormAccess(authorization, formToken);
-    return this.service.intakeCustomerForm(body);
+    return this.service.intakeCustomerForm(body, {
+      publicAppOrigin: publicAppOrigin ?? null
+    });
   }
 
   @Public()

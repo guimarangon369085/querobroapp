@@ -34,7 +34,9 @@ function sanitizePublicCustomerFormSuccessPayload(payload: unknown) {
         typeof intakeRecord.deliveryFee === 'number' && Number.isFinite(intakeRecord.deliveryFee)
           ? intakeRecord.deliveryFee
           : 0,
-      pixCharge: intakeRecord.pixCharge ?? null
+      paymentMethod: intakeRecord.paymentMethod === 'card' ? 'card' : 'pix',
+      pixCharge: intakeRecord.pixCharge ?? null,
+      cardCheckout: intakeRecord.cardCheckout ?? null
     }
   };
 }
@@ -52,6 +54,11 @@ export async function POST(request: Request) {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'
   };
+  try {
+    headers['x-public-app-origin'] = new URL(request.url).origin;
+  } catch (error) {
+    void error;
+  }
   const bridgeToken = String(process.env.ORDER_FORM_BRIDGE_TOKEN || '').trim();
   if (bridgeToken) {
     headers.Authorization = `Bearer ${bridgeToken}`;

@@ -3,7 +3,7 @@ import type { OrderIntakeMeta } from '@querobroapp/shared';
 export const ORDER_FINALIZED_STORAGE_KEY = 'querobroapp:order-finalized';
 
 export type StoredOrderFinalized = {
-  version: 1;
+  version: 1 | 2;
   origin: 'PUBLIC_FORM' | 'INTERNAL_DASHBOARD';
   savedAt: string;
   returnPath: '/pedido' | '/pedidos';
@@ -14,7 +14,7 @@ export type StoredOrderFinalized = {
     scheduledAt?: string | null;
     deliveryWindowLabel?: string | null;
   };
-  intake: Pick<OrderIntakeMeta, 'stage' | 'deliveryFee' | 'pixCharge'>;
+  intake: Pick<OrderIntakeMeta, 'stage' | 'deliveryFee' | 'paymentMethod' | 'pixCharge' | 'cardCheckout'>;
 };
 
 function readStorageValue(storage: Storage, key: string) {
@@ -26,6 +26,7 @@ function parseStoredIntakeStage(value: unknown): StoredOrderFinalized['intake'][
   return value === 'DRAFT' ||
     value === 'CONFIRMED' ||
     value === 'PIX_PENDING' ||
+    value === 'PAYMENT_PENDING' ||
     value === 'PAID' ||
     value === 'SCHEDULED'
     ? value
@@ -42,7 +43,7 @@ export function readStoredOrderFinalized(): StoredOrderFinalized | null {
 
   try {
     const parsed = readStorageValue(window.sessionStorage, ORDER_FINALIZED_STORAGE_KEY);
-    if (!parsed || parsed.version !== 1) return null;
+    if (!parsed || (parsed.version !== 1 && parsed.version !== 2)) return null;
     if (typeof parsed.productSubtotal !== 'number' || !Number.isFinite(parsed.productSubtotal)) return null;
     if (!parsed.order || typeof parsed.order !== 'object') return null;
     if (!parsed.intake || typeof parsed.intake !== 'object') return null;
@@ -50,7 +51,7 @@ export function readStoredOrderFinalized(): StoredOrderFinalized | null {
     const parsedOrder = parsed.order as Record<string, unknown>;
     const parsedIntake = parsed.intake as Record<string, unknown>;
     const sanitized: StoredOrderFinalized = {
-      version: 1,
+      version: 2,
       origin: parsed.origin === 'INTERNAL_DASHBOARD' ? 'INTERNAL_DASHBOARD' : 'PUBLIC_FORM',
       savedAt: String(parsed.savedAt || '').trim(),
       returnPath: parsed.returnPath === '/pedidos' ? '/pedidos' : '/pedido',
@@ -76,7 +77,9 @@ export function readStoredOrderFinalized(): StoredOrderFinalized | null {
           typeof parsedIntake.deliveryFee === 'number' && Number.isFinite(parsedIntake.deliveryFee)
             ? parsedIntake.deliveryFee
             : 0,
-        pixCharge: (parsedIntake.pixCharge ?? null) as StoredOrderFinalized['intake']['pixCharge']
+        paymentMethod: parsedIntake.paymentMethod === 'card' ? 'card' : 'pix',
+        pixCharge: (parsedIntake.pixCharge ?? null) as StoredOrderFinalized['intake']['pixCharge'],
+        cardCheckout: (parsedIntake.cardCheckout ?? null) as StoredOrderFinalized['intake']['cardCheckout']
       }
     };
 

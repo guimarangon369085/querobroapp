@@ -50,7 +50,10 @@ const OrderStatusInputSchema = z.preprocess((input) => {
 
 export const PaymentStatusEnum = z.enum(['PENDENTE', 'PAGO', 'CANCELADO']);
 export const OrderPaymentStatusEnum = z.enum(['PENDENTE', 'PARCIAL', 'PAGO']);
+export const PaymentMethodEnum = z.enum(['pix', 'card']);
 export const PixChargeProviderEnum = z.enum(['STATIC_PIX', 'LOCAL_DEV']);
+export const CardCheckoutProviderEnum = z.enum(['SUMUP']);
+export const CardCheckoutStatusEnum = z.enum(['PENDING', 'FAILED', 'PAID']);
 export const OrderFulfillmentModeEnum = z.enum(['DELIVERY', 'PICKUP']);
 export const DeliveryProviderEnum = z.enum(['NONE', 'LOCAL']);
 export const DeliveryFeeSourceEnum = z.enum(['NONE', 'MANUAL_FALLBACK']);
@@ -89,6 +92,16 @@ export const PixChargeSchema = z.object({
   copyPasteCode: z.string().min(1),
   expiresAt: z.string().optional().nullable(),
   payable: z.boolean().default(false)
+});
+
+export const CardCheckoutSchema = z.object({
+  provider: CardCheckoutProviderEnum,
+  checkoutId: z.string().trim().min(1).max(160),
+  reference: z.string().trim().min(1).max(160),
+  status: CardCheckoutStatusEnum,
+  hostedCheckoutUrl: z.string().url(),
+  expiresAt: z.string().optional().nullable(),
+  redirectUrl: z.string().url().optional().nullable()
 });
 
 export const CustomerAddressSchema = z.object({
@@ -641,7 +654,7 @@ export const PaymentSchema = z.object({
   id: z.number().int().positive().optional(),
   orderId: z.number().int().positive(),
   amount: z.number().nonnegative(),
-  method: z.literal('pix').default('pix'),
+  method: PaymentMethodEnum.default('pix'),
   status: PaymentStatusEnum.default('PENDENTE'),
   paidAt: z.string().optional().nullable(),
   dueDate: z.string().optional().nullable(),
@@ -682,7 +695,14 @@ export const OrderIntakeChannelEnum = z.enum([
 ]);
 
 export const OrderIntakeIntentEnum = z.enum(['DRAFT', 'CONFIRMED', 'PAID']);
-export const OrderIntakeStageEnum = z.enum(['DRAFT', 'CONFIRMED', 'PIX_PENDING', 'PAID', 'SCHEDULED']);
+export const OrderIntakeStageEnum = z.enum([
+  'DRAFT',
+  'CONFIRMED',
+  'PIX_PENDING',
+  'PAYMENT_PENDING',
+  'PAID',
+  'SCHEDULED'
+]);
 export const PixChargeStatusEnum = z.enum(['PENDENTE', 'PAGO']);
 
 export const OrderIntakeCustomerRefSchema = z.union([
@@ -725,7 +745,7 @@ export const OrderIntakeItemSchema = OrderItemSchema.pick({
 });
 
 export const OrderIntakePaymentSchema = z.object({
-  method: z.literal('pix').default('pix'),
+  method: PaymentMethodEnum.default('pix'),
   status: PixChargeStatusEnum.default('PENDENTE'),
   dueAt: z.string().datetime().optional().nullable(),
   paidAt: z.string().datetime().optional().nullable(),
@@ -736,7 +756,8 @@ export const OrderIntakeSourceSchema = z.object({
   channel: OrderIntakeChannelEnum.default('INTERNAL_DASHBOARD'),
   externalId: z.string().trim().min(1).max(160).optional().nullable(),
   idempotencyKey: z.string().trim().min(1).max(160).optional().nullable(),
-  originLabel: z.string().trim().min(1).max(160).optional().nullable()
+  originLabel: z.string().trim().min(1).max(160).optional().nullable(),
+  publicAppOrigin: z.string().url().optional().nullable()
 });
 
 export const DeliveryQuoteSelectionSchema = z.object({
@@ -776,7 +797,7 @@ export const OrderIntakeMetaSchema = z.object({
   intent: OrderIntakeIntentEnum,
   stage: OrderIntakeStageEnum,
   fulfillmentMode: OrderFulfillmentModeEnum,
-  paymentMethod: z.literal('pix'),
+  paymentMethod: PaymentMethodEnum,
   pixStatus: PixChargeStatusEnum,
   paymentId: z.number().int().positive().nullable(),
   dueAt: z.string().nullable(),
@@ -788,6 +809,7 @@ export const OrderIntakeMetaSchema = z.object({
   deliveryQuoteStatus: DeliveryQuoteStatusEnum,
   deliveryQuoteExpiresAt: z.string().nullable(),
   pixCharge: PixChargeSchema.nullable(),
+  cardCheckout: CardCheckoutSchema.nullable(),
   orderId: z.number().int().positive(),
   customerId: z.number().int().positive()
 });
@@ -878,6 +900,7 @@ export const ExternalOrderSubmissionSchema = z
       timeWindow: ExternalOrderDeliveryWindowKeyEnum.optional().nullable()
     }),
     delivery: DeliveryQuoteSelectionSchema.optional(),
+    paymentMethod: PaymentMethodEnum.default('pix'),
     flavors: ExternalOrderFlavorCountsSchema,
     items: z.array(ExternalOrderSubmissionItemSchema).default([]),
     couponCode: z.string().trim().min(1).max(80).optional().nullable(),
@@ -887,7 +910,8 @@ export const ExternalOrderSubmissionSchema = z
         channel: ExternalOrderSubmissionChannelEnum.default('GOOGLE_FORM'),
         externalId: z.string().trim().min(1).max(160).optional().nullable(),
         idempotencyKey: z.string().trim().min(1).max(160).optional().nullable(),
-        originLabel: z.string().trim().min(1).max(160).optional().nullable()
+        originLabel: z.string().trim().min(1).max(160).optional().nullable(),
+        publicAppOrigin: z.string().url().optional().nullable()
       })
       .default({})
   })
@@ -1002,7 +1026,7 @@ export const ExternalOrderSubmissionPreviewSchema = z.object({
   }),
   delivery: DeliveryQuoteResponseSchema,
   payment: z.object({
-    method: z.literal('pix'),
+    method: PaymentMethodEnum,
     status: PixChargeStatusEnum,
     payable: z.boolean(),
     dueAt: z.string().datetime().nullable()
@@ -1410,8 +1434,12 @@ export const BuilderBlockKeyEnum = z.enum(['theme', 'forms', 'home', 'layout']);
 export type OrderStatus = z.infer<typeof OrderStatusEnum>;
 export type PaymentStatus = z.infer<typeof PaymentStatusEnum>;
 export type OrderPaymentStatus = z.infer<typeof OrderPaymentStatusEnum>;
+export type PaymentMethod = z.infer<typeof PaymentMethodEnum>;
 export type PixChargeProvider = z.infer<typeof PixChargeProviderEnum>;
 export type PixCharge = z.infer<typeof PixChargeSchema>;
+export type CardCheckoutProvider = z.infer<typeof CardCheckoutProviderEnum>;
+export type CardCheckoutStatus = z.infer<typeof CardCheckoutStatusEnum>;
+export type CardCheckout = z.infer<typeof CardCheckoutSchema>;
 export type StockMovementType = z.infer<typeof StockMovementTypeEnum>;
 export type OrderIntakeChannel = z.infer<typeof OrderIntakeChannelEnum>;
 export type OrderIntakeIntent = z.infer<typeof OrderIntakeIntentEnum>;

@@ -1,8 +1,12 @@
 # PROJECT_SNAPSHOT
 
-Ultima atualizacao: 2026-04-22
+Ultima atualizacao: 2026-04-24
 
 ## Estado atual
+
+- 2026-04-24: o `/pedido` publicado passou a oferecer `PIX` e `Cartão` com checkout hospedado da SumUp. O fluxo cria o pedido no app, preserva idempotencia no intake externo, grava `paymentMethod`, gera checkout hospedado para cartão, expõe sync/webhook públicos e redireciona o cliente para a SumUp a partir da tela final do pedido. As variáveis `SUMUP_API_KEY` e `SUMUP_MERCHANT_CODE` foram gravadas em `querobroAPI` e `querobroAPP` no Railway, com `merchant_code = M16V7P5B` validado pela API oficial da SumUp.
+
+- 2026-04-24: a correção mobile de `/confirmacoes` ficou formalizada no código local. `queue-screen.tsx` deixou de depender da tabela desktop no celular e passou a renderizar cards móveis com endereço quebrando corretamente (`break-words` + `leading-6`), reduzindo o truncamento visual em scroll rápido no Safari/iPhone.
 
 - 2026-04-22: o feed `meta-catalog.csv` e os assets públicos do sabor `Romeu e Julieta` foram recompostos para manter o catálogo do WhatsApp alinhado ao web. `romeu-e-julieta.jpg` foi reexportado na resolução publicada, `sabores-caixa.jpg` foi regenerado com a coluna atual do `RJ`, a `Caixa Mista de Romeu e Julieta` ganhou a arte quadrada `mista-romeu-e-julieta-meta-square-v2.jpg` no mesmo padrão diagonal full bleed das demais mistas, sem moldura clara, e o web voltou a usar também a composição vertical `mista-romeu-e-julieta.jpg` nos pontos internos do catálogo.
 

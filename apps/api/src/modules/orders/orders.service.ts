@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import type { Customer as PrismaCustomer } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
 import {
+  type CardCheckout,
   compareMoney,
   ExternalOrderDeliveryWindowKeyEnum,
   ExternalOrderScheduleAvailabilitySchema,
@@ -20,6 +21,7 @@ import {
   normalizeOrderStatus,
   parseMarketingSamplesDiscountPct,
   parseMarketingSamplesSponsoredDeliveryFee,
+  type PaymentMethod,
   preserveOrderNoteMetadata,
   PixChargeSchema,
   roundMoney,
@@ -181,6 +183,7 @@ function resolveOrderStatusPath(currentStatus: string, targetStatus: OrderStatus
 }
 
 const ORDER_INTAKE_SCOPE = 'ORDER_INTAKE';
+const ORDER_EXTERNAL_INTAKE_SCOPE = 'ORDER_INTAKE_EXTERNAL';
 const ORDER_BOX_PRICE_CUSTOM = 52;
 const ORDER_BOX_PRICE_TRADITIONAL = 40;
 const ORDER_BOX_PRICE_MIXED_GOIABADA = 45;
@@ -226,6 +229,7 @@ type OrderScheduleQueryClient = Pick<
 type OrderIntakePayload = z.infer<typeof OrderIntakeSchema>;
 type OrderIntakeMeta = z.infer<typeof OrderIntakeMetaSchema>;
 type PixCharge = z.infer<typeof PixChargeSchema>;
+type CheckoutCard = CardCheckout;
 type ExternalOrderSubmissionPayload = z.infer<typeof ExternalOrderSubmissionSchema>;
 type ExternalOrderSubmissionPreview = z.infer<typeof ExternalOrderSubmissionPreviewSchema>;
 type ExternalOrderDeliveryWindowKey = z.infer<typeof ExternalOrderDeliveryWindowKeyEnum>;
@@ -1724,6 +1728,19 @@ export class OrdersService {
     return JSON.stringify(payload);
   }
 
+  private externalSubmissionIdemKey(
+    payload: ExternalOrderSubmissionPayload,
+    intakeChannel: 'CUSTOMER_LINK'
+  ) {
+    const rawKey = payload.source.idempotencyKey?.trim() || payload.source.externalId?.trim();
+    if (!rawKey) return null;
+    return `${intakeChannel}:${rawKey}`;
+  }
+
+  private externalSubmissionRequestHash(payload: ExternalOrderSubmissionPayload) {
+    return JSON.stringify(payload);
+  }
+
   private intakeRecordExpiry() {
     const expiresAt = new Date();
     expiresAt.setFullYear(expiresAt.getFullYear() + 10);
@@ -1921,8 +1938,32 @@ export class OrdersService {
     data: ExternalOrderSubmissionPayload,
     params: {
       intakeChannel: 'CUSTOMER_LINK';
+      publicAppOrigin?: string | null;
     }
   ) {
+    const externalIdemKey = this.externalSubmissionIdemKey(data, params.intakeChannel);
+    const externalRequestHash = this.externalSubmissionRequestHash(data);
+    if (externalIdemKey) {
+      const stored = await this.prisma.$transaction(async (tx) => {
+        const existingRecord = await tx.idempotencyRecord.findUnique({
+          where: {
+            scope_idemKey: {
+              scope: ORDER_EXTERNAL_INTAKE_SCOPE,
+              idemKey: externalIdemKey
+            }
+          }
+        });
+        if (!existingRecord) return null;
+        if (existingRecord.requestHash !== externalRequestHash) {
+          throw new BadRequestException('Chave de idempotencia reutilizada com payload diferente.');
+        }
+        return this.findStoredIntakeResult(tx, externalIdemKey, ORDER_EXTERNAL_INTAKE_SCOPE);
+      });
+      if (stored) {
+        return stored;
+      }
+    }
+
     const items = await this.resolveExternalSubmissionItems(data);
     const pricedOrder = await this.priceOrderItems(this.prisma, items);
     const resolvedSchedule = await this.resolvePublicExternalSubmissionSchedule(this.prisma, data.fulfillment, {
@@ -1934,7 +1975,7 @@ export class OrdersService {
       customerPhone: data.customer.phone ?? null
     });
 
-    return this.intake({
+    const result = await this.intake({
       version: 1,
       intent: 'CONFIRMED',
       customer: {
@@ -1974,7 +2015,7 @@ export class OrdersService {
           ) ?? undefined
       },
       payment: {
-        method: 'pix',
+        method: data.paymentMethod,
         status: 'PENDENTE',
         dueAt: resolvedSchedule.scheduledAtIso
       },
@@ -1982,9 +2023,18 @@ export class OrdersService {
         channel: params.intakeChannel,
         externalId: data.source.externalId ?? null,
         idempotencyKey: data.source.idempotencyKey ?? data.source.externalId ?? null,
-        originLabel: data.source.originLabel ?? null
+        originLabel: data.source.originLabel ?? null,
+        publicAppOrigin: params.publicAppOrigin ?? data.source.publicAppOrigin ?? null
       }
     });
+
+    if (externalIdemKey) {
+      await this.prisma.$transaction((tx) =>
+        this.saveIntakeResult(tx, externalIdemKey, externalRequestHash, result, ORDER_EXTERNAL_INTAKE_SCOPE)
+      );
+    }
+
+    return result;
   }
 
   private async previewExternalSubmission(
@@ -2039,7 +2089,7 @@ export class OrdersService {
     return ExternalOrderSubmissionPreviewSchema.parse({
       version: 1,
       channel: params.intakeChannel,
-      expectedStage: 'PIX_PENDING',
+      expectedStage: data.paymentMethod === 'card' ? 'PAYMENT_PENDING' : 'PIX_PENDING',
       fulfillmentMode: data.fulfillment.mode,
       scheduledAt: resolvedSchedule.scheduledAtIso,
       customer: {
@@ -2073,7 +2123,7 @@ export class OrdersService {
       },
       delivery: deliveryQuote,
       payment: {
-        method: 'pix',
+        method: data.paymentMethod,
         status: 'PENDENTE',
         payable: false,
         dueAt: resolvedSchedule.scheduledAtIso
@@ -2755,7 +2805,9 @@ export class OrdersService {
     if (payload.intent === 'DRAFT') return 'DRAFT' as const;
 
     const pixStatus = payment && (payment.status === 'PAGO' || payment.paidAt) ? 'PAGO' : 'PENDENTE';
-    if (payment && pixStatus === 'PENDENTE') return 'PIX_PENDING' as const;
+    if (payment && pixStatus === 'PENDENTE') {
+      return payment.method === 'pix' ? ('PIX_PENDING' as const) : ('PAYMENT_PENDING' as const);
+    }
     if (payment && pixStatus === 'PAGO' && order.scheduledAt) return 'SCHEDULED' as const;
     if (payment && pixStatus === 'PAGO') return 'PAID' as const;
     return 'CONFIRMED' as const;
@@ -2772,16 +2824,18 @@ export class OrdersService {
       providerRef: string | null;
       method: string;
     } | null,
-    pixCharge: PixCharge | null
+    pixCharge: PixCharge | null,
+    cardCheckout: CheckoutCard | null
   ) {
     const pixStatus = payment && (payment.status === 'PAGO' || payment.paidAt) ? 'PAGO' : 'PENDENTE';
+    const paymentMethod: PaymentMethod = payment?.method === 'card' ? 'card' : 'pix';
     return OrderIntakeMetaSchema.parse({
       version: 1,
       channel: payload.source.channel,
       intent: payload.intent,
       stage: this.intakeStageFrom(payload, order, payment),
       fulfillmentMode: payload.fulfillment.mode,
-      paymentMethod: 'pix',
+      paymentMethod,
       pixStatus,
       paymentId: payment?.id ?? null,
       dueAt: payment?.dueDate?.toISOString() ?? null,
@@ -2793,6 +2847,7 @@ export class OrdersService {
       deliveryQuoteStatus: this.normalizeDeliveryQuoteStatus(order.deliveryQuoteStatus),
       deliveryQuoteExpiresAt: order.deliveryQuoteExpiresAt?.toISOString() ?? null,
       pixCharge,
+      cardCheckout,
       orderId: order.id!,
       customerId: order.customerId
     });
@@ -2800,12 +2855,13 @@ export class OrdersService {
 
   private async findStoredIntakeResult(
     tx: TransactionClient,
-    idemKey: string
+    idemKey: string,
+    scope = ORDER_INTAKE_SCOPE
   ): Promise<{ order: ReturnType<OrdersService['withFinancial']>; intake: OrderIntakeMeta } | null> {
     const record = await tx.idempotencyRecord.findUnique({
       where: {
         scope_idemKey: {
-          scope: ORDER_INTAKE_SCOPE,
+          scope,
           idemKey
         }
       }
@@ -2828,7 +2884,9 @@ export class OrdersService {
       return {
         order: this.withFinancial(order),
         intake: OrderIntakeMetaSchema.parse({
+          paymentMethod: 'pix',
           pixCharge: null,
+          cardCheckout: null,
           ...intakePayload,
           deliveryProvider: this.normalizeDeliveryProvider(intakePayload.deliveryProvider as string | null | undefined),
           deliveryFeeSource: this.normalizeDeliveryFeeSource(intakePayload.deliveryFeeSource as string | null | undefined),
@@ -2846,12 +2904,13 @@ export class OrdersService {
     tx: TransactionClient,
     idemKey: string,
     requestHash: string,
-    result: { order: ReturnType<OrdersService['withFinancial']>; intake: OrderIntakeMeta }
+    result: { order: ReturnType<OrdersService['withFinancial']>; intake: OrderIntakeMeta },
+    scope = ORDER_INTAKE_SCOPE
   ) {
     await tx.idempotencyRecord.upsert({
       where: {
         scope_idemKey: {
-          scope: ORDER_INTAKE_SCOPE,
+          scope,
           idemKey
         }
       },
@@ -2864,7 +2923,7 @@ export class OrdersService {
         expiresAt: this.intakeRecordExpiry()
       },
       create: {
-        scope: ORDER_INTAKE_SCOPE,
+        scope,
         idemKey,
         requestHash,
         responseJson: JSON.stringify({
@@ -2878,6 +2937,29 @@ export class OrdersService {
 
   async intake(payload: unknown) {
     const data = OrderIntakeSchema.parse(payload);
+    const idemKey = this.intakeIdemKey(data);
+    const requestHash = this.intakeRequestHash(data);
+    if (idemKey) {
+      const stored = await this.prisma.$transaction(async (tx) => {
+        const existingRecord = await tx.idempotencyRecord.findUnique({
+          where: {
+            scope_idemKey: {
+              scope: ORDER_INTAKE_SCOPE,
+              idemKey
+            }
+          }
+        });
+        if (!existingRecord) return null;
+        if (existingRecord.requestHash !== requestHash) {
+          throw new BadRequestException('Chave de idempotencia reutilizada com payload diferente.');
+        }
+        return this.findStoredIntakeResult(tx, idemKey);
+      });
+      if (stored) {
+        return stored;
+      }
+    }
+
     const isExternalIntakeChannel = data.source.channel === 'CUSTOMER_LINK';
     const quoteCustomer = await this.resolveDeliveryQuoteCustomer(data.customer);
     const pricedOrder = await this.priceOrderItems(this.prisma, data.order.items);
@@ -2932,9 +3014,6 @@ export class OrdersService {
       | null = null;
 
     const result = await this.prisma.$transaction(async (tx) => {
-      const idemKey = this.intakeIdemKey(data);
-      const requestHash = this.intakeRequestHash(data);
-
       if (idemKey) {
         const existingRecord = await tx.idempotencyRecord.findUnique({
           where: {
@@ -3072,6 +3151,7 @@ export class OrdersService {
         providerRef: string | null;
         method: string;
       } | null = null;
+      let cardCheckout: CheckoutCard | null = null;
 
       if (data.intent !== 'DRAFT' && data.payment) {
         const normalizedPaymentStatus = compareMoney(total, 0) <= 0 ? 'PAGO' : data.payment.status;
@@ -3079,7 +3159,7 @@ export class OrdersService {
           data: {
             orderId: createdOrder.id,
             amount: total,
-            method: 'pix',
+            method: data.payment.method,
             status: normalizedPaymentStatus,
             dueDate: data.payment.dueAt ? new Date(data.payment.dueAt) : scheduledAt,
             paidAt:
@@ -3093,7 +3173,16 @@ export class OrdersService {
         });
 
         if (paymentRecord.status !== 'PAGO' && !paymentRecord.paidAt) {
-          paymentRecord = await this.paymentsService.ensurePixChargeOnRecord(tx, paymentRecord);
+          if (paymentRecord.method === 'pix') {
+            paymentRecord = await this.paymentsService.ensurePixChargeOnRecord(tx, paymentRecord);
+          } else if (paymentRecord.method === 'card' && compareMoney(paymentRecord.amount, 0) > 0) {
+            const ensuredCardCheckout = await this.paymentsService.ensureSumUpHostedCheckoutOnRecord(tx, paymentRecord, {
+              orderPublicNumber: createdOrder.publicNumber ?? null,
+              publicAppOrigin: data.source.publicAppOrigin ?? null
+            });
+            paymentRecord = ensuredCardCheckout.payment;
+            cardCheckout = ensuredCardCheckout.cardCheckout;
+          }
         }
       }
 
@@ -3152,7 +3241,7 @@ export class OrdersService {
           : null;
       const result = {
         order,
-        intake: this.buildOrderIntakeMeta(data, order, latestPayment, pixCharge)
+        intake: this.buildOrderIntakeMeta(data, order, latestPayment, pixCharge, cardCheckout)
       };
 
       if (data.intent !== 'DRAFT') {
@@ -3176,14 +3265,15 @@ export class OrdersService {
     return result;
   }
 
-  async intakeCustomerForm(payload: unknown) {
+  async intakeCustomerForm(payload: unknown, options?: { publicAppOrigin?: string | null }) {
     const data = this.parseExternalOrderSubmission(payload, {
       defaultChannel: 'PUBLIC_FORM',
       defaultOriginLabel: 'customer-form'
     });
     this.assertPublicFormDeliveryAddress(data.customer, data.fulfillment.mode);
     return this.intakeExternalSubmission(data, {
-      intakeChannel: 'CUSTOMER_LINK'
+      intakeChannel: 'CUSTOMER_LINK',
+      publicAppOrigin: options?.publicAppOrigin ?? null
     });
   }
 

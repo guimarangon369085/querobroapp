@@ -66,6 +66,9 @@ export function generateMetadata(): Metadata {
 export default async function PedidoPage() {
   let initialCatalogProducts: Product[] = [];
   const showCompanionProducts = true;
+  const sumupEnabled = Boolean(
+    String(process.env.SUMUP_API_KEY || '').trim() && String(process.env.SUMUP_MERCHANT_CODE || '').trim()
+  );
 
   try {
     const requestHeaders = await headers();
@@ -89,6 +92,7 @@ export default async function PedidoPage() {
     <PublicOrderPage
       initialCatalogProducts={initialCatalogProducts}
       showCompanionProducts={showCompanionProducts}
+      sumupEnabled={sumupEnabled}
     />
   );
 }

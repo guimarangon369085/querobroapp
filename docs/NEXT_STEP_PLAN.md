@@ -1,6 +1,6 @@
 # NEXT_STEP_PLAN
 
-Ultima atualizacao: 2026-04-16
+Ultima atualizacao: 2026-04-24
 
 ## Objetivo da fase atual
 
@@ -40,6 +40,7 @@ Criterio de pronto:
 
 ### Teste real do canal externo com total final correto
 
+- Validar em produção o novo ramo `Cartão` da SumUp em `/pedido`, incluindo criação do pedido com `PAYMENT_PENDING`, redirecionamento para checkout hospedado, sync de status e retorno seguro para a tela final.
 - Configurar `ORDER_FORM_BRIDGE_TOKEN` onde houver auth ligada.
 - Montar o `Google Form` real com os labels definidos em `docs/GOOGLE_FORMS_BRIDGE.md`.
 - Colar o `scripts/google-form-bridge.gs` no Apps Script do formulario.

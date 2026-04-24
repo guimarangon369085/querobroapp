@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { type PixCharge } from '@querobroapp/shared';
+import { type CardCheckout, type PixCharge } from '@querobroapp/shared';
 import { useFeedback } from '@/components/feedback-provider';
 import {
   clearStoredOrderFinalized,
   readStoredOrderFinalized,
+  writeStoredOrderFinalized,
   type StoredOrderFinalized
 } from '@/lib/order-finalized-storage';
 
@@ -37,11 +38,26 @@ function resolveDeliveryWindowLabel(order: StoredOrderFinalized['order']) {
   return formatScheduledAt(order.scheduledAt);
 }
 
+function resolvePaymentStatusLabel(payload: StoredOrderFinalized | null) {
+  if (!payload) return 'A confirmar';
+  const { intake } = payload;
+  if (intake.paymentMethod === 'card') {
+    if (intake.stage === 'PAID' || intake.stage === 'SCHEDULED') return 'Cartão aprovado';
+    if (intake.cardCheckout?.status === 'FAILED') return 'Cartão não concluído';
+    return 'Cartão pendente';
+  }
+
+  if (intake.stage === 'PIX_PENDING') return 'PIX pendente';
+  if (intake.stage === 'PAID' || intake.stage === 'SCHEDULED') return 'PIX recebido';
+  return intake.stage;
+}
+
 export function PublicOrderSuccessPage() {
   const router = useRouter();
   const { notifyError, notifyInfo } = useFeedback();
   const [successPayload, setSuccessPayload] = useState<StoredOrderFinalized | null>(null);
   const [isCopyingPix, setIsCopyingPix] = useState(false);
+  const [isRefreshingCardStatus, setIsRefreshingCardStatus] = useState(false);
 
   useEffect(() => {
     const stored = readStoredOrderFinalized();
@@ -56,6 +72,15 @@ export function PublicOrderSuccessPage() {
     () => successPayload?.intake.pixCharge ?? null,
     [successPayload]
   );
+  const cardCheckout = useMemo<CardCheckout | null>(
+    () => successPayload?.intake.cardCheckout ?? null,
+    [successPayload]
+  );
+
+  const persistSuccessPayload = useCallback((nextPayload: StoredOrderFinalized) => {
+    setSuccessPayload(nextPayload);
+    writeStoredOrderFinalized(nextPayload);
+  }, []);
 
   const startAnotherOrder = () => {
     clearStoredOrderFinalized();
@@ -76,11 +101,76 @@ export function PublicOrderSuccessPage() {
     }
   };
 
+  const refreshCardStatus = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (!successPayload || !cardCheckout) return;
+
+      try {
+        setIsRefreshingCardStatus(true);
+        const response = await fetch(
+          `/api/payments/sumup/checkouts/${encodeURIComponent(cardCheckout.checkoutId)}/sync`,
+          {
+            method: 'POST',
+            cache: 'no-store'
+          }
+        );
+        const raw = await response.text();
+        const data = raw ? JSON.parse(raw) : null;
+        if (!response.ok) {
+          throw new Error(
+            data && typeof data === 'object' && typeof (data as Record<string, unknown>).message === 'string'
+              ? String((data as Record<string, unknown>).message)
+              : 'Não foi possível atualizar o pagamento.'
+          );
+        }
+
+        const payment =
+          data && typeof data === 'object' && typeof (data as Record<string, unknown>).payment === 'object'
+            ? ((data as Record<string, unknown>).payment as Record<string, unknown>)
+            : null;
+        const nextCardCheckout =
+          data && typeof data === 'object' && typeof (data as Record<string, unknown>).cardCheckout === 'object'
+            ? ((data as Record<string, unknown>).cardCheckout as CardCheckout)
+            : cardCheckout;
+        const isPaid = String(payment?.status || '').toUpperCase() === 'PAGO';
+        const nextPayload: StoredOrderFinalized = {
+          ...successPayload,
+          intake: {
+            ...successPayload.intake,
+            stage: isPaid ? (successPayload.order.scheduledAt ? 'SCHEDULED' : 'PAID') : 'PAYMENT_PENDING',
+            paymentMethod: 'card',
+            cardCheckout: nextCardCheckout,
+            pixCharge: null
+          }
+        };
+        persistSuccessPayload(nextPayload);
+
+        if (!options?.silent) {
+          notifyInfo(isPaid ? 'Pagamento confirmado.' : 'Status do cartão atualizado.');
+        }
+      } catch (error) {
+        if (!options?.silent) {
+          notifyError(error instanceof Error ? error.message : 'Não foi possível atualizar o pagamento.');
+        }
+      } finally {
+        setIsRefreshingCardStatus(false);
+      }
+    },
+    [cardCheckout, notifyError, notifyInfo, persistSuccessPayload, successPayload]
+  );
+
+  useEffect(() => {
+    if (!successPayload || successPayload.intake.paymentMethod !== 'card' || !cardCheckout) return;
+    if (successPayload.intake.stage === 'PAID' || successPayload.intake.stage === 'SCHEDULED') return;
+    void refreshCardStatus({ silent: true });
+  }, [cardCheckout, refreshCardStatus, successPayload]);
+
   if (!successPayload) {
     return null;
   }
 
   const { intake, order, productSubtotal } = successPayload;
+  const isCardPayment = intake.paymentMethod === 'card';
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(234,223,200,0.5),transparent_34%),radial-gradient(circle_at_top_right,rgba(210,228,219,0.54),transparent_30%),linear-gradient(180deg,#fbf4ea_0%,#f7efe3_100%)]">
@@ -113,17 +203,47 @@ export function PublicOrderSuccessPage() {
             </div>
             <div className="flex items-center justify-between gap-3 rounded-[24px] bg-white/78 px-4 py-3">
               <span>Status</span>
-              <strong className="text-[color:var(--ink-strong)]">
-                {intake.stage === 'PIX_PENDING'
-                  ? 'PIX pendente'
-                  : intake.stage === 'PAID' || intake.stage === 'SCHEDULED'
-                    ? 'PIX recebido'
-                    : intake.stage}
-              </strong>
+              <strong className="text-[color:var(--ink-strong)]">{resolvePaymentStatusLabel(successPayload)}</strong>
             </div>
           </div>
 
-          {pixCharge?.copyPasteCode ? (
+          {isCardPayment && cardCheckout ? (
+            <div className="mt-5 grid gap-4">
+              <div className="rounded-[24px] bg-white/78 px-4 py-4 text-sm leading-6 text-[color:var(--ink-muted)]">
+                {intake.stage === 'PAID' || intake.stage === 'SCHEDULED'
+                  ? 'Pagamento confirmado na SumUp. Se precisar, você pode fazer um novo pedido abaixo.'
+                  : cardCheckout.status === 'FAILED'
+                    ? 'O checkout da SumUp não foi concluído. Você pode tentar abrir novamente ou pedir um novo link no atendimento.'
+                    : 'Seu pedido foi criado. Toque abaixo para concluir o pagamento com cartão na SumUp.'}
+              </div>
+              <div className="app-form-actions">
+                {intake.stage === 'PAID' || intake.stage === 'SCHEDULED' ? null : (
+                  <button
+                    className="app-button app-button-primary"
+                    onClick={() => {
+                      window.location.assign(cardCheckout.hostedCheckoutUrl);
+                    }}
+                    type="button"
+                  >
+                    {cardCheckout.status === 'FAILED' ? 'Abrir checkout novamente' : 'Pagar com cartão'}
+                  </button>
+                )}
+                <button
+                  className="app-button app-button-ghost"
+                  disabled={isRefreshingCardStatus}
+                  onClick={() => {
+                    void refreshCardStatus();
+                  }}
+                  type="button"
+                >
+                  {isRefreshingCardStatus ? 'Atualizando...' : 'Atualizar status'}
+                </button>
+                <button className="app-button app-button-ghost" onClick={startAnotherOrder} type="button">
+                  {successPayload.returnLabel}
+                </button>
+              </div>
+            </div>
+          ) : pixCharge?.copyPasteCode ? (
             <div className="mt-5 grid gap-4">
               <div>
                 <p className="text-sm font-semibold text-[color:var(--ink-strong)]">PIX copia e cola</p>
@@ -150,7 +270,7 @@ export function PublicOrderSuccessPage() {
           ) : (
             <div className="mt-5 grid gap-3">
               <p className="rounded-[24px] bg-white/78 px-4 py-3 text-sm text-[color:var(--ink-muted)]">
-                Pedido enviado. O PIX sera confirmado no atendimento.
+                Pedido enviado. O pagamento será confirmado no atendimento.
               </p>
               <button className="app-button app-button-primary w-full sm:w-auto" onClick={startAnotherOrder} type="button">
                 {successPayload.returnLabel}

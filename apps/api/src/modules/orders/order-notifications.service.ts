@@ -540,7 +540,7 @@ export class OrderNotificationsService {
       order.fulfillmentMode === 'DELIVERY' ? 'Modo: entrega' : 'Modo: retirada',
       this.formatDeliveryLabel(order),
       `Total: ${this.formatMoney(order.total)}`,
-      `PIX: ${intake.pixStatus === 'PAGO' ? 'pago' : 'pendente'}`,
+      `${intake.paymentMethod === 'card' ? 'Cartão' : 'PIX'}: ${intake.pixStatus === 'PAGO' ? 'pago' : 'pendente'}`,
       '',
       `Abrir operação: ${operationsUrl}`
     ];
@@ -592,6 +592,7 @@ export class OrderNotificationsService {
         channel: intake.channel,
         intent: intake.intent,
         stage: intake.stage,
+        paymentMethod: intake.paymentMethod,
         pixStatus: intake.pixStatus,
         orderId: intake.orderId,
         customerId: intake.customerId
@@ -643,7 +644,7 @@ export class OrderNotificationsService {
       const flavors = this.buildDailyDigestFlavorSummary(order);
       const paidLabel = String(order.paymentStatus || '').toUpperCase() === 'PAGO' ? 'PAGO' : 'PENDENTE';
       lines.push(
-        `${index + 1}. ${this.formatTime(order.scheduledAt)} • #${orderNumber} • ${order.customer.name} • ${this.formatMode(order.fulfillmentMode)} • ${this.formatMoney(order.total)} • PIX ${paidLabel}`
+        `${index + 1}. ${this.formatTime(order.scheduledAt)} • #${orderNumber} • ${order.customer.name} • ${this.formatMode(order.fulfillmentMode)} • ${this.formatMoney(order.total)} • PAGAMENTO ${paidLabel}`
       );
       if (flavors) {
         lines.push(`Sabores: ${flavors}`);

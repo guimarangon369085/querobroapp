@@ -1664,7 +1664,7 @@ function OrdersPageContent() {
       setNewOrderDeliveryQuoteError(null);
       setIsNewOrderModalOpen(false);
       writeStoredOrderFinalized({
-        version: 1,
+        version: 2,
         origin: 'INTERNAL_DASHBOARD',
         savedAt: new Date().toISOString(),
         returnPath: '/pedidos',
@@ -1677,7 +1677,9 @@ function OrdersPageContent() {
         intake: {
           stage: created.intake.stage,
           deliveryFee: created.intake.deliveryFee,
-          pixCharge: created.intake.pixCharge
+          paymentMethod: created.intake.paymentMethod,
+          pixCharge: created.intake.pixCharge,
+          cardCheckout: created.intake.cardCheckout
         }
       });
       startTransition(() => {

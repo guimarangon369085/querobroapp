@@ -103,6 +103,7 @@ type PublicOrderFormState = {
   name: string;
   phone: string;
   fulfillmentMode: 'DELIVERY' | 'PICKUP';
+  paymentMethod: 'pix' | 'card';
   address: string;
   addressLine1: string;
   addressLine2: string;
@@ -147,6 +148,7 @@ type AppliedCoupon = CouponResolveResponse;
 type PublicOrderPageProps = {
   initialCatalogProducts?: Product[];
   showCompanionProducts?: boolean;
+  sumupEnabled?: boolean;
 };
 
 type PublicOrderScheduleAvailability = {
@@ -183,6 +185,7 @@ const initialFormState: PublicOrderFormState = {
   name: '',
   phone: '',
   fulfillmentMode: 'DELIVERY',
+  paymentMethod: 'pix',
   address: '',
   addressLine1: '',
   addressLine2: '',
@@ -563,7 +566,8 @@ function resolveMixedBoxesCollectionArt(
 
 export function PublicOrderPage({
   initialCatalogProducts = [],
-  showCompanionProducts = false
+  showCompanionProducts = false,
+  sumupEnabled = false
 }: PublicOrderPageProps) {
   const router = useRouter();
   const { notifyError } = useFeedback();
@@ -781,6 +785,14 @@ export function PublicOrderPage({
       }));
     }
   }, []);
+
+  useEffect(() => {
+    if (sumupEnabled || form.paymentMethod !== 'card') return;
+    setForm((current) => ({
+      ...current,
+      paymentMethod: 'pix'
+    }));
+  }, [form.paymentMethod, sumupEnabled]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1850,7 +1862,9 @@ export function PublicOrderPage({
       ? isQuotingDelivery
         ? 'CALCULANDO FRETE...'
         : 'CALCULAR FRETE'
-      : 'FINALIZAR PEDIDO';
+      : form.paymentMethod === 'card' && displayTotal > 0
+        ? 'IR PARA PAGAMENTO'
+        : 'FINALIZAR PEDIDO';
 
   const handlePrimaryAction = async () => {
     if (isSubmitting) return;
@@ -1967,6 +1981,7 @@ export function PublicOrderPage({
               expiresAt: activeDeliveryQuote.expiresAt
             } as ExternalOrderSubmission['delivery'])
           : undefined,
+      paymentMethod: sumupEnabled ? form.paymentMethod : 'pix',
       flavors: legacyFlavorCounts,
       items: computedOrderItems,
       couponCode: isCouponApplied ? appliedCoupon?.code ?? null : null,
@@ -1987,6 +2002,7 @@ export function PublicOrderPage({
       fulfillment: payloadBase.fulfillment,
       delivery: payloadBase.delivery,
       items: payloadBase.items,
+      paymentMethod: payloadBase.paymentMethod,
       couponCode: payloadBase.couponCode,
       notes: payloadBase.notes
     });
@@ -2040,7 +2056,7 @@ export function PublicOrderPage({
       window.localStorage.setItem(PUBLIC_ORDER_LAST_ORDER_STORAGE_KEY, JSON.stringify(storedOrderSnapshot));
       const result = data as PublicOrderResult;
       writeStoredOrderFinalized({
-        version: 1,
+        version: 2,
         origin: 'PUBLIC_FORM',
         savedAt: new Date().toISOString(),
         returnPath: '/pedido',
@@ -2054,7 +2070,9 @@ export function PublicOrderPage({
         intake: {
           stage: result.intake.stage,
           deliveryFee: result.intake.deliveryFee,
-          pixCharge: result.intake.pixCharge
+          paymentMethod: result.intake.paymentMethod,
+          pixCharge: result.intake.pixCharge,
+          cardCheckout: result.intake.cardCheckout
         }
       });
       trackAnalyticsEvent({
@@ -2796,6 +2814,65 @@ export function PublicOrderPage({
                   placeholder="Ex.: tocar o interfone, confirmar retirada antes, evitar atraso."
                 />
               </FormField>
+            </section>
+
+            <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
+              <div className="mb-4">
+                <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Pagamento</h2>
+                <p className="mt-2 text-sm leading-6 text-[color:var(--ink-muted)]">
+                  {sumupEnabled
+                    ? 'Escolha entre receber o PIX aqui ou seguir para o checkout seguro da SumUp com cartão.'
+                    : 'O pagamento segue por PIX depois do envio do pedido.'}
+                </p>
+              </div>
+              <div className={`grid gap-3 ${sumupEnabled ? 'sm:grid-cols-2' : ''}`}>
+                <button
+                  type="button"
+                  className={`rounded-[22px] border px-4 py-4 text-left transition ${
+                    form.paymentMethod === 'pix'
+                      ? 'border-[rgba(102,131,117,0.45)] bg-[rgba(232,244,237,0.7)] shadow-[0_14px_30px_rgba(90,120,104,0.1)]'
+                      : 'border-[rgba(126,79,45,0.1)] bg-[rgb(255,252,248)] hover:bg-[rgba(250,244,236,0.9)]'
+                  }`}
+                  onClick={() => {
+                    setForm((current) => ({
+                      ...current,
+                      paymentMethod: 'pix'
+                    }));
+                  }}
+                >
+                  <span className="block text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
+                    PIX
+                  </span>
+                  <strong className="mt-2 block text-lg text-[color:var(--ink-strong)]">Copia e cola</strong>
+                  <span className="mt-2 block text-sm leading-6 text-[color:var(--ink-muted)]">
+                    O código aparece na tela final do pedido.
+                  </span>
+                </button>
+                {sumupEnabled ? (
+                  <button
+                    type="button"
+                    className={`rounded-[22px] border px-4 py-4 text-left transition ${
+                      form.paymentMethod === 'card'
+                        ? 'border-[rgba(102,131,117,0.45)] bg-[rgba(232,244,237,0.7)] shadow-[0_14px_30px_rgba(90,120,104,0.1)]'
+                        : 'border-[rgba(126,79,45,0.1)] bg-[rgb(255,252,248)] hover:bg-[rgba(250,244,236,0.9)]'
+                    }`}
+                    onClick={() => {
+                      setForm((current) => ({
+                        ...current,
+                        paymentMethod: 'card'
+                      }));
+                    }}
+                  >
+                    <span className="block text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
+                      Cartão
+                    </span>
+                    <strong className="mt-2 block text-lg text-[color:var(--ink-strong)]">Checkout SumUp</strong>
+                    <span className="mt-2 block text-sm leading-6 text-[color:var(--ink-muted)]">
+                      O pedido é criado aqui e o pagamento segue para a SumUp.
+                    </span>
+                  </button>
+                ) : null}
+              </div>
             </section>
 
             <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
