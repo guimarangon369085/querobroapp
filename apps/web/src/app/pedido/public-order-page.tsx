@@ -2835,10 +2835,7 @@ export function PublicOrderPage({
                     }));
                   }}
                 >
-                  <span className="block text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
-                    PIX
-                  </span>
-                  <strong className="mt-2 block text-lg text-[color:var(--ink-strong)]">Copia e cola</strong>
+                  <strong className="block text-lg text-[color:var(--ink-strong)]">PIX</strong>
                 </button>
                 {sumupEnabled ? (
                   <button
@@ -2855,10 +2852,7 @@ export function PublicOrderPage({
                       }));
                     }}
                   >
-                    <span className="block text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
-                      CARTÃO
-                    </span>
-                    <strong className="mt-2 block text-lg text-[color:var(--ink-strong)]">DÉBITO ou CRÉDITO</strong>
+                    <strong className="block text-lg text-[color:var(--ink-strong)]">CARTÃO</strong>
                     <span className="mt-2 block text-sm leading-6 text-[color:var(--ink-muted)]">
                       as taxas do cartão são repassadas ao final do pedido
                     </span>
