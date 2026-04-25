@@ -380,6 +380,65 @@ export function buildCompanionProductName(value?: Partial<CompanionProductProfil
     .join(' • ');
 }
 
+const COMPANION_PRODUCT_IMAGE_VERSION = '20260424-amigas1';
+const COMPANION_PRODUCT_IMAGE_PATHS = {
+  coffee: '/querobroa-brand/amigas-da-broa/cafe-torrado-e-moido-dona-luiza.webp',
+  jellyBlackberry: '/querobroa-brand/amigas-da-broa/geleia-amora-com-cumaru-iba.webp',
+  jellyZeroApricot: '/querobroa-brand/amigas-da-broa/geleia-zero-damasco-iba.webp',
+  butter: '/querobroa-brand/amigas-da-broa/manteiga-bisnaga-iba.webp',
+  pequelito: '/querobroa-brand/amigas-da-broa/palitos-de-queijo-pequelito.webp',
+  stuffedCheeseBread: '/querobroa-brand/amigas-da-broa/pao-de-queijo-recheado-requeijao.webp'
+} as const;
+
+function normalizeCompanionProductImageLookup(value?: string | null) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+export function resolveCompanionProductCanonicalImageUrl(value?: {
+  name?: string | null;
+  drawerNote?: string | null;
+} | null) {
+  const profile = resolveCompanionProductProfile(value);
+  const title = normalizeCompanionProductImageLookup(profile?.title || value?.name || '');
+  const flavor = normalizeCompanionProductImageLookup(profile?.flavor);
+  const maker = normalizeCompanionProductImageLookup(profile?.maker);
+  const baseName = normalizeCompanionProductImageLookup(value?.name);
+
+  let path: string | null = null;
+
+  if (title.includes('cafe torrado') || maker.includes('dona luiza') || baseName.includes('cafe torrado')) {
+    path = COMPANION_PRODUCT_IMAGE_PATHS.coffee;
+  } else if (
+    title.includes('geleia') &&
+    (title.includes('zero') || flavor.includes('damasco') || baseName.includes('damasco'))
+  ) {
+    path = COMPANION_PRODUCT_IMAGE_PATHS.jellyZeroApricot;
+  } else if (
+    title.includes('geleia') &&
+    (flavor.includes('amora') || baseName.includes('amora') || baseName.includes('cumaru'))
+  ) {
+    path = COMPANION_PRODUCT_IMAGE_PATHS.jellyBlackberry;
+  } else if (title.includes('manteiga') || baseName.includes('manteiga')) {
+    path = COMPANION_PRODUCT_IMAGE_PATHS.butter;
+  } else if (
+    title.includes('palitos de queijo') ||
+    title.includes('pequelito') ||
+    baseName.includes('palitos de queijo') ||
+    baseName.includes('pequelito')
+  ) {
+    path = COMPANION_PRODUCT_IMAGE_PATHS.pequelito;
+  } else if (title.includes('pao de queijo') || baseName.includes('pao de queijo recheado')) {
+    path = COMPANION_PRODUCT_IMAGE_PATHS.stuffedCheeseBread;
+  }
+
+  return path ? `${path}?v=${COMPANION_PRODUCT_IMAGE_VERSION}` : null;
+}
+
 export function parseCompanionProductProfileFromName(name?: string | null): CompanionProductProfile | null {
   const parts = String(name || '')
     .split('•')

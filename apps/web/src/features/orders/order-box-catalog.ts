@@ -3,6 +3,7 @@ import {
   buildCompanionProductName,
   moneyFromMinorUnits,
   moneyToMinorUnits,
+  resolveCompanionProductCanonicalImageUrl,
   resolveCompanionProductProfile,
   type Product
 } from '@querobroapp/shared';
@@ -657,10 +658,15 @@ export function resolveOrderCardImage(product?: OrderProductArtSource | string |
 export function resolveOrderCardArt(product?: OrderProductArtSource | string | null) {
   const productName = typeof product === 'string' ? product : product?.name;
   const explicitImageUrl = typeof product === 'string' ? null : String(product?.imageUrl || '').trim() || null;
-  if (explicitImageUrl) {
+  const companionImageUrl =
+    resolveCompanionProductCanonicalImageUrl(
+      typeof product === 'string' ? { name: product } : { name: product?.name, drawerNote: product?.drawerNote }
+    ) || null;
+
+  if (explicitImageUrl || companionImageUrl) {
     return {
       mode: 'single',
-      src: explicitImageUrl,
+      src: explicitImageUrl || companionImageUrl || ORDER_SABORES_REFERENCE_IMAGE,
       objectPosition: 'center center'
     } satisfies OrderCardArt;
   }
@@ -818,6 +824,7 @@ export function buildRuntimeOrderCatalog(
     .map((product) => {
       const profile = resolveCompanionProductProfile(product);
       const label = buildCompanionProductName(profile) || compactOrderProductName(product.name);
+      const imageUrl = product.imageUrl || resolveCompanionProductCanonicalImageUrl(product) || null;
       return {
         id: product.id,
         key: `companion:${product.id}`,
@@ -828,7 +835,7 @@ export function buildRuntimeOrderCatalog(
         displayTitle: profile?.title || compactOrderProductName(product.name),
         displayFlavor: profile?.flavor ?? null,
         displayMakerLine: buildCompanionProductMakerLine(profile),
-        imageUrl: product.imageUrl ?? null,
+        imageUrl,
         price: Number(product.price || 0),
         unit: product.unit ?? null,
         measureLabel: product.measureLabel ?? null,

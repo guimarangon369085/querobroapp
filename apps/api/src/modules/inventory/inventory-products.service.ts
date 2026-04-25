@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, Inject, BadRequestException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
-import { ProductSchema } from '@querobroapp/shared';
+import { ProductSchema, resolveCompanionProductCanonicalImageUrl } from '@querobroapp/shared';
 import { normalizeMoney, normalizeText, normalizeTitle } from '../../common/normalize.js';
 import { PrismaService } from '../../prisma.service.js';
 import { normalizeInventoryLookup } from './inventory-formulas.js';
@@ -798,14 +798,20 @@ export class InventoryProductsService {
     category?: string | null;
   }) {
     const normalizedImageUrl = this.normalizeProductImageUrl(params.imageUrl);
-    if (!normalizedImageUrl?.startsWith(`${PRODUCT_UPLOADS_PREFIX}/`)) {
-      return normalizedImageUrl;
-    }
-
     const canonicalCatalogImage =
       isCanonicalCatalogCategory(params.category)
         ? resolveCanonicalCatalogImageByProductName(params.productName)
-        : null;
+        : isCompanionCatalogCategory(params.category)
+          ? resolveCompanionProductCanonicalImageUrl({ name: params.productName })
+          : null;
+
+    if (!normalizedImageUrl) {
+      return canonicalCatalogImage ?? null;
+    }
+
+    if (!normalizedImageUrl.startsWith(`${PRODUCT_UPLOADS_PREFIX}/`)) {
+      return normalizedImageUrl;
+    }
 
     const fileName = normalizedImageUrl.replace(`${PRODUCT_UPLOADS_PREFIX}/`, '');
     if (!isSafeManagedProductImageName(fileName)) {

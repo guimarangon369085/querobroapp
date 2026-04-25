@@ -2819,11 +2819,6 @@ export function PublicOrderPage({
             <section className="rounded-[22px] border border-[rgba(126,79,45,0.08)] bg-white p-4 sm:rounded-[28px] sm:p-6 xl:p-7">
               <div className="mb-4">
                 <h2 className="text-[1.35rem] font-semibold text-[color:var(--ink-strong)] sm:text-2xl">Pagamento</h2>
-                <p className="mt-2 text-sm leading-6 text-[color:var(--ink-muted)]">
-                  {sumupEnabled
-                    ? 'Escolha entre receber o PIX aqui ou seguir para o checkout seguro da SumUp com cartão.'
-                    : 'O pagamento segue por PIX depois do envio do pedido.'}
-                </p>
               </div>
               <div className={`grid gap-3 ${sumupEnabled ? 'sm:grid-cols-2' : ''}`}>
                 <button
@@ -2844,9 +2839,6 @@ export function PublicOrderPage({
                     PIX
                   </span>
                   <strong className="mt-2 block text-lg text-[color:var(--ink-strong)]">Copia e cola</strong>
-                  <span className="mt-2 block text-sm leading-6 text-[color:var(--ink-muted)]">
-                    O código aparece na tela final do pedido.
-                  </span>
                 </button>
                 {sumupEnabled ? (
                   <button
@@ -2864,11 +2856,11 @@ export function PublicOrderPage({
                     }}
                   >
                     <span className="block text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-[color:var(--ink-muted)]">
-                      Cartão
+                      CARTÃO
                     </span>
-                    <strong className="mt-2 block text-lg text-[color:var(--ink-strong)]">Checkout SumUp</strong>
+                    <strong className="mt-2 block text-lg text-[color:var(--ink-strong)]">DÉBITO ou CRÉDITO</strong>
                     <span className="mt-2 block text-sm leading-6 text-[color:var(--ink-muted)]">
-                      O pedido é criado aqui e o pagamento segue para a SumUp.
+                      as taxas do cartão são repassadas ao final do pedido
                     </span>
                   </button>
                 ) : null}
