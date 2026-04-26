@@ -1,6 +1,10 @@
 import { Injectable, NotFoundException, Inject, BadRequestException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
-import { ProductSchema, resolveCompanionProductCanonicalImageUrl } from '@querobroapp/shared';
+import {
+  ProductSchema,
+  resolveCompanionProductCanonicalDrawerNote,
+  resolveCompanionProductCanonicalImageUrl
+} from '@querobroapp/shared';
 import { normalizeMoney, normalizeText, normalizeTitle } from '../../common/normalize.js';
 import { PrismaService } from '../../prisma.service.js';
 import { normalizeInventoryLookup } from './inventory-formulas.js';
@@ -127,6 +131,17 @@ export class InventoryProductsService {
       .filter(Boolean);
 
     return normalizedLines.length ? normalizedLines.join('\n') : null;
+  }
+
+  private resolveDisplayCompanionDrawerNote(params: {
+    productName?: string | null;
+    drawerNote?: string | null;
+    category?: string | null;
+  }) {
+    const normalizedDrawerNote = this.normalizeDrawerNote(params.drawerNote);
+    if (normalizedDrawerNote) return normalizedDrawerNote;
+    if (!isCompanionCatalogCategory(params.category)) return normalizedDrawerNote;
+    return resolveCompanionProductCanonicalDrawerNote({ name: params.productName }) ?? null;
   }
 
   private buildBalanceByItemId(
@@ -849,12 +864,18 @@ export class InventoryProductsService {
     T extends {
       name: string;
       imageUrl?: string | null;
+      drawerNote?: string | null;
       category?: string | null;
     }
   >(products: T[]) {
     return Promise.all(
       products.map(async (product) => ({
         ...product,
+        drawerNote: this.resolveDisplayCompanionDrawerNote({
+          productName: product.name,
+          drawerNote: product.drawerNote,
+          category: product.category
+        }),
         imageUrl: await this.resolveDisplayProductImageUrl({
           imageUrl: product.imageUrl,
           productName: product.name,

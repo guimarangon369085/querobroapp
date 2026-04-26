@@ -389,6 +389,20 @@ const COMPANION_PRODUCT_IMAGE_PATHS = {
   pequelito: '/querobroa-brand/amigas-da-broa/palitos-de-queijo-pequelito.webp',
   stuffedCheeseBread: '/querobroa-brand/amigas-da-broa/pao-de-queijo-recheado-requeijao.webp'
 } as const;
+const COMPANION_PRODUCT_CANONICAL_NOTES = {
+  coffee:
+    'Café torrado e moído da Fazenda Dona Luiza, em Cambuquira/MG, com torra média e variedade Catucaí Amarelo 24/137.',
+  jellyBlackberry:
+    'Geléia de amora com cumaru da IBÁ BRASIL, em bisnaga prática para servir com calma no café da manhã ou da tarde.',
+  jellyZeroApricot:
+    'Geléia zero açúcar de damasco da IBÁ BRASIL, em bisnaga prática para acompanhar broas, queijos e outras pausas gostosas.',
+  butter:
+    'Manteiga extra com sal da IBÁ BRASIL, em bisnaga, pronta para servir com broa ainda morna.',
+  pequelito:
+    'Palitos de queijo parmesão da PEQUÊ, em pacote para dividir ou acompanhar a mesa com crocância.',
+  stuffedCheeseBread:
+    'Pão de queijo recheado com requeijão da PEQUÊ, em pacote para aquecer e servir com recheio cremoso.'
+} as const;
 
 function normalizeCompanionProductImageLookup(value?: string | null) {
   return String(value || '')
@@ -399,7 +413,9 @@ function normalizeCompanionProductImageLookup(value?: string | null) {
     .trim();
 }
 
-export function resolveCompanionProductCanonicalImageUrl(value?: {
+type CompanionProductCanonicalAssetKey = keyof typeof COMPANION_PRODUCT_IMAGE_PATHS;
+
+function resolveCompanionProductCanonicalAssetKey(value?: {
   name?: string | null;
   drawerNote?: string | null;
 } | null) {
@@ -409,34 +425,55 @@ export function resolveCompanionProductCanonicalImageUrl(value?: {
   const maker = normalizeCompanionProductImageLookup(profile?.maker);
   const baseName = normalizeCompanionProductImageLookup(value?.name);
 
-  let path: string | null = null;
-
   if (title.includes('cafe torrado') || maker.includes('dona luiza') || baseName.includes('cafe torrado')) {
-    path = COMPANION_PRODUCT_IMAGE_PATHS.coffee;
-  } else if (
+    return 'coffee' satisfies CompanionProductCanonicalAssetKey;
+  }
+  if (
     title.includes('geleia') &&
     (title.includes('zero') || flavor.includes('damasco') || baseName.includes('damasco'))
   ) {
-    path = COMPANION_PRODUCT_IMAGE_PATHS.jellyZeroApricot;
-  } else if (
+    return 'jellyZeroApricot' satisfies CompanionProductCanonicalAssetKey;
+  }
+  if (
     title.includes('geleia') &&
     (flavor.includes('amora') || baseName.includes('amora') || baseName.includes('cumaru'))
   ) {
-    path = COMPANION_PRODUCT_IMAGE_PATHS.jellyBlackberry;
-  } else if (title.includes('manteiga') || baseName.includes('manteiga')) {
-    path = COMPANION_PRODUCT_IMAGE_PATHS.butter;
-  } else if (
+    return 'jellyBlackberry' satisfies CompanionProductCanonicalAssetKey;
+  }
+  if (title.includes('manteiga') || baseName.includes('manteiga')) {
+    return 'butter' satisfies CompanionProductCanonicalAssetKey;
+  }
+  if (
     title.includes('palitos de queijo') ||
     title.includes('pequelito') ||
     baseName.includes('palitos de queijo') ||
     baseName.includes('pequelito')
   ) {
-    path = COMPANION_PRODUCT_IMAGE_PATHS.pequelito;
-  } else if (title.includes('pao de queijo') || baseName.includes('pao de queijo recheado')) {
-    path = COMPANION_PRODUCT_IMAGE_PATHS.stuffedCheeseBread;
+    return 'pequelito' satisfies CompanionProductCanonicalAssetKey;
+  }
+  if (title.includes('pao de queijo') || baseName.includes('pao de queijo recheado')) {
+    return 'stuffedCheeseBread' satisfies CompanionProductCanonicalAssetKey;
   }
 
-  return path ? `${path}?v=${COMPANION_PRODUCT_IMAGE_VERSION}` : null;
+  return null;
+}
+
+export function resolveCompanionProductCanonicalImageUrl(value?: {
+  name?: string | null;
+  drawerNote?: string | null;
+} | null) {
+  const assetKey = resolveCompanionProductCanonicalAssetKey(value);
+  if (!assetKey) return null;
+  return `${COMPANION_PRODUCT_IMAGE_PATHS[assetKey]}?v=${COMPANION_PRODUCT_IMAGE_VERSION}`;
+}
+
+export function resolveCompanionProductCanonicalDrawerNote(value?: {
+  name?: string | null;
+  drawerNote?: string | null;
+} | null) {
+  const assetKey = resolveCompanionProductCanonicalAssetKey(value);
+  if (!assetKey) return null;
+  return COMPANION_PRODUCT_CANONICAL_NOTES[assetKey] || null;
 }
 
 export function parseCompanionProductProfileFromName(name?: string | null): CompanionProductProfile | null {

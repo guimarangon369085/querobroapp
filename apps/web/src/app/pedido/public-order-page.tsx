@@ -5,6 +5,7 @@ import {
   EXTERNAL_ORDER_DELIVERY_WINDOWS,
   buildCompanionProductMakerLine,
   resolveCompanionProductProfile,
+  resolveCompanionProductCanonicalDrawerNote,
   formatExternalOrderMinimumSchedule,
   mergeOrderItemsSummaryIntoNotes,
   resolveExternalOrderDeliveryWindowKeyForDate,
@@ -460,9 +461,13 @@ function formatCustomBoxParts(
     .join(' • ');
 }
 
-function resolveCompanionDrawerNote(product?: Pick<Product, 'drawerNote'> | null) {
+function resolveCompanionDrawerNote(product?: Pick<Product, 'name' | 'drawerNote'> | null) {
   const customNote = stripCompanionProductProfileFromDrawerNote(product?.drawerNote) || '';
-  return customNote.trim() || 'Toque fora da gaveta ou no botão fechar para voltar ao catálogo.';
+  return (
+    customNote.trim() ||
+    resolveCompanionProductCanonicalDrawerNote(product) ||
+    'Toque fora da gaveta ou no botão fechar para voltar ao catálogo.'
+  );
 }
 
 function resolveCompanionProductPublicLines(

@@ -1,6 +1,6 @@
 # NEXT_STEP_PLAN
 
-Ultima atualizacao: 2026-04-24
+Ultima atualizacao: 2026-04-26
 
 ## Objetivo da fase atual
 
@@ -57,6 +57,7 @@ Criterio de pronto:
 
 ### Refino final de Estoque e Pedidos
 
+- Ajuste local pronto e pendente de publish: `AMIGAS DA BROA` ganhou fallback canonico de descricao por item no `shared`/API/web para quando `drawerNote` vier nulo, evitando a copia generica `Toque fora da gaveta...` no `/pedido`. Bloqueio atual: Railway CLI desautenticado (`railway login` necessario antes do proximo deploy).
 - Continuar reduzindo densidade visual e scroll na visao `Dia`.
 - Continuar a extracao dos blocos grandes restantes de `orders-screen` para componentes menores.
 - Manter o catalogo de caixas/sabores centralizado entre `/pedido`, `quick create` e `/pedidos`.

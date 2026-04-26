@@ -88,11 +88,19 @@ test('amigas da broa fall back to canonical static art when image url is missing
     created.imageUrl,
     '/querobroa-brand/amigas-da-broa/cafe-torrado-e-moido-dona-luiza.webp?v=20260424-amigas1'
   );
+  assert.equal(
+    created.drawerNote,
+    'Café torrado e moído da Fazenda Dona Luiza, em Cambuquira/MG, com torra média e variedade Catucaí Amarelo 24/137.'
+  );
 
   const refreshed = await request(apiUrl, `/inventory-products/${productId}`);
   assert.equal(
     refreshed.imageUrl,
     '/querobroa-brand/amigas-da-broa/cafe-torrado-e-moido-dona-luiza.webp?v=20260424-amigas1'
+  );
+  assert.equal(
+    refreshed.drawerNote,
+    'Café torrado e moído da Fazenda Dona Luiza, em Cambuquira/MG, com torra média e variedade Catucaí Amarelo 24/137.'
   );
 
   const products = await request(apiUrl, '/inventory-products');
@@ -101,5 +109,9 @@ test('amigas da broa fall back to canonical static art when image url is missing
   assert.equal(
     sameProduct.imageUrl,
     '/querobroa-brand/amigas-da-broa/cafe-torrado-e-moido-dona-luiza.webp?v=20260424-amigas1'
+  );
+  assert.equal(
+    sameProduct.drawerNote,
+    'Café torrado e moído da Fazenda Dona Luiza, em Cambuquira/MG, com torra média e variedade Catucaí Amarelo 24/137.'
   );
 });
