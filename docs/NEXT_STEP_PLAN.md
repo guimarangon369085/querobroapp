@@ -57,7 +57,7 @@ Criterio de pronto:
 
 ### Refino final de Estoque e Pedidos
 
-- Ajuste local pronto e pendente de publish: `AMIGAS DA BROA` ganhou fallback canonico de descricao por item no `shared`/API/web para quando `drawerNote` vier nulo, evitando a copia generica `Toque fora da gaveta...` no `/pedido`. Bloqueio atual: Railway CLI desautenticado (`railway login` necessario antes do proximo deploy).
+- Publicado em 2026-04-26: `AMIGAS DA BROA` ganhou fallback canonico de descricao por item no `shared`/API/web para quando `drawerNote` vier nulo, evitando a copia generica `Toque fora da gaveta...` no `/pedido`. Deploys em producao: API `f888f261-2f9a-4f85-b18b-fdee1c4b2be5` e web `0d74d3e8-f5f5-41f5-b2a1-84bdf670be0d`.
 - Continuar reduzindo densidade visual e scroll na visao `Dia`.
 - Continuar a extracao dos blocos grandes restantes de `orders-screen` para componentes menores.
 - Manter o catalogo de caixas/sabores centralizado entre `/pedido`, `quick create` e `/pedidos`.

@@ -1,8 +1,10 @@
 # PROJECT_SNAPSHOT
 
-Ultima atualizacao: 2026-04-25
+Ultima atualizacao: 2026-04-26
 
 ## Estado atual
+
+- 2026-04-26: as `AMIGAS DA BROA` publicadas voltaram a exibir descricao propria na gaveta do `/pedido` mesmo quando `drawerNote` vem nulo do catalogo. O fallback canonico agora cobre textos por item no `shared`, na API e no runtime do web, eliminando a copia generica `Toque fora da gaveta ou no botão fechar para voltar ao catálogo.`. Deploys publicados e validados: API `f888f261-2f9a-4f85-b18b-fdee1c4b2be5` e web `0d74d3e8-f5f5-41f5-b2a1-84bdf670be0d`, com `pnpm validate:public-deploy` verde e `6` itens de `Amigas da Broa` respondendo `drawerNote` preenchido em `https://querobroa.com.br/api/order-catalog`.
 
 - 2026-04-25: os cards de pagamento do `/pedido` publicado foram enxugados de novo. O card `PIX` passou a mostrar apenas `PIX`, enquanto o card `CARTÃO` manteve apenas a frase `as taxas do cartão são repassadas ao final do pedido`, removendo os rótulos intermediários `Copia e cola` e `DÉBITO ou CRÉDITO`. Deploy web publicado no Railway: `3c406b00-b472-470e-9e94-0bf13942c164`, com validação pública verde (`/` 200, `/pedido` 200, `/pedidos` protegido, `apiHealth=ok`, preview `PIX_PENDING` e quote `LOCAL / MANUAL_FALLBACK`).
 
