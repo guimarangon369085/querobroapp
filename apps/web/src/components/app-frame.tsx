@@ -4,19 +4,9 @@ import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { useCallback } from 'react';
 import { usePathname } from 'next/navigation';
 import { Nav } from '@/components/nav';
+import { OpsLogoutButton } from '@/components/ops-logout-button';
 import { Topbar } from '@/components/topbar';
-
-function isPublicOrderPath(pathname: string) {
-  return pathname === '/pedido' || pathname.startsWith('/pedido/');
-}
-
-function isPublicOrderCompletionPath(pathname: string) {
-  return pathname === '/pedidofinalizado';
-}
-
-function isPublicLandingPath(pathname: string) {
-  return pathname === '/';
-}
+import { isPublicPagePath } from '@/lib/ops-access';
 
 function shouldAllowTouchContextMenu(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
@@ -36,7 +26,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
     event.preventDefault();
   }, []);
 
-  if (isPublicOrderPath(pathname) || isPublicOrderCompletionPath(pathname) || isPublicLandingPath(pathname)) {
+  if (isPublicPagePath(pathname)) {
     return <>{children}</>;
   }
 
@@ -49,6 +39,9 @@ export function AppFrame({ children }: { children: ReactNode }) {
           </div>
         </div>
         <Nav />
+        <div className="mt-auto pt-2">
+          <OpsLogoutButton />
+        </div>
       </aside>
       <div className="app-main">
         <main className="app-content">

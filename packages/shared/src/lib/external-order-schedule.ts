@@ -1,11 +1,52 @@
 export const EXTERNAL_ORDER_TIME_ZONE = 'America/Sao_Paulo';
 export const EXTERNAL_ORDER_NEXT_DAY_CUTOFF_HOUR = 22;
-export const EXTERNAL_ORDER_FIRST_SLOT_HOUR = 8;
+export const EXTERNAL_ORDER_FIRST_SLOT_HOUR = 9;
 export const EXTERNAL_ORDER_FIRST_SLOT_MINUTE = 0;
 export const EXTERNAL_ORDER_SLOT_MINUTES = 15;
 export const EXTERNAL_ORDER_MAX_ORDERS_PER_DAY = 15;
+export const EXTERNAL_ORDER_OVEN_CAPACITY_BROAS = 14;
+export const EXTERNAL_ORDER_OVEN_BATCH_MINUTES = 60;
 
-type ExternalOrderScheduleAvailabilityReason = 'AVAILABLE' | 'BEFORE_MINIMUM' | 'SLOT_TAKEN' | 'DAY_FULL';
+export const EXTERNAL_ORDER_DELIVERY_WINDOWS = [
+  {
+    key: 'MORNING',
+    label: '9h - 12h',
+    startHour: 9,
+    startMinute: 0,
+    endHour: 12,
+    endMinute: 0
+  },
+  {
+    key: 'AFTERNOON',
+    label: '12h - 16h',
+    startHour: 12,
+    startMinute: 0,
+    endHour: 16,
+    endMinute: 0
+  },
+  {
+    key: 'EVENING',
+    label: '16h - 20h',
+    startHour: 16,
+    startMinute: 0,
+    endHour: 20,
+    endMinute: 0
+  }
+] as const;
+
+export type ExternalOrderDeliveryWindowKey = (typeof EXTERNAL_ORDER_DELIVERY_WINDOWS)[number]['key'];
+
+type ExternalOrderScheduleAvailabilityReason =
+  | 'AVAILABLE'
+  | 'BEFORE_MINIMUM'
+  | 'SLOT_TAKEN'
+  | 'DAY_FULL'
+  | 'DAY_BLOCKED';
+
+type ExternalOrderScheduleEntryInput = {
+  scheduledAt: Date | string | null | undefined;
+  totalBroas?: number | null | undefined;
+};
 
 type ZonedDateParts = {
   year: number;
@@ -15,6 +56,15 @@ type ZonedDateParts = {
   minute: number;
   second: number;
 };
+
+type CalendarDateParts = Pick<ZonedDateParts, 'year' | 'month' | 'day'>;
+
+type OccupiedWindow = {
+  startAt: Date;
+  endAt: Date;
+};
+
+type BlockedWindowsByDay = Map<string, Set<ExternalOrderDeliveryWindowKey>>;
 
 function getFormatter(timeZone = EXTERNAL_ORDER_TIME_ZONE) {
   return new Intl.DateTimeFormat('en-CA', {
@@ -39,6 +89,27 @@ function readParts(reference: Date, timeZone = EXTERNAL_ORDER_TIME_ZONE): ZonedD
     hour: Number(map.hour),
     minute: Number(map.minute),
     second: Number(map.second)
+  };
+}
+
+function parseDayKey(value?: string | null): CalendarDateParts | null {
+  const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+  return { year, month, day };
+}
+
+function resolveCalendarDateParts(date: Date, timeZone = EXTERNAL_ORDER_TIME_ZONE): CalendarDateParts {
+  const parts = readParts(date, timeZone);
+  return {
+    year: parts.year,
+    month: parts.month,
+    day: parts.day
   };
 }
 
@@ -73,6 +144,178 @@ function zonedDateTimeToUtc(
 function normalizeQuarterMinute(minute: number, slotMinutes = EXTERNAL_ORDER_SLOT_MINUTES) {
   const normalizedSlotMinutes = Math.max(Math.floor(slotMinutes), 1);
   return Math.ceil(minute / normalizedSlotMinutes) * normalizedSlotMinutes;
+}
+
+function normalizeExternalOrderBroaCount(value: number | null | undefined) {
+  const parsed = Number(value ?? 0);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(Math.floor(parsed), 0);
+}
+
+function resolveWindowDateTime(
+  dateParts: CalendarDateParts,
+  hour: number,
+  minute: number,
+  timeZone = EXTERNAL_ORDER_TIME_ZONE
+) {
+  return zonedDateTimeToUtc(
+    {
+      year: dateParts.year,
+      month: dateParts.month,
+      day: dateParts.day,
+      hour,
+      minute,
+      second: 0
+    },
+    timeZone
+  );
+}
+
+function resolveWindowRange(
+  dateParts: CalendarDateParts,
+  windowKey: ExternalOrderDeliveryWindowKey,
+  timeZone = EXTERNAL_ORDER_TIME_ZONE
+) {
+  const windowIndex = EXTERNAL_ORDER_DELIVERY_WINDOWS.findIndex((entry) => entry.key === windowKey);
+  const window = windowIndex >= 0 ? EXTERNAL_ORDER_DELIVERY_WINDOWS[windowIndex] : null;
+  if (!window) {
+    return null;
+  }
+
+  return {
+    ...window,
+    endInclusive: windowIndex === EXTERNAL_ORDER_DELIVERY_WINDOWS.length - 1,
+    startAt: resolveWindowDateTime(dateParts, window.startHour, window.startMinute, timeZone),
+    endAt: resolveWindowDateTime(dateParts, window.endHour, window.endMinute, timeZone)
+  };
+}
+
+function overlapsWindow(candidateStartAt: Date, candidateEndAt: Date, occupiedWindows: OccupiedWindow[]) {
+  return occupiedWindows.some(
+    (window) =>
+      candidateStartAt.getTime() < window.endAt.getTime() &&
+      candidateEndAt.getTime() > window.startAt.getTime()
+  );
+}
+
+function findFirstAvailableAtWithinRange(input: {
+  rangeStartAt: Date;
+  rangeEndAt: Date;
+  rangeEndInclusive?: boolean;
+  minimumAllowedAt: Date;
+  requestedDurationMinutes: number;
+  occupiedWindows: OccupiedWindow[];
+  dayOrderCount: number;
+  dailyLimit: number;
+  blocked: boolean;
+  timeZone: string;
+}) {
+  if (input.blocked) return null;
+  if (input.dayOrderCount >= input.dailyLimit) return null;
+
+  const initialStart =
+    input.rangeStartAt.getTime() > input.minimumAllowedAt.getTime() ? input.rangeStartAt : input.minimumAllowedAt;
+  let candidateAt = resolveExternalOrderSlotStart(initialStart, input.timeZone);
+  const isWithinRange = (candidate: Date) =>
+    input.rangeEndInclusive ? candidate.getTime() <= input.rangeEndAt.getTime() : candidate.getTime() < input.rangeEndAt.getTime();
+
+  while (isWithinRange(candidateAt)) {
+    const candidateStartAt = new Date(candidateAt.getTime() - input.requestedDurationMinutes * 60_000);
+    if (!overlapsWindow(candidateStartAt, candidateAt, input.occupiedWindows)) {
+      return candidateAt;
+    }
+    candidateAt = new Date(candidateAt.getTime() + EXTERNAL_ORDER_SLOT_MINUTES * 60_000);
+  }
+
+  return null;
+}
+
+function findNextAvailableAtFrom(input: {
+  startingPoint: Date;
+  minimumAllowedAt: Date;
+  requestedDurationMinutes: number;
+  occupiedWindows: OccupiedWindow[];
+  dayCounts: Map<string, number>;
+  blockedDayKeys?: Set<string>;
+  blockedWindowsByDay?: BlockedWindowsByDay;
+  dailyLimit: number;
+  timeZone: string;
+}) {
+  let nextAvailableAt = resolveExternalOrderSlotStart(
+    input.startingPoint.getTime() > input.minimumAllowedAt.getTime() ? input.startingPoint : input.minimumAllowedAt,
+    input.timeZone
+  );
+
+  while (true) {
+    const candidateDayKey = formatExternalOrderDayKey(nextAvailableAt, input.timeZone);
+    const candidateWindowKey = resolveExternalOrderDeliveryWindowKeyForDate(nextAvailableAt, input.timeZone);
+    const blockedWindows = input.blockedWindowsByDay?.get(candidateDayKey);
+    const dayFullyBlocked =
+      input.blockedDayKeys?.has(candidateDayKey) ||
+      (blockedWindows?.size ?? 0) >= EXTERNAL_ORDER_DELIVERY_WINDOWS.length;
+
+    if (dayFullyBlocked) {
+      nextAvailableAt = resolveNextScheduleDayStart(nextAvailableAt, input.timeZone);
+      continue;
+    }
+
+    if (candidateWindowKey && blockedWindows?.has(candidateWindowKey)) {
+      nextAvailableAt = new Date(nextAvailableAt.getTime() + EXTERNAL_ORDER_SLOT_MINUTES * 60_000);
+      continue;
+    }
+
+    const candidateDayCount = input.dayCounts.get(candidateDayKey) || 0;
+
+    if (candidateDayCount >= input.dailyLimit) {
+      nextAvailableAt = resolveNextScheduleDayStart(nextAvailableAt, input.timeZone);
+      continue;
+    }
+
+    const candidateStartAt = new Date(nextAvailableAt.getTime() - input.requestedDurationMinutes * 60_000);
+    if (overlapsWindow(candidateStartAt, nextAvailableAt, input.occupiedWindows)) {
+      nextAvailableAt = new Date(nextAvailableAt.getTime() + EXTERNAL_ORDER_SLOT_MINUTES * 60_000);
+      continue;
+    }
+
+    return nextAvailableAt;
+  }
+}
+
+export function resolveExternalOrderProductionBatchCount(totalBroas: number | null | undefined) {
+  const normalizedTotalBroas = normalizeExternalOrderBroaCount(totalBroas);
+  if (normalizedTotalBroas <= 0) return 0;
+  return Math.ceil(normalizedTotalBroas / EXTERNAL_ORDER_OVEN_CAPACITY_BROAS);
+}
+
+export function resolveExternalOrderProductionDurationMinutes(totalBroas: number | null | undefined) {
+  return resolveExternalOrderProductionBatchCount(totalBroas) * EXTERNAL_ORDER_OVEN_BATCH_MINUTES;
+}
+
+export function resolveExternalOrderProductionWindow(
+  scheduledAt: Date | string | null | undefined,
+  totalBroas: number | null | undefined
+) {
+  const parsedScheduledAt = scheduledAt instanceof Date ? new Date(scheduledAt) : new Date(scheduledAt ?? Number.NaN);
+  if (Number.isNaN(parsedScheduledAt.getTime())) {
+    return {
+      scheduledAt: new Date(Number.NaN),
+      productionStartAt: new Date(Number.NaN),
+      totalBroas: 0,
+      durationMinutes: 0,
+      batchCount: 0
+    };
+  }
+
+  const normalizedTotalBroas = normalizeExternalOrderBroaCount(totalBroas);
+  const durationMinutes = resolveExternalOrderProductionDurationMinutes(normalizedTotalBroas);
+
+  return {
+    scheduledAt: parsedScheduledAt,
+    productionStartAt: new Date(parsedScheduledAt.getTime() - durationMinutes * 60_000),
+    totalBroas: normalizedTotalBroas,
+    durationMinutes,
+    batchCount: resolveExternalOrderProductionBatchCount(normalizedTotalBroas)
+  };
 }
 
 export function formatExternalOrderDayKey(date: Date, timeZone = EXTERNAL_ORDER_TIME_ZONE) {
@@ -172,9 +415,40 @@ export function formatExternalOrderMinimumSchedule(
   }).format(minimum);
 }
 
+export function resolveExternalOrderDeliveryWindowLabel(windowKey?: string | null) {
+  return EXTERNAL_ORDER_DELIVERY_WINDOWS.find((entry) => entry.key === windowKey)?.label ?? null;
+}
+
+export function resolveExternalOrderDeliveryWindowKeyForDate(date?: Date | string | null, timeZone = EXTERNAL_ORDER_TIME_ZONE) {
+  const parsed = date instanceof Date ? new Date(date) : new Date(date ?? Number.NaN);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const parts = readParts(parsed, timeZone);
+  const minutes = parts.hour * 60 + parts.minute;
+
+  for (const [index, window] of EXTERNAL_ORDER_DELIVERY_WINDOWS.entries()) {
+    const startMinutes = window.startHour * 60 + window.startMinute;
+    const endMinutes = window.endHour * 60 + window.endMinute;
+    const withinRange =
+      minutes >= startMinutes &&
+      (index === EXTERNAL_ORDER_DELIVERY_WINDOWS.length - 1 ? minutes <= endMinutes : minutes < endMinutes);
+    if (withinRange) {
+      return window.key;
+    }
+  }
+
+  return null;
+}
+
 export function resolveExternalOrderScheduleAvailability(input: {
-  scheduledOrders: Array<Date | string | null | undefined>;
+  scheduledOrders: ExternalOrderScheduleEntryInput[];
   requestedAt?: Date | string | null;
+  requestedDate?: string | null;
+  requestedWindowKey?: ExternalOrderDeliveryWindowKey | string | null;
+  requestedTotalBroas?: number | null;
+  blockedDayKeys?: Iterable<string> | null;
+  blockedWindows?:
+    | Iterable<{ dayKey: string; windowKey: ExternalOrderDeliveryWindowKey | string | null | undefined }>
+    | null;
   reference?: Date;
   timeZone?: string;
   dailyLimit?: number;
@@ -188,16 +462,40 @@ export function resolveExternalOrderScheduleAvailability(input: {
   const minimumAllowedAt = resolveExternalOrderMinimumSchedule(reference, timeZone);
 
   const dayCounts = new Map<string, number>();
-  const occupiedSlots = new Set<string>();
+  const occupiedWindows: OccupiedWindow[] = [];
+  const blockedDayKeys = new Set(
+    Array.from(input.blockedDayKeys || [])
+      .map((value) => parseDayKey(value))
+      .filter((value): value is CalendarDateParts => Boolean(value))
+      .map((value) => `${value.year}-${`${value.month}`.padStart(2, '0')}-${`${value.day}`.padStart(2, '0')}`),
+  );
+  const blockedWindowsByDay: BlockedWindowsByDay = new Map();
+
+  for (const entry of input.blockedWindows || []) {
+    const normalizedDay = parseDayKey(entry?.dayKey);
+    const parsedWindowKey = EXTERNAL_ORDER_DELIVERY_WINDOWS.some((window) => window.key === entry?.windowKey)
+      ? (entry?.windowKey as ExternalOrderDeliveryWindowKey)
+      : null;
+    if (!normalizedDay || !parsedWindowKey) continue;
+    const dayKey = `${normalizedDay.year}-${`${normalizedDay.month}`.padStart(2, '0')}-${`${normalizedDay.day}`.padStart(2, '0')}`;
+    const bucket = blockedWindowsByDay.get(dayKey) || new Set<ExternalOrderDeliveryWindowKey>();
+    bucket.add(parsedWindowKey);
+    blockedWindowsByDay.set(dayKey, bucket);
+  }
 
   for (const value of input.scheduledOrders) {
-    if (!value) continue;
-    const parsed = value instanceof Date ? value : new Date(value);
+    if (!value?.scheduledAt) continue;
+    const window = resolveExternalOrderProductionWindow(value.scheduledAt, value.totalBroas);
+    const parsed = window.scheduledAt;
     if (Number.isNaN(parsed.getTime())) continue;
     const dayKey = formatExternalOrderDayKey(parsed, timeZone);
-    const slotKey = formatExternalOrderSlotKey(parsed, timeZone);
     dayCounts.set(dayKey, (dayCounts.get(dayKey) || 0) + 1);
-    occupiedSlots.add(slotKey);
+    if (window.durationMinutes > 0) {
+      occupiedWindows.push({
+        startAt: window.productionStartAt,
+        endAt: window.scheduledAt
+      });
+    }
   }
 
   const requestedDate =
@@ -208,6 +506,8 @@ export function resolveExternalOrderScheduleAvailability(input: {
         : new Date(input.requestedAt);
   const requestedAt =
     requestedDate && !Number.isNaN(requestedDate.getTime()) ? resolveExternalOrderSlotStart(requestedDate, timeZone) : null;
+  const requestedTotalBroas = normalizeExternalOrderBroaCount(input.requestedTotalBroas);
+  const requestedDurationMinutes = resolveExternalOrderProductionDurationMinutes(requestedTotalBroas);
 
   let reason: ExternalOrderScheduleAvailabilityReason = 'AVAILABLE';
   let requestedAvailable = true;
@@ -216,12 +516,20 @@ export function resolveExternalOrderScheduleAvailability(input: {
 
   if (requestedAt) {
     const requestedDayKey = formatExternalOrderDayKey(requestedAt, timeZone);
-    const requestedSlotKey = formatExternalOrderSlotKey(requestedAt, timeZone);
+    const requestedWindowKeyAt = resolveExternalOrderDeliveryWindowKeyForDate(requestedAt, timeZone);
+    const blockedWindows = blockedWindowsByDay.get(requestedDayKey);
+    const requestedDayFullyBlocked =
+      blockedDayKeys.has(requestedDayKey) ||
+      (blockedWindows?.size ?? 0) >= EXTERNAL_ORDER_DELIVERY_WINDOWS.length;
     dayOrderCount = dayCounts.get(requestedDayKey) || 0;
-    slotTaken = occupiedSlots.has(requestedSlotKey);
+    const requestedStartAt = new Date(requestedAt.getTime() - requestedDurationMinutes * 60_000);
+    slotTaken = overlapsWindow(requestedStartAt, requestedAt, occupiedWindows);
 
     if (requestedAt.getTime() < minimumAllowedAt.getTime()) {
       reason = 'BEFORE_MINIMUM';
+      requestedAvailable = false;
+    } else if (requestedDayFullyBlocked || (requestedWindowKeyAt && blockedWindows?.has(requestedWindowKeyAt))) {
+      reason = 'DAY_BLOCKED';
       requestedAvailable = false;
     } else if (dayOrderCount >= dailyLimit) {
       reason = 'DAY_FULL';
@@ -232,26 +540,102 @@ export function resolveExternalOrderScheduleAvailability(input: {
     }
   }
 
-  const startingPoint = requestedAt && requestedAt.getTime() > minimumAllowedAt.getTime() ? requestedAt : minimumAllowedAt;
-  let nextAvailableAt = resolveExternalOrderSlotStart(startingPoint, timeZone);
+  const nextAvailableAt = findNextAvailableAtFrom({
+    startingPoint: requestedAt && requestedAt.getTime() > minimumAllowedAt.getTime() ? requestedAt : minimumAllowedAt,
+    minimumAllowedAt,
+    requestedDurationMinutes,
+    occupiedWindows,
+    dayCounts,
+    blockedDayKeys,
+    blockedWindowsByDay,
+    dailyLimit,
+    timeZone
+  });
 
-  while (true) {
-    const candidateDayKey = formatExternalOrderDayKey(nextAvailableAt, timeZone);
-    const candidateSlotKey = formatExternalOrderSlotKey(nextAvailableAt, timeZone);
-    const candidateDayCount = dayCounts.get(candidateDayKey) || 0;
+  const requestedCalendarDateParts =
+    parseDayKey(input.requestedDate) ??
+    (requestedAt ? resolveCalendarDateParts(requestedAt, timeZone) : resolveCalendarDateParts(nextAvailableAt, timeZone));
+  const requestedDateKey = `${requestedCalendarDateParts.year}-${`${requestedCalendarDateParts.month}`.padStart(2, '0')}-${`${requestedCalendarDateParts.day}`.padStart(2, '0')}`;
+  const requestedWindowKey = EXTERNAL_ORDER_DELIVERY_WINDOWS.some((entry) => entry.key === input.requestedWindowKey)
+    ? (input.requestedWindowKey as ExternalOrderDeliveryWindowKey)
+    : null;
+  const requestedDateDayCount = dayCounts.get(requestedDateKey) || dayOrderCount;
+  const requestedDateBlockedWindows = blockedWindowsByDay.get(requestedDateKey);
+  const requestedDateBlocked =
+    blockedDayKeys.has(requestedDateKey) ||
+    (requestedDateBlockedWindows?.size ?? 0) >= EXTERNAL_ORDER_DELIVERY_WINDOWS.length;
 
-    if (candidateDayCount >= dailyLimit) {
-      nextAvailableAt = resolveNextScheduleDayStart(nextAvailableAt, timeZone);
-      continue;
+  const windows = EXTERNAL_ORDER_DELIVERY_WINDOWS.map((window) => {
+    const range = resolveWindowRange(requestedCalendarDateParts, window.key, timeZone);
+    if (!range) {
+      return {
+        key: window.key,
+        label: window.label,
+        startLabel: `${window.startHour}h`,
+        endLabel: `${window.endHour}h`,
+        available: false,
+        scheduledAt: null,
+        reason: 'SLOT_TAKEN' as ExternalOrderScheduleAvailabilityReason
+      };
     }
 
-    if (occupiedSlots.has(candidateSlotKey)) {
-      nextAvailableAt = new Date(nextAvailableAt.getTime() + EXTERNAL_ORDER_SLOT_MINUTES * 60_000);
-      continue;
-    }
+    const availableAt = findFirstAvailableAtWithinRange({
+      rangeStartAt: range.startAt,
+      rangeEndAt: range.endAt,
+      rangeEndInclusive: range.endInclusive,
+      minimumAllowedAt,
+      requestedDurationMinutes,
+      occupiedWindows,
+      dayOrderCount: requestedDateBlocked ? dailyLimit : requestedDateDayCount,
+      dailyLimit,
+      blocked: requestedDateBlocked || Boolean(requestedDateBlockedWindows?.has(window.key)),
+      timeZone
+    });
 
-    break;
-  }
+    const windowFinishedBeforeMinimum = range.endInclusive
+      ? range.endAt.getTime() < minimumAllowedAt.getTime()
+      : range.endAt.getTime() <= minimumAllowedAt.getTime();
+    const windowBlocked = requestedDateBlocked || Boolean(requestedDateBlockedWindows?.has(window.key));
+    const windowReason: ExternalOrderScheduleAvailabilityReason =
+      availableAt
+        ? 'AVAILABLE'
+        : windowBlocked
+          ? 'DAY_BLOCKED'
+        : requestedDateDayCount >= dailyLimit
+          ? 'DAY_FULL'
+          : windowFinishedBeforeMinimum
+            ? 'BEFORE_MINIMUM'
+            : 'SLOT_TAKEN';
+
+    return {
+      key: window.key,
+      label: window.label,
+      startLabel: `${window.startHour}h`,
+      endLabel: `${window.endHour}h`,
+      available: Boolean(availableAt),
+      scheduledAt: availableAt,
+      reason: windowReason
+    };
+  });
+
+  const requestedWindow = requestedWindowKey ? windows.find((entry) => entry.key === requestedWindowKey) ?? null : null;
+  const requestedWindowStartAt = requestedWindowKey
+    ? resolveWindowRange(requestedCalendarDateParts, requestedWindowKey, timeZone)?.startAt ?? null
+    : null;
+  const requestedWindowNextAvailableAt =
+    requestedWindowStartAt == null
+      ? null
+      : findNextAvailableAtFrom({
+          startingPoint: requestedWindowStartAt,
+          minimumAllowedAt,
+          requestedDurationMinutes,
+          occupiedWindows,
+          dayCounts,
+          blockedDayKeys,
+          blockedWindowsByDay,
+          dailyLimit,
+          timeZone
+        });
 
   return {
     minimumAllowedAt,
@@ -260,8 +644,18 @@ export function resolveExternalOrderScheduleAvailability(input: {
     requestedAvailable,
     reason,
     dailyLimit,
+    requestedTotalBroas,
+    requestedDurationMinutes,
     slotMinutes: EXTERNAL_ORDER_SLOT_MINUTES,
-    dayOrderCount,
-    slotTaken
+    dayOrderCount: requestedAt ? dayOrderCount : requestedDateDayCount,
+    slotTaken,
+    requestedDate: requestedDateKey,
+    requestedWindowKey,
+    requestedWindowLabel: requestedWindow?.label ?? null,
+    requestedWindowAvailable: requestedWindow?.available ?? false,
+    requestedWindowReason: requestedWindow?.reason ?? null,
+    requestedWindowScheduledAt: requestedWindow?.scheduledAt ?? null,
+    requestedWindowNextAvailableAt,
+    windows
   };
 }

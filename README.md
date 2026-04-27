@@ -53,6 +53,36 @@ pnpm cleanup:test-data
 
 - Atalho para reboot + limpeza executavel em um comando: `./scripts/refresh-and-start.command`.
 
+### Espelho publico local + lab futuro
+
+Para trabalhar com a topologia publica separada do lab:
+
+Terminal 1:
+
+```bash
+pnpm dev:web:published-local
+```
+
+Terminal 2:
+
+```bash
+pnpm --filter @querobroapp/api dev
+```
+
+Terminal 3:
+
+```bash
+pnpm dev:web:amigas-lab
+```
+
+Notas:
+
+- `pnpm dev:web:published-local` sobe um espelho local exato de `https://querobroa.com.br` em `http://127.0.0.1:3000`.
+- `pnpm dev:web:ops-local` sobe o web operacional local em `http://127.0.0.1:3003`, usando o codigo local e a API local.
+- `pnpm dev:web:amigas-lab` sobe o laboratorio futuro em `http://127.0.0.1:3002`, usando o codigo local e a API local.
+- Esse trilho evita misturar a feature `AMIGAS DA BROA` com o espelho oficial.
+- Se voce rodar `./scripts/dev-all.sh`, ele sobe juntos: espelho publicado em `3000`, API em `3001` e web operacional local em `3003`.
+
 ### Alternativa em 2 terminais
 
 Terminal 1:
@@ -73,14 +103,16 @@ Observacao:
 
 ## URLs locais
 
-- Web: `http://127.0.0.1:3000/pedidos`
+- Espelho publico oficial: `http://127.0.0.1:3000/pedido`
+- Laboratorio futuro (`AMIGAS DA BROA`): `http://127.0.0.1:3002/pedido`
+- Web operacional completo via `dev-all`: `http://127.0.0.1:3003/pedidos`
 - API health: `http://127.0.0.1:3001/health`
 - Runtime config (read-only): `http://127.0.0.1:3001/runtime-config`
 - Alias legado de runtime config: `http://127.0.0.1:3001/builder/config`
 
 ## Checklist manual apos reboot
 
-1. Abra `http://127.0.0.1:3000/pedidos`.
+1. Abra `http://127.0.0.1:3003/pedidos`.
 2. Confirme que a tela abre em `Dia`.
 3. Clique em um card qualquer no calendario de `Semana` ou `Mes` e confirme que ele abre a visao `Dia`, mesmo vazio.
 4. Crie ou edite um produto em `Produtos`.
@@ -136,10 +168,8 @@ Nota importante:
 
 ## Integracoes externas
 
-- O backend atual ja sustenta intake externo canonico (`/orders/intake/customer-form`, `google-form` e `whatsapp-flow`), envio opcional pela WhatsApp Cloud API e alerta operacional por webhook/ntfy.
-- Agora tambem existe `POST /whatsapp/webhook`, `POST /payments/pix-settlements/webhook` para baixa PIX por identificador interno e `POST /payments/pix-reconciliations/webhook` para conciliacao segura por nome + valor vinda de bridge externa.
-- O trilho bancario foi preparado de forma provider-neutral: a conta oficial hoje e Nubank, mas a integracao de liquidacao entra pelo webhook do ERP para permitir automacao futura via Nubank/Open Finance/bridge externo sem trocar o contrato interno.
-- O repo agora inclui `scripts/nubank-pix-bridge.mjs`, que usa a aba autenticada do Nubank PJ no Chrome para ler PIX de entrada visiveis e delegar o matching seguro ao backend.
+- O backend atual ja sustenta intake externo canonico (`/orders/intake/customer-form` e `google-form`) e alerta operacional por webhook/ntfy.
+- O fluxo financeiro operacional agora usa importacao manual do extrato semanal do Nu Empresas (`.eml`, `.csv` ou `.ofx`) direto no dashboard, que reconcilia PIX de entrada e recalcula os indicadores financeiros do app.
 
 ## Scripts principais
 
@@ -153,9 +183,6 @@ pnpm test
 pnpm qa:trust
 pnpm qa:browser-smoke
 pnpm qa:critical-e2e
-pnpm bank:pix:bridge:once
-pnpm bank:pix:bridge
-pnpm bank:pix:bridge:install
 ```
 
 ## Fontes de verdade

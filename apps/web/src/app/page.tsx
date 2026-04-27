@@ -6,7 +6,7 @@ import { buildPublicAppUrl, isOpsHost } from '@/lib/public-site-config';
 
 const pageTitle = 'QUEROBROA';
 const pageDescription = 'Sua vida + broa :) 🙂';
-const homeSocialImagePath = '/querobroa-brand/home-immersive/scene-05.jpg';
+const homeSocialImagePath = '/querobroa-brand/stack-wide.jpg';
 
 export function generateMetadata(): Metadata {
   const canonicalUrl = buildPublicAppUrl('/', {
@@ -15,10 +15,23 @@ export function generateMetadata(): Metadata {
   const socialImageUrl = buildPublicAppUrl(homeSocialImagePath, {
     allowLocalFallback: process.env.NODE_ENV !== 'production'
   });
+  const homeIcon512 = '/querobroa-brand/icons/home-shortcut-stack-v2-512.png';
+  const homeIcon180 = '/querobroa-brand/icons/home-shortcut-stack-v2-180.png';
 
   return {
     title: pageTitle,
     description: pageDescription,
+    icons: {
+      icon: [{ url: homeIcon512, sizes: '512x512', type: 'image/png' }],
+      shortcut: homeIcon512,
+      apple: [
+        {
+          url: homeIcon180,
+          sizes: '180x180',
+          type: 'image/png'
+        }
+      ]
+    },
     alternates: canonicalUrl
       ? {
           canonical: canonicalUrl
@@ -39,9 +52,9 @@ export function generateMetadata(): Metadata {
         ? [
             {
               url: socialImageUrl,
-              width: 1466,
-              height: 2200,
-              alt: 'Broas QUEROBROA em composicao editorial'
+              width: 1200,
+              height: 630,
+              alt: 'Broas QUEROBROA empilhadas em preview largo sobre fundo verde-claro'
             }
           ]
         : undefined

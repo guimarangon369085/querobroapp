@@ -1,26 +1,25 @@
 import type {
   Customer,
+  ExternalOrderDeliveryWindowKey,
   OrderIntake,
   OrderIntakeMeta,
   PixCharge,
-  Product,
-  WhatsAppPixDispatch
+  Product
 } from '@querobroapp/shared';
 import { apiFetch } from '@/lib/api';
 import type {
   DeliveryReadiness,
   DeliveryQuote,
   DeliveryTracking,
-  MassPrepEvent,
   OrderView,
-  ProductionBoard
+  ProductionBoard,
+  ScheduleDayAvailability
 } from './orders-model';
 
 export type OrdersWorkspaceData = {
   orders: OrderView[];
   customers: Customer[];
   products: Product[];
-  massPrepEvents: MassPrepEvent[];
 };
 
 export type OrderIntakeResult = {
@@ -29,14 +28,13 @@ export type OrderIntakeResult = {
 };
 
 export async function fetchOrdersWorkspace(): Promise<OrdersWorkspaceData> {
-  const [orders, customers, products, massPrepEvents] = await Promise.all([
+  const [orders, customers, products] = await Promise.all([
     apiFetch<OrderView[]>('/orders'),
     apiFetch<Customer[]>('/customers'),
-    apiFetch<Product[]>('/inventory-products'),
-    apiFetch<MassPrepEvent[]>('/orders/mass-prep-events')
+    apiFetch<Product[]>('/inventory-products')
   ]);
 
-  return { orders, customers, products, massPrepEvents };
+  return { orders, customers, products };
 }
 
 export function submitOrderIntake(payload: OrderIntake) {
@@ -50,12 +48,6 @@ export function fetchOrderPixCharge(orderId: number) {
   return apiFetch<PixCharge>(`/orders/${orderId}/pix-charge`);
 }
 
-export function sendOrderPixChargeWhatsApp(orderId: number) {
-  return apiFetch<WhatsAppPixDispatch>(`/orders/${orderId}/send-pix-whatsapp`, {
-    method: 'POST'
-  });
-}
-
 export function fetchOrderDeliveryReadiness(orderId: number) {
   return apiFetch<DeliveryReadiness>(`/deliveries/orders/${orderId}/readiness`);
 }
@@ -67,6 +59,13 @@ export function fetchDeliveryQuote(payload: {
     name?: string | null;
     phone?: string | null;
     address?: string | null;
+    addressLine1?: string | null;
+    addressLine2?: string | null;
+    neighborhood?: string | null;
+    city?: string | null;
+    state?: string | null;
+    postalCode?: string | null;
+    country?: string | null;
     placeId?: string | null;
     lat?: number | null;
     lng?: number | null;
@@ -91,6 +90,13 @@ export function fetchInternalDeliveryQuote(payload: {
     name?: string | null;
     phone?: string | null;
     address?: string | null;
+    addressLine1?: string | null;
+    addressLine2?: string | null;
+    neighborhood?: string | null;
+    city?: string | null;
+    state?: string | null;
+    postalCode?: string | null;
+    country?: string | null;
     placeId?: string | null;
     lat?: number | null;
     lng?: number | null;
@@ -132,6 +138,17 @@ export function markOrderDeliveryComplete(orderId: number) {
 
 export function fetchProductionBoard() {
   return apiFetch<ProductionBoard>('/production/queue');
+}
+
+export function fetchScheduleDayAvailability(dayKey: string) {
+  return apiFetch<ScheduleDayAvailability>(`/orders/schedule-days/${encodeURIComponent(dayKey)}`);
+}
+
+export function updateScheduleDayAvailability(dayKey: string, blockedWindows: ExternalOrderDeliveryWindowKey[]) {
+  return apiFetch<ScheduleDayAvailability>(`/orders/schedule-days/${encodeURIComponent(dayKey)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ blockedWindows }),
+  });
 }
 
 export function startNextProductionBatch(payload?: {

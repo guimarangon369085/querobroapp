@@ -19,6 +19,11 @@ export class ProductionController {
     return this.service.requirements(date);
   }
 
+  @Get('stock-planning')
+  stockPlanning() {
+    return this.service.stockPlanning();
+  }
+
   @Get('queue')
   queue() {
     return this.service.queue();

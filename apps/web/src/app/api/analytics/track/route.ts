@@ -11,7 +11,7 @@ function buildErrorResponse(status: number, payload: unknown) {
 export async function POST(request: Request) {
   if (!isTrustedSameOriginBridgeRequest(request)) {
     return buildErrorResponse(403, {
-      message: 'Origem de analytics nao autorizada.'
+      message: 'Origem de analytics não autorizada.'
     });
   }
 
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     body = await request.json();
   } catch {
     return buildErrorResponse(400, {
-      message: 'Payload invalido para analytics.'
+      message: 'Payload inválido para analytics.'
     });
   }
 

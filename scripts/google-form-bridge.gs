@@ -3,7 +3,7 @@ const APP_BASE_URL = 'https://querobroa.com.br';
 const FORM_FIELDS = {
   timestamp: 'Carimbo de data/hora',
   name: 'Nome completo',
-  phone: 'Telefone com WhatsApp',
+  phone: 'Telefone',
   fulfillmentMode: 'Como voce quer receber?',
   address: 'Endereco para entrega',
   deliveryNotes: 'Complemento / referencia',

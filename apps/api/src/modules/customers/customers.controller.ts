@@ -2,7 +2,7 @@ import { Controller, Delete, Get, Param, Body, Post, Put, Inject } from '@nestjs
 import { CustomersService } from './customers.service.js';
 import { parseWithSchema } from '../../common/validation.js';
 import { z } from 'zod';
-import { CustomerSchema } from '@querobroapp/shared';
+import { CustomerAddressSchema, CustomerSchema } from '@querobroapp/shared';
 
 const idSchema = z.coerce.number().int().positive();
 
@@ -22,15 +22,47 @@ export class CustomersController {
 
   @Post()
   create(@Body() body: unknown) {
-    const payload = CustomerSchema.omit({ id: true, publicNumber: true, createdAt: true }).parse(body);
+    const payload = CustomerSchema.omit({ id: true, publicNumber: true, createdAt: true, addresses: true }).parse(body);
     return this.service.create(payload);
   }
 
   @Put(':id')
   update(@Param('id') id: string, @Body() body: unknown) {
     const customerId = parseWithSchema(idSchema, id);
-    const payload = CustomerSchema.partial().omit({ id: true, publicNumber: true, createdAt: true }).parse(body);
+    const payload = CustomerSchema.partial().omit({ id: true, publicNumber: true, createdAt: true, addresses: true }).parse(body);
     return this.service.update(customerId, payload);
+  }
+
+  @Post(':id/addresses')
+  addAddress(@Param('id') id: string, @Body() body: unknown) {
+    const customerId = parseWithSchema(idSchema, id);
+    const payload = CustomerAddressSchema.omit({
+      id: true,
+      customerId: true,
+      createdAt: true,
+      updatedAt: true,
+      isPrimary: true
+    }).parse(body);
+    return this.service.addAddress(customerId, payload);
+  }
+
+  @Put(':id/addresses/:addressId')
+  updateAddress(@Param('id') id: string, @Param('addressId') addressId: string, @Body() body: unknown) {
+    const customerId = parseWithSchema(idSchema, id);
+    const parsedAddressId = parseWithSchema(idSchema, addressId);
+    const payload = CustomerAddressSchema.omit({
+      id: true,
+      customerId: true,
+      createdAt: true,
+      updatedAt: true,
+      isPrimary: true
+    }).parse(body);
+    return this.service.updateAddress(customerId, parsedAddressId, payload);
+  }
+
+  @Delete(':id/addresses/:addressId')
+  removeAddress(@Param('id') id: string, @Param('addressId') addressId: string) {
+    return this.service.removeAddress(parseWithSchema(idSchema, id), parseWithSchema(idSchema, addressId));
   }
 
   @Delete(':id')

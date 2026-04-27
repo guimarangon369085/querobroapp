@@ -5,7 +5,7 @@ Objetivo implicito desta sessao: simplificar UX para usuario leigo com minimo de
 
 Bootstrap inicial:
 1) Leia primeiro o snapshot factual gerado automaticamente em `__AUTO_SNAPSHOT_PATH__`.
-2) Use esse snapshot como fonte principal para branch, worktree, commits recentes, servicos locais e frescor dos docs.
+2) Use esse snapshot como fonte principal para branch, worktree, commits recentes, servicos locais, arquivos canonicos, comandos rapidos e frescor dos docs.
 3) Leia:
 - docs/PROJECT_SNAPSHOT.md
 - docs/NEXT_STEP_PLAN.md

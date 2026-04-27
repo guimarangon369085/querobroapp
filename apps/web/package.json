@@ -4,22 +4,25 @@
   "private": true,
   "scripts": {
     "dev": "NEXT_DISABLE_DEVTOOLS=1 next dev -H 127.0.0.1",
+    "dev:ops-local": "NEXT_DIST_DIR=.next-ops-local NEXT_PUBLIC_APP_URL=http://127.0.0.1:3003 NEXT_DISABLE_DEVTOOLS=1 next dev -H 127.0.0.1 -p 3003",
+    "dev:amigas-lab": "NEXT_DIST_DIR=.next-amigas-lab NEXT_PUBLIC_ENABLE_AMIGAS_DA_BROA=1 NEXT_DISABLE_DEVTOOLS=1 next dev -H 127.0.0.1 -p 3002",
     "build": "next build",
     "lint": "eslint . --ext .ts,.tsx,.js,.cjs,.mjs --max-warnings=0",
-    "typecheck": "tsc -p tsconfig.json --noEmit --incremental false"
+    "typecheck": "rm -rf .next/types && next typegen && tsc -p tsconfig.json --noEmit --incremental false"
   },
   "dependencies": {
     "@querobroapp/shared": "workspace:*",
     "@querobroapp/ui": "workspace:*",
+    "@tabler/icons-react": "^3.41.1",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
+    "libphonenumber-js": "^1.12.38",
     "lucide-react": "^0.468.0",
     "next": "^15.5.14",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tailwind-merge": "^2.5.4",
-    "tailwindcss-animate": "^1.0.7",
-    "libphonenumber-js": "^1.12.38"
+    "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

@@ -1,7 +1,7 @@
 export const GOOGLE_FORM_FIELDS = {
   timestamp: 'Carimbo de data/hora',
   name: 'Nome completo',
-  phone: 'Telefone com WhatsApp',
+  phone: 'Telefone',
   fulfillmentMode: 'Como voce quer receber?',
   address: 'Endereco para entrega',
   deliveryNotes: 'Complemento / referencia',

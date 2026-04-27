@@ -299,7 +299,7 @@ test(
 
     const goiabadaRow = requirements.rows.find((row) => row.ingredientId === goiabadaItem.id);
     assert.ok(goiabadaRow, 'Goiabada deveria aparecer no D+1');
-    assert.ok(approxEqual(goiabadaRow.requiredQty, 15));
+    assert.ok(approxEqual(goiabadaRow.requiredQty, 24));
     assert.ok(Number(goiabadaRow.availableQty) >= 15);
     assert.ok(approxEqual(goiabadaRow.shortageQty, 0));
 

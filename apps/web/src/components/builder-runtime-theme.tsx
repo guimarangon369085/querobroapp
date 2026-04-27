@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import type { BuilderConfig } from '@querobroapp/shared';
-import { fetchBuilderConfigClient } from '@/lib/builder';
+import { BuilderConfigSchema, type BuilderConfig } from '@querobroapp/shared';
 
 function applyBuilderConfig(config: BuilderConfig) {
   const root = document.documentElement;
@@ -23,11 +22,23 @@ function applyBuilderConfig(config: BuilderConfig) {
   root.style.setProperty('--builder-checkbox-accent', config.forms.checkboxAccentColor);
 }
 
+async function fetchPublicBuilderThemeConfig() {
+  const response = await fetch('/api/runtime-theme', {
+    method: 'GET',
+    cache: 'no-store'
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const body = await response.json();
+  return BuilderConfigSchema.parse(body);
+}
+
 export function BuilderRuntimeTheme() {
   useEffect(() => {
     let active = true;
 
-    fetchBuilderConfigClient()
+    fetchPublicBuilderThemeConfig()
       .then((config) => {
         if (!active) return;
         applyBuilderConfig(config);

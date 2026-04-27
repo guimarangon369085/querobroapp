@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PORTS=(3000 3001 8081)
+PORTS=(3000 3001 3002 3003 8081)
 
 if ! command -v lsof >/dev/null 2>&1; then
   echo "kill-ports: lsof nao encontrado."
@@ -80,4 +80,4 @@ for port in "${PORTS[@]}"; do
   clear_port "$port"
 done
 
-echo "Ports 3000/3001/8081 cleared."
+echo "Ports 3000/3001/3002/3003/8081 cleared."

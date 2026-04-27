@@ -1,15 +1,19 @@
 # NEXT_STEP_PLAN
 
-Ultima atualizacao: 2026-03-21
+Ultima atualizacao: 2026-04-27
 
 ## Objetivo da fase atual
 
 Consolidar o lancamento publico do app sobre o mesmo nucleo operacional:
 
 - landing publica em `/`
-- operacao interna em `Pedidos`
+- operacao interna autenticada em `Pedidos`
 - captura externa em `/pedido` e `Google Forms`
-- entrega com frete cotado antes do PIX, calculado internamente por raio
+- entrega com frete cotado antes do PIX, calculado internamente por raio com tabela operacional editavel em `/frete`, mantendo bloqueio acima de `30 km`
+- COGS calculado por pedido com preco historico de insumo, usando baseline pesquisada desde o primeiro pedido quando necessario
+- ficha tecnica oficial de broa recalibrada para `36 broas` por receita, com leitura por broa no dashboard e custo reprocessado sobre toda a base ativa
+- dashboard executivo em formato `board cockpit`, com linha do tempo automatica diaria/mensal, atribuicao por origem/referrer, meta mensal orientada por run rate e separacao explicita entre caixa recebido e COGS tecnico estimado
+- caixa real do dashboard alimentado por importacao do extrato semanal do Nu Empresas, sem dependencia de bridge local autenticada no navegador
 
 ## Gate operacional (concluido em 2026-03-11)
 
@@ -24,18 +28,20 @@ Consolidar o lancamento publico do app sobre o mesmo nucleo operacional:
 
 - Subir `web`, `api` e `Postgres` no host final.
 - Apontar `www.querobroa.com.br` para o `web`.
-- Garantir `/` como landing publica, `/pedido` como captura publica e `/pedidos` como superficie operacional.
+- Garantir `/` como landing publica, `/pedido` como captura publica e `/pedidos` como superficie operacional protegida por sessao.
 - Publicar a URL final do `web` para a pagina `/pedido`.
 - Validar uma abertura externa real nas 3 rotas finais do dominio.
-- Validacao executada: `pnpm validate:public-deploy` e `pnpm validate:delivery-quote`, com `200` em `/`, `/pedido` e `/pedidos`, `apiHealth=ok` e quote publico `LOCAL / MANUAL_FALLBACK`.
+- Validacao executada: `pnpm validate:public-deploy` e `pnpm validate:delivery-quote`, com `200` em `/` e `/pedido`, protecao de `/pedidos`, `apiHealth=ok` e quote publico `LOCAL / MANUAL_FALLBACK`.
 
 Criterio de pronto:
-- `www.querobroa.com.br`, `www.querobroa.com.br/pedido` e `www.querobroa.com.br/pedidos` abrem no deploy final e usam a mesma base operacional.
+- `www.querobroa.com.br` e `www.querobroa.com.br/pedido` abrem publicamente, enquanto `www.querobroa.com.br/pedidos` exige sessao valida e usa a mesma base operacional.
 
 ## Prioridade 2 (agora)
 
 ### Teste real do canal externo com total final correto
 
+- Publicado em 2026-04-27: o ramo `Cartão` do `/pedido` passou a gross-upar o total do cliente com a taxa online vigente da SumUp (`5,99%`) sem contaminar o valor líquido operacional do pedido. O preview público agora sobe de `R$ 57,00` para `R$ 60,64` no mesmo pedido ao alternar de `PIX` para `CARTÃO`, o `/pedido` publicado atualiza o total em tempo real (`R$ 40,00 -> R$ 42,55` em validação manual), o checkout hospedado da SumUp abre com esse mesmo valor bruto e o resumo visual passou a exibir `TAXA DO CARTÃO` entre `FRETE` e `TOTAL`. Deploys em produção: API `aff8d265-8c32-4493-9552-a55726de8a49`, web `f5d06d60-58b8-4322-98f1-c171477e3033` e refresh visual do web `499eb099-cf59-4dd1-8ad3-359a87e45678`.
+- Validar em produção o novo ramo `Cartão` da SumUp em `/pedido`, incluindo criação do pedido com `PAYMENT_PENDING`, redirecionamento para checkout hospedado, sync de status e retorno seguro para a tela final.
 - Configurar `ORDER_FORM_BRIDGE_TOKEN` onde houver auth ligada.
 - Montar o `Google Form` real com os labels definidos em `docs/GOOGLE_FORMS_BRIDGE.md`.
 - Colar o `scripts/google-form-bridge.gs` no Apps Script do formulario.
@@ -43,6 +49,7 @@ Criterio de pronto:
 - Validar uma submissao real ponta a ponta caindo no app com `PIX_PENDING`.
 - Validar no mesmo teste um pedido `Entrega` com frete somado antes do PIX.
 - Rodar `pnpm validate:public-deploy` apos o deploy e manter `pnpm validate:delivery-quote` como checagem rapida de frete real.
+- Garantir que o validador publico continue checando `/pedidos -> /acesso` sem sessao, sem reabrir a operacao por engano.
 
 Criterio de pronto:
 - cliente consegue abrir o link, enviar o pedido e receber o PIX com o total final correto sem intervencao manual de cadastro.
@@ -51,15 +58,25 @@ Criterio de pronto:
 
 ### Refino final de Estoque e Pedidos
 
+- Publicado em 2026-04-27: `AMIGAS DA BROA` não some mais do catálogo ao zerar o estoque direto. O estado `sem estoque` agora é derivado no runtime e no backend: card visível em escala de cinza com aviso `TEMPORARIAMENTE SEM ESTOQUE`, adição bloqueada no `/pedido` e no quick create, e intake/API recusando nova compra sem saldo real, sem depender de `active=false`. No hotfix seguinte do mesmo dia, a API publicada também passou a religar automaticamente os vínculos legados quebrados entre `Amigas` e seus itens de estoque oficiais, reaproveitando o item por nome exato e a gramatura do pack quando `inventoryItemId`/`inventoryQtyPerSaleUnit` estiverem faltando, para que o saldo zerado volte a refletir no catálogo público. Deploys em produção: API `cf99057d-162b-4441-86ac-af745170ab53` + hotfix API `6e2024a3-c52b-4c46-ada2-efac2691e765` e web `65c7e088-11e1-496d-872f-35d033356aa6`.
+- Publicado em 2026-04-26: `/cupons` voltou a operar com cadastro vivo mesmo quando um código só sobrevive no histórico. O web agora permite recuperar/recriar esses códigos a partir da própria tela, e a produção já teve os `5` cupons históricos recriados como registros vivos `inativos`, mantendo histórico de uso e devolvendo `Salvar/Excluir` na interface. Deploys em produção: API `0d7d7251-5561-42f2-8054-132b89951315` e web `650a6438-c55c-4f50-8895-66dae3c4c1e7`.
+- Publicado em 2026-04-26: `AMIGAS DA BROA` ganhou fallback canonico de descricao por item no `shared`/API/web para quando `drawerNote` vier nulo, evitando a copia generica `Toque fora da gaveta...` no `/pedido`. Deploys em producao: API `f888f261-2f9a-4f85-b18b-fdee1c4b2be5` e web `0d74d3e8-f5f5-41f5-b2a1-84bdf670be0d`.
 - Continuar reduzindo densidade visual e scroll na visao `Dia`.
 - Continuar a extracao dos blocos grandes restantes de `orders-screen` para componentes menores.
 - Manter o catalogo de caixas/sabores centralizado entre `/pedido`, `quick create` e `/pedidos`.
+- Validar em uso real a sessao `AMIGAS DA BROA` publicada, mantendo estoque direto por produto, estado visual de indisponibilidade sem sumir do catálogo e cupom incidindo apenas sobre Broas.
+- Manter o feed publico `meta-catalog.csv` sincronizado com o catalogo publicado do `/pedido`, incluindo `AMIGAS DA BROA` e `Caixa Mista de Romeu e Julieta`, e concluir no Commerce Manager autenticado a organizacao final dos conjuntos de produtos usando os labels ja publicados no feed.
+- Cadastrar os proximos itens de `AMIGAS DA BROA` de forma incremental, preservando o formato editorial dos cards/gavetas e evitando proliferacao de copy auxiliar desnecessaria.
+- Manter em `/pedido` a selecao manual de data/faixa estavel, sem resync da agenda sobrescrever a escolha do cliente durante a interacao com o calendario.
 - Manter a numeracao publica sequencial de clientes/pedidos como unico numero exposto na interface.
-- Validar em producao o atalho mobile da home, o prefill local de `/pedido` e o fluxo `Refazer ultimo pedido`.
+- Validar em producao o CTA principal da home, o prefill local de `/pedido` e o fluxo `Refazer ultimo pedido`.
 - Manter a home sem CTA de instalacao/atalho enquanto iPhone/iOS nao permitir um fluxo realmente coerente por clique direto.
 - Manter a home travada ao viewport visivel real, sem qualquer rolagem residual causada por `100vh` ou barras do navegador.
 - Manter a home sem bounce/scroll residual em iPhone, mesmo com barras dinamicas do navegador, e validar isso no dominio publico.
+- Manter favoritos, favicon, `apple-touch-icon`, `manifest` e preview social da home ancorados na foto canonica atual da pilha de broas, usando crop quadrado centralizado com leve ajuste vertical nos ícones e um preview largo dedicado (`stack-wide.jpg`) para evitar padding lateral, desequilíbrio no enquadramento ou reaparecimento de imagens antigas ao favoritar/adicionar atalho.
 - Manter o restante do app no mesmo modelo de viewport real da home, com modais, toasts, avisos e barras sticky respeitando `visualViewport` e safe areas do navegador.
+- Manter `Novo pedido`, detalhe de pedido e detalhe de cliente no padrao drawer lateral sobreposto, sem regressao para modal central flutuante nem scroll no container externo.
+- Manter o app sem pinch zoom e com gesto principal de navegacao restrito ao eixo vertical, evitando zoom acidental e conflito com drawers/calendario em mobile.
 - Manter as rotas publicas com copy social curta e editorial no compartilhamento, sem texto tecnico de operacao no preview.
   Copy atual: `Sua vida + broa :) 🙂`.
 - Manter na home desktop o fundo em 3 colunas sincronizadas e sem repeticao, evitando crop agressivo de uma unica imagem em widescreen.
@@ -70,16 +87,29 @@ Criterio de pronto:
 - Manter `/pedido` abrindo direto em `Dados`, sem header/resumo duplicado no topo e sem labels redundantes de seção.
 - Manter `/pedido` sem colapsos em desktop/mobile intermediario, com grids elasticos para agendamento, caixas e `Caixa Sabores` em qualquer navegador.
 - Manter em `/pedido` a mensagem explicita de que pedido novo nao entra para hoje, sempre mostrando o primeiro horario liberado antes do erro final.
-- Manter `/pedido` sem subtotal/CTA flutuante no mobile e com a `Caixa Sabores` exibindo a composicao oficial dos 5 sabores.
+- Manter `/pedido` sem subtotal/CTA flutuante no mobile e com a `Caixa Sabores` exibindo a composicao oficial alinhada aos sabores ativos do catalogo.
 - Manter `/pedido` e `/clientes` no autocomplete novo do Google Places, sem regressao para o widget legado nem novos warnings de console ao selecionar sugestao.
 - Manter a linha de quantidade dos cards de `/pedido` no layout flexivel novo, sem voltar a comprimir o selo `caixas` em Safari/desktop ou em larguras intermediarias.
 - Manter `/dashboard` acessivel no menu principal sem voltar a aplicar trava de host no web por engano.
+- Manter `/pedidos`, `/clientes`, `/estoque`, `/dashboard` e `/api/internal/*` protegidos por sessao persistente no web, sem voltar a expor a operacao por URL direta.
 - Manter `/dashboard` no formato editorial didatico novo, sem regressao para cards genericos ou leitura mais tecnica do que humana.
+- Manter no `/dashboard` a granularidade automatica da linha do tempo (`diaria` abaixo de `120` dias, `mensal` acima disso) e a base temporal coerente por `createdAt`, sem voltar a misturar receita de um mes com COGS de outro.
+- Manter no `/dashboard` a atribuicao analitica por `origem` e `referrer`, com `share`, `chegou /pedido`, `envio` e indice relativo por canal, para leitura real de oportunidade comercial.
+- Manter no `/dashboard` o bloco de extrato bancario como unica fonte de caixa real, garantindo que importacao de `.eml/.csv/.ofx` continue conciliando PIX pendente e atualizando custos/fluxo imediatamente.
+- Fechado neste lote: o fluxo financeiro deixou de depender da bridge local do Nubank e passou a operar por importacao manual do extrato semanal direto no dashboard.
+- Fechado neste lote: a conciliacao do extrato agora tambem reconhece `PIX` ja pago por `valor + paidAt/dueDate/scheduledAt`, mesmo com `order.customerName` nulo, e o plano de contas do dashboard passou a separar tesouraria, tributos, gateway, embalagem e insumos com breakdown explicito.
+- Fechado neste lote: o `Recebido` do dashboard agora respeita o teto do `total` por pedido, sem inflar por pagamentos historicos excedentes, e o bloco de extrato passou a denunciar cobertura parcial quando o periodo escolhido supera a janela importada.
+- Proximo foco financeiro: revisar apenas os `4` inflows ainda sem match no extrato publicado (`1` repasse SumUp sem pagamento correspondente, `1` PIX de `R$ 73,90`, `1` PIX de `R$ 52,00` com ambiguidade residual e `1` PIX de `R$ 15,00` sem pedido candidato) antes de ampliar novas automacoes contabeis.
 - Manter `Novo pedido` de `/pedidos` estavel em mobile, sem popup deformado nem quebra no bloco de quantidade.
 - Manter `/pedidos` mobile sem FAB flutuante para `Novo pedido`, usando acao inline no proprio painel.
+- Manter a abertura do detalhe de pedido sem refetch global da workspace ao trocar `selectedOrder`, evitando flashes curtos de loading ao clicar em cards.
+- Manter os cards comprimidos do calendario de `/pedidos` mostrando ao menos o nome do cliente em mobile quando houver sobreposicao na mesma faixa.
+- Manter `/pedidos` exibindo de forma visivel as 3 faixas publicas de `/pedido` (`9h - 12h`, `12h - 16h`, `16h - 20h`) no quick create e na edicao, para conferência operacional sem remover a liberdade de sobreposicao interna.
 - Manter o intake externo/publico sem abortar transacao no Postgres ao reservar `publicNumber` para cliente/pedido.
 - Manter a navegacao padronizada com `PEDIDOS` como item principal e labels em caixa alta em todo o menu.
 - Seguir limpando redundancias em `Estoque` agora que `Produtos` saiu da navegação.
+- Publicar o novo bloco `Preços` em `/estoque`, aplicar a baseline historica na base produtiva e confirmar o COGS sobre todos os pedidos ativos da base.
+- Fechado neste lote: o COGS publicado foi recalibrado sobre os `433` pedidos usando a receita oficial de `36 broas`, com `qtyPerUnit` como base canonica, sacola a cada `2 caixas` e margem consolidada novamente em nivel plausivel.
 - Validar estados vazios e mudanca de dia em desktop e mobile width.
 - Fechado neste lote: `/dashboard` e analytics ficaram blindados por bridge/token, e `PICKUP` passou a ser respeitado em `/clientes` e no quick create de `/pedidos`.
 
@@ -88,12 +118,9 @@ Criterio de pronto:
 
 ## Prioridade 4 (agora)
 
-### Ativacao final do WhatsApp Flow
+### Operacao externa canonica
 
-- Publicar o Flow na Meta e preencher `WHATSAPP_FLOW_ORDER_INTAKE_ID`.
-- Apontar `WHATSAPP_FLOW_API_BASE_URL` para a API publica final, se necessario.
-- Validar o disparo real do convite no webhook e o submit do Flow caindo em `/pedidos`.
-- Persistir a origem do canal no modelo/UI se for necessario distinguir pedido vindo do WhatsApp no operacional.
+- Consolidar `Google Forms` e `/pedido` sobre o mesmo contrato de preview/intake.
 - Manter `PIX` simples no curto prazo: chave/copia e cola entregue ao cliente.
 - Postergar automacao de confirmacao financeira ate existir provedor adequado.
 
@@ -104,10 +131,10 @@ Criterio de pronto:
 
 1. Teste real de `/pedido` e do `Google Forms`, incluindo `Entrega`.
 2. Refino final de `Estoque` e `Pedidos`, com foco agora em performance/agregacao do dashboard e fatiamento de `orders-screen`.
-3. Ativacao final de `WhatsApp Flow` sobre o intake canonico ja pronto.
+3. Consolidacao final do intake externo sem mensageria de terceiros.
 
 ## Riscos de nao fazer
 
 - O deploy publico ja esta no ar; o risco agora e o canal externo parecer pronto sem Apps Script/token realmente configurados de ponta a ponta.
 - Um formulario externo mal configurado pode criar friccao mesmo com o backend pronto.
-- Se a ativacao final do `WhatsApp Flow` divergir do intake canonico ja implementado, o canal vai reintroduzir retrabalho e inconsistencias operacionais.
+- Se algum canal externo divergir do intake canonico ja implementado, isso vai reintroduzir retrabalho e inconsistencias operacionais.

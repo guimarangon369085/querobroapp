@@ -20,7 +20,6 @@ export const BusinessPublicProfileSchema = z.object({
   cnpjDisplay: z.string().min(1),
   officialPhoneDigits: z.string().regex(/^\d{12,13}$/),
   officialPhoneDisplay: z.string().min(1),
-  officialWhatsAppUrl: z.string().url(),
   pixKey: z.string().min(1),
   pickupAddressLine1: z.string().min(1),
   pickupAddressLine2: z.string().min(1),
@@ -38,7 +37,6 @@ export const OFFICIAL_BUSINESS_PUBLIC_PROFILE = BusinessPublicProfileSchema.pars
   cnpjDisplay: formatCnpj(OFFICIAL_CNPJ_DIGITS),
   officialPhoneDigits: OFFICIAL_PHONE_DIGITS,
   officialPhoneDisplay: '+55 11 99400-9584',
-  officialWhatsAppUrl: `https://wa.me/${OFFICIAL_PHONE_DIGITS}`,
   pixKey: '+5511994009584',
   pickupAddressLine1: 'Alameda Jau, 731',
   pickupAddressLine2: 'Apto 62',
@@ -48,14 +46,5 @@ export const OFFICIAL_BUSINESS_PUBLIC_PROFILE = BusinessPublicProfileSchema.pars
   postalCode: '01420-001',
   pickupAddressDisplay: 'Alameda Jau, 731 - Apto 62 - Jardim Paulista - Sao Paulo/SP - CEP 01420-001'
 });
-
-export function buildOfficialBusinessWhatsAppUrl(message?: string) {
-  const params = new URLSearchParams();
-  if (message?.trim()) {
-    params.set('text', message.trim());
-  }
-  const query = params.toString();
-  return `${OFFICIAL_BUSINESS_PUBLIC_PROFILE.officialWhatsAppUrl}${query ? `?${query}` : ''}`;
-}
 
 export type BusinessPublicProfile = z.infer<typeof BusinessPublicProfileSchema>;

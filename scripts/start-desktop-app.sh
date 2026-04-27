@@ -9,14 +9,18 @@ source "$ROOT_DIR/scripts/runtime-path.sh"
 setup_runtime_path
 
 API_URL="http://127.0.0.1:3001/health"
-WEB_URL="${QUEROBROAPP_START_URL:-http://127.0.0.1:3000/pedidos}"
+MIRROR_URL="http://127.0.0.1:3000/pedido"
+WEB_URL="${QUEROBROAPP_START_URL:-http://127.0.0.1:3003/pedidos}"
 API_LOG="/tmp/querobroapp-api.log"
+MIRROR_LOG="/tmp/querobroapp-public-mirror.log"
 WEB_LOG="/tmp/querobroapp-web.log"
 UID_VALUE="$(id -u)"
 AGENTS_DIR="$HOME/Library/LaunchAgents"
 API_LABEL="com.querobroapp.api"
+MIRROR_LABEL="com.querobroapp.public-mirror"
 WEB_LABEL="com.querobroapp.web"
 API_PLIST="$AGENTS_DIR/$API_LABEL.plist"
+MIRROR_PLIST="$AGENTS_DIR/$MIRROR_LABEL.plist"
 WEB_PLIST="$AGENTS_DIR/$WEB_LABEL.plist"
 PNPM_BIN="$(command -v pnpm || true)"
 
@@ -24,6 +28,11 @@ if [ -z "$PNPM_BIN" ]; then
   echo "pnpm nao encontrado no PATH."
   exit 1
 fi
+
+bash "$ROOT_DIR/scripts/check-local-node-version.sh"
+bash "$ROOT_DIR/scripts/clean-local-sqlite-paths.sh"
+bash "$ROOT_DIR/scripts/check-local-env.sh"
+bash "$ROOT_DIR/scripts/check-prisma-migration-drift.sh"
 
 is_port_listening() {
   local port="$1"
@@ -103,7 +112,7 @@ start_launch_agent() {
 
 printf -v ESCAPED_PATH '%q' "$PATH"
 
-if is_port_listening 3000 && is_port_listening 3001; then
+if is_port_listening 3000 && is_port_listening 3001 && is_port_listening 3003; then
   echo "QUEROBROAPP ja esta em execucao."
   open_web
   exit 0
@@ -117,16 +126,23 @@ echo "Preparando ambiente..."
 "$PNPM_BIN" --filter @querobroapp/api prisma:migrate:dev
 
 : > "$API_LOG"
+: > "$MIRROR_LOG"
 : > "$WEB_LOG"
 
 mkdir -p "$AGENTS_DIR"
 write_agent_plist "$API_LABEL" "export PATH=$ESCAPED_PATH && cd '$ROOT_DIR' && '$PNPM_BIN' --filter @querobroapp/api dev" "$API_LOG" "$API_PLIST"
-write_agent_plist "$WEB_LABEL" "export PATH=$ESCAPED_PATH && cd '$ROOT_DIR' && '$PNPM_BIN' --filter @querobroapp/web dev" "$WEB_LOG" "$WEB_PLIST"
+write_agent_plist "$MIRROR_LABEL" "export PATH=$ESCAPED_PATH && cd '$ROOT_DIR' && '$PNPM_BIN' dev:web:published-local" "$MIRROR_LOG" "$MIRROR_PLIST"
+write_agent_plist "$WEB_LABEL" "export PATH=$ESCAPED_PATH && cd '$ROOT_DIR' && '$PNPM_BIN' dev:web:ops-local" "$WEB_LOG" "$WEB_PLIST"
 
 echo "Iniciando API..."
 start_launch_agent "$API_LABEL" "$API_PLIST"
 
 wait_for_http "API" "$API_URL" 120
+
+echo "Iniciando Mirror..."
+start_launch_agent "$MIRROR_LABEL" "$MIRROR_PLIST"
+
+wait_for_http "MIRROR" "$MIRROR_URL" 120
 
 echo "Iniciando Web..."
 start_launch_agent "$WEB_LABEL" "$WEB_PLIST"
@@ -134,8 +150,10 @@ start_launch_agent "$WEB_LABEL" "$WEB_PLIST"
 ./scripts/wait-web-dev-ready.sh "$WEB_URL" 120
 
 echo "QUEROBROAPP pronto."
+echo "Mirror: $MIRROR_URL"
 echo "Web: $WEB_URL"
 echo "Logs API: $API_LOG"
+echo "Logs Mirror: $MIRROR_LOG"
 echo "Logs Web: $WEB_LOG"
 
 open_web

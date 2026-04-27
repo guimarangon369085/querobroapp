@@ -1,5 +1,5 @@
 import { BuilderConfigSchema, type BuilderConfig } from '@querobroapp/shared';
-import { getApiBaseUrl } from '@/lib/api-base-url';
+import { getApiBaseUrl, getInternalApiBaseUrl } from '@/lib/api-base-url';
 const runtimeConfigPaths = ['/runtime-config', '/builder/config'];
 
 export function resolveBuilderImageSrc(src: string) {
@@ -14,7 +14,7 @@ export function getDefaultBuilderConfig() {
 
 export async function fetchBuilderConfigServer(): Promise<BuilderConfig> {
   const fallback = getDefaultBuilderConfig();
-  const baseUrl = getApiBaseUrl();
+  const baseUrl = getInternalApiBaseUrl();
 
   for (const endpoint of runtimeConfigPaths) {
     try {
@@ -35,7 +35,7 @@ export async function fetchBuilderConfigServer(): Promise<BuilderConfig> {
 }
 
 export async function fetchBuilderConfigClient(): Promise<BuilderConfig> {
-  const baseUrl = getApiBaseUrl();
+  const baseUrl = getInternalApiBaseUrl();
 
   let lastStatus = 0;
   for (const endpoint of runtimeConfigPaths) {
@@ -52,5 +52,5 @@ export async function fetchBuilderConfigClient(): Promise<BuilderConfig> {
     return BuilderConfigSchema.parse(body);
   }
 
-  throw new Error(`Falha ao carregar configuracao interna: HTTP ${lastStatus || 0}`);
+  throw new Error(`Falha ao carregar configuração interna: HTTP ${lastStatus || 0}`);
 }

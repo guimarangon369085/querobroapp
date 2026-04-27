@@ -24,11 +24,6 @@ const nextConfig = {
         source: '/resumo',
         destination: '/pedidos',
         permanent: true
-      },
-      {
-        source: '/whatsapp-flow/:path*',
-        destination: '/pedidos',
-        permanent: true
       }
     ];
   }

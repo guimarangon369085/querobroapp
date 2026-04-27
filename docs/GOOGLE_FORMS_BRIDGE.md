@@ -1,6 +1,6 @@
 # Google Forms Bridge
 
-Canal temporario para capturar pedidos sem depender ainda de um numero dedicado de WhatsApp Business.
+Canal temporario para capturar pedidos pela pagina publica e pelo Google Forms, sem depender de mensageria externa.
 
 ## Rotas
 
@@ -14,10 +14,9 @@ Canal temporario para capturar pedidos sem depender ainda de um numero dedicado 
 
 O Google Forms entra apenas como camada de entrada.
 
-O dominio do app continua centralizado no intake canonico de pedidos, o que facilita migrar depois para:
+O dominio do app continua centralizado no intake canonico de pedidos, o que facilita evoluir depois sem trocar o contrato:
 
 - pagina publica propria
-- WhatsApp Flow
 
 ## Payload esperado
 
@@ -52,12 +51,12 @@ O dominio do app continua centralizado no intake canonico de pedidos, o que faci
 
 ## Especificacao final do Google Form
 
-A ordem abaixo foi alinhada para migrar com o minimo de retrabalho depois para `PUBLIC_FORM` ou `WHATSAPP_FLOW`.
+A ordem abaixo foi alinhada para convergir no contrato canonico de `PUBLIC_FORM`.
 
 1. `Nome completo`
    - tipo: resposta curta
    - obrigatorio: sim
-2. `Telefone com WhatsApp`
+2. `Telefone`
    - tipo: resposta curta
    - obrigatorio: sim
    - validacao: telefone celular com DDD
@@ -116,11 +115,7 @@ Regra operacional:
   - a route handler do Next repassa para `POST /orders/intake/customer-form`
 - `Pagina publica propria`:
   - chama `POST /orders/intake/customer-form`
-- `WhatsApp Flow`:
-  - coleta os mesmos campos
-  - chama `POST /orders/intake/customer-form` ou `POST /orders/intake/whatsapp-flow`
-
-Ou seja: muda o canal, nao muda o contrato.
+Ou seja: o Google Forms e a pagina publica usam o mesmo contrato canonico.
 
 ## Preview seguro
 
@@ -156,12 +151,6 @@ Regras:
 - `127.0.0.1` ou `localhost` servem apenas para teste local via script Node, nao para o Apps Script real
 - quando o script chama `/api/google-form`, o token do backend fica no servidor do `web`; o Apps Script nao precisa carregar `ORDER_FORM_BRIDGE_TOKEN`
 
-## Migracao futura para WhatsApp Flow
+## Continuidade
 
-Quando o numero dedicado estiver pronto:
-
-1. o Flow coleta os mesmos campos
-2. o backend envia para `POST /orders/intake/customer-form` ou `POST /orders/intake/whatsapp-flow`
-3. o restante do dominio continua igual
-
-Ou seja: muda o canal, nao muda a regra de negocio.
+Enquanto o canal externo seguir em formulario, a recomendacao e manter a fonte de verdade no contrato `ExternalOrderSubmissionSchema`.

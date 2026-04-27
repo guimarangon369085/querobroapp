@@ -55,7 +55,7 @@ export class AnalyticsController {
 
     if (configuredToken) {
       if (providedToken === configuredToken) return;
-      throw new UnauthorizedException('Token do bridge de analytics invalido.');
+      throw new UnauthorizedException('Token do bridge de analytics inválido.');
     }
 
     if ((process.env.NODE_ENV || 'development') === 'production' || getSecurityRuntimeConfig().enabled) {

@@ -10,6 +10,18 @@ const configuredStorageDir = (process.env.BUILDER_STORAGE_DIR || '').trim();
 const DATA_DIR = configuredStorageDir || path.join(repoRoot, 'data', 'builder');
 const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads', 'home');
+const RUNTIME_CONFIG_SEED_JSON = (process.env.RUNTIME_CONFIG_SEED_JSON || '').trim();
+
+function readSeedConfig(): BuilderConfig | null {
+  if (!RUNTIME_CONFIG_SEED_JSON) return null;
+  try {
+    const parsed = JSON.parse(RUNTIME_CONFIG_SEED_JSON);
+    return BuilderConfigSchema.parse(parsed);
+  } catch (error) {
+    console.error('[runtime-config] invalid RUNTIME_CONFIG_SEED_JSON, using default config', error);
+    return null;
+  }
+}
 
 @Injectable()
 export class RuntimeConfigService {
@@ -22,7 +34,8 @@ export class RuntimeConfigService {
 
     const raw = await fs.readFile(CONFIG_PATH, 'utf8').catch(() => '');
     if (!raw) {
-      const fallback = BuilderConfigSchema.parse({ version: 1, updatedAt: new Date().toISOString() });
+      const fallback =
+        readSeedConfig() || BuilderConfigSchema.parse({ version: 1, updatedAt: new Date().toISOString() });
       await this.writeConfig(fallback);
       return fallback;
     }

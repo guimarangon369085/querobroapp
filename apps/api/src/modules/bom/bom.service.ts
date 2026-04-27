@@ -49,7 +49,7 @@ export class BomService {
       where: { id },
       include: { items: { include: { item: true } }, product: true }
     });
-    if (!bom) throw new NotFoundException('BOM nao encontrado');
+    if (!bom) throw new NotFoundException('BOM não encontrado');
     return bom;
   }
 

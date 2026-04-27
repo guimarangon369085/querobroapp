@@ -38,7 +38,7 @@ export class RbacGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<RequestLike>();
     const principal = request.authPrincipal;
     if (!principal) {
-      throw new InternalServerErrorException('Principal de autenticacao ausente no contexto.');
+      throw new InternalServerErrorException('Principal de autenticação ausente no contexto.');
     }
 
     const requiredRoles = this.reflector.getAllAndOverride<AuthRole[]>(ROLES_KEY, [

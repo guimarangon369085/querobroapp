@@ -1,17 +1,26 @@
 'use client';
 import {
   Suspense,
+  startTransition,
+  useDeferredValue,
   useEffect,
   useId,
   useMemo,
   useRef,
   useState
 } from 'react';
-import { resolveDisplayNumber, type Customer, type OrderIntake, type OrderItem, type Product } from '@querobroapp/shared';
+import {
+  normalizeOrderStatus,
+  resolveDisplayNumber,
+  stripOrderNoteMetadata,
+  type Customer,
+  type OrderIntake,
+  type OrderItem,
+  type Product
+} from '@querobroapp/shared';
 import { apiFetch } from '@/lib/api';
 import { useDialogA11y } from '@/lib/use-dialog-a11y';
 import {
-  buildWhatsAppUrl,
   compactWhitespace,
   formatPhoneBR,
   formatPostalCodeBR,
@@ -39,7 +48,23 @@ import {
 import { submitOrderIntake } from '@/features/orders/orders-api';
 
 type CustomerRecord = Customer;
+type CustomerCouponUsage = {
+  code: string;
+  uses: number;
+  lastUsedAt?: string | null;
+};
+type CustomerRecordWithUsage = CustomerRecord & {
+  couponUsage?: CustomerCouponUsage[];
+};
 type CustomerFormState = Partial<CustomerRecord>;
+type CustomerAddressEntry = {
+  key: string;
+  addressId: number | null;
+  label: string;
+  value: Partial<Customer>;
+  canDelete: boolean;
+  mode: 'primary' | 'saved';
+};
 
 const emptyCustomer: CustomerFormState = {
   name: '',
@@ -163,8 +188,42 @@ function formatOrderDateTimeLabel(isoValue?: string | null) {
 
 function formatOrderStatusLabel(status?: string | null) {
   if (!status) return 'Sem status';
-  if (status === 'EM_PREPARACAO') return 'NO FORNO';
-  return status.replace(/_/g, ' ');
+  return (normalizeOrderStatus(status) || status).replace(/_/g, ' ');
+}
+
+function stripPostalCodeFromAddressLabel(value?: string | null) {
+  return compactWhitespace(value || '')
+    .replace(/\bCEP[:\s-]*\d{5}-?\d{3}\b/gi, '')
+    .replace(/\b\d{5}-?\d{3}\b/g, '')
+    .replace(/\s*,\s*,+/g, ', ')
+    .replace(/\s+-\s+,/g, ', ')
+    .replace(/(?:\s*,\s*)+$/g, '')
+    .replace(/(?:\s+-\s*)+$/g, '')
+    .trim();
+}
+
+function formatCustomerAddressLabel(
+  customer: Partial<
+    Pick<Customer, 'address' | 'addressLine1' | 'addressLine2' | 'neighborhood' | 'city' | 'state' | 'postalCode'>
+  >
+) {
+  const normalizedAddress = stripPostalCodeFromAddressLabel(customer.address || '');
+  const inferred = buildCustomerAddressAutofill(normalizedAddress);
+  const addressLine1 = compactWhitespace(customer.addressLine1 || inferred.addressLine1 || '');
+  const neighborhoodSource = compactWhitespace(customer.neighborhood || inferred.neighborhood || '');
+  const neighborhood = /\d/.test(neighborhoodSource) ? '' : neighborhoodSource;
+  const addressLine2 = compactWhitespace(customer.addressLine2 || '');
+  const parts = [addressLine1, neighborhood, addressLine2].filter(Boolean);
+  if (parts.length > 0) return parts.join(', ');
+
+  return (
+    normalizedAddress
+      .split(',')
+      .map((part) => compactWhitespace(part))
+      .filter(Boolean)
+      .slice(0, 2)
+      .join(', ') || 'Sem endereço'
+  );
 }
 
 function normalizeLooseText(value?: string | null) {
@@ -192,23 +251,122 @@ function pickPromotedValue(currentValue?: string | null, inferredValue?: string 
   return normalizeLooseText(currentValue) || '';
 }
 
+function buildNormalizedCustomerAddressPayload(form: CustomerFormState) {
+  const inferredAddressPatch = buildCustomerAddressAutofill(form.address || '');
+  const promotedAddressLine1 = pickPromotedValue(form.addressLine1, inferredAddressPatch.addressLine1);
+  const promotedNeighborhood = pickPromotedValue(form.neighborhood, inferredAddressPatch.neighborhood);
+  const sanitizedNeighborhood = /\d/.test(promotedNeighborhood) ? '' : promotedNeighborhood;
+  const promotedCity = pickPromotedValue(form.city, inferredAddressPatch.city);
+  const promotedState = pickPromotedValue(form.state, inferredAddressPatch.state).toUpperCase();
+  const promotedPostalCode = formatPostalCodeBR(
+    pickPromotedValue(form.postalCode, inferredAddressPatch.postalCode)
+  );
+  const structuredAddress = buildCustomerAddressSummary({
+    addressLine1: normalizeAddress(promotedAddressLine1),
+    addressLine2: normalizeAddress(form.addressLine2 || ''),
+    neighborhood: normalizeAddress(sanitizedNeighborhood),
+    city: normalizeAddress(promotedCity),
+    state: promotedState || undefined,
+    postalCode: promotedPostalCode || undefined
+  });
+
+  return {
+    address: normalizeAddress(form.address || structuredAddress || ''),
+    addressLine1: normalizeAddress(promotedAddressLine1),
+    addressLine2: normalizeAddress(form.addressLine2 || ''),
+    neighborhood: normalizeAddress(sanitizedNeighborhood),
+    city: normalizeAddress(promotedCity),
+    state: promotedState || undefined,
+    postalCode: promotedPostalCode || undefined,
+    country: normalizeAddress(form.country || '') || 'Brasil',
+    placeId: normalizeLooseText(form.placeId || '') || undefined,
+    lat: typeof form.lat === 'number' ? form.lat : undefined,
+    lng: typeof form.lng === 'number' ? form.lng : undefined,
+    deliveryNotes: form.deliveryNotes?.trim() || undefined
+  };
+}
+
+function buildCustomerAddressEntries(customer?: Customer | null): CustomerAddressEntry[] {
+  if (!customer) return [];
+
+  const entries: CustomerAddressEntry[] = [];
+  const seen = new Set<string>();
+  const pushEntry = (entry: CustomerAddressEntry) => {
+    const identity = [
+      normalizeLooseText(entry.value.placeId || '').toLowerCase(),
+      normalizeLooseText(entry.value.address || entry.value.addressLine1 || '').toLowerCase(),
+      normalizeLooseText(entry.value.addressLine2 || '').toLowerCase(),
+      normalizeLooseText(entry.value.neighborhood || '').toLowerCase(),
+      normalizeLooseText(entry.value.city || '').toLowerCase(),
+      normalizeLooseText(entry.value.state || '').toLowerCase(),
+      normalizeLooseText(entry.value.postalCode || '').toLowerCase(),
+      normalizeLooseText(entry.value.deliveryNotes || '').toLowerCase()
+    ].join('|');
+    if (!identity || seen.has(identity)) return;
+    seen.add(identity);
+    entries.push(entry);
+  };
+
+  pushEntry({
+    key: 'primary',
+    addressId: null,
+    label: `Principal • ${formatCustomerAddressLabel(customer)}`,
+    value: {
+      address: customer.address,
+      addressLine1: customer.addressLine1,
+      addressLine2: customer.addressLine2,
+      neighborhood: customer.neighborhood,
+      city: customer.city,
+      state: customer.state,
+      postalCode: customer.postalCode,
+      country: customer.country,
+      placeId: customer.placeId,
+      lat: customer.lat,
+      lng: customer.lng,
+      deliveryNotes: customer.deliveryNotes
+    },
+    canDelete: false,
+    mode: 'primary'
+  });
+
+  for (const address of customer.addresses || []) {
+    pushEntry({
+      key: `saved-${address.id ?? entries.length + 1}`,
+      addressId: address.id ?? null,
+      label: `${address.isPrimary ? 'Principal' : 'Salvo'} • ${formatCustomerAddressLabel(address)}`,
+      value: address,
+      canDelete: Boolean(address.id) && !address.isPrimary,
+      mode: 'saved'
+    });
+  }
+
+  return entries;
+}
+
 function CustomersPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { tutorialMode, isSpotlightSlot } = useTutorialSpotlight(searchParams, TUTORIAL_QUERY_VALUE);
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
+  const [orders, setOrders] = useState<CustomerOrderPreview[]>([]);
   const [form, setForm] = useState<CustomerFormState>(emptyCustomer);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [selectedCustomer, setSelectedCustomer] = useState<CustomerRecord | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerRecordWithUsage | null>(null);
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const [customerRecentOrders, setCustomerRecentOrders] = useState<CustomerOrderPreview[]>([]);
   const [customerOrdersError, setCustomerOrdersError] = useState<string | null>(null);
   const [isLoadingCustomerOrders, setIsLoadingCustomerOrders] = useState(false);
   const [isCustomerInfoEditing, setIsCustomerInfoEditing] = useState(false);
-  const [lastOrderAtByCustomerId, setLastOrderAtByCustomerId] = useState<Record<number, number>>({});
-  const [orderCountByCustomerId, setOrderCountByCustomerId] = useState<Record<number, number>>({});
+  const [isCustomerAddressEditing, setIsCustomerAddressEditing] = useState(false);
+  const [isSavingCustomer, setIsSavingCustomer] = useState(false);
+  const [editingCustomerAddressId, setEditingCustomerAddressId] = useState<number | null>(null);
+  const [editingCustomerAddressMode, setEditingCustomerAddressMode] = useState<'primary' | 'saved' | 'new' | null>(
+    null
+  );
+  const [isSavingCustomerAddress, setIsSavingCustomerAddress] = useState(false);
+  const [deletingCustomerAddressId, setDeletingCustomerAddressId] = useState<number | null>(null);
   const [productNameById, setProductNameById] = useState<Record<number, string>>({});
   const [repeatDraftOrderId, setRepeatDraftOrderId] = useState<number | null>(null);
   const [repeatDraftMinimumInput, setRepeatDraftMinimumInput] = useState(() =>
@@ -226,42 +384,81 @@ function CustomersPageContent() {
   const customerAutofillRef = useRef(createCustomerAutofillState());
   const openCustomerModalRef = useRef<((customer: CustomerRecord) => Promise<void>) | null>(null);
   const postalCodeLookupAbortRef = useRef<AbortController | null>(null);
+  const productNamesLoadPromiseRef = useRef<Promise<void> | null>(null);
+  const initialLoadStartedRef = useRef(false);
+  const customerDetailRequestIdRef = useRef(0);
+  const handledEditCustomerIdRef = useRef<string | null>(null);
+  const isCustomerInfoEditingRef = useRef(false);
+  const isCustomerAddressEditingRef = useRef(false);
   const customerDialogTitleId = useId();
   const { confirm, notifyError, notifySuccess, notifyUndo } = useFeedback();
+  const deferredCustomers = useDeferredValue(customers);
+  const deferredOrders = useDeferredValue(orders);
+  const deferredSearch = useDeferredValue(search);
+  const selectedCustomerAddressEntries = useMemo(
+    () => buildCustomerAddressEntries(selectedCustomer),
+    [selectedCustomer]
+  );
+
+  const syncCustomerDetail = (detail: CustomerRecordWithUsage) => {
+    startTransition(() => {
+      setCustomers((current) =>
+        current.map((entry) => (entry.id === detail.id ? { ...entry, ...detail } : entry))
+      );
+      setSelectedCustomer(detail);
+    });
+  };
+
+  const upsertCustomerInList = (customer: CustomerRecord, options?: { prepend?: boolean }) => {
+    startTransition(() => {
+      setCustomers((current) => {
+        const hasExisting = current.some((entry) => entry.id === customer.id);
+        if (hasExisting) {
+          return current.map((entry) => (entry.id === customer.id ? { ...entry, ...customer } : entry));
+        }
+        return options?.prepend === false ? [...current, customer] : [customer, ...current];
+      });
+      setSelectedCustomer((current) =>
+        current?.id === customer.id ? { ...current, ...customer } : current
+      );
+    });
+  };
+
+  const removeCustomerFromList = (customerId: number) => {
+    startTransition(() => {
+      setCustomers((current) => current.filter((entry) => entry.id !== customerId));
+      setSelectedCustomer((current) => (current?.id === customerId ? null : current));
+    });
+  };
 
   const load = async () => {
     const [nextCustomers, orders] = await Promise.all([
       apiFetch<CustomerRecord[]>('/customers'),
       apiFetch<CustomerOrderPreview[]>('/orders')
     ]);
-
-    const nextLastOrderAtByCustomerId: Record<number, number> = {};
-    const nextOrderCountByCustomerId: Record<number, number> = {};
-    for (const order of orders) {
-      const customerId = Number(order.customerId || 0);
-      if (!Number.isFinite(customerId) || customerId <= 0) continue;
-      nextOrderCountByCustomerId[customerId] = (nextOrderCountByCustomerId[customerId] || 0) + 1;
-      const referenceIso = order.createdAt || order.scheduledAt || '';
-      const referenceTime = new Date(referenceIso).getTime();
-      if (!Number.isFinite(referenceTime)) continue;
-      const current = nextLastOrderAtByCustomerId[customerId];
-      if (!Number.isFinite(current) || referenceTime > current) {
-        nextLastOrderAtByCustomerId[customerId] = referenceTime;
-      }
-    }
-
-    setLastOrderAtByCustomerId(nextLastOrderAtByCustomerId);
-    setOrderCountByCustomerId(nextOrderCountByCustomerId);
-    setCustomers(nextCustomers);
+    startTransition(() => {
+      setCustomers(nextCustomers);
+      setOrders(orders);
+    });
   };
 
   useEffect(() => {
+    if (initialLoadStartedRef.current) return;
+    initialLoadStartedRef.current = true;
     load().catch((loadError) => {
-      const message = loadError instanceof Error ? loadError.message : 'Nao foi possivel carregar os clientes.';
+      const message = loadError instanceof Error ? loadError.message : 'Não foi possível carregar os clientes.';
       setCustomerOrdersError(message);
       notifyError(message);
     });
   }, [notifyError]);
+
+  useEffect(() => {
+    isCustomerInfoEditingRef.current = isCustomerInfoEditing;
+  }, [isCustomerInfoEditing]);
+
+  useEffect(() => {
+    isCustomerAddressEditingRef.current = isCustomerAddressEditing;
+  }, [isCustomerAddressEditing]);
 
   useEffect(() => {
     return () => {
@@ -323,7 +520,7 @@ function CustomersPageContent() {
     setForm((prev) => {
       const next: CustomerFormState = {
         ...prev,
-        // Complemento permanece manual; nao e preenchido pelo endereco do Google.
+        // Complemento permanece manual; não é preenchido pelo endereço do Google.
         address: `${patch.address || ''}`,
         addressLine1: `${patch.addressLine1 || ''}`,
         neighborhood: `${patch.neighborhood || ''}`,
@@ -438,11 +635,13 @@ function CustomersPageContent() {
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (isSavingCustomer) return;
     if (!form.name || !form.name.trim()) {
       setError('Informe ao menos o nome do cliente.');
       return;
     }
     setError(null);
+    setIsSavingCustomer(true);
 
     const fullName = titleCase(form.name || '');
     const split = fullName.split(' ').filter(Boolean);
@@ -455,6 +654,7 @@ function CustomersPageContent() {
     const promotedLastName = pickPromotedValue(form.lastName, inferredNamePatch.lastName || fallbackLast);
     const promotedAddressLine1 = pickPromotedValue(form.addressLine1, inferredAddressPatch.addressLine1);
     const promotedNeighborhood = pickPromotedValue(form.neighborhood, inferredAddressPatch.neighborhood);
+    const sanitizedNeighborhood = /\d/.test(promotedNeighborhood) ? '' : promotedNeighborhood;
     const promotedCity = pickPromotedValue(form.city, inferredAddressPatch.city);
     const promotedState = pickPromotedValue(form.state, inferredAddressPatch.state).toUpperCase();
     const promotedPostalCode = formatPostalCodeBR(
@@ -470,7 +670,7 @@ function CustomersPageContent() {
       address: normalizeAddress(form.address || ''),
       addressLine1: normalizeAddress(promotedAddressLine1),
       addressLine2: normalizeAddress(form.addressLine2 || ''),
-      neighborhood: normalizeAddress(promotedNeighborhood),
+      neighborhood: normalizeAddress(sanitizedNeighborhood),
       city: normalizeAddress(promotedCity),
       state: promotedState || undefined,
       postalCode: promotedPostalCode || undefined,
@@ -488,16 +688,20 @@ function CustomersPageContent() {
     const isEditing = editingId != null;
 
     try {
+      const savedCustomer = await apiFetch<CustomerRecord>(
+        isEditing ? `/customers/${editingId}` : '/customers',
+        {
+          method: isEditing ? 'PUT' : 'POST',
+          body: JSON.stringify(payload)
+        }
+      );
+
+      upsertCustomerInList(savedCustomer, { prepend: !isEditing });
+
       if (isEditing) {
-        await apiFetch(`/customers/${editingId}`, {
-          method: 'PUT',
-          body: JSON.stringify(payload)
-        });
-      } else {
-        await apiFetch('/customers', {
-          method: 'POST',
-          body: JSON.stringify(payload)
-        });
+        setSelectedCustomer((current) =>
+          current?.id === savedCustomer.id ? { ...current, ...savedCustomer } : current
+        );
       }
 
       resetCustomerAutofill();
@@ -510,11 +714,12 @@ function CustomersPageContent() {
         setRepeatDraftOrderId(null);
         setRepeatDraftError(null);
       }
-      await load();
       notifySuccess('Cliente salvo.');
       scrollToLayoutSlot('list');
     } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Nao foi possivel salvar.');
+      notifyError(err instanceof Error ? err.message : 'Não foi possível salvar.');
+    } finally {
+      setIsSavingCustomer(false);
     }
   };
 
@@ -525,6 +730,7 @@ function CustomersPageContent() {
     const promotedLastName = pickPromotedValue(customer.lastName, inferredNamePatch.lastName);
     const promotedAddressLine1 = pickPromotedValue(customer.addressLine1, inferredAddressPatch.addressLine1);
     const promotedNeighborhood = pickPromotedValue(customer.neighborhood, inferredAddressPatch.neighborhood);
+    const sanitizedNeighborhood = /\d/.test(promotedNeighborhood) ? '' : promotedNeighborhood;
     const promotedCity = pickPromotedValue(customer.city, inferredAddressPatch.city);
     const promotedState = pickPromotedValue(customer.state, inferredAddressPatch.state).toUpperCase();
     const promotedPostalCode = formatPostalCodeBR(
@@ -540,7 +746,7 @@ function CustomersPageContent() {
       address: customer.address ?? '',
       addressLine1: promotedAddressLine1,
       addressLine2: customer.addressLine2 ?? '',
-      neighborhood: promotedNeighborhood,
+      neighborhood: sanitizedNeighborhood,
       city: promotedCity,
       state: promotedState,
       postalCode: promotedPostalCode,
@@ -555,7 +761,143 @@ function CustomersPageContent() {
     }
   };
 
+  const applyAddressEntryToForm = (entry: CustomerAddressEntry) => {
+    const inferred = buildCustomerAddressAutofill(entry.value.address || '');
+    const nextForm: CustomerFormState = {
+      ...form,
+      address: entry.value.address ?? buildCustomerAddressSummary(entry.value) ?? '',
+      addressLine1: entry.value.addressLine1 ?? inferred.addressLine1 ?? '',
+      addressLine2: entry.value.addressLine2 ?? '',
+      neighborhood: entry.value.neighborhood ?? inferred.neighborhood ?? '',
+      city: entry.value.city ?? inferred.city ?? '',
+      state: entry.value.state ?? inferred.state ?? '',
+      postalCode: entry.value.postalCode ?? inferred.postalCode ?? '',
+      country: entry.value.country ?? form.country ?? 'Brasil',
+      placeId: entry.value.placeId ?? '',
+      lat: typeof entry.value.lat === 'number' ? entry.value.lat : undefined,
+      lng: typeof entry.value.lng === 'number' ? entry.value.lng : undefined,
+      deliveryNotes: entry.value.deliveryNotes ?? ''
+    };
+    primeCustomerAutofill(nextForm);
+    setForm(nextForm);
+  };
+
+  const openCustomerAddressEditor = (entry?: CustomerAddressEntry | null) => {
+    setIsCustomerInfoEditing(false);
+    if (entry) {
+      applyAddressEntryToForm(entry);
+      setEditingCustomerAddressId(entry.addressId);
+      setEditingCustomerAddressMode(entry.mode);
+    } else {
+      const nextForm: CustomerFormState = {
+        ...form,
+        address: '',
+        addressLine1: '',
+        addressLine2: '',
+        neighborhood: '',
+        city: '',
+        state: '',
+        postalCode: '',
+        placeId: '',
+        lat: undefined,
+        lng: undefined,
+        deliveryNotes: ''
+      };
+      primeCustomerAutofill(nextForm);
+      setForm(nextForm);
+      setEditingCustomerAddressId(null);
+      setEditingCustomerAddressMode('new');
+    }
+    setIsCustomerAddressEditing(true);
+    window.requestAnimationFrame(() => {
+      modalAddressInputRef.current?.focus();
+    });
+  };
+
+  const cancelCustomerAddressEdit = () => {
+    setIsCustomerAddressEditing(false);
+    setEditingCustomerAddressId(null);
+    setEditingCustomerAddressMode(null);
+    if (selectedCustomer) {
+      startEdit(selectedCustomer, { focusForm: false });
+    }
+  };
+
+  const saveCustomerAddress = async () => {
+    if (isSavingCustomerAddress) return;
+    if (!selectedCustomer?.id) return;
+    const payload = buildNormalizedCustomerAddressPayload(form);
+    if (!payload.address && !payload.addressLine1) {
+      notifyError('Informe o endereço antes de salvar.');
+      return;
+    }
+
+    setIsSavingCustomerAddress(true);
+    try {
+      if (editingCustomerAddressMode === 'primary') {
+        await apiFetch(`/customers/${selectedCustomer.id}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload)
+        });
+      } else if (editingCustomerAddressId) {
+        await apiFetch(`/customers/${selectedCustomer.id}/addresses/${editingCustomerAddressId}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload)
+        });
+      } else {
+        await apiFetch(`/customers/${selectedCustomer.id}/addresses`, {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+      }
+      const detail = await apiFetch<CustomerRecordWithUsage>(`/customers/${selectedCustomer.id}`);
+      syncCustomerDetail(detail);
+      startEdit(detail, { focusForm: false });
+      setIsCustomerAddressEditing(false);
+      setEditingCustomerAddressId(null);
+      setEditingCustomerAddressMode(null);
+      notifySuccess('Endereço salvo.');
+    } catch (saveError) {
+      notifyError(saveError instanceof Error ? saveError.message : 'Não foi possível salvar o endereço.');
+    } finally {
+      setIsSavingCustomerAddress(false);
+    }
+  };
+
+  const removeCustomerAddress = async (entry: CustomerAddressEntry) => {
+    if (!selectedCustomer?.id || !entry.addressId || !entry.canDelete) return;
+    const accepted = await confirm({
+      title: 'Excluir endereço?',
+      description: 'O endereço salvo será removido do cadastro do cliente.',
+      confirmLabel: 'Excluir',
+      cancelLabel: 'Cancelar',
+      danger: true
+    });
+    if (!accepted) return;
+
+    setDeletingCustomerAddressId(entry.addressId);
+    try {
+      const detail = await apiFetch<CustomerRecordWithUsage>(
+        `/customers/${selectedCustomer.id}/addresses/${entry.addressId}`,
+        { method: 'DELETE' }
+      );
+      syncCustomerDetail(detail);
+      if (editingCustomerAddressId === entry.addressId) {
+        setIsCustomerAddressEditing(false);
+        setEditingCustomerAddressId(null);
+        setEditingCustomerAddressMode(null);
+        startEdit(detail, { focusForm: false });
+      }
+      notifySuccess('Endereço excluído.');
+    } catch (removeError) {
+      notifyError(removeError instanceof Error ? removeError.message : 'Não foi possível excluir o endereço.');
+    } finally {
+      setDeletingCustomerAddressId(null);
+    }
+  };
+
   const cancelEdit = () => {
+    customerDetailRequestIdRef.current += 1;
     setEditingId(null);
     resetCustomerAutofill();
     setForm(emptyCustomer);
@@ -565,6 +907,9 @@ function CustomersPageContent() {
     setCustomerOrdersError(null);
     setIsLoadingCustomerOrders(false);
     setIsCustomerInfoEditing(false);
+    setIsCustomerAddressEditing(false);
+    setEditingCustomerAddressId(null);
+    setEditingCustomerAddressMode(null);
     setRepeatDraftOrderId(null);
     setRepeatDraftMinimumInput(defaultRepeatOrderDateTimeInput());
     setRepeatDraftError(null);
@@ -589,23 +934,35 @@ function CustomersPageContent() {
     return `${parts.slice(0, 3).join(' • ')} +${parts.length - 3}`;
   };
 
-  const loadCustomerRecentOrders = async (customerId: number) => {
-    setIsLoadingCustomerOrders(true);
-    setCustomerOrdersError(null);
+  const ensureProductNamesLoaded = async () => {
+    if (Object.keys(productNameById).length > 0) return;
+    if (productNamesLoadPromiseRef.current) {
+      await productNamesLoadPromiseRef.current;
+      return;
+    }
 
-    try {
-      const [orders, products] = await Promise.all([
-        apiFetch<CustomerOrderPreview[]>('/orders'),
-        apiFetch<Product[]>('/inventory-products')
-      ]);
-
+    productNamesLoadPromiseRef.current = (async () => {
+      const products = await apiFetch<Product[]>('/inventory-products');
       const nextProductNameById: Record<number, string> = {};
       for (const product of products) {
         if (typeof product.id !== 'number') continue;
         nextProductNameById[product.id] = product.name;
       }
-      setProductNameById(nextProductNameById);
+      startTransition(() => {
+        setProductNameById(nextProductNameById);
+      });
+    })().finally(() => {
+      productNamesLoadPromiseRef.current = null;
+    });
 
+    await productNamesLoadPromiseRef.current;
+  };
+
+  const loadCustomerRecentOrders = (customerId: number) => {
+    setIsLoadingCustomerOrders(true);
+    setCustomerOrdersError(null);
+
+    try {
       const recent = orders
         .filter((order) => order.customerId === customerId)
         .sort((left, right) => {
@@ -616,9 +973,16 @@ function CustomersPageContent() {
         .slice(0, 8);
 
       setCustomerRecentOrders(recent);
+      if (
+        recent.length > 0 &&
+        Object.keys(productNameById).length === 0 &&
+        !productNamesLoadPromiseRef.current
+      ) {
+        void ensureProductNamesLoaded();
+      }
       return recent;
     } catch (err) {
-      setCustomerOrdersError(err instanceof Error ? err.message : 'Nao foi possivel carregar os pedidos.');
+      setCustomerOrdersError(err instanceof Error ? err.message : 'Não foi possível carregar os pedidos.');
       setCustomerRecentOrders([]);
       return [] as CustomerOrderPreview[];
     } finally {
@@ -630,13 +994,28 @@ function CustomersPageContent() {
     customer: CustomerRecord,
     options?: { preselectRepeatOrderId?: number | null }
   ) => {
+    const requestId = ++customerDetailRequestIdRef.current;
     startEdit(customer, { focusForm: false });
     setSelectedCustomer(customer);
     setIsCustomerModalOpen(true);
     setIsCustomerInfoEditing(false);
+    setIsCustomerAddressEditing(false);
+    setEditingCustomerAddressId(null);
+    setEditingCustomerAddressMode(null);
     setRepeatDraftOrderId(null);
     setRepeatDraftError(null);
-    const recentOrders = await loadCustomerRecentOrders(customer.id!);
+    const recentOrders = loadCustomerRecentOrders(customer.id!);
+    try {
+      const detail = await apiFetch<CustomerRecordWithUsage>(`/customers/${customer.id}`);
+      if (requestId !== customerDetailRequestIdRef.current) return;
+      setSelectedCustomer(detail);
+      if (!isCustomerInfoEditingRef.current && !isCustomerAddressEditingRef.current) {
+        startEdit(detail, { focusForm: false });
+      }
+    } catch (modalError) {
+      if (requestId !== customerDetailRequestIdRef.current) return;
+      notifyError(modalError instanceof Error ? modalError.message : 'Não foi possível carregar os dados do cliente.');
+    }
     const targetOrderId = options?.preselectRepeatOrderId;
     if (!targetOrderId) return;
     const targetOrder = recentOrders.find((order) => order.id === targetOrderId);
@@ -695,7 +1074,7 @@ function CustomersPageContent() {
     }
     const minimumRepeatSchedule = parseDateTimeLocalInput(repeatDraftMinimumInput);
     if (!minimumRepeatSchedule) {
-      setRepeatDraftError('Nao foi possivel validar o horario minimo.');
+      setRepeatDraftError('Não foi possível validar o horário mínimo.');
       return;
     }
     if (parsedScheduledAt.getTime() < minimumRepeatSchedule.getTime()) {
@@ -713,7 +1092,7 @@ function CustomersPageContent() {
       .filter((item) => Number.isFinite(item.productId) && item.productId > 0 && item.quantity > 0);
 
     if (nextItems.length === 0) {
-      setRepeatDraftError('Esse pedido nao tem caixas validas.');
+      setRepeatDraftError('Esse pedido não tem caixas válidas.');
       return;
     }
 
@@ -735,7 +1114,7 @@ function CustomersPageContent() {
         order: {
           items: nextItems,
           discount: typeof order.discount === 'number' ? order.discount : 0,
-          notes: order.notes || undefined
+          notes: stripOrderNoteMetadata(order.notes) || undefined
         },
         payment: {
           method: 'pix',
@@ -756,7 +1135,7 @@ function CustomersPageContent() {
       closeCustomerModal();
       router.push('/pedidos?focus=list');
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Nao foi possivel repetir o pedido.';
+      const message = err instanceof Error ? err.message : 'Não foi possível repetir o pedido.';
       setRepeatDraftError(message);
       notifyError(message);
     } finally {
@@ -766,12 +1145,17 @@ function CustomersPageContent() {
 
   useEffect(() => {
     const raw = searchParams.get('editCustomerId');
-    if (!raw) return;
+    if (!raw) {
+      handledEditCustomerIdRef.current = null;
+      return;
+    }
+    if (handledEditCustomerIdRef.current === raw) return;
     const parsed = Number(raw);
     if (!Number.isFinite(parsed) || parsed <= 0) return;
 
     const customer = customers.find((entry) => entry.id === parsed);
     if (!customer) return;
+    handledEditCustomerIdRef.current = raw;
     clearQueryParams(['editCustomerId']);
     void openCustomerModalRef.current?.(customer);
   }, [customers, searchParams]);
@@ -788,21 +1172,21 @@ function CustomersPageContent() {
     if (!accepted) return;
     try {
       await apiFetch(`/customers/${id}`, { method: 'DELETE' });
+      removeCustomerFromList(id);
       if (editingId === id) {
         cancelEdit();
       }
-      await load();
       if (customerToRestore) {
-        notifyUndo(`Cliente ${customerToRestore.name} excluido.`, async () => {
-            await apiFetch('/customers', {
-              method: 'POST',
-              body: JSON.stringify({
-                name: customerToRestore.name,
-                firstName: customerToRestore.firstName ?? null,
-                lastName: customerToRestore.lastName ?? null,
-                phone: customerToRestore.phone ?? null,
-                address: customerToRestore.address ?? null,
-                addressLine1: customerToRestore.addressLine1 ?? null,
+        notifyUndo(`Cliente ${customerToRestore.name} excluído.`, async () => {
+          const restoredCustomer = await apiFetch<CustomerRecord>('/customers', {
+            method: 'POST',
+            body: JSON.stringify({
+              name: customerToRestore.name,
+              firstName: customerToRestore.firstName ?? null,
+              lastName: customerToRestore.lastName ?? null,
+              phone: customerToRestore.phone ?? null,
+              address: customerToRestore.address ?? null,
+              addressLine1: customerToRestore.addressLine1 ?? null,
               addressLine2: customerToRestore.addressLine2 ?? null,
               neighborhood: customerToRestore.neighborhood ?? null,
               city: customerToRestore.city ?? null,
@@ -812,23 +1196,46 @@ function CustomersPageContent() {
               deliveryNotes: customerToRestore.deliveryNotes ?? null
             })
           });
-          await load();
+          upsertCustomerInList(restoredCustomer);
           notifySuccess('Cliente restaurado.');
           scrollToLayoutSlot('list');
         });
       } else {
-        notifySuccess('Cliente excluido.');
+        notifySuccess('Cliente excluído.');
       }
     } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Nao foi possivel excluir.');
+      notifyError(err instanceof Error ? err.message : 'Não foi possível excluir.');
     }
   };
 
+  const customerOrderStats = useMemo(() => {
+    const nextLastOrderAtByCustomerId: Record<number, number> = {};
+    const nextOrderCountByCustomerId: Record<number, number> = {};
+
+    for (const order of deferredOrders) {
+      const customerId = Number(order.customerId || 0);
+      if (!Number.isFinite(customerId) || customerId <= 0) continue;
+      nextOrderCountByCustomerId[customerId] = (nextOrderCountByCustomerId[customerId] || 0) + 1;
+      const referenceIso = order.createdAt || order.scheduledAt || '';
+      const referenceTime = new Date(referenceIso).getTime();
+      if (!Number.isFinite(referenceTime)) continue;
+      const current = nextLastOrderAtByCustomerId[customerId];
+      if (!Number.isFinite(current) || referenceTime > current) {
+        nextLastOrderAtByCustomerId[customerId] = referenceTime;
+      }
+    }
+
+    return {
+      lastOrderAtByCustomerId: nextLastOrderAtByCustomerId,
+      orderCountByCustomerId: nextOrderCountByCustomerId
+    };
+  }, [deferredOrders]);
+
   const filteredCustomers = useMemo(() => {
-    const query = search.trim().toLowerCase();
+    const query = deferredSearch.trim().toLowerCase();
     const baseList = !query
-      ? customers
-      : customers.filter((customer) => {
+      ? deferredCustomers
+      : deferredCustomers.filter((customer) => {
       const name = customer.name.toLowerCase();
       const phone = customer.phone || '';
       const address = customer.address || '';
@@ -846,23 +1253,25 @@ function CustomersPageContent() {
     return [...baseList].sort((left, right) => {
       const leftId = Number(left.id || 0);
       const rightId = Number(right.id || 0);
-      const leftLastOrderAt = lastOrderAtByCustomerId[leftId] ?? Number.NEGATIVE_INFINITY;
-      const rightLastOrderAt = lastOrderAtByCustomerId[rightId] ?? Number.NEGATIVE_INFINITY;
+      const leftLastOrderAt =
+        customerOrderStats.lastOrderAtByCustomerId[leftId] ?? Number.NEGATIVE_INFINITY;
+      const rightLastOrderAt =
+        customerOrderStats.lastOrderAtByCustomerId[rightId] ?? Number.NEGATIVE_INFINITY;
       if (leftLastOrderAt !== rightLastOrderAt) {
         return rightLastOrderAt - leftLastOrderAt;
       }
       return rightId - leftId;
     });
-  }, [customers, lastOrderAtByCustomerId, search]);
+  }, [customerOrderStats.lastOrderAtByCustomerId, deferredCustomers, deferredSearch]);
 
   const addressRecommendations = useMemo(() => {
     const unique = new Set<string>();
-    for (const customer of customers) {
+    for (const customer of deferredCustomers) {
       const normalizedAddress = compactWhitespace(customer.address || '');
       if (normalizedAddress) unique.add(normalizedAddress);
     }
     return Array.from(unique).slice(0, 80);
-  }, [customers]);
+  }, [deferredCustomers]);
 
   return (
     <>
@@ -1011,20 +1420,22 @@ function CustomersPageContent() {
             type="button"
             className="order-quick-create__clear app-button app-button-ghost"
             onClick={clearCustomerForm}
+            disabled={isSavingCustomer}
             aria-label="Limpar"
             title="Limpar"
           >
             ↺
           </button>
-          <button className="app-button app-button-primary w-full md:w-auto" type="submit">
+          <button className="app-button app-button-primary w-full md:w-auto" type="submit" disabled={isSavingCustomer}>
             {editingId ? <AppIcon name="refresh" className="h-4 w-4" /> : null}
-            {editingId ? 'Atualizar' : 'Criar'}
+            {isSavingCustomer ? 'Salvando...' : editingId ? 'Atualizar' : 'Criar'}
           </button>
           {editingId && (
             <button
               className="app-button app-button-ghost"
               type="button"
               onClick={cancelEdit}
+              disabled={isSavingCustomer}
             >
               <AppIcon name="close" className="h-4 w-4" />
               Cancelar
@@ -1058,8 +1469,9 @@ function CustomersPageContent() {
       <div className="grid gap-3">
         {filteredCustomers.map((customer) => {
           const customerPhoneLabel = formatPhoneBR(customer.phone) || 'Sem telefone';
-          const customerPhoneHref = buildWhatsAppUrl(customer.phone);
-          const customerOrdersCount = customer.id ? orderCountByCustomerId[customer.id] || 0 : 0;
+          const customerOrdersCount = customer.id
+            ? customerOrderStats.orderCountByCustomerId[customer.id] || 0
+            : 0;
           return (
             <div key={customer.id} className="app-panel">
               <div className="flex flex-wrap items-start justify-between gap-4">
@@ -1070,26 +1482,11 @@ function CustomersPageContent() {
                       Cliente #{resolveDisplayNumber(customer) ?? customer.id}
                     </span>
                     <span className="min-w-0 truncate text-xs font-semibold tracking-[0.12em] text-neutral-500">
-                      {customer.address || 'Sem endereco'}
-                      {customer.neighborhood ? ` • ${customer.neighborhood}` : ''}
+                      {formatCustomerAddressLabel(customer)}
                     </span>
                   </div>
                   <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-neutral-500">
-                      {customerPhoneHref ? (
-                        <a
-                          href={customerPhoneHref}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex min-w-0 items-center gap-1 break-all underline decoration-dotted underline-offset-2 hover:text-neutral-900"
-                        onClick={(event) => event.stopPropagation()}
-                        aria-label={`Abrir conversa no WhatsApp para ${customerPhoneLabel}`}
-                      >
-                        <AppIcon name="whatsapp" className="h-4 w-4 text-[#25D366]" />
-                        {customerPhoneLabel}
-                      </a>
-                    ) : (
-                      <span>{customerPhoneLabel}</span>
-                    )}
+                    <span>{customerPhoneLabel}</span>
                     <span className="whitespace-nowrap text-xs font-semibold tracking-[0.08em] text-neutral-500">
                       {customerOrdersCount} {customerOrdersCount === 1 ? 'Pedido' : 'Pedidos'}
                     </span>
@@ -1193,7 +1590,7 @@ function CustomersPageContent() {
                                     style: 'currency',
                                     currency: 'BRL'
                                   })
-                                : 'Nao calculado'}
+                                : 'Não calculado'}
                             </p>
                           </div>
                           <button
@@ -1257,7 +1654,12 @@ function CustomersPageContent() {
                   <button
                     type="button"
                     className="app-button app-button-ghost min-h-8 w-full px-3 py-1.5 text-[0.7rem] normal-case tracking-[0.02em] sm:w-auto"
-                    onClick={() => setIsCustomerInfoEditing((current) => !current)}
+                    onClick={() => {
+                      setIsCustomerAddressEditing(false);
+                      setEditingCustomerAddressId(null);
+                      setEditingCustomerAddressMode(null);
+                      setIsCustomerInfoEditing((current) => !current);
+                    }}
                   >
                     {isCustomerInfoEditing ? 'Fechar edicao' : 'Editar'}
                   </button>
@@ -1274,15 +1676,22 @@ function CustomersPageContent() {
                     </p>
                     <p className="mt-1">
                       <span className="font-semibold text-neutral-900">Endereço:</span>{' '}
-                      {[
-                        form.address || form.addressLine1 || '',
-                        form.addressLine2 || '',
-                        form.neighborhood || '',
-                        [form.city || '', form.state || ''].filter(Boolean).join(' - '),
-                        form.postalCode || ''
-                      ]
-                        .filter(Boolean)
-                        .join(', ') || 'Sem endereço'}
+                      {formatCustomerAddressLabel(form)}
+                    </p>
+                    <p className="mt-1">
+                      <span className="font-semibold text-neutral-900">Cupons utilizados:</span>{' '}
+                      {selectedCustomer.couponUsage?.length ? (
+                        selectedCustomer.couponUsage
+                          .map((entry) => {
+                            const lastUsedLabel = entry.lastUsedAt
+                              ? new Date(entry.lastUsedAt).toLocaleDateString('pt-BR')
+                              : null;
+                            return `${entry.code} (${entry.uses}x${lastUsedLabel ? ` • ${lastUsedLabel}` : ''})`;
+                          })
+                          .join(' • ')
+                      ) : (
+                        'Nenhum cupom utilizado'
+                      )}
                     </p>
                     <p className="mt-1">
                       <span className="font-semibold text-neutral-900">Entrega:</span>{' '}
@@ -1314,30 +1723,6 @@ function CustomersPageContent() {
                           }
                         />
                       </FormField>
-                      <FormField label="Endereço">
-                        <GoogleAddressAutocompleteInput
-                          className="app-input"
-                          placeholder="Rua, numero, bairro, cidade"
-                          inputRef={modalAddressInputRef}
-                          value={form.address || ''}
-                          autoComplete="street-address"
-                          googleApiKey={GOOGLE_MAPS_API_KEY}
-                          manualSuggestions={addressRecommendations}
-                          onValueChange={handleAddressChange}
-                          onGooglePlacePick={applyGooglePatch}
-                          onBlur={(event) => handleAddressChange(normalizeAddress(event.target.value) || '')}
-                        />
-                      </FormField>
-                      <FormField label="Complemento">
-                        <input
-                          className="app-input"
-                          placeholder="Apto, bloco, andar..."
-                          value={form.addressLine2 || ''}
-                          onChange={(event) =>
-                            setForm((prev) => ({ ...prev, addressLine2: event.target.value }))
-                          }
-                        />
-                      </FormField>
                       <FormField label="Primeiro nome">
                         <input
                           className="app-input"
@@ -1354,74 +1739,12 @@ function CustomersPageContent() {
                           onChange={(event) => setForm((prev) => ({ ...prev, lastName: event.target.value }))}
                         />
                       </FormField>
-                      <FormField label="Rua e numero">
-                        <input
-                          className="app-input"
-                          placeholder="Ex: Rua X, 123"
-                          value={form.addressLine1 || ''}
-                          onChange={(event) =>
-                            setForm((prev) => ({ ...prev, addressLine1: event.target.value }))
-                          }
-                        />
-                      </FormField>
-                      <FormField label="Bairro">
-                        <input
-                          className="app-input"
-                          placeholder="Bairro"
-                          value={form.neighborhood || ''}
-                          onChange={(event) =>
-                            setForm((prev) => ({ ...prev, neighborhood: event.target.value }))
-                          }
-                        />
-                      </FormField>
-                      <FormField label="Cidade">
-                        <input
-                          className="app-input"
-                          placeholder="Cidade"
-                          value={form.city || ''}
-                          onChange={(event) => setForm((prev) => ({ ...prev, city: event.target.value }))}
-                        />
-                      </FormField>
-                      <FormField label="Estado (UF)">
-                        <input
-                          className="app-input"
-                          placeholder="SP"
-                          value={form.state || ''}
-                          onChange={(event) => setForm((prev) => ({ ...prev, state: event.target.value }))}
-                        />
-                      </FormField>
-                      <FormField label="CEP">
-                        <input
-                          className="app-input"
-                          placeholder="00000-000"
-                          value={form.postalCode || ''}
-                          inputMode="numeric"
-                          autoComplete="postal-code"
-                          onChange={(event) => handlePostalCodeChange(event.target.value)}
-                        />
-                      </FormField>
-                      <FormField label="Pais">
-                        <input
-                          className="app-input"
-                          placeholder="Brasil"
-                          value={form.country || ''}
-                          onChange={(event) => setForm((prev) => ({ ...prev, country: event.target.value }))}
-                        />
-                      </FormField>
                     </div>
-                    <FormField label="Entrega" hint="Portao, referencia, interfone">
-                      <input
-                        className="app-input"
-                        placeholder="Ex: portao preto, tocar 18"
-                        value={form.deliveryNotes || ''}
-                        onChange={(event) => setForm((prev) => ({ ...prev, deliveryNotes: event.target.value }))}
-                      />
-                    </FormField>
 
                     <div className="app-form-actions">
-                      <button className="app-button app-button-primary" type="submit">
+                      <button className="app-button app-button-primary" type="submit" disabled={isSavingCustomer}>
                         <AppIcon name="refresh" className="h-4 w-4" />
-                        Salvar
+                        {isSavingCustomer ? 'Salvando...' : 'Salvar'}
                       </button>
                       <button
                         className="app-button app-button-ghost"
@@ -1433,6 +1756,7 @@ function CustomersPageContent() {
                           setIsCustomerInfoEditing(false);
                           setError(null);
                         }}
+                        disabled={isSavingCustomer}
                       >
                         Cancelar
                       </button>
@@ -1446,6 +1770,7 @@ function CustomersPageContent() {
                             if (!selectedCustomer.id) return;
                             void remove(selectedCustomer.id);
                           }}
+                          disabled={isSavingCustomer}
                         >
                           Excluir cliente
                         </button>
@@ -1453,6 +1778,189 @@ function CustomersPageContent() {
                     ) : null}
                   </form>
                 )}
+
+                <div className="mt-4 grid gap-3 rounded-2xl border border-[color:var(--line-soft)] bg-white/85 p-3 text-sm text-neutral-700">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                    <h5 className="text-sm font-semibold uppercase tracking-[0.14em] text-neutral-600">Endereços</h5>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="app-button app-button-ghost min-h-8 px-3 py-1.5 text-[0.7rem] normal-case tracking-[0.02em]"
+                        onClick={() => openCustomerAddressEditor()}
+                      >
+                        Novo endereço
+                      </button>
+                      {isCustomerAddressEditing ? (
+                        <button
+                          type="button"
+                          className="app-button app-button-ghost min-h-8 px-3 py-1.5 text-[0.7rem] normal-case tracking-[0.02em]"
+                          onClick={cancelCustomerAddressEdit}
+                        >
+                          Fechar edição
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {selectedCustomerAddressEntries.length > 0 ? (
+                    <div className="grid gap-2">
+                      {selectedCustomerAddressEntries.map((entry) => (
+                        <article
+                          key={entry.key}
+                          className="rounded-2xl border border-[color:var(--line-soft)] bg-[color:var(--bg-soft)] px-3 py-3"
+                        >
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="space-y-1">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neutral-500">
+                                {entry.label}
+                              </p>
+                              <p className="text-sm text-neutral-900">{formatCustomerAddressLabel(entry.value)}</p>
+                              {entry.value.deliveryNotes ? (
+                                <p className="text-xs text-neutral-600">Obs: {entry.value.deliveryNotes}</p>
+                              ) : null}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                className="app-button app-button-ghost min-h-8 px-3 py-1.5 text-[0.72rem] normal-case tracking-[0.01em]"
+                                onClick={() => openCustomerAddressEditor(entry)}
+                              >
+                                Selecionar
+                              </button>
+                              {entry.canDelete ? (
+                                <button
+                                  type="button"
+                                  className="app-button app-button-ghost min-h-8 px-3 py-1.5 text-[0.72rem] normal-case tracking-[0.01em] text-red-700"
+                                  onClick={() => {
+                                    void removeCustomerAddress(entry);
+                                  }}
+                                  disabled={deletingCustomerAddressId === entry.addressId}
+                                >
+                                  {deletingCustomerAddressId === entry.addressId ? 'Excluindo...' : 'Excluir'}
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-neutral-600">Nenhum endereço salvo além do principal.</p>
+                  )}
+
+                  {isCustomerAddressEditing ? (
+                    <div className="grid gap-3 rounded-2xl border border-[color:var(--line-soft)] bg-white p-3">
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <FormField label="Endereço">
+                          <GoogleAddressAutocompleteInput
+                            className="app-input"
+                            placeholder="Rua, numero, bairro, cidade"
+                            inputRef={modalAddressInputRef}
+                            value={form.address || ''}
+                            autoComplete="street-address"
+                            googleApiKey={GOOGLE_MAPS_API_KEY}
+                            manualSuggestions={addressRecommendations}
+                            onValueChange={handleAddressChange}
+                            onGooglePlacePick={applyGooglePatch}
+                            onBlur={(event) => handleAddressChange(normalizeAddress(event.target.value) || '')}
+                          />
+                        </FormField>
+                        <FormField label="Complemento">
+                          <input
+                            className="app-input"
+                            placeholder="Apto, bloco, andar..."
+                            value={form.addressLine2 || ''}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, addressLine2: event.target.value }))
+                            }
+                          />
+                        </FormField>
+                        <FormField label="Rua e numero">
+                          <input
+                            className="app-input"
+                            placeholder="Ex: Rua X, 123"
+                            value={form.addressLine1 || ''}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, addressLine1: event.target.value }))
+                            }
+                          />
+                        </FormField>
+                        <FormField label="Bairro">
+                          <input
+                            className="app-input"
+                            placeholder="Bairro"
+                            value={form.neighborhood || ''}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, neighborhood: event.target.value }))
+                            }
+                          />
+                        </FormField>
+                        <FormField label="Cidade">
+                          <input
+                            className="app-input"
+                            placeholder="Cidade"
+                            value={form.city || ''}
+                            onChange={(event) => setForm((prev) => ({ ...prev, city: event.target.value }))}
+                          />
+                        </FormField>
+                        <FormField label="Estado (UF)">
+                          <input
+                            className="app-input"
+                            placeholder="SP"
+                            value={form.state || ''}
+                            onChange={(event) => setForm((prev) => ({ ...prev, state: event.target.value }))}
+                          />
+                        </FormField>
+                        <FormField label="CEP">
+                          <input
+                            className="app-input"
+                            placeholder="00000-000"
+                            value={form.postalCode || ''}
+                            inputMode="numeric"
+                            autoComplete="postal-code"
+                            onChange={(event) => handlePostalCodeChange(event.target.value)}
+                          />
+                        </FormField>
+                        <FormField label="Pais">
+                          <input
+                            className="app-input"
+                            placeholder="Brasil"
+                            value={form.country || ''}
+                            onChange={(event) => setForm((prev) => ({ ...prev, country: event.target.value }))}
+                          />
+                        </FormField>
+                      </div>
+                      <FormField label="Obs. entrega" hint="Portão, referência, interfone">
+                        <input
+                          className="app-input"
+                          placeholder="Ex: portão preto, tocar 18"
+                          value={form.deliveryNotes || ''}
+                          onChange={(event) => setForm((prev) => ({ ...prev, deliveryNotes: event.target.value }))}
+                        />
+                      </FormField>
+                      <div className="app-form-actions">
+                        <button
+                          className="app-button app-button-primary"
+                          type="button"
+                          onClick={() => {
+                            void saveCustomerAddress();
+                          }}
+                          disabled={isSavingCustomerAddress}
+                        >
+                          {isSavingCustomerAddress ? 'Salvando...' : 'Salvar endereço'}
+                        </button>
+                        <button
+                          className="app-button app-button-ghost"
+                          type="button"
+                          onClick={cancelCustomerAddressEdit}
+                          disabled={isSavingCustomerAddress}
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
               </section>
             </div>
           </div>

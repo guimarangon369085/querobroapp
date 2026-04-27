@@ -40,10 +40,36 @@ export const primaryNavItems: AppNavItem[] = [
   }
 ];
 
-const byHref = new Map(primaryNavItems.map((item) => [item.href, item]));
+export const managementNavItems: AppNavItem[] = [
+  {
+    href: '/cupons',
+    label: 'CUPONS',
+    title: 'CUPONS',
+    icon: 'spark'
+  }
+];
+
+export const secondaryNavItems: AppNavItem[] = [
+  {
+    href: '/frete',
+    label: 'FRETE',
+    title: 'FRETE',
+    icon: 'tools'
+  },
+  {
+    href: '/confirmacoes',
+    label: 'PRODUÇÃO',
+    title: 'PRODUÇÃO',
+    icon: 'spark'
+  }
+];
+
+const allNavItems = [...primaryNavItems, ...managementNavItems, ...secondaryNavItems];
+const byHref = new Map(allNavItems.map((item) => [item.href, item]));
 const pathAliases = new Map<string, string>([
   ['/', '/pedidos'],
   ['/dashboard', '/dashboard'],
+  ['/cupons', '/cupons'],
   ['/inicio', '/pedidos'],
   ['/jornada', '/pedidos'],
   ['/hoje', '/pedidos'],
@@ -53,8 +79,7 @@ const pathAliases = new Map<string, string>([
   ['/saidas', '/pedidos'],
   ['/caixa', '/pedidos'],
   ['/base', '/clientes'],
-  ['/builder', '/pedidos'],
-  ['/whatsapp-flow', '/pedidos']
+  ['/builder', '/pedidos']
 ]);
 
 function pickItems(hrefs: string[]) {
@@ -68,6 +93,16 @@ export const navSections: AppNavSection[] = [
     id: 'principal',
     label: 'PRINCIPAL',
     items: pickItems(['/pedidos', '/clientes', '/estoque', '/dashboard'])
+  },
+  {
+    id: 'gestao',
+    label: 'GESTÃO',
+    items: pickItems(['/cupons'])
+  },
+  {
+    id: 'operacao',
+    label: 'OPERAÇÃO',
+    items: pickItems(['/frete', '/confirmacoes'])
   }
 ];
 

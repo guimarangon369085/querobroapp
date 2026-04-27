@@ -19,6 +19,85 @@ function focusableElements(container: HTMLElement) {
   return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(isFocusable);
 }
 
+const dialogStack: HTMLElement[] = [];
+
+let scrollGuardsAttached = false;
+let previousHtmlOverflow = '';
+let previousHtmlOverscrollBehavior = '';
+let previousBodyOverflow = '';
+let previousBodyOverscrollBehavior = '';
+
+function getTopDialog() {
+  return dialogStack[dialogStack.length - 1] ?? null;
+}
+
+function eventTargetsTopDialog(eventTarget: EventTarget | null, dialog: HTMLElement) {
+  return eventTarget instanceof Node && dialog.contains(eventTarget);
+}
+
+function preventBackgroundScroll(event: WheelEvent | TouchEvent) {
+  const topDialog = getTopDialog();
+  if (!topDialog) return;
+  if (eventTargetsTopDialog(event.target, topDialog)) return;
+  event.preventDefault();
+}
+
+function attachScrollGuards() {
+  if (scrollGuardsAttached) return;
+  document.addEventListener('wheel', preventBackgroundScroll, { capture: true, passive: false });
+  document.addEventListener('touchmove', preventBackgroundScroll, { capture: true, passive: false });
+  scrollGuardsAttached = true;
+}
+
+function detachScrollGuards() {
+  if (!scrollGuardsAttached) return;
+  document.removeEventListener('wheel', preventBackgroundScroll, true);
+  document.removeEventListener('touchmove', preventBackgroundScroll, true);
+  scrollGuardsAttached = false;
+}
+
+function lockDialogEnvironment(dialog: HTMLElement) {
+  if (!dialogStack.includes(dialog)) {
+    dialogStack.push(dialog);
+  }
+
+  if (dialogStack.length === 1) {
+    const html = document.documentElement;
+    const body = document.body;
+    previousHtmlOverflow = html.style.overflow;
+    previousHtmlOverscrollBehavior = html.style.overscrollBehavior;
+    previousBodyOverflow = body.style.overflow;
+    previousBodyOverscrollBehavior = body.style.overscrollBehavior;
+    html.classList.add('app-dialog-open');
+    body.classList.add('app-dialog-open');
+    html.style.overflow = 'hidden';
+    html.style.overscrollBehavior = 'none';
+    body.style.overflow = 'hidden';
+    body.style.overscrollBehavior = 'none';
+  }
+
+  attachScrollGuards();
+}
+
+function unlockDialogEnvironment(dialog: HTMLElement) {
+  const dialogIndex = dialogStack.lastIndexOf(dialog);
+  if (dialogIndex >= 0) {
+    dialogStack.splice(dialogIndex, 1);
+  }
+
+  if (dialogStack.length > 0) return;
+
+  const html = document.documentElement;
+  const body = document.body;
+  html.classList.remove('app-dialog-open');
+  body.classList.remove('app-dialog-open');
+  html.style.overflow = previousHtmlOverflow;
+  html.style.overscrollBehavior = previousHtmlOverscrollBehavior;
+  body.style.overflow = previousBodyOverflow;
+  body.style.overscrollBehavior = previousBodyOverscrollBehavior;
+  detachScrollGuards();
+}
+
 type UseDialogA11yOptions = {
   isOpen: boolean;
   dialogRef: RefObject<HTMLElement | null>;
@@ -40,9 +119,8 @@ export function useDialogA11y({ isOpen, dialogRef, onClose, initialFocusRef }: U
     const dialog = dialogRef.current;
     if (!dialog) return;
 
-    const previousOverflow = document.body.style.overflow;
     const previousActiveElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    document.body.style.overflow = 'hidden';
+    lockDialogEnvironment(dialog);
 
     const focusInitialTarget = () => {
       const preferred = initialFocusRef?.current;
@@ -100,7 +178,7 @@ export function useDialogA11y({ isOpen, dialogRef, onClose, initialFocusRef }: U
 
     return () => {
       window.cancelAnimationFrame(frameId);
-      document.body.style.overflow = previousOverflow;
+      unlockDialogEnvironment(dialog);
       document.removeEventListener('keydown', onKeyDown);
       if (previousActiveElement?.isConnected) {
         previousActiveElement.focus();

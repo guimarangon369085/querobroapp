@@ -1,6 +1,6 @@
 # MVP_FINANCEIRO_E_D+1
 
-> Nota historica: este documento mistura partes ainda validas do financeiro/D+1 com referencias a WhatsApp que nao fazem mais parte da base ativa. Use apenas os blocos de financeiro e D+1 como referencia atual.
+> Nota historica: este documento mistura partes ainda validas do financeiro/D+1 com referencias antigas a mensageria externa. Use apenas os blocos de financeiro e D+1 como referencia atual.
 
 ## Objetivo
 
@@ -38,11 +38,11 @@ Uso pratico:
 3. Escolher data.
 4. Ver faltas e planejar compras/producao.
 
-## Outbox de WhatsApp
+## Outbox historico
 
 Esta secao ficou historica.
 
-- A base operacional atual nao expoe `GET /whatsapp/outbox`.
+- A base operacional atual nao expoe nenhum outbox de mensageria.
 - O fluxo ativo validado hoje e interno, sem provider externo.
 - Qualquer reintegracao futura deve ser redesenhada do zero.
 

@@ -60,7 +60,7 @@ trap cleanup EXIT INT TERM HUP
 ./scripts/dev-all.sh &
 DEV_ALL_PID=$!
 
-./scripts/wait-web-dev-ready.sh "http://127.0.0.1:3000/pedidos" 180
+./scripts/wait-web-dev-ready.sh "http://127.0.0.1:3003/pedidos" 180
 curl -fsS "http://127.0.0.1:3001/health" >/dev/null
 "$PNPM_BIN" cleanup:test-data
 

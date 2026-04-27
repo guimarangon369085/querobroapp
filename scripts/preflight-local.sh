@@ -22,6 +22,10 @@ echo "Commit: $(git rev-parse --short HEAD)"
 echo "Node: $(node -v)"
 echo "pnpm: $("$PNPM_BIN" -v)"
 
+bash "$ROOT_DIR/scripts/check-local-node-version.sh" --strict
+bash "$ROOT_DIR/scripts/clean-local-sqlite-paths.sh"
+bash "$ROOT_DIR/scripts/check-local-env.sh"
+
 if command -v shasum >/dev/null 2>&1; then
   echo "Lockfile SHA256: $(LC_ALL=C shasum -a 256 pnpm-lock.yaml | awk '{print $1}')"
 elif command -v openssl >/dev/null 2>&1; then
@@ -66,15 +70,19 @@ echo "1) Dependencias travadas"
 "$PNPM_BIN" install --frozen-lockfile
 
 echo
-echo "2) Prisma drift"
+echo "2) Prisma schema drift (dev vs prod)"
 "$PNPM_BIN" check:prisma-drift
 
 echo
-echo "3) Trust gate (docs + diff + typecheck + test + build + lint + browser smoke)"
+echo "3) Prisma migration drift (migrations vs schema)"
+bash "$ROOT_DIR/scripts/check-prisma-migration-drift.sh"
+
+echo
+echo "4) Trust gate (docs + diff + typecheck + test + build + lint + browser smoke)"
 QA_TRUST_INCLUDE_LINT=1 QA_TRUST_INCLUDE_BROWSER=1 "$PNPM_BIN" qa:trust
 
 echo
-echo "4) Smoke API (se online)"
+echo "5) Smoke API (se online)"
 if node -e "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1));"; then
   "$PNPM_BIN" qa:smoke
 else

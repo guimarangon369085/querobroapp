@@ -98,19 +98,94 @@ test('delivery quotes charge 12 within 5 km', async () => {
   assert.match(String(quote.quoteToken || ''), /^DQ_/);
 });
 
-test('delivery quotes charge 18 above 5 km', async () => {
+test('delivery quotes charge 20 from 6 km to 10 km', async () => {
   const { DeliveriesService } = await loadApiModules();
   const service = new DeliveriesService(createPrismaStub());
   const payload = quotePayload({
     customer: {
-      lat: -23.4,
-      lng: -46.5
+      lat: -23.502,
+      lng: FIXED_COORDS.lng
     }
   });
 
   const quote = await service.quoteDelivery(payload);
 
-  assert.equal(quote.fee, 18);
+  assert.equal(quote.fee, 20);
+});
+
+test('delivery quotes charge 22 from 11 km to 15 km', async () => {
+  const { DeliveriesService } = await loadApiModules();
+  const service = new DeliveriesService(createPrismaStub());
+  const payload = quotePayload({
+    customer: {
+      lat: -23.457,
+      lng: FIXED_COORDS.lng
+    }
+  });
+
+  const quote = await service.quoteDelivery(payload);
+
+  assert.equal(quote.fee, 22);
+});
+
+test('delivery quotes charge 25 from 16 km to 20 km', async () => {
+  const { DeliveriesService } = await loadApiModules();
+  const service = new DeliveriesService(createPrismaStub());
+  const payload = quotePayload({
+    customer: {
+      lat: -23.412,
+      lng: FIXED_COORDS.lng
+    }
+  });
+
+  const quote = await service.quoteDelivery(payload);
+
+  assert.equal(quote.fee, 25);
+});
+
+test('delivery quotes charge 30 from 21 km to 25 km', async () => {
+  const { DeliveriesService } = await loadApiModules();
+  const service = new DeliveriesService(createPrismaStub());
+  const payload = quotePayload({
+    customer: {
+      lat: -23.358,
+      lng: FIXED_COORDS.lng
+    }
+  });
+
+  const quote = await service.quoteDelivery(payload);
+
+  assert.equal(quote.fee, 30);
+});
+
+test('delivery quotes charge 35 from 26 km to 30 km', async () => {
+  const { DeliveriesService } = await loadApiModules();
+  const service = new DeliveriesService(createPrismaStub());
+  const payload = quotePayload({
+    customer: {
+      lat: -23.313,
+      lng: FIXED_COORDS.lng
+    }
+  });
+
+  const quote = await service.quoteDelivery(payload);
+
+  assert.equal(quote.fee, 35);
+});
+
+test('delivery quotes reject addresses above 30 km', async () => {
+  const { DeliveriesService } = await loadApiModules();
+  const service = new DeliveriesService(createPrismaStub());
+  const payload = quotePayload({
+    customer: {
+      lat: -23.277,
+      lng: FIXED_COORDS.lng
+    }
+  });
+
+  await assert.rejects(() => service.quoteDelivery(payload), {
+    message: 'FORA DA ÁREA DE ENTREGA'
+  });
 });
 
 test('delivery quotes fall back to base rate when coordinates missing', async () => {
@@ -126,4 +201,43 @@ test('delivery quotes fall back to base rate when coordinates missing', async ()
   const quote = await service.quoteDelivery(payload);
 
   assert.equal(quote.fee, 12);
+});
+
+test('delivery quotes honor injected pricing config', async () => {
+  const { DeliveriesService } = await loadApiModules();
+  const service = new DeliveriesService(createPrismaStub(), {
+    getConfig: async () => ({
+      tiers: [{ maxKm: 2, fee: 99 }],
+      fallbackWithoutCoordinatesFee: 7,
+      outOfAreaMessage: 'SEM COBERTURA',
+      updatedAt: '2026-04-02T00:00:00.000Z'
+    }),
+    updateConfig: async () => {
+      throw new Error('not used');
+    }
+  });
+
+  const quote = await service.quoteDelivery(
+    quotePayload({
+      customer: {
+        lat: null,
+        lng: null
+      }
+    })
+  );
+
+  assert.equal(quote.fee, 7);
+
+  await assert.rejects(
+    () =>
+      service.quoteDelivery(
+        quotePayload({
+          customer: {
+            lat: -23.4,
+            lng: -46.5
+          }
+        })
+      ),
+    { message: 'SEM COBERTURA' }
+  );
 });

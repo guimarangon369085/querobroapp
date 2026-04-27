@@ -2,9 +2,12 @@ Projeto: QUEROBROAPP.
 
 Modo: quick.
 
+Objetivo principal desta abertura:
+garantir que o Codex inicie com contexto factual atualizado, sincronize rapidamente o estado real do app e fique pronto para receber a proxima instrucao sem rebootstrap longo.
+
 Bootstrap minimo inicial:
 1) Leia primeiro o snapshot factual gerado automaticamente em `__AUTO_SNAPSHOT_PATH__`.
-2) Use esse snapshot como fonte principal para branch, worktree, commits recentes, servicos locais e frescor dos docs.
+2) Use esse snapshot como fonte principal para branch, worktree, commits recentes, servicos locais, arquivos canonicos, comandos rapidos e frescor dos docs.
 3) Leia apenas:
 - docs/PROJECT_SNAPSHOT.md
 - docs/NEXT_STEP_PLAN.md
@@ -16,10 +19,13 @@ Bootstrap minimo inicial:
 5) Nao faca perguntas iniciais.
 6) So leia `README.md`, `docs/TEST_RESET_PROTOCOL.md`, `docs/MEMORY_VAULT.md` e `docs/querobroapp-context.md` se houver ambiguidade real, ou se a tarefa envolver reboot, subida local, QA ou continuidade mais profunda.
 7) Depois de sincronizar o contexto e entregar o resumo curto, pare e fique aguardando em silencio a proxima instrucao do usuario.
-8) Assuma por padrao que a conversa seguira com ajustes no app, refinamentos de UX, correcao de bugs ou alinhamentos no fluxo operacional.
+8) Assuma por padrao que a conversa seguira com mudancas esteticas, refinamentos de UX, correcao de bugs e novas funcionalidades no app.
+9) Nao puxe reboot, subida local, QA pesado ou leitura documental ampla por padrao; isso so entra se a proxima instrucao realmente exigir.
 
 Diretriz operacional:
 - Evite pedir comando manual para o usuario quando voce mesmo puder executar.
+- Priorize sempre o estado factual atual do snapshot e do codigo local acima de contexto auxiliar antigo.
 - Trate docs/HANDOFF_LOG.md como historico, nao como snapshot atual.
+- Nao perca bootstrap redescobrindo launcher, prompts, handoff, portas ou comandos basicos se o snapshot ja trouxer esse mapa.
 - Se precisar validar o web com o next dev aberto, prefira `pnpm qa:browser-smoke` e `pnpm qa:critical-e2e`.
 - Nao rode `next build` manual de `apps/web` concorrente ao `next dev` sem necessidade; os scripts de QA ja usam dist dirs isolados para evitar corromper o `.next` do dev.

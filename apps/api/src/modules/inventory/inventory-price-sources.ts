@@ -6,7 +6,8 @@ export type InventoryPriceSourceDefinition = {
   url: string;
   sourcePackSize: number;
   fallbackPrice: number;
-  strategy: 'paodeacucar' | 'fornecedornet' | 'trela' | 'manual';
+  historicalSamplePrices?: number[];
+  strategy: 'paodeacucar' | 'fornecedornet' | 'trela' | 'superabc' | 'manual';
 };
 
 export const INVENTORY_PRICE_SOURCE_DEFINITIONS: InventoryPriceSourceDefinition[] = [
@@ -16,22 +17,25 @@ export const INVENTORY_PRICE_SOURCE_DEFINITIONS: InventoryPriceSourceDefinition[
     url: 'https://www.paodeacucar.com/produto/23692/farinha-de-trigo-tipo-1-tradicional-qualita-pacote-1kg',
     sourcePackSize: 1000,
     fallbackPrice: 6.49,
+    historicalSamplePrices: [6.19],
     strategy: 'paodeacucar'
   },
   {
     canonicalName: 'FUBÁ DE CANJICA',
-    sourceName: 'Planilha antiga (manual)',
+    sourceName: 'Super ABC',
     url: 'https://superabconline.com.br/p/d/2593871/fuba-canjica-rocinha-1kg/p?srsltid=AfmBOopm2tuTDIIbMkyeDJ9wrv1qP3q9xfNLKuw60mxXeRSZEhVicbEnKEA',
     sourcePackSize: 1000,
-    fallbackPrice: 6,
-    strategy: 'manual'
+    fallbackPrice: 11.99,
+    historicalSamplePrices: [6],
+    strategy: 'superabc'
   },
   {
     canonicalName: 'AÇÚCAR',
     sourceName: 'Pao de Acucar',
     url: 'https://www.paodeacucar.com/produto/74215/acucar-refinado-uniao-pacote-1kg',
     sourcePackSize: 1000,
-    fallbackPrice: 5.69,
+    fallbackPrice: 4.59,
+    historicalSamplePrices: [5.69],
     strategy: 'paodeacucar'
   },
   {
@@ -47,7 +51,8 @@ export const INVENTORY_PRICE_SOURCE_DEFINITIONS: InventoryPriceSourceDefinition[
     sourceName: 'Pao de Acucar',
     url: 'https://www.paodeacucar.com/produto/164887/leite-uht-integral-qualita-caixa-com-tampa-1l',
     sourcePackSize: 1000,
-    fallbackPrice: 4.19,
+    fallbackPrice: 5.49,
+    historicalSamplePrices: [3.49, 4.19],
     strategy: 'paodeacucar'
   },
   {
@@ -112,6 +117,7 @@ export const INVENTORY_PRICE_SOURCE_DEFINITIONS: InventoryPriceSourceDefinition[
     url: 'https://www.paodeacucar.com/produto/108699/papel-manteiga-qualita-30cm-x-7,5m',
     sourcePackSize: 750,
     fallbackPrice: 7.87,
+    historicalSamplePrices: [6.69, 7.09],
     strategy: 'paodeacucar'
   }
 ];
@@ -165,6 +171,16 @@ function extractFornecedorNetPrice(html: string) {
     target.match(/<h2>\s*<span[^>]*>\s*R\$\s*([0-9.,]+)\s*<\/span>/i);
   if (liveMatch?.[1]) {
     return parseMoneyBR(liveMatch[1]);
+  }
+  return null;
+}
+
+function extractSuperAbcPrice(html: string) {
+  const primaryMatch =
+    html.match(/R\$\s*([0-9]+(?:,[0-9]{2})?)\s*un/i) ||
+    html.match(/Preço por quilo:\s*R\$\s*([0-9]+(?:,[0-9]{2})?)/i);
+  if (primaryMatch?.[1]) {
+    return parseMoneyBR(primaryMatch[1]);
   }
   return null;
 }
@@ -233,12 +249,14 @@ export async function fetchInventorySourcePrice(
     const extracted =
       definition.strategy === 'paodeacucar'
         ? extractPaodeAcucarPrice(html)
+        : definition.strategy === 'superabc'
+          ? extractSuperAbcPrice(html)
         : definition.strategy === 'fornecedornet'
           ? extractFornecedorNetPrice(html)
           : extractTrelaPrice(html);
 
     if (extracted == null || extracted <= 0) {
-      throw new Error('Preco nao encontrado no HTML da pagina.');
+      throw new Error('Preço não encontrado no HTML da página.');
     }
 
     return {
@@ -260,4 +278,3 @@ export async function fetchInventorySourcePrice(
     };
   }
 }
-

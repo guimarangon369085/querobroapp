@@ -1,21 +1,32 @@
-import { BadRequestException, Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
-import type { Customer as PrismaCustomer, Prisma } from '@prisma/client';
+import { BadRequestException, Injectable, NotFoundException, Inject } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import type { Customer as PrismaCustomer } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
 import {
+  type CardCheckout,
   compareMoney,
+  computeSumUpCardPayableTotal,
+  ExternalOrderDeliveryWindowKeyEnum,
   ExternalOrderScheduleAvailabilitySchema,
   ExternalOrderSubmissionPreviewSchema,
   ExternalOrderSubmissionSchema,
+  mergeMarketingSamplesIntoNotes,
   moneyFromMinorUnits,
   moneyToMinorUnits,
   OrderIntakeMetaSchema,
   OrderIntakeSchema,
+  OrderCustomerSnapshotSchema,
   OrderItemSchema,
   OrderSchema,
   OrderStatusEnum,
+  normalizeOrderStatus,
+  parseMarketingSamplesDiscountPct,
+  parseMarketingSamplesSponsoredDeliveryFee,
+  type PaymentMethod,
+  preserveOrderNoteMetadata,
   PixChargeSchema,
-  roundMoney
+  roundMoney,
+  stripOrderNoteMetadata
 } from '@querobroapp/shared';
 import { z } from 'zod';
 import {
@@ -25,63 +36,101 @@ import {
   computeBroaPaperBagCount,
   computeBroaPackagingPlan,
   findInventoryByAliases,
-  MASS_PREP_DEFAULT_BATCH_RECIPES,
   MASS_READY_BROAS_PER_RECIPE,
   MASS_READY_ITEM_NAME,
-  massPrepRecipeIngredients,
   ORDER_BOX_UNITS,
   orderFillingIngredientsByFlavorCode,
-  resolveExecutableMassPrepRecipes,
   resolveInventoryDefinition,
-  resolveInventoryFamilyItemIds,
-  resolvePlannedMassPrepRecipes
+  resolveInventoryFamilyItemIds
 } from '../inventory/inventory-formulas.js';
+import { syncCompanionProductActiveStateByProductIds } from '../inventory/companion-product-availability.js';
+import { loadProductSalesLimitStates } from '../inventory/product-sales-limit.js';
 import { normalizePhone, normalizeText, normalizeTitle } from '../../common/normalize.js';
 import {
+  customerAddressIdentityKey,
+  inferAddressLine1,
+  normalizeCustomerAddressPayload,
+  normalizeNeighborhood
+} from '../../common/customer-profile.js';
+import {
+  EXTERNAL_ORDER_DELIVERY_WINDOWS,
   externalOrderScheduleAvailabilityErrorMessage,
   externalOrderScheduleErrorMessage,
+  resolveExternalOrderDeliveryWindowKeyForDate,
+  resolveExternalOrderDeliveryWindowLabel,
   isExternalOrderScheduleAllowed,
   resolveExternalOrderScheduleAvailability
 } from '../../common/external-order-schedule.js';
+import {
+  countCouponUsageForCustomer,
+  findCouponByNormalizedCode,
+  mergeAppliedCouponIntoNotes,
+  normalizeCouponCode,
+  parseAppliedCouponFromNotes,
+  resolveStoredCouponCode
+} from '../../common/coupons.js';
 import { allocateNextPublicNumber } from '../../common/public-sequence.js';
 import { PaymentsService } from '../payments/payments.service.js';
-import { WhatsAppService } from '../whatsapp/whatsapp.service.js';
 import { DeliveriesService } from '../deliveries/deliveries.service.js';
 import { OrderNotificationsService } from './order-notifications.service.js';
 
-const updateSchema = OrderSchema.partial().omit({ id: true, publicNumber: true, createdAt: true, items: true });
+const updateSchema = z
+  .object({
+    scheduledAt: OrderSchema.shape.scheduledAt.optional(),
+    notes: OrderSchema.shape.notes.optional(),
+    discount: OrderSchema.shape.discount.optional(),
+    discountPct: OrderSchema.shape.discountPct.optional(),
+    fulfillmentMode: OrderSchema.shape.fulfillmentMode.optional(),
+    customerSnapshot: OrderCustomerSnapshotSchema.partial().optional().nullable()
+  })
+  .strict();
 const replaceItemsSchema = z.object({
   items: z.array(OrderItemSchema.pick({ productId: true, quantity: true })).min(1)
 });
 const markPaidSchema = z.object({
+  paid: z.boolean().optional().default(true),
   paidAt: z.string().datetime().optional().nullable()
 });
-
-const whatsappFlowIntakeSchema = OrderIntakeSchema.omit({ source: true }).extend({
-  source: z
-    .object({
-      externalId: z.string().trim().min(1).max(160).optional().nullable(),
-      idempotencyKey: z.string().trim().min(1).max(160).optional().nullable(),
-      originLabel: z.string().trim().min(1).max(160).optional().nullable()
-    })
-    .default({})
-});
+const orderScheduleDayKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 const statusTransitions: Record<string, string[]> = {
-  ABERTO: ['CONFIRMADO', 'CANCELADO'],
-  CONFIRMADO: ['ABERTO', 'EM_PREPARACAO', 'CANCELADO'],
-  EM_PREPARACAO: ['CONFIRMADO', 'PRONTO', 'CANCELADO'],
-  PRONTO: ['EM_PREPARACAO', 'ENTREGUE', 'CANCELADO'],
+  ABERTO: ['PRONTO', 'CANCELADO'],
+  PRONTO: ['ABERTO', 'ENTREGUE', 'CANCELADO'],
   ENTREGUE: ['PRONTO', 'CANCELADO'],
   CANCELADO: []
 };
-const ORDER_WORKFLOW_STATUSES = ['ABERTO', 'CONFIRMADO', 'EM_PREPARACAO', 'PRONTO', 'ENTREGUE'] as const;
+const ORDER_WORKFLOW_STATUSES = ['ABERTO', 'PRONTO', 'ENTREGUE'] as const;
+const STREET_NUMBER_IN_ADDRESS_LINE_PATTERN =
+  /(?:,\s*|^)(?:(?:n(?:[.o]|o|umero)?\s*)?\d+[a-z]?(?:[-/]\d+[a-z]?)?|s\/?n|sem numero)$/i;
 
 type OrderStatusValue = z.infer<typeof OrderStatusEnum>;
 type OrderWorkflowStatus = (typeof ORDER_WORKFLOW_STATUSES)[number];
 
 function isOrderWorkflowStatus(status: string): status is OrderWorkflowStatus {
   return ORDER_WORKFLOW_STATUSES.includes(status as OrderWorkflowStatus);
+}
+
+function normalizeOrderPricingLookup(value?: string | null) {
+  return (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function isCouponCompanionCategory(value?: string | null) {
+  const normalized = normalizeOrderPricingLookup(value);
+  return normalized.includes('amigos da broa') || normalized.includes('amigas da broa');
+}
+
+function isCouponEligibleBroaProduct(product?: { name?: string | null; category?: string | null } | null) {
+  const normalizedName = normalizeOrderPricingLookup(product?.name);
+  const normalizedCategory = normalizeOrderPricingLookup(product?.category);
+  return (
+    normalizedName.startsWith('broa ') &&
+    !normalizedName.includes('mista') &&
+    (normalizedCategory === 'sabores' || (!normalizedCategory && !isCouponCompanionCategory(product?.category)))
+  );
 }
 
 function resolveOrderStatusPath(currentStatus: string, targetStatus: OrderStatusValue) {
@@ -95,13 +144,13 @@ function resolveOrderStatusPath(currentStatus: string, targetStatus: OrderStatus
   }
 
   if (!isOrderWorkflowStatus(currentStatus) || !isOrderWorkflowStatus(targetStatus)) {
-    throw new BadRequestException(`Transicao invalida: ${currentStatus} -> ${targetStatus}`);
+    throw new BadRequestException(`Transição inválida: ${currentStatus} -> ${targetStatus}`);
   }
 
   const currentIndex = ORDER_WORKFLOW_STATUSES.indexOf(currentStatus);
   const targetIndex = ORDER_WORKFLOW_STATUSES.indexOf(targetStatus);
   if (currentIndex < 0 || targetIndex < 0) {
-    throw new BadRequestException(`Transicao invalida: ${currentStatus} -> ${targetStatus}`);
+    throw new BadRequestException(`Transição inválida: ${currentStatus} -> ${targetStatus}`);
   }
 
   const direction = targetIndex > currentIndex ? 1 : -1;
@@ -120,7 +169,7 @@ function resolveOrderStatusPath(currentStatus: string, targetStatus: OrderStatus
 
     const allowedTransitions = statusTransitions[cursor] || [];
     if (!allowedTransitions.includes(candidate)) {
-      throw new BadRequestException(`Transicao invalida: ${currentStatus} -> ${targetStatus}`);
+      throw new BadRequestException(`Transição inválida: ${currentStatus} -> ${targetStatus}`);
     }
 
     path.push(candidate);
@@ -128,16 +177,14 @@ function resolveOrderStatusPath(currentStatus: string, targetStatus: OrderStatus
   }
 
   if (path[path.length - 1] !== targetStatus) {
-    throw new BadRequestException(`Transicao invalida: ${currentStatus} -> ${targetStatus}`);
+    throw new BadRequestException(`Transição inválida: ${currentStatus} -> ${targetStatus}`);
   }
 
   return path;
 }
 
-const MASS_PREP_EVENT_SCOPE = 'MASS_PREP_EVENT';
 const ORDER_INTAKE_SCOPE = 'ORDER_INTAKE';
-const MASS_PREP_EVENT_NAME = 'FAZER MASSA';
-const MASS_PREP_EVENT_DURATION_MINUTES = 60;
+const ORDER_EXTERNAL_INTAKE_SCOPE = 'ORDER_INTAKE_EXTERNAL';
 const ORDER_BOX_PRICE_CUSTOM = 52;
 const ORDER_BOX_PRICE_TRADITIONAL = 40;
 const ORDER_BOX_PRICE_MIXED_GOIABADA = 45;
@@ -148,55 +195,59 @@ const ORDER_BOX_PRICE_TRADITIONAL_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRIC
 const ORDER_BOX_PRICE_MIXED_GOIABADA_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRICE_MIXED_GOIABADA);
 const ORDER_BOX_PRICE_MIXED_OTHER_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRICE_MIXED_OTHER);
 const ORDER_BOX_PRICE_GOIABADA_MINOR_UNITS = moneyToMinorUnits(ORDER_BOX_PRICE_GOIABADA);
-const MASS_PREP_SOURCE = 'MASS_PREP';
-const MASS_PREP_SOURCE_LABEL_PREFIX = 'ORDER_';
+const ORDER_FORMULA_SOURCE_LABEL_PREFIX = 'ORDER_';
 const ORDER_FORMULA_SOURCE_MASS_READY = 'MASS_READY';
 const ORDER_FORMULA_SOURCE_FILLING = 'ORDER_FILLING';
 const ORDER_FORMULA_SOURCE_PACKAGING = 'ORDER_PACKAGING';
+const ORDER_FORMULA_SOURCE_COMPANION = 'ORDER_COMPANION';
 const ORDER_FORMULA_SOURCES = [
   ORDER_FORMULA_SOURCE_MASS_READY,
   ORDER_FORMULA_SOURCE_FILLING,
-  ORDER_FORMULA_SOURCE_PACKAGING
+  ORDER_FORMULA_SOURCE_PACKAGING,
+  ORDER_FORMULA_SOURCE_COMPANION
 ] as const;
 
-const massPrepEventStatusSchema = z.enum(['INGREDIENTES', 'PREPARO', 'NO_FORNO', 'PRONTA']);
-const massPrepEventStatusTransitions: Record<z.infer<typeof massPrepEventStatusSchema>, z.infer<typeof massPrepEventStatusSchema>[]> = {
-  INGREDIENTES: ['PREPARO'],
-  PREPARO: ['NO_FORNO'],
-  NO_FORNO: ['PRONTA'],
-  PRONTA: []
-};
-
-const massPrepEventSchema = z.object({
-  version: z.literal(1),
-  id: z.string().min(1),
-  eventName: z.literal(MASS_PREP_EVENT_NAME),
-  orderId: z.number().int().positive(),
-  startsAt: z.string().datetime(),
-  endsAt: z.string().datetime(),
-  durationMinutes: z.number().int().positive(),
-  massRecipes: z.number().int().positive(),
-  status: massPrepEventStatusSchema.default('INGREDIENTES'),
-  createdAt: z.string().datetime()
-});
-
-const massPrepEventStatusPayloadSchema = z.object({
-  status: massPrepEventStatusSchema
+const orderWithRelationsInclude = Prisma.validator<Prisma.OrderInclude>()({
+  items: true,
+  customer: {
+    include: {
+      addresses: {
+        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }]
+      }
+    }
+  },
+  payments: true
 });
 
 type OrderWithRelations = Prisma.OrderGetPayload<{
-  include: { items: true; customer: true; payments: true };
+  include: typeof orderWithRelationsInclude;
 }>;
 type TransactionClient = Prisma.TransactionClient;
-type OrderScheduleQueryClient = Pick<PrismaService | TransactionClient, 'order'>;
+type OrderScheduleQueryClient = Pick<
+  PrismaService | TransactionClient,
+  'order' | 'orderScheduleDayAvailability'
+>;
 type OrderIntakePayload = z.infer<typeof OrderIntakeSchema>;
 type OrderIntakeMeta = z.infer<typeof OrderIntakeMetaSchema>;
 type PixCharge = z.infer<typeof PixChargeSchema>;
+type CheckoutCard = CardCheckout;
 type ExternalOrderSubmissionPayload = z.infer<typeof ExternalOrderSubmissionSchema>;
 type ExternalOrderSubmissionPreview = z.infer<typeof ExternalOrderSubmissionPreviewSchema>;
-
-type MassPrepEvent = z.infer<typeof massPrepEventSchema>;
-type OrderFlavorCode = 'T' | 'G' | 'D' | 'Q' | 'R';
+type ExternalOrderDeliveryWindowKey = z.infer<typeof ExternalOrderDeliveryWindowKeyEnum>;
+type OrderCustomerSnapshotPayload = z.infer<typeof OrderCustomerSnapshotSchema>;
+type OrderScheduleDayAvailabilitySummary = {
+  dayKey: string;
+  blockedWindows: ExternalOrderDeliveryWindowKey[];
+  windows: Array<{
+    key: ExternalOrderDeliveryWindowKey;
+    label: string;
+    startLabel: string;
+    endLabel: string;
+    isOpen: boolean;
+  }>;
+  updatedAt: string | null;
+};
+type OrderFlavorCode = 'T' | 'G' | 'D' | 'Q' | 'R' | 'RJ';
 type FillingFlavorCode = Exclude<OrderFlavorCode, 'T'>;
 type OrderPricingFlavorKind = 'TRADITIONAL' | 'GOIABADA' | 'PREMIUM';
 type InventoryLookupItem = {
@@ -209,12 +260,29 @@ type InventoryLookupItem = {
   createdAt: Date;
 };
 
+function formatScheduleDayKeyFromDate(date: Date) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    })
+      .formatToParts(date)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value])
+  );
+
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+const ORDER_SCHEDULE_BLOCK_ALL_DAY_WINDOW_KEY = 'ALL_DAY';
+
 @Injectable()
 export class OrdersService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(PaymentsService) private readonly paymentsService: PaymentsService,
-    @Inject(forwardRef(() => WhatsAppService)) private readonly whatsAppService: WhatsAppService,
     @Inject(DeliveriesService) private readonly deliveriesService: DeliveriesService,
     @Inject(OrderNotificationsService) private readonly orderNotificationsService: OrderNotificationsService
   ) {}
@@ -244,13 +312,54 @@ export class OrdersService {
     return moneyFromMinorUnits(subtotalAfterDiscount + moneyToMinorUnits(deliveryFee));
   }
 
+  private resolveMarketingSponsoredDeliveryFee(input: {
+    quotedDeliveryFee: number;
+    discountPct: number;
+    fulfillmentMode: string | null | undefined;
+    allowSponsoredDelivery: boolean;
+  }) {
+    if (!input.allowSponsoredDelivery) return 0;
+    if (input.fulfillmentMode !== 'DELIVERY') return 0;
+    if (compareMoney(input.discountPct, 100) < 0) return 0;
+    return this.toMoney(Math.max(input.quotedDeliveryFee || 0, 0));
+  }
+
+  private resolveOrderDiscountInput(
+    subtotal: number,
+    input: {
+      discount?: number | null;
+      discountPct?: number | null;
+    }
+  ) {
+    const hasDiscountAmount = typeof input.discount === 'number';
+    const hasDiscountPct = typeof input.discountPct === 'number';
+    const discountAmount = this.toMoney(Math.max(input.discount ?? 0, 0));
+    const discountPct = this.toMoney(Math.max(input.discountPct ?? 0, 0));
+    const discountAmountFromPct = this.toMoney((subtotal * discountPct) / 100);
+
+    if (hasDiscountAmount && hasDiscountPct && compareMoney(discountAmount, discountAmountFromPct) !== 0) {
+      throw new BadRequestException('Informe o desconto em reais ou em percentual, não os dois com valores diferentes.');
+    }
+
+    if (hasDiscountPct) {
+      return {
+        discount: discountAmountFromPct,
+        discountPct
+      };
+    }
+
+    const derivedDiscountPct =
+      compareMoney(subtotal, 0) > 0 ? this.toMoney((discountAmount / subtotal) * 100) : 0;
+
+    return {
+      discount: discountAmount,
+      discountPct: derivedDiscountPct
+    };
+  }
+
   private toQty(value: number) {
     if (!Number.isFinite(value)) return 0;
     return Math.round((value + Number.EPSILON) * 10000) / 10000;
-  }
-
-  private massPrepEventIdemKey(orderId: number) {
-    return `ORDER_${orderId}`;
   }
 
   private inventoryBalanceFromMovements(
@@ -272,8 +381,25 @@ export class OrdersService {
     return balance;
   }
 
-  private massPrepEventDate(order: Pick<OrderWithRelations, 'scheduledAt' | 'createdAt'>) {
-    return order.scheduledAt ? new Date(order.scheduledAt) : new Date(order.createdAt);
+  private buildInventoryBalanceByItemId(
+    movements: Array<{
+      itemId: number;
+      type: string;
+      quantity: number;
+    }>
+  ) {
+    const balanceByItemId = new Map<number, number>();
+    for (const movement of movements) {
+      const current = balanceByItemId.get(movement.itemId) || 0;
+      if (movement.type === 'IN') {
+        balanceByItemId.set(movement.itemId, this.toQty(current + movement.quantity));
+      } else if (movement.type === 'OUT') {
+        balanceByItemId.set(movement.itemId, this.toQty(current - movement.quantity));
+      } else if (movement.type === 'ADJUST') {
+        balanceByItemId.set(movement.itemId, this.toQty(movement.quantity));
+      }
+    }
+    return balanceByItemId;
   }
 
   private formatDate(value: Date) {
@@ -304,55 +430,26 @@ export class OrdersService {
     };
   }
 
-  private async saveMassPrepEvent(tx: TransactionClient, event: MassPrepEvent) {
-    const expiresAt = new Date();
-    expiresAt.setFullYear(expiresAt.getFullYear() + 10);
-    const idemKey = this.massPrepEventIdemKey(event.orderId);
-
-    await tx.idempotencyRecord.upsert({
-      where: {
-        scope_idemKey: {
-          scope: MASS_PREP_EVENT_SCOPE,
-          idemKey
-        }
-      },
-      update: {
-        requestHash: event.id,
-        responseJson: JSON.stringify(event),
-        expiresAt
-      },
-      create: {
-        scope: MASS_PREP_EVENT_SCOPE,
-        idemKey,
-        requestHash: event.id,
-        responseJson: JSON.stringify(event),
-        expiresAt
-      }
-    });
-  }
-
-  private parseMassPrepEvent(raw: string): MassPrepEvent | null {
-    try {
-      return massPrepEventSchema.parse(JSON.parse(raw));
-    } catch {
-      return null;
-    }
-  }
-
   private orderFormulaSourceLabel(orderId: number) {
-    return `${MASS_PREP_SOURCE_LABEL_PREFIX}${orderId}`;
+    return `${ORDER_FORMULA_SOURCE_LABEL_PREFIX}${orderId}`;
+  }
+
+  private normalizeOrderProductDescriptor(value?: string | null) {
+    return (value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
   }
 
   private resolveOrderFlavorCodeFromProductName(value?: string | null): OrderFlavorCode | null {
-    const normalized = (value || '')
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .trim()
-      .toLowerCase();
+    const normalized = this.normalizeOrderProductDescriptor(value);
     if (!normalized) return null;
     if (normalized.includes('tradicional')) return 'T';
     if (normalized.includes('goiabada')) return 'G';
     if (normalized.includes('doce')) return 'D';
+    if (normalized.includes('romeu') || normalized.includes('julieta')) return 'RJ';
     if (normalized.includes('queijo') && !normalized.includes('requeij')) return 'Q';
     if (normalized.includes('requeij')) return 'R';
     return null;
@@ -370,6 +467,52 @@ export class OrdersService {
     productNameById: Map<number, string>
   ) {
     return buildOfficialBroaFlavorSummary(items, productNameById);
+  }
+
+  private resolveOrderProductionBroaCount(
+    items: Array<{
+      quantity: number;
+      productName?: string | null;
+      productUnit?: string | null;
+    }>
+  ) {
+    return items.reduce((sum, item) => {
+      const quantity = Math.max(Math.floor(item.quantity || 0), 0);
+      if (quantity <= 0) return sum;
+
+      const productName = this.normalizeOrderProductDescriptor(item.productName);
+      const productUnit = this.normalizeOrderProductDescriptor(item.productUnit);
+      const looksLikeOfficialBroa = Boolean(this.resolveOrderFlavorCodeFromProductName(productName));
+      const looksLikeBox =
+        productUnit === 'cx' ||
+        productUnit === 'caixa' ||
+        productUnit === 'caixas' ||
+        productName.includes('caixa');
+
+      if (looksLikeOfficialBroa) return sum + quantity;
+      if (looksLikeBox) return sum + quantity * ORDER_BOX_UNITS;
+      return sum;
+    }, 0);
+  }
+
+  private async resolveOrderProductionBroaCountForItems(
+    tx: TransactionClient | PrismaService,
+    items: Array<{ productId: number; quantity: number }>
+  ) {
+    const productIds = Array.from(new Set(items.map((item) => item.productId))).filter((id) => Number.isFinite(id));
+    if (productIds.length <= 0) return 0;
+    const products = await tx.product.findMany({
+      where: { id: { in: productIds } },
+      select: { id: true, name: true, unit: true }
+    });
+    const productMetaById = new Map(products.map((product) => [product.id, product] as const));
+    return this.resolveOrderProductionBroaCount(
+      items.map((item) => ({
+        quantity: item.quantity,
+        productName: productMetaById.get(item.productId)?.name ?? null,
+        productUnit: productMetaById.get(item.productId)?.unit ?? null
+      }))
+    );
   }
 
   private sumTripletsByCounts(counts: number[]) {
@@ -501,28 +644,170 @@ export class OrdersService {
     tx: TransactionClient | PrismaService,
     items: Array<{ productId: number; quantity: number }>
   ) {
-    if (items.length <= 0) return 0;
+    return (await this.calculateOrderSubtotalsFromItems(tx, items)).subtotal;
+  }
+
+  private async calculateOrderSubtotalsFromItems(
+    tx: TransactionClient | PrismaService,
+    items: Array<{ productId: number; quantity: number }>
+  ) {
+    if (items.length <= 0) {
+      return {
+        subtotal: 0,
+        couponEligibleSubtotal: 0
+      };
+    }
     const productIds = Array.from(new Set(items.map((item) => item.productId)));
     const products = await tx.product.findMany({
       where: { id: { in: productIds } },
-      select: { id: true, name: true }
+      select: { id: true, name: true, category: true, price: true }
     });
     const productNameById = new Map(products.map((product) => [product.id, product.name]));
+    const productById = new Map(products.map((product) => [product.id, product]));
     const quantityByProductId = new Map<number, number>();
     let totalUnits = 0;
+    let directSubtotalMinorUnits = 0;
 
     for (const item of items) {
       const quantity = Math.max(Math.floor(item.quantity || 0), 0);
       if (quantity <= 0) continue;
-      totalUnits += quantity;
-      quantityByProductId.set(item.productId, (quantityByProductId.get(item.productId) || 0) + quantity);
+      const product = productById.get(item.productId);
+      if (isCouponEligibleBroaProduct(product)) {
+        totalUnits += quantity;
+        quantityByProductId.set(item.productId, (quantityByProductId.get(item.productId) || 0) + quantity);
+        continue;
+      }
+      directSubtotalMinorUnits += moneyToMinorUnits(Number(product?.price || 0)) * quantity;
     }
 
-    return this.calculateSubtotalFromProductQuantities({
+    const broaSubtotal = this.calculateSubtotalFromProductQuantities({
       totalUnits,
       quantityByProductId,
       productNameById
     });
+
+    return {
+      subtotal: moneyFromMinorUnits(moneyToMinorUnits(broaSubtotal) + directSubtotalMinorUnits),
+      couponEligibleSubtotal: broaSubtotal
+    };
+  }
+
+  private async resolveExistingOrderItemsPricing(
+    tx: TransactionClient | PrismaService,
+    order: {
+      id: number;
+      customerId: number;
+      customer?: {
+        name?: string | null;
+        phone?: string | null;
+        address?: string | null;
+        addressLine1?: string | null;
+        addressLine2?: string | null;
+        neighborhood?: string | null;
+        city?: string | null;
+        state?: string | null;
+        postalCode?: string | null;
+        country?: string | null;
+        placeId?: string | null;
+        lat?: number | null;
+        lng?: number | null;
+        deliveryNotes?: string | null;
+      } | null;
+      customerName?: string | null;
+      customerPhone?: string | null;
+      customerAddress?: string | null;
+      customerAddressLine1?: string | null;
+      customerAddressLine2?: string | null;
+      customerNeighborhood?: string | null;
+      customerCity?: string | null;
+      customerState?: string | null;
+      customerPostalCode?: string | null;
+      customerCountry?: string | null;
+      customerPlaceId?: string | null;
+      customerLat?: number | null;
+      customerLng?: number | null;
+      customerDeliveryNotes?: string | null;
+      discount?: number | null;
+      deliveryFee?: number | null;
+      couponCode?: string | null;
+      notes?: string | null;
+    },
+    items: Array<{ productId: number; quantity: number }>
+  ) {
+    const { subtotal, couponEligibleSubtotal } = await this.calculateOrderSubtotalsFromItems(tx, items);
+    const storedCouponCode = resolveStoredCouponCode(order.couponCode, order.notes);
+    const customerSnapshot = this.extractOrderCustomerSnapshot(order);
+    const storedCouponNote = parseAppliedCouponFromNotes(order.notes ?? null);
+    const resolvedCoupon =
+      storedCouponCode &&
+      storedCouponNote?.code === storedCouponCode &&
+      typeof storedCouponNote.discountPct === 'number' &&
+      storedCouponNote.discountPct > 0
+        ? {
+            code: storedCouponCode,
+            discountPct: this.toMoney(storedCouponNote.discountPct),
+            discountAmount: this.toMoney(
+              (couponEligibleSubtotal * this.toMoney(storedCouponNote.discountPct)) / 100
+            ),
+            subtotalAfterDiscount: this.toMoney(
+              Math.max(
+                couponEligibleSubtotal -
+                  this.toMoney((couponEligibleSubtotal * this.toMoney(storedCouponNote.discountPct)) / 100),
+                0
+              )
+            )
+          }
+        : storedCouponCode
+          ? await this.resolveCouponDiscount({
+              couponCode: storedCouponCode,
+              subtotal: couponEligibleSubtotal,
+              customerId: order.customerId ?? null,
+              customerPhone: customerSnapshot.phone ?? null,
+              client: tx,
+              excludeOrderId: order.id
+            })
+          : null;
+    const storedMarketingDiscountPct = this.toMoney(
+      Math.max(parseMarketingSamplesDiscountPct(order.notes ?? null) ?? 0, 0)
+    );
+    const manualDiscountResolution = resolvedCoupon
+      ? null
+      : compareMoney(storedMarketingDiscountPct, 0) > 0
+        ? this.resolveOrderDiscountInput(subtotal, { discountPct: storedMarketingDiscountPct })
+        : this.resolveOrderDiscountInput(subtotal, { discount: order.discount ?? 0 });
+    const discount = resolvedCoupon ? resolvedCoupon.discountAmount : manualDiscountResolution?.discount ?? 0;
+    const discountPct = resolvedCoupon ? resolvedCoupon.discountPct : manualDiscountResolution?.discountPct ?? 0;
+    const deliveryFee = this.toMoney(order.deliveryFee ?? 0);
+    const total = this.computeOrderTotal(subtotal, discount, deliveryFee);
+
+    let notes = mergeAppliedCouponIntoNotes(
+      order.notes ?? null,
+      resolvedCoupon?.code
+        ? {
+            code: resolvedCoupon.code,
+            discountPct: resolvedCoupon.discountPct
+          }
+        : null
+    );
+    notes = mergeMarketingSamplesIntoNotes(
+      notes,
+      !resolvedCoupon && compareMoney(discountPct, 0) > 0
+        ? {
+            discountPct,
+            sponsoredDeliveryFee: parseMarketingSamplesSponsoredDeliveryFee(order.notes ?? null)
+          }
+        : null
+    );
+
+    return {
+      subtotal,
+      discount,
+      discountPct,
+      deliveryFee,
+      total,
+      couponCode: resolvedCoupon?.code ?? null,
+      notes
+    };
   }
 
   private async ensureInventoryItemByAliases(
@@ -585,48 +870,11 @@ export class OrdersService {
     );
   }
 
-  private async resolveMassPrepRecipesPossibleFromIngredients(tx: TransactionClient) {
-    const inventoryItems = await tx.inventoryItem.findMany({ orderBy: { id: 'asc' } });
-    let possibleRecipes = Number.POSITIVE_INFINITY;
-
-    for (const ingredient of massPrepRecipeIngredients) {
-      const availableQty = this.toQty(
-        await this.loadInventoryFamilyBalance(
-          tx,
-          resolveInventoryFamilyItemIds(inventoryItems, ingredient)
-        )
-      );
-      const possibleForIngredient = ingredient.qtyPerRecipe
-        ? Math.floor(availableQty / ingredient.qtyPerRecipe)
-        : 0;
-      possibleRecipes = Math.min(possibleRecipes, possibleForIngredient);
-    }
-
-    return Number.isFinite(possibleRecipes) ? Math.max(possibleRecipes, 0) : 0;
-  }
-
-  private async getMassPrepEventRecord(tx: TransactionClient, orderId: number) {
-    return tx.idempotencyRecord.findUnique({
-      where: {
-        scope_idemKey: {
-          scope: MASS_PREP_EVENT_SCOPE,
-          idemKey: this.massPrepEventIdemKey(orderId)
-        }
-      }
-    });
-  }
-
-  private async getMassPrepEvent(tx: TransactionClient, orderId: number) {
-    const record = await this.getMassPrepEventRecord(tx, orderId);
-    if (!record) return null;
-    return this.parseMassPrepEvent(record.responseJson);
-  }
-
   private async resolveOrderFillingBroasByFlavorCode(
     tx: TransactionClient,
     items: Array<{ productId: number; quantity: number }>
   ) {
-    const byFlavorCode: Record<FillingFlavorCode, number> = { G: 0, D: 0, Q: 0, R: 0 };
+    const byFlavorCode: Record<FillingFlavorCode, number> = { G: 0, D: 0, Q: 0, R: 0, RJ: 0 };
     if (items.length === 0) return byFlavorCode;
 
     const productIds = Array.from(new Set(items.map((item) => item.productId)));
@@ -637,7 +885,7 @@ export class OrdersService {
     const productNameById = new Map(products.map((product) => [product.id, product.name]));
     const summary = this.buildOfficialBroaSummaryFromItems(items, productNameById);
 
-    for (const code of ['G', 'D', 'Q', 'R'] as const) {
+    for (const code of ['G', 'D', 'Q', 'R', 'RJ'] as const) {
       byFlavorCode[code] = summary.flavorCounts[code] || 0;
     }
 
@@ -667,12 +915,12 @@ export class OrdersService {
     tx: TransactionClient,
     order: Pick<OrderWithRelations, 'id' | 'status'>
   ) {
-    if (!['ABERTO', 'CONFIRMADO'].includes(order.status)) {
-      throw new BadRequestException('Pedido nao permite alterar itens neste status');
+    if (normalizeOrderStatus(order.status) !== 'ABERTO') {
+      throw new BadRequestException('Pedido não permite alterar itens neste status');
     }
     if (await this.hasPhysicalInventoryMovements(tx, order.id)) {
       throw new BadRequestException(
-        'Pedido nao permite alterar itens apos gerar movimentacoes fisicas de estoque.'
+        'Pedido não permite alterar itens após gerar movimentações físicas de estoque.'
       );
     }
   }
@@ -680,18 +928,9 @@ export class OrdersService {
   private async assertOrderRemovable(tx: TransactionClient, orderId: number) {
     if (await this.hasPhysicalInventoryMovements(tx, orderId)) {
       throw new BadRequestException(
-        'Pedido com movimentacoes fisicas de estoque nao pode ser excluido.'
+        'Pedido com movimentações físicas de estoque não pode ser excluído.'
       );
     }
-  }
-
-  private async clearMassPrepEventArtifact(tx: TransactionClient, orderId: number) {
-    await tx.idempotencyRecord.deleteMany({
-      where: {
-        scope: MASS_PREP_EVENT_SCOPE,
-        idemKey: this.massPrepEventIdemKey(orderId)
-      }
-    });
   }
 
   private async syncPaperBagReservationsForCustomerDateGroup(
@@ -795,10 +1034,16 @@ export class OrdersService {
     const products = productIds.length
       ? await tx.product.findMany({
           where: { id: { in: productIds } },
-          select: { id: true, name: true }
+          select: {
+            id: true,
+            name: true,
+            inventoryItemId: true,
+            inventoryQtyPerSaleUnit: true
+          }
         })
       : [];
     const productNameById = new Map(products.map((product) => [product.id, product.name]));
+    const productById = new Map(products.map((product) => [product.id, product]));
 
     const massReadyItem = await this.ensureInventoryItemByAliases(tx, inventoryByLookup, {
       canonicalName: MASS_READY_ITEM_NAME,
@@ -837,30 +1082,31 @@ export class OrdersService {
     }
 
     for (const [code, broasQty] of Object.entries(fillingBroasByCode) as Array<[FillingFlavorCode, number]>) {
-      const definition = orderFillingIngredientsByFlavorCode[code];
-      const fillingQty = this.toQty(Math.max(broasQty, 0) * (definition.qtyPerUnit ?? 0));
-      if (fillingQty <= 0) continue;
+      for (const definition of orderFillingIngredientsByFlavorCode[code]) {
+        const fillingQty = this.toQty(Math.max(broasQty, 0) * (definition.qtyPerUnit ?? 0));
+        if (fillingQty <= 0) continue;
 
-      const item = await this.ensureInventoryItemByAliases(tx, inventoryByLookup, {
-        canonicalName: definition.canonicalName,
-        aliases: definition.aliases,
-        category: definition.category,
-        unit: definition.unit,
-        purchasePackSize: definition.purchasePackSize,
-        purchasePackCost: definition.purchasePackCost
-      });
+        const item = await this.ensureInventoryItemByAliases(tx, inventoryByLookup, {
+          canonicalName: definition.canonicalName,
+          aliases: definition.aliases,
+          category: definition.category,
+          unit: definition.unit,
+          purchasePackSize: definition.purchasePackSize,
+          purchasePackCost: definition.purchasePackCost
+        });
 
-      await tx.inventoryMovement.create({
-        data: {
-          itemId: item.id,
-          orderId: order.id,
-          type: 'OUT',
-          quantity: fillingQty,
-          reason: `Consumo de recheio por pedido (${definition.canonicalName})`,
-          source: ORDER_FORMULA_SOURCE_FILLING,
-          sourceLabel
-        }
-      });
+        await tx.inventoryMovement.create({
+          data: {
+            itemId: item.id,
+            orderId: order.id,
+            type: 'OUT',
+            quantity: fillingQty,
+            reason: `Consumo de recheio por pedido (${definition.canonicalName})`,
+            source: ORDER_FORMULA_SOURCE_FILLING,
+            sourceLabel
+          }
+        });
+      }
     }
 
     const plasticBoxDefinition = resolveInventoryDefinition('CAIXA DE PLÁSTICO');
@@ -910,266 +1156,43 @@ export class OrdersService {
       });
     }
 
+    for (const orderItem of order.items || []) {
+      const product = productById.get(orderItem.productId);
+      if (!product?.inventoryItemId || !product.inventoryQtyPerSaleUnit) continue;
+
+      const companionQty = this.toQty(
+        Math.max(orderItem.quantity || 0, 0) * product.inventoryQtyPerSaleUnit
+      );
+      if (companionQty <= 0) continue;
+
+      await tx.inventoryMovement.create({
+        data: {
+          itemId: product.inventoryItemId,
+          orderId: order.id,
+          type: 'OUT',
+          quantity: companionQty,
+          reason: `Reserva direta do produto ${product.name}`,
+          source: ORDER_FORMULA_SOURCE_COMPANION,
+          sourceLabel
+        }
+      });
+    }
+
     return {
       massReadyItem,
       requiredMassRecipes: massReadyRecipes
     };
   }
 
-  private async syncMassPrepEventForOrder(
-    tx: TransactionClient,
-    order: Pick<OrderWithRelations, 'id' | 'scheduledAt' | 'createdAt'>,
-    massReadyItemId: number,
-    requiredMassRecipes: number
-  ) {
-    const existingEvent = await this.getMassPrepEvent(tx, order.id);
-    const orderReferenceDate = this.massPrepEventDate(order);
-    const startsAt = new Date(orderReferenceDate.getTime() - MASS_PREP_EVENT_DURATION_MINUTES * 60_000);
-    const endsAt = new Date(orderReferenceDate);
-
-    const massReadyMovements = await tx.inventoryMovement.findMany({
-      where: { itemId: massReadyItemId },
-      select: { type: true, quantity: true, orderId: true, source: true },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
-    });
-    const availableMassReadyExcludingOrderFormula = this.toQty(
-      this.inventoryBalanceFromMovements(
-        massReadyMovements.filter(
-          (movement) =>
-            !(movement.orderId === order.id && movement.source === ORDER_FORMULA_SOURCE_MASS_READY)
-        )
-      )
-    );
-    const missingMassRecipes = Math.max(
-      this.toQty(requiredMassRecipes - availableMassReadyExcludingOrderFormula),
-      0
-    );
-    const possibleRecipesFromIngredients =
-      missingMassRecipes > 0
-        ? await this.resolveMassPrepRecipesPossibleFromIngredients(tx)
-        : 0;
-    const recipesToPrepare = resolvePlannedMassPrepRecipes(
-      missingMassRecipes,
-      possibleRecipesFromIngredients
-    );
-
-    if (!existingEvent) {
-      if (recipesToPrepare <= 0) return null;
-      const createdEvent = massPrepEventSchema.parse({
-        version: 1,
-        id: `mass-prep-${randomUUID()}`,
-        eventName: MASS_PREP_EVENT_NAME,
-        orderId: order.id,
-        startsAt: startsAt.toISOString(),
-        endsAt: endsAt.toISOString(),
-        durationMinutes: MASS_PREP_EVENT_DURATION_MINUTES,
-        massRecipes: recipesToPrepare,
-        status: 'INGREDIENTES',
-        createdAt: new Date().toISOString()
-      });
-      await this.saveMassPrepEvent(tx, createdEvent);
-      return createdEvent;
-    }
-
-    let changed = false;
-    const nextEvent: MassPrepEvent = { ...existingEvent };
-    const nextStartsAtIso = startsAt.toISOString();
-    const nextEndsAtIso = endsAt.toISOString();
-
-    if (nextEvent.startsAt !== nextStartsAtIso) {
-      nextEvent.startsAt = nextStartsAtIso;
-      changed = true;
-    }
-    if (nextEvent.endsAt !== nextEndsAtIso) {
-      nextEvent.endsAt = nextEndsAtIso;
-      changed = true;
-    }
-    if (
-      nextEvent.status === 'INGREDIENTES' &&
-      recipesToPrepare > 0 &&
-      nextEvent.massRecipes !== recipesToPrepare
-    ) {
-      nextEvent.massRecipes = recipesToPrepare;
-      changed = true;
-    }
-
-    if (!changed) return nextEvent;
-    const parsedEvent = massPrepEventSchema.parse(nextEvent);
-    await this.saveMassPrepEvent(tx, parsedEvent);
-    return parsedEvent;
-  }
-
-  private async syncOrderInventoryAndMassPrepEvent(
+  private async syncOrderInventoryArtifacts(
     tx: TransactionClient,
     order: Pick<OrderWithRelations, 'id' | 'customerId' | 'scheduledAt' | 'createdAt' | 'items'>
   ) {
-    const formula = await this.syncOrderFormulaInventory(tx, order);
-    await this.syncMassPrepEventForOrder(tx, order, formula.massReadyItem.id, formula.requiredMassRecipes);
+    await this.syncOrderFormulaInventory(tx, order);
     await this.syncPaperBagReservationsForCustomerDateGroup(tx, {
       customerId: order.customerId,
       targetDate: this.orderTargetDate(order).date
     });
-  }
-
-  private async syncMassPrepEventScheduleAndCoverage(
-    tx: TransactionClient,
-    order: Pick<OrderWithRelations, 'id' | 'scheduledAt' | 'createdAt' | 'items'>
-  ) {
-    const inventoryItems = await tx.inventoryItem.findMany({ orderBy: { id: 'asc' } });
-    const inventoryByLookup = buildInventoryItemLookup(inventoryItems);
-    const productIds = Array.from(new Set((order.items || []).map((item) => item.productId)));
-    const products = productIds.length
-      ? await tx.product.findMany({
-          where: { id: { in: productIds } },
-          select: { id: true, name: true }
-        })
-      : [];
-    const productNameById = new Map(products.map((product) => [product.id, product.name]));
-    const massReadyItem = await this.ensureInventoryItemByAliases(tx, inventoryByLookup, {
-      canonicalName: MASS_READY_ITEM_NAME,
-      aliases: [MASS_READY_ITEM_NAME],
-      category: 'INGREDIENTE',
-      unit: 'receita',
-      purchasePackSize: 1,
-      purchasePackCost: 0
-    });
-    const broaSummary = this.buildOfficialBroaSummaryFromItems(order.items || [], productNameById);
-    const requiredMassRecipes = this.toQty(
-      broaSummary.totalBroas / MASS_READY_BROAS_PER_RECIPE
-    );
-    await this.syncMassPrepEventForOrder(tx, order, massReadyItem.id, requiredMassRecipes);
-  }
-
-  private async prepareMassForEvent(
-    tx: TransactionClient,
-    event: Pick<MassPrepEvent, 'orderId' | 'massRecipes'>
-  ) {
-    const plannedRecipes = Math.max(Math.floor(event.massRecipes || 0), 0);
-    if (plannedRecipes <= 0) {
-      throw new BadRequestException('Evento FAZER MASSA sem receitas para preparar.');
-    }
-
-    const inventoryItems = await tx.inventoryItem.findMany({ orderBy: { id: 'asc' } });
-    const inventoryByLookup = buildInventoryItemLookup(inventoryItems);
-    const sourceLabel = this.orderFormulaSourceLabel(event.orderId);
-
-    const massReadyItem = await this.ensureInventoryItemByAliases(tx, inventoryByLookup, {
-      canonicalName: MASS_READY_ITEM_NAME,
-      aliases: [MASS_READY_ITEM_NAME],
-      category: 'INGREDIENTE',
-      unit: 'receita',
-      purchasePackSize: 1,
-      purchasePackCost: 0
-    });
-
-    const plan: Array<{
-      item: InventoryLookupItem;
-      qtyPerRecipe: number;
-      availableQty: number;
-      displayName: string;
-      unit: string;
-    }> = [];
-    let possibleRecipesFromIngredients = Number.POSITIVE_INFINITY;
-
-    for (const ingredient of massPrepRecipeIngredients) {
-      const item = await this.ensureInventoryItemByAliases(tx, inventoryByLookup, {
-        canonicalName: ingredient.canonicalName,
-        aliases: ingredient.aliases,
-        category: ingredient.category,
-        unit: ingredient.unit,
-        purchasePackSize: ingredient.purchasePackSize,
-        purchasePackCost: ingredient.purchasePackCost
-      });
-      const availableQty = this.toQty(
-        await this.loadInventoryFamilyBalance(
-          tx,
-          resolveInventoryFamilyItemIds(inventoryItems, ingredient)
-        )
-      );
-      const possibleForIngredient = ingredient.qtyPerRecipe
-        ? Math.floor(availableQty / ingredient.qtyPerRecipe)
-        : 0;
-      possibleRecipesFromIngredients = Math.min(possibleRecipesFromIngredients, possibleForIngredient);
-      plan.push({
-        item,
-        qtyPerRecipe: ingredient.qtyPerRecipe,
-        availableQty,
-        displayName: ingredient.canonicalName,
-        unit: ingredient.unit
-      });
-    }
-
-    const recipes = resolveExecutableMassPrepRecipes(
-      MASS_PREP_DEFAULT_BATCH_RECIPES,
-      Number.isFinite(possibleRecipesFromIngredients) ? possibleRecipesFromIngredients : 0
-    );
-    if (recipes <= 0) {
-      const missingIngredients = plan.map(
-        (ingredient) =>
-          `${ingredient.displayName}: disponivel ${ingredient.availableQty} ${ingredient.unit}, necessario ${ingredient.qtyPerRecipe} ${ingredient.unit}`
-      );
-      throw new BadRequestException(
-        `Nao ha insumos suficientes para iniciar PREPARO. ${missingIngredients.join(' | ')}`
-      );
-    }
-
-    for (const ingredient of plan) {
-      await tx.inventoryMovement.create({
-        data: {
-          itemId: ingredient.item.id,
-          orderId: event.orderId,
-          type: 'OUT',
-          quantity: this.toQty(ingredient.qtyPerRecipe * recipes),
-          reason: `Consumo de insumos para MASSA PRONTA (${recipes} receita(s))`,
-          source: MASS_PREP_SOURCE,
-          sourceLabel
-        }
-      });
-    }
-
-    await tx.inventoryMovement.create({
-      data: {
-        itemId: massReadyItem.id,
-        orderId: event.orderId,
-        type: 'IN',
-        quantity: recipes,
-        reason: `Reposicao de MASSA PRONTA (${recipes} receita(s))`,
-        source: MASS_PREP_SOURCE,
-        sourceLabel
-      }
-    });
-
-    return recipes;
-  }
-
-  private async syncMassPrepEventStatusFromOrderStatus(
-    tx: TransactionClient,
-    orderId: number,
-    orderStatus: string
-  ) {
-    const event = await this.getMassPrepEvent(tx, orderId);
-    if (!event) return null;
-
-    let nextStatus = event.status;
-
-    if (orderStatus === 'EM_PREPARACAO' && event.status === 'PREPARO') {
-      nextStatus = 'NO_FORNO';
-    }
-
-    if ((orderStatus === 'PRONTO' || orderStatus === 'ENTREGUE') && event.status !== 'PRONTA') {
-      nextStatus = 'PRONTA';
-    }
-
-    if (nextStatus === event.status) {
-      return event;
-    }
-
-    const updatedEvent = massPrepEventSchema.parse({
-      ...event,
-      status: nextStatus
-    });
-    await this.saveMassPrepEvent(tx, updatedEvent);
-    return updatedEvent;
   }
 
   private getPaidAmount(
@@ -1188,6 +1211,7 @@ export class OrdersService {
   }
 
   private deriveOrderPaymentStatus(total: number, amountPaid: number) {
+    if (compareMoney(total, 0) <= 0) return 'PAGO';
     if (compareMoney(amountPaid, 0) <= 0) return 'PENDENTE';
     if (compareMoney(amountPaid, total) >= 0) return 'PAGO';
     return 'PARCIAL';
@@ -1198,7 +1222,7 @@ export class OrdersService {
     const normalizedAmountPaid = moneyToMinorUnits(amountPaid);
     if (normalizedAmountPaid > normalizedTotal) {
       throw new BadRequestException(
-        `Total do pedido nao pode ficar abaixo do valor ja pago. Total=${moneyFromMinorUnits(normalizedTotal)} Pago=${moneyFromMinorUnits(normalizedAmountPaid)}`
+        `Total do pedido não pode ficar abaixo do valor já pago. Total=${moneyFromMinorUnits(normalizedTotal)} Pago=${moneyFromMinorUnits(normalizedAmountPaid)}`
       );
     }
   }
@@ -1207,31 +1231,162 @@ export class OrdersService {
     if (value == null) return null;
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime())) {
-      throw new BadRequestException('Data/hora do pedido invalida.');
+      throw new BadRequestException('Data/hora do pedido inválida.');
     }
     return parsed;
+  }
+
+  private normalizeScheduleDayKey(dayKey: string) {
+    return orderScheduleDayKeySchema.parse(String(dayKey || '').trim());
+  }
+
+  private async loadBlockedScheduleWindows(client: OrderScheduleQueryClient) {
+    const blockedEntries = await client.orderScheduleDayAvailability.findMany({
+      where: { isOpen: false },
+      select: {
+        dayKey: true,
+        windowKey: true
+      },
+      orderBy: [{ dayKey: 'asc' }, { windowKey: 'asc' }],
+    });
+
+    const blockedByDay = new Map<string, Set<ExternalOrderDeliveryWindowKey>>();
+
+    for (const entry of blockedEntries) {
+      let normalizedDayKey: string | null = null;
+      try {
+        normalizedDayKey = this.normalizeScheduleDayKey(entry.dayKey);
+      } catch {
+        normalizedDayKey = null;
+      }
+      if (!normalizedDayKey) continue;
+
+      const bucket = blockedByDay.get(normalizedDayKey) || new Set<ExternalOrderDeliveryWindowKey>();
+      if (entry.windowKey === ORDER_SCHEDULE_BLOCK_ALL_DAY_WINDOW_KEY) {
+        for (const window of EXTERNAL_ORDER_DELIVERY_WINDOWS) {
+          bucket.add(window.key);
+        }
+        blockedByDay.set(normalizedDayKey, bucket);
+        continue;
+      }
+
+      const parsedWindowKey = ExternalOrderDeliveryWindowKeyEnum.safeParse(entry.windowKey);
+      if (!parsedWindowKey.success) continue;
+      bucket.add(parsedWindowKey.data);
+      blockedByDay.set(normalizedDayKey, bucket);
+    }
+
+    return blockedByDay;
+  }
+
+  private async resolveScheduleDayAvailability(
+    client: Pick<PrismaService | TransactionClient, 'orderScheduleDayAvailability'>,
+    dayKey: string,
+  ) {
+    const normalizedDayKey = this.normalizeScheduleDayKey(dayKey);
+    const existing = await client.orderScheduleDayAvailability.findMany({
+      where: { dayKey: normalizedDayKey },
+      select: {
+        windowKey: true,
+        isOpen: true,
+        updatedAt: true,
+      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }]
+    });
+    const blockedWindows = new Set<ExternalOrderDeliveryWindowKey>();
+    let latestUpdatedAt: Date | null = null;
+
+    for (const entry of existing) {
+      if (entry.updatedAt && (!latestUpdatedAt || entry.updatedAt.getTime() > latestUpdatedAt.getTime())) {
+        latestUpdatedAt = entry.updatedAt;
+      }
+      if (entry.isOpen !== false) continue;
+      if (entry.windowKey === ORDER_SCHEDULE_BLOCK_ALL_DAY_WINDOW_KEY) {
+        for (const window of EXTERNAL_ORDER_DELIVERY_WINDOWS) {
+          blockedWindows.add(window.key);
+        }
+        continue;
+      }
+      const parsedWindowKey = ExternalOrderDeliveryWindowKeyEnum.safeParse(entry.windowKey);
+      if (parsedWindowKey.success) {
+        blockedWindows.add(parsedWindowKey.data);
+      }
+    }
+
+    return {
+      dayKey: normalizedDayKey,
+      blockedWindows: EXTERNAL_ORDER_DELIVERY_WINDOWS.filter((window) => blockedWindows.has(window.key)).map(
+        (window) => window.key
+      ),
+      windows: EXTERNAL_ORDER_DELIVERY_WINDOWS.map((window) => ({
+        key: window.key,
+        label: window.label,
+        startLabel: `${window.startHour}h`,
+        endLabel: `${window.endHour}h`,
+        isOpen: !blockedWindows.has(window.key),
+      })),
+      updatedAt: latestUpdatedAt?.toISOString() ?? null,
+    } satisfies OrderScheduleDayAvailabilitySummary;
   }
 
   private async buildExternalOrderScheduleAvailability(
     client: OrderScheduleQueryClient,
     options: {
       requestedAt?: Date | null;
+      requestedDate?: string | null;
+      requestedWindowKey?: string | null;
+      requestedTotalBroas?: number | null;
       excludeOrderId?: number | null;
       reference?: Date;
     }
   ) {
+    const blockedWindowsByDay = await this.loadBlockedScheduleWindows(client);
     const scheduledOrders = await client.order.findMany({
       where: {
         scheduledAt: { not: null },
         status: { not: 'CANCELADO' },
         ...(options.excludeOrderId ? { id: { not: options.excludeOrderId } } : {})
       },
-      select: { scheduledAt: true }
+      select: {
+        scheduledAt: true,
+        items: {
+          select: {
+            quantity: true,
+            product: {
+              select: {
+                name: true,
+                unit: true
+              }
+            }
+          }
+        }
+      }
     });
 
+    const parsedRequestedWindowKey = ExternalOrderDeliveryWindowKeyEnum.safeParse(options.requestedWindowKey ?? null);
+    const requestedWindowKey = parsedRequestedWindowKey.success ? parsedRequestedWindowKey.data : null;
+
     const availability = resolveExternalOrderScheduleAvailability({
-      scheduledOrders: scheduledOrders.map((entry) => entry.scheduledAt),
+      scheduledOrders: scheduledOrders.map((entry) => ({
+        scheduledAt: entry.scheduledAt,
+        totalBroas: this.resolveOrderProductionBroaCount(
+          entry.items.map((item) => ({
+            quantity: item.quantity,
+            productName: item.product?.name ?? null,
+            productUnit: item.product?.unit ?? null
+          }))
+        )
+      })),
       requestedAt: options.requestedAt ?? null,
+      requestedDate: options.requestedDate ?? null,
+      requestedWindowKey,
+      requestedTotalBroas: options.requestedTotalBroas ?? null,
+      blockedWindows: Array.from(blockedWindowsByDay.entries()).flatMap(([dayKey, windowKeys]) =>
+        Array.from(windowKeys).map((windowKey) => ({
+          dayKey,
+          windowKey
+        }))
+      ),
       reference: options.reference
     });
 
@@ -1242,25 +1397,135 @@ export class OrdersService {
       requestedAvailable: availability.requestedAvailable,
       reason: availability.reason,
       dailyLimit: availability.dailyLimit,
+      requestedTotalBroas: availability.requestedTotalBroas,
+      requestedDurationMinutes: availability.requestedDurationMinutes,
       slotMinutes: availability.slotMinutes,
       dayOrderCount: availability.dayOrderCount,
-      slotTaken: availability.slotTaken
+      slotTaken: availability.slotTaken,
+      requestedDate: availability.requestedDate,
+      requestedWindowKey: availability.requestedWindowKey,
+      requestedWindowLabel: availability.requestedWindowLabel,
+      requestedWindowAvailable: availability.requestedWindowAvailable,
+      requestedWindowReason: availability.requestedWindowReason,
+      requestedWindowScheduledAt: availability.requestedWindowScheduledAt?.toISOString() ?? null,
+      requestedWindowNextAvailableAt: availability.requestedWindowNextAvailableAt?.toISOString() ?? null,
+      windows: availability.windows.map((window) => ({
+        key: window.key,
+        label: window.label,
+        startLabel: window.startLabel,
+        endLabel: window.endLabel,
+        available: window.available,
+        scheduledAt: window.scheduledAt?.toISOString() ?? null,
+        reason: window.reason
+      }))
     });
+  }
+
+  private buildPublicWindowAvailabilityError(availability: z.infer<typeof ExternalOrderScheduleAvailabilitySchema>) {
+    const nextAvailableAt = availability.requestedWindowNextAvailableAt ?? availability.nextAvailableAt;
+    const nextDate = new Date(nextAvailableAt);
+    const nextWindowKey = resolveExternalOrderDeliveryWindowKeyForDate(nextDate);
+    const nextWindowLabel = resolveExternalOrderDeliveryWindowLabel(nextWindowKey);
+    const nextLabel = nextWindowLabel
+      ? `${nextWindowLabel} (${new Intl.DateTimeFormat('pt-BR', {
+          day: '2-digit',
+          month: '2-digit'
+        }).format(nextDate)})`
+      : new Intl.DateTimeFormat('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit'
+        }).format(nextDate);
+
+    const reason = availability.requestedWindowReason ?? availability.reason;
+    const message =
+      reason === 'DAY_FULL'
+        ? `Esse dia já atingiu ${availability.dailyLimit} pedidos agendados. Próxima faixa: ${nextLabel}.`
+        : reason === 'DAY_BLOCKED'
+          ? `Essa faixa foi fechada para novos agendamentos. Próxima faixa: ${nextLabel}.`
+          : `Essa faixa não comporta o tempo de forno necessário. Próxima faixa: ${nextLabel}.`;
+
+    return new BadRequestException({
+      message,
+      nextAvailableAt,
+      reason,
+      dailyLimit: availability.dailyLimit,
+      requestedDate: availability.requestedDate,
+      requestedWindowKey: availability.requestedWindowKey
+    });
+  }
+
+  private async resolvePublicExternalSubmissionSchedule(
+    client: OrderScheduleQueryClient,
+    fulfillment: ExternalOrderSubmissionPayload['fulfillment'],
+    options: {
+      requestedTotalBroas?: number | null;
+      reference?: Date;
+    } = {}
+  ) {
+    const requestedDate = String(fulfillment.date || '').trim() || null;
+    const requestedWindowKey =
+      ExternalOrderDeliveryWindowKeyEnum.safeParse(fulfillment.timeWindow ?? null).success
+        ? (fulfillment.timeWindow as ExternalOrderDeliveryWindowKey)
+        : null;
+
+    if (requestedDate && requestedWindowKey) {
+      const availability = await this.buildExternalOrderScheduleAvailability(client, {
+        requestedDate,
+        requestedWindowKey,
+        requestedTotalBroas: options.requestedTotalBroas ?? null,
+        reference: options.reference
+      });
+
+      if (!availability.requestedWindowAvailable || !availability.requestedWindowScheduledAt) {
+        throw this.buildPublicWindowAvailabilityError(availability);
+      }
+
+      const scheduledAt = this.parseOptionalDateTime(availability.requestedWindowScheduledAt);
+      if (!scheduledAt) {
+        throw new BadRequestException('Faixa de horário inválida para o pedido.');
+      }
+
+      return {
+        availability,
+        scheduledAt,
+        scheduledAtIso: availability.requestedWindowScheduledAt,
+        requestedDate,
+        requestedWindowKey
+      };
+    }
+
+    const scheduledAt = this.parseOptionalDateTime(fulfillment.scheduledAt);
+    await this.ensurePublicOrderScheduleAllowed(scheduledAt, {
+      requestedTotalBroas: options.requestedTotalBroas ?? null,
+      reference: options.reference
+    });
+
+    return {
+      availability: null,
+      scheduledAt,
+      scheduledAtIso: scheduledAt?.toISOString() ?? fulfillment.scheduledAt ?? null,
+      requestedDate: null,
+      requestedWindowKey: null
+    };
   }
 
   private async ensureOrderScheduleCapacityAllowed(
     client: OrderScheduleQueryClient,
     scheduledAt: Date | null,
     options: {
+      requestedTotalBroas?: number | null;
       excludeOrderId?: number | null;
       reference?: Date;
     } = {}
   ) {
     if (!scheduledAt) {
-      throw new BadRequestException('Data/hora do pedido invalida.');
+      throw new BadRequestException('Data/hora do pedido inválida.');
     }
     const availability = await this.buildExternalOrderScheduleAvailability(client, {
       requestedAt: scheduledAt,
+      requestedTotalBroas: options.requestedTotalBroas ?? null,
       excludeOrderId: options.excludeOrderId,
       reference: options.reference
     });
@@ -1276,36 +1541,117 @@ export class OrdersService {
   private async ensurePublicOrderScheduleAllowed(
     scheduledAt: Date | null,
     options: {
+      requestedTotalBroas?: number | null;
       excludeOrderId?: number | null;
       reference?: Date;
     } = {}
   ) {
     if (!scheduledAt) {
-      throw new BadRequestException('Data/hora do pedido invalida.');
+      throw new BadRequestException('Data/hora do pedido inválida.');
     }
     if (!isExternalOrderScheduleAllowed(scheduledAt, options.reference)) {
       throw new BadRequestException(externalOrderScheduleErrorMessage(options.reference));
     }
-    return this.ensureOrderScheduleCapacityAllowed(this.prisma, scheduledAt, options);
-  }
-
-  async getPublicScheduleAvailability(requestedAt?: string | null) {
-    const parsedRequestedAt = this.parseOptionalDateTime(requestedAt ?? null);
-    return this.buildExternalOrderScheduleAvailability(this.prisma, {
-      requestedAt: parsedRequestedAt
+    return this.ensureOrderScheduleCapacityAllowed(this.prisma, scheduledAt, {
+      ...options,
+      requestedTotalBroas: options.requestedTotalBroas ?? null
     });
   }
 
+  private async ensureScheduleDayIsOpen(
+    client: OrderScheduleQueryClient,
+    scheduledAt: Date | null,
+    options: {
+      requestedTotalBroas?: number | null;
+      currentScheduledAt?: Date | null;
+      reference?: Date;
+    } = {}
+  ) {
+    if (!scheduledAt) return;
+
+    const requestedDayKey = formatScheduleDayKeyFromDate(scheduledAt);
+    const requestedWindowKey = resolveExternalOrderDeliveryWindowKeyForDate(scheduledAt);
+    const currentDayKey = options.currentScheduledAt ? formatScheduleDayKeyFromDate(options.currentScheduledAt) : null;
+    const currentWindowKey = options.currentScheduledAt
+      ? resolveExternalOrderDeliveryWindowKeyForDate(options.currentScheduledAt)
+      : null;
+    if (currentDayKey && currentDayKey === requestedDayKey && currentWindowKey === requestedWindowKey) {
+      return;
+    }
+
+    const availability = await this.buildExternalOrderScheduleAvailability(client, {
+      requestedAt: scheduledAt,
+      requestedTotalBroas: options.requestedTotalBroas ?? null,
+      reference: options.reference
+    });
+
+    if (availability.reason === 'DAY_BLOCKED') {
+      throw this.buildPublicWindowAvailabilityError(availability);
+    }
+  }
+
+  async getPublicScheduleAvailability(
+    requestedDate?: string | null,
+    requestedWindowKey?: string | null,
+    requestedAt?: string | null,
+    requestedTotalBroas?: number | null
+  ) {
+    const parsedRequestedAt = this.parseOptionalDateTime(requestedAt ?? null);
+    return this.buildExternalOrderScheduleAvailability(this.prisma, {
+      requestedDate: requestedDate ?? null,
+      requestedWindowKey: requestedWindowKey ?? null,
+      requestedAt: parsedRequestedAt,
+      requestedTotalBroas: requestedTotalBroas ?? ORDER_BOX_UNITS
+    });
+  }
+
+  async getScheduleDayAvailability(dayKey: string) {
+    return this.resolveScheduleDayAvailability(this.prisma, dayKey);
+  }
+
+  async updateScheduleDayAvailability(dayKey: string, blockedWindows: ExternalOrderDeliveryWindowKey[]) {
+    const normalizedDayKey = this.normalizeScheduleDayKey(dayKey);
+    const normalizedBlockedWindows = Array.from(
+      new Set(
+        blockedWindows
+          .map((windowKey) => ExternalOrderDeliveryWindowKeyEnum.safeParse(windowKey))
+          .filter((result) => result.success)
+          .map((result) => result.data)
+      )
+    );
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.orderScheduleDayAvailability.deleteMany({
+        where: { dayKey: normalizedDayKey },
+      });
+
+      if (!normalizedBlockedWindows.length) return;
+
+      await tx.orderScheduleDayAvailability.createMany({
+        data: normalizedBlockedWindows.map((windowKey) => ({
+          dayKey: normalizedDayKey,
+          windowKey,
+          isOpen: false,
+        }))
+      });
+    });
+
+    return this.resolveScheduleDayAvailability(this.prisma, normalizedDayKey);
+  }
+
   private withFinancial(order: OrderWithRelations) {
+    const normalizedStatus = normalizeOrderStatus(order.status) || 'ABERTO';
     const total = this.toMoney(order.total ?? 0);
     const amountPaid = this.getPaidAmount(order.payments || []);
     const balanceDue = moneyFromMinorUnits(Math.max(moneyToMinorUnits(total) - moneyToMinorUnits(amountPaid), 0));
     const paymentStatus = this.deriveOrderPaymentStatus(total, amountPaid);
     return {
       ...order,
+      status: normalizedStatus,
       deliveryProvider: this.normalizeDeliveryProvider(order.deliveryProvider),
       deliveryFeeSource: this.normalizeDeliveryFeeSource(order.deliveryFeeSource),
       deliveryQuoteStatus: this.normalizeDeliveryQuoteStatus(order.deliveryQuoteStatus),
+      customerSnapshot: this.extractOrderCustomerSnapshot(order),
       amountPaid,
       balanceDue,
       paymentStatus
@@ -1340,12 +1686,57 @@ export class OrdersService {
     return 'NOT_REQUIRED';
   }
 
+  private async syncPendingPixPaymentsForOrderTotal(tx: TransactionClient, orderId: number, total: number) {
+    const pendingPayments = await tx.payment.findMany({
+      where: {
+        orderId,
+        method: 'pix',
+        paidAt: null,
+        status: {
+          not: 'PAGO'
+        }
+      },
+      orderBy: [{ id: 'desc' }]
+    });
+
+    if (pendingPayments.length === 0) {
+      return;
+    }
+
+    if (compareMoney(total, 0) <= 0) {
+      await tx.payment.updateMany({
+        where: {
+          id: {
+            in: pendingPayments.map((payment) => payment.id)
+          }
+        },
+        data: {
+          amount: 0,
+          status: 'PAGO',
+          paidAt: new Date()
+        }
+      });
+      return;
+    }
+
+    await tx.payment.updateMany({
+      where: {
+        id: {
+          in: pendingPayments.map((payment) => payment.id)
+        }
+      },
+      data: {
+        amount: total
+      }
+    });
+  }
+
   private async getRaw(id: number) {
     const order = await this.prisma.order.findUnique({
       where: { id },
-      include: { items: true, customer: true, payments: true }
+      include: orderWithRelationsInclude
     });
-    if (!order) throw new NotFoundException('Pedido nao encontrado');
+    if (!order) throw new NotFoundException('Pedido não encontrado');
     return order;
   }
 
@@ -1359,6 +1750,19 @@ export class OrdersService {
     return JSON.stringify(payload);
   }
 
+  private externalSubmissionIdemKey(
+    payload: ExternalOrderSubmissionPayload,
+    intakeChannel: 'CUSTOMER_LINK'
+  ) {
+    const rawKey = payload.source.idempotencyKey?.trim() || payload.source.externalId?.trim();
+    if (!rawKey) return null;
+    return `${intakeChannel}:${rawKey}`;
+  }
+
+  private externalSubmissionRequestHash(payload: ExternalOrderSubmissionPayload) {
+    return JSON.stringify(payload);
+  }
+
   private intakeRecordExpiry() {
     const expiresAt = new Date();
     expiresAt.setFullYear(expiresAt.getFullYear() + 10);
@@ -1368,7 +1772,7 @@ export class OrdersService {
   private parseExternalOrderSubmission(
     payload: unknown,
     params: {
-      defaultChannel: 'GOOGLE_FORM' | 'PUBLIC_FORM' | 'WHATSAPP_FLOW';
+      defaultChannel: 'GOOGLE_FORM' | 'PUBLIC_FORM';
       defaultOriginLabel: string;
     }
   ) {
@@ -1384,6 +1788,35 @@ export class OrdersService {
         originLabel: source.originLabel ?? params.defaultOriginLabel
       }
     });
+  }
+
+  private assertPublicFormDeliveryAddress(customer: ExternalOrderSubmissionPayload['customer'], fulfillmentMode: 'DELIVERY' | 'PICKUP') {
+    if (fulfillmentMode !== 'DELIVERY') return;
+
+    if (!normalizeText(customer.address ?? undefined)) {
+      throw new BadRequestException('Informe o endereço para entrega.');
+    }
+
+    if (!normalizeText(customer.placeId ?? undefined)) {
+      throw new BadRequestException('Selecione um endereço reconhecido pelo Google Maps.');
+    }
+
+    const addressLine1 = normalizeTitle(customer.addressLine1 ?? undefined) ?? inferAddressLine1(customer.address ?? undefined) ?? '';
+    if (!addressLine1) {
+      throw new BadRequestException('Selecione um endereço com rua e número.');
+    }
+
+    if (!STREET_NUMBER_IN_ADDRESS_LINE_PATTERN.test(addressLine1)) {
+      throw new BadRequestException('O endereço precisa incluir o número da rua.');
+    }
+
+    if (!normalizeNeighborhood(customer.neighborhood ?? undefined)) {
+      throw new BadRequestException('O endereço precisa incluir o bairro.');
+    }
+
+    if (!normalizeTitle(customer.addressLine2 ?? undefined)) {
+      throw new BadRequestException('Informe o complemento do endereço.');
+    }
   }
 
   private async resolveActiveFlavorProductIdByCode() {
@@ -1407,13 +1840,13 @@ export class OrdersService {
     flavorCounts: ExternalOrderSubmissionPayload['flavors'],
     productIdByCode: Map<OrderFlavorCode, number>
   ) {
-    return (['T', 'G', 'D', 'Q', 'R'] as const)
+    return (['T', 'G', 'D', 'Q', 'R', 'RJ'] as const)
       .map((code) => {
         const quantity = Math.max(Math.floor(flavorCounts[code] || 0), 0);
         if (quantity <= 0) return null;
         const productId = productIdByCode.get(code);
         if (!productId) {
-          throw new BadRequestException(`Produto ativo nao encontrado para o sabor ${code}.`);
+          throw new BadRequestException(`Produto ativo não encontrado para o sabor ${code}.`);
         }
         return { productId, quantity };
       })
@@ -1450,22 +1883,134 @@ export class OrdersService {
     return this.buildOrderItemsFromFlavorCounts(data.flavors, productIdByCode);
   }
 
+  private async resolveCouponDiscount(input: {
+    couponCode?: string | null;
+    subtotal: number;
+    customerId?: number | null;
+    customerPhone?: string | null;
+    client?: PrismaService | TransactionClient;
+    excludeOrderId?: number | null;
+  }) {
+    const client = input.client ?? this.prisma;
+    const normalizedCode = normalizeCouponCode(input.couponCode);
+    const subtotal = this.toMoney(input.subtotal);
+
+    if (!normalizedCode) {
+      return {
+        code: null,
+        discountPct: 0,
+        discountAmount: 0,
+        subtotalAfterDiscount: subtotal
+      };
+    }
+
+    const coupon = await findCouponByNormalizedCode(client, normalizedCode);
+
+    if (!coupon) {
+      const activeCouponsCount = await client.coupon.count({
+        where: {
+          active: true
+        }
+      });
+      throw new BadRequestException(
+        activeCouponsCount > 0
+          ? `Cupom ${normalizedCode} não encontrado entre os cupons ativos.`
+          : 'Nenhum cupom ativo cadastrado no momento.'
+      );
+    }
+
+    if (!coupon.active) {
+      throw new BadRequestException(`Cupom ${coupon.code} esta inativo.`);
+    }
+
+    const usageLimitPerCustomer =
+      typeof coupon.usageLimitPerCustomer === 'number' && coupon.usageLimitPerCustomer > 0
+        ? Math.floor(coupon.usageLimitPerCustomer)
+        : null;
+    if (usageLimitPerCustomer) {
+      if (!(input.customerId || String(input.customerPhone || '').trim())) {
+        throw new BadRequestException(`Informe um telefone válido para usar o cupom ${coupon.code}.`);
+      }
+
+      const customerUsageCount = await countCouponUsageForCustomer(client, {
+        couponCode: coupon.code,
+        customerId: input.customerId ?? null,
+        customerPhone: input.customerPhone ?? null,
+        excludeOrderId: input.excludeOrderId ?? null
+      });
+
+      if (customerUsageCount >= usageLimitPerCustomer) {
+        throw new BadRequestException(
+          `Cupom ${coupon.code} já atingiu o limite de ${usageLimitPerCustomer} uso(s) para este cliente.`
+        );
+      }
+    }
+
+    const discountPct = this.toMoney(coupon.discountPct);
+    const discountAmount = this.toMoney((subtotal * discountPct) / 100);
+    return {
+      code: coupon.code,
+      discountPct,
+      discountAmount,
+      subtotalAfterDiscount: this.toMoney(Math.max(subtotal - discountAmount, 0))
+    };
+  }
+
   private async intakeExternalSubmission(
     data: ExternalOrderSubmissionPayload,
     params: {
-      intakeChannel: 'CUSTOMER_LINK' | 'WHATSAPP_FLOW';
+      intakeChannel: 'CUSTOMER_LINK';
+      publicAppOrigin?: string | null;
     }
   ) {
-    await this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt));
-    const items = await this.resolveExternalSubmissionItems(data);
+    const externalIdemKey = this.externalSubmissionIdemKey(data, params.intakeChannel);
+    const externalRequestHash = this.externalSubmissionRequestHash(data);
+    if (externalIdemKey) {
+      const stored = await this.prisma.$transaction(async (tx) => {
+        const existingRecord = await tx.idempotencyRecord.findUnique({
+          where: {
+            scope_idemKey: {
+              scope: ORDER_EXTERNAL_INTAKE_SCOPE,
+              idemKey: externalIdemKey
+            }
+          }
+        });
+        if (!existingRecord) return null;
+        if (existingRecord.requestHash !== externalRequestHash) {
+          throw new BadRequestException('Chave de idempotencia reutilizada com payload diferente.');
+        }
+        return this.findStoredIntakeResult(tx, externalIdemKey, ORDER_EXTERNAL_INTAKE_SCOPE);
+      });
+      if (stored) {
+        return stored;
+      }
+    }
 
-    return this.intake({
+    const items = await this.resolveExternalSubmissionItems(data);
+    const pricedOrder = await this.priceOrderItems(this.prisma, items);
+    const resolvedSchedule = await this.resolvePublicExternalSubmissionSchedule(this.prisma, data.fulfillment, {
+      requestedTotalBroas: pricedOrder.productionTotalBroas
+    });
+    const coupon = await this.resolveCouponDiscount({
+      couponCode: data.couponCode ?? null,
+      subtotal: pricedOrder.couponEligibleSubtotal,
+      customerPhone: data.customer.phone ?? null
+    });
+
+    const result = await this.intake({
       version: 1,
       intent: 'CONFIRMED',
       customer: {
         name: data.customer.name,
         phone: data.customer.phone ?? null,
         address: data.customer.address ?? null,
+        addressLine1: data.customer.addressLine1 ?? null,
+        addressLine2: data.customer.addressLine2 ?? null,
+        neighborhood: data.customer.neighborhood ?? null,
+        city: data.customer.city ?? null,
+        state: data.customer.state ?? null,
+        postalCode: data.customer.postalCode ?? null,
+        country: data.customer.country ?? null,
         placeId: data.customer.placeId ?? null,
         lat: data.customer.lat ?? null,
         lng: data.customer.lng ?? null,
@@ -1473,52 +2018,85 @@ export class OrdersService {
       },
       fulfillment: {
         mode: data.fulfillment.mode,
-        scheduledAt: data.fulfillment.scheduledAt
+        scheduledAt: resolvedSchedule.scheduledAtIso
       },
       delivery: data.delivery,
       order: {
         items,
-        notes: data.notes ?? undefined
+        couponCode: coupon.code,
+        discount: coupon.discountAmount,
+        notes:
+          mergeAppliedCouponIntoNotes(
+            data.notes ?? null,
+            coupon.code
+              ? {
+                  code: coupon.code,
+                  discountPct: coupon.discountPct
+                }
+              : null
+          ) ?? undefined
       },
       payment: {
-        method: 'pix',
+        method: data.paymentMethod,
         status: 'PENDENTE',
-        dueAt: data.fulfillment.scheduledAt
+        dueAt: resolvedSchedule.scheduledAtIso
       },
       source: {
         channel: params.intakeChannel,
         externalId: data.source.externalId ?? null,
         idempotencyKey: data.source.idempotencyKey ?? data.source.externalId ?? null,
-        originLabel: data.source.originLabel ?? null
+        originLabel: data.source.originLabel ?? null,
+        publicAppOrigin: params.publicAppOrigin ?? data.source.publicAppOrigin ?? null
       }
     });
+
+    if (externalIdemKey) {
+      await this.prisma.$transaction((tx) =>
+        this.saveIntakeResult(tx, externalIdemKey, externalRequestHash, result, ORDER_EXTERNAL_INTAKE_SCOPE)
+      );
+    }
+
+    return result;
   }
 
   private async previewExternalSubmission(
     data: ExternalOrderSubmissionPayload,
     params: {
-      intakeChannel: 'CUSTOMER_LINK' | 'WHATSAPP_FLOW';
+      intakeChannel: 'CUSTOMER_LINK';
     }
   ): Promise<ExternalOrderSubmissionPreview> {
-    await this.ensurePublicOrderScheduleAllowed(this.parseOptionalDateTime(data.fulfillment.scheduledAt));
-
     const items = await this.resolveExternalSubmissionItems(data);
     const pricedOrder = await this.priceOrderItems(this.prisma, items);
-    const scheduledAt = this.parseOptionalDateTime(data.fulfillment.scheduledAt);
+    const resolvedSchedule = await this.resolvePublicExternalSubmissionSchedule(this.prisma, data.fulfillment, {
+      requestedTotalBroas: pricedOrder.productionTotalBroas
+    });
+    const coupon = await this.resolveCouponDiscount({
+      couponCode: data.couponCode ?? null,
+      subtotal: pricedOrder.couponEligibleSubtotal,
+      customerPhone: data.customer.phone ?? null
+    });
+    const scheduledAt = resolvedSchedule.scheduledAt;
     const deliveryQuote = await this.deliveriesService.resolveDeliverySelection(
       data.delivery,
       this.buildDeliveryQuoteDraft({
         fulfillmentMode: data.fulfillment.mode,
-        scheduledAt: scheduledAt?.toISOString() ?? data.fulfillment.scheduledAt ?? null,
+        scheduledAt: resolvedSchedule.scheduledAtIso,
         customerName: data.customer.name,
         customerPhone: data.customer.phone ?? null,
         customerAddress: data.customer.address ?? null,
+        customerAddressLine1: data.customer.addressLine1 ?? null,
+        customerAddressLine2: data.customer.addressLine2 ?? null,
+        customerNeighborhood: data.customer.neighborhood ?? null,
+        customerCity: data.customer.city ?? null,
+        customerState: data.customer.state ?? null,
+        customerPostalCode: data.customer.postalCode ?? null,
+        customerCountry: data.customer.country ?? null,
         customerPlaceId: data.customer.placeId ?? null,
         customerLat: data.customer.lat ?? null,
         customerLng: data.customer.lng ?? null,
         customerDeliveryNotes: data.customer.deliveryNotes ?? null,
         items: pricedOrder.manifestItems,
-        subtotal: pricedOrder.subtotal
+        subtotal: this.toMoney(Math.max(pricedOrder.subtotal - coupon.discountAmount, 0))
       }),
       {
         enforceExternalSchedule: true,
@@ -1527,15 +2105,16 @@ export class OrdersService {
     );
 
     const deliveryFee = this.toMoney(deliveryQuote.fee ?? 0);
-    const discount = 0;
-    const total = this.computeOrderTotal(pricedOrder.subtotal, discount, deliveryFee);
+    const discount = coupon.discountAmount;
+    const netTotal = this.computeOrderTotal(pricedOrder.subtotal, discount, deliveryFee);
+    const total = data.paymentMethod === 'card' ? computeSumUpCardPayableTotal(netTotal) : netTotal;
 
     return ExternalOrderSubmissionPreviewSchema.parse({
       version: 1,
       channel: params.intakeChannel,
-      expectedStage: 'PIX_PENDING',
+      expectedStage: data.paymentMethod === 'card' ? 'PAYMENT_PENDING' : 'PIX_PENDING',
       fulfillmentMode: data.fulfillment.mode,
-      scheduledAt: data.fulfillment.scheduledAt,
+      scheduledAt: resolvedSchedule.scheduledAtIso,
       customer: {
         name: data.customer.name,
         phone: data.customer.phone ?? null,
@@ -1555,14 +2134,22 @@ export class OrdersService {
         discount,
         deliveryFee,
         total,
-        notes: data.notes ?? null
+        notes: mergeAppliedCouponIntoNotes(
+          data.notes ?? null,
+          coupon.code
+            ? {
+                code: coupon.code,
+                discountPct: coupon.discountPct
+              }
+            : null
+        )
       },
       delivery: deliveryQuote,
       payment: {
-        method: 'pix',
+        method: data.paymentMethod,
         status: 'PENDENTE',
         payable: false,
-        dueAt: data.fulfillment.scheduledAt
+        dueAt: resolvedSchedule.scheduledAtIso
       },
       source: {
         channel: data.source.channel,
@@ -1579,6 +2166,13 @@ export class OrdersService {
     customerName?: string | null;
     customerPhone?: string | null;
     customerAddress?: string | null;
+    customerAddressLine1?: string | null;
+    customerAddressLine2?: string | null;
+    customerNeighborhood?: string | null;
+    customerCity?: string | null;
+    customerState?: string | null;
+    customerPostalCode?: string | null;
+    customerCountry?: string | null;
     customerPlaceId?: string | null;
     customerLat?: number | null;
     customerLng?: number | null;
@@ -1593,6 +2187,13 @@ export class OrdersService {
         name: input.customerName ?? null,
         phone: input.customerPhone ?? null,
         address: input.customerAddress ?? null,
+        addressLine1: input.customerAddressLine1 ?? null,
+        addressLine2: input.customerAddressLine2 ?? null,
+        neighborhood: input.customerNeighborhood ?? null,
+        city: input.customerCity ?? null,
+        state: input.customerState ?? null,
+        postalCode: input.customerPostalCode ?? null,
+        country: input.customerCountry ?? null,
         placeId: input.customerPlaceId ?? null,
         lat: input.customerLat ?? null,
         lng: input.customerLng ?? null,
@@ -1611,6 +2212,183 @@ export class OrdersService {
 
   private normalizeCustomerName(value?: string | null) {
     return normalizeTitle(value ?? undefined) ?? normalizeText(value ?? undefined) ?? null;
+  }
+
+  private buildOrderCustomerSnapshot(input: {
+    name?: string | null;
+    phone?: string | null;
+    address?: string | null;
+    addressLine1?: string | null;
+    addressLine2?: string | null;
+    neighborhood?: string | null;
+    city?: string | null;
+    state?: string | null;
+    postalCode?: string | null;
+    country?: string | null;
+    placeId?: string | null;
+    lat?: number | null;
+    lng?: number | null;
+    deliveryNotes?: string | null;
+  }): OrderCustomerSnapshotPayload {
+    const normalizedName = this.normalizeCustomerName(input.name);
+    const normalizedPhone = normalizePhone(input.phone);
+    const normalizedAddress = normalizeCustomerAddressPayload({
+      address: input.address ?? null,
+      addressLine1: input.addressLine1 ?? null,
+      addressLine2: input.addressLine2 ?? null,
+      neighborhood: input.neighborhood ?? null,
+      city: input.city ?? null,
+      state: input.state ?? null,
+      postalCode: input.postalCode ?? null,
+      country: input.country ?? null,
+      placeId: input.placeId ?? null,
+      lat: input.lat ?? null,
+      lng: input.lng ?? null,
+      deliveryNotes: input.deliveryNotes ?? null
+    });
+
+    return {
+      name: normalizedName,
+      phone: normalizedPhone,
+      address: normalizedAddress.address,
+      addressLine1: normalizedAddress.addressLine1,
+      addressLine2: normalizedAddress.addressLine2,
+      neighborhood: normalizedAddress.neighborhood,
+      city: normalizedAddress.city,
+      state: normalizedAddress.state,
+      postalCode: normalizedAddress.postalCode,
+      country: normalizedAddress.country,
+      placeId: normalizedAddress.placeId,
+      lat: normalizedAddress.lat,
+      lng: normalizedAddress.lng,
+      deliveryNotes: normalizedAddress.deliveryNotes
+    };
+  }
+
+  private extractOrderCustomerSnapshot(order: {
+    customer?: {
+      name?: string | null;
+      phone?: string | null;
+      address?: string | null;
+      addressLine1?: string | null;
+      addressLine2?: string | null;
+      neighborhood?: string | null;
+      city?: string | null;
+      state?: string | null;
+      postalCode?: string | null;
+      country?: string | null;
+      placeId?: string | null;
+      lat?: number | null;
+      lng?: number | null;
+      deliveryNotes?: string | null;
+    } | null;
+    customerName?: string | null;
+    customerPhone?: string | null;
+    customerAddress?: string | null;
+    customerAddressLine1?: string | null;
+    customerAddressLine2?: string | null;
+    customerNeighborhood?: string | null;
+    customerCity?: string | null;
+    customerState?: string | null;
+    customerPostalCode?: string | null;
+    customerCountry?: string | null;
+    customerPlaceId?: string | null;
+    customerLat?: number | null;
+    customerLng?: number | null;
+    customerDeliveryNotes?: string | null;
+  }) {
+    const customer = order.customer;
+    return this.buildOrderCustomerSnapshot({
+      name: order.customerName ?? customer?.name ?? null,
+      phone: order.customerPhone ?? customer?.phone ?? null,
+      address: order.customerAddress ?? customer?.address ?? null,
+      addressLine1: order.customerAddressLine1 ?? customer?.addressLine1 ?? null,
+      addressLine2: order.customerAddressLine2 ?? customer?.addressLine2 ?? null,
+      neighborhood: order.customerNeighborhood ?? customer?.neighborhood ?? null,
+      city: order.customerCity ?? customer?.city ?? null,
+      state: order.customerState ?? customer?.state ?? null,
+      postalCode: order.customerPostalCode ?? customer?.postalCode ?? null,
+      country: order.customerCountry ?? customer?.country ?? null,
+      placeId: order.customerPlaceId ?? customer?.placeId ?? null,
+      lat: order.customerLat ?? customer?.lat ?? null,
+      lng: order.customerLng ?? customer?.lng ?? null,
+      deliveryNotes: order.customerDeliveryNotes ?? customer?.deliveryNotes ?? null
+    });
+  }
+
+  private flattenOrderCustomerSnapshot(snapshot: OrderCustomerSnapshotPayload) {
+    return {
+      customerName: snapshot.name ?? null,
+      customerPhone: snapshot.phone ?? null,
+      customerAddress: snapshot.address ?? null,
+      customerAddressLine1: snapshot.addressLine1 ?? null,
+      customerAddressLine2: snapshot.addressLine2 ?? null,
+      customerNeighborhood: snapshot.neighborhood ?? null,
+      customerCity: snapshot.city ?? null,
+      customerState: snapshot.state ?? null,
+      customerPostalCode: snapshot.postalCode ?? null,
+      customerCountry: snapshot.country ?? null,
+      customerPlaceId: snapshot.placeId ?? null,
+      customerLat: snapshot.lat ?? null,
+      customerLng: snapshot.lng ?? null,
+      customerDeliveryNotes: snapshot.deliveryNotes ?? null
+    };
+  }
+
+  private async saveCustomerAdditionalAddress(
+    tx: TransactionClient,
+    customerId: number,
+    snapshot: OrderCustomerSnapshotPayload,
+    options?: { primary?: boolean }
+  ) {
+    const normalized = normalizeCustomerAddressPayload({
+      address: snapshot.address ?? null,
+      addressLine1: snapshot.addressLine1 ?? null,
+      addressLine2: snapshot.addressLine2 ?? null,
+      neighborhood: snapshot.neighborhood ?? null,
+      city: snapshot.city ?? null,
+      state: snapshot.state ?? null,
+      postalCode: snapshot.postalCode ?? null,
+      country: snapshot.country ?? null,
+      placeId: snapshot.placeId ?? null,
+      lat: snapshot.lat ?? null,
+      lng: snapshot.lng ?? null,
+      deliveryNotes: snapshot.deliveryNotes ?? null
+    });
+    const addressKey = customerAddressIdentityKey(normalized);
+    if (!addressKey) return null;
+
+    const existing = await tx.customerAddress.findMany({
+      where: { customerId },
+      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }]
+    });
+    const matched = existing.find((entry) => customerAddressIdentityKey(entry) === addressKey) || null;
+    const shouldBePrimary = options?.primary === true;
+
+    if (shouldBePrimary) {
+      await tx.customerAddress.updateMany({
+        where: { customerId, isPrimary: true, ...(matched ? { id: { not: matched.id } } : {}) },
+        data: { isPrimary: false }
+      });
+    }
+
+    if (matched) {
+      return tx.customerAddress.update({
+        where: { id: matched.id },
+        data: {
+          ...normalized,
+          isPrimary: shouldBePrimary ? true : matched.isPrimary
+        }
+      });
+    }
+
+    return tx.customerAddress.create({
+      data: {
+        customerId,
+        ...normalized,
+        isPrimary: shouldBePrimary
+      }
+    });
   }
 
   private async ensureCustomerPublicNumber(tx: TransactionClient, customer: PrismaCustomer) {
@@ -1736,9 +2514,9 @@ export class OrdersService {
   ) {
     if ('customerId' in customer) {
       const existing = await tx.customer.findUnique({ where: { id: customer.customerId } });
-      if (!existing) throw new NotFoundException('Cliente nao encontrado');
+      if (!existing) throw new NotFoundException('Cliente não encontrado');
       if (existing.deletedAt) {
-        throw new BadRequestException('Cliente foi excluido e nao pode receber novos pedidos.');
+        throw new BadRequestException('Cliente foi excluído e não pode receber novos pedidos.');
       }
       return this.ensureCustomerPublicNumber(tx, existing);
     }
@@ -1747,15 +2525,25 @@ export class OrdersService {
     if (!normalizedName) {
       throw new BadRequestException('Nome do cliente e obrigatorio.');
     }
-
-    const normalizedPhone = normalizePhone(customer.phone);
-    const normalizedAddress = normalizeTitle(customer.address ?? undefined) ?? null;
-    const normalizedPlaceId = normalizeText(('placeId' in customer ? customer.placeId : null) ?? undefined);
-    const normalizedLat =
-      'lat' in customer && typeof customer.lat === 'number' && Number.isFinite(customer.lat) ? customer.lat : null;
-    const normalizedLng =
-      'lng' in customer && typeof customer.lng === 'number' && Number.isFinite(customer.lng) ? customer.lng : null;
-    const normalizedDeliveryNotes = normalizeText(customer.deliveryNotes ?? undefined);
+    const snapshot = this.buildOrderCustomerSnapshot({
+      name: normalizedName,
+      phone: customer.phone ?? null,
+      address: customer.address ?? null,
+      addressLine1: 'addressLine1' in customer ? customer.addressLine1 ?? null : null,
+      addressLine2: 'addressLine2' in customer ? customer.addressLine2 ?? null : null,
+      neighborhood: 'neighborhood' in customer ? customer.neighborhood ?? null : null,
+      city: 'city' in customer ? customer.city ?? null : null,
+      state: 'state' in customer ? customer.state ?? null : null,
+      postalCode: 'postalCode' in customer ? customer.postalCode ?? null : null,
+      country: 'country' in customer ? customer.country ?? null : null,
+      placeId: 'placeId' in customer ? customer.placeId ?? null : null,
+      lat: 'lat' in customer ? customer.lat ?? null : null,
+      lng: 'lng' in customer ? customer.lng ?? null : null,
+      deliveryNotes: customer.deliveryNotes ?? null
+    });
+    const normalizedPhone = snapshot.phone;
+    const normalizedPlaceId = snapshot.placeId;
+    const normalizedAddress = snapshot.address;
 
     let existing = normalizedPhone
       ? await tx.customer
@@ -1792,82 +2580,118 @@ export class OrdersService {
 
     if (existing) {
       const shouldUpdate =
-        (normalizedPhone && !existing.phone) ||
-        (normalizedAddress && !existing.address) ||
-        (normalizedPlaceId && !existing.placeId) ||
-        (normalizedLat !== null && existing.lat === null) ||
-        (normalizedLng !== null && existing.lng === null) ||
-        (normalizedDeliveryNotes && !existing.deliveryNotes);
-      if (!shouldUpdate) return existing;
-
-      return tx.customer.update({
-        where: { id: existing.id },
-        data: {
-          publicNumber: existing.publicNumber ?? (await allocateNextPublicNumber(tx, 'CUSTOMER')),
-          activePhoneKey: existing.activePhoneKey || normalizedPhone,
-          phone: existing.phone || normalizedPhone,
-          address: existing.address || normalizedAddress,
-          placeId: existing.placeId || normalizedPlaceId,
-          lat: existing.lat ?? normalizedLat,
-          lng: existing.lng ?? normalizedLng,
-          deliveryNotes: existing.deliveryNotes || normalizedDeliveryNotes
-        }
-      });
+        (snapshot.phone && !existing.phone) ||
+        (snapshot.address && !existing.address) ||
+        (snapshot.addressLine1 && !existing.addressLine1) ||
+        (snapshot.addressLine2 && !existing.addressLine2) ||
+        (snapshot.neighborhood && !existing.neighborhood) ||
+        (snapshot.city && !existing.city) ||
+        (snapshot.state && !existing.state) ||
+        (snapshot.postalCode && !existing.postalCode) ||
+        (snapshot.country && !existing.country) ||
+        (snapshot.placeId && !existing.placeId) ||
+        (snapshot.lat !== null && existing.lat === null) ||
+        (snapshot.lng !== null && existing.lng === null) ||
+        (snapshot.deliveryNotes && !existing.deliveryNotes);
+      const resolvedCustomer = shouldUpdate
+        ? await tx.customer.update({
+            where: { id: existing.id },
+            data: {
+              publicNumber: existing.publicNumber ?? (await allocateNextPublicNumber(tx, 'CUSTOMER')),
+              activePhoneKey: existing.activePhoneKey || snapshot.phone,
+              phone: existing.phone || snapshot.phone,
+              address: existing.address || snapshot.address,
+              addressLine1: existing.addressLine1 || snapshot.addressLine1 || inferAddressLine1(snapshot.address),
+              addressLine2: existing.addressLine2 || snapshot.addressLine2,
+              neighborhood: existing.neighborhood || normalizeNeighborhood(snapshot.neighborhood),
+              city: existing.city || snapshot.city,
+              state: existing.state || snapshot.state,
+              postalCode: existing.postalCode || snapshot.postalCode,
+              country: existing.country || snapshot.country,
+              placeId: existing.placeId || snapshot.placeId,
+              lat: existing.lat ?? snapshot.lat,
+              lng: existing.lng ?? snapshot.lng,
+              deliveryNotes: existing.deliveryNotes || snapshot.deliveryNotes
+            }
+          })
+        : existing;
+      await this.saveCustomerAdditionalAddress(tx, resolvedCustomer.id, snapshot, { primary: false });
+      return resolvedCustomer;
     }
 
-    return tx.customer.create({
+    const created = await tx.customer.create({
       data: {
         publicNumber: await allocateNextPublicNumber(tx, 'CUSTOMER'),
         name: normalizedName,
         firstName: normalizedName.split(' ')[0] || null,
         lastName: normalizedName.includes(' ') ? normalizedName.split(' ').slice(1).join(' ') : null,
-        activePhoneKey: normalizedPhone,
-        phone: normalizedPhone,
-        address: normalizedAddress,
-        addressLine1: normalizedAddress,
-        addressLine2: null,
-        neighborhood: null,
-        city: null,
-        state: null,
-        postalCode: null,
-        country: null,
-        placeId: normalizedPlaceId,
-        lat: normalizedLat,
-        lng: normalizedLng,
-        deliveryNotes: normalizedDeliveryNotes
+        activePhoneKey: snapshot.phone,
+        phone: snapshot.phone,
+        address: snapshot.address,
+        addressLine1: snapshot.addressLine1 || inferAddressLine1(snapshot.address),
+        addressLine2: snapshot.addressLine2,
+        neighborhood: snapshot.neighborhood,
+        city: snapshot.city,
+        state: snapshot.state,
+        postalCode: snapshot.postalCode,
+        country: snapshot.country,
+        placeId: snapshot.placeId,
+        lat: snapshot.lat,
+        lng: snapshot.lng,
+        deliveryNotes: snapshot.deliveryNotes
       }
     });
+    await this.saveCustomerAdditionalAddress(tx, created.id, snapshot, { primary: true });
+    return created;
   }
 
   private async resolveDeliveryQuoteCustomer(customer: OrderIntakePayload['customer']) {
     if ('customerId' in customer) {
       const existing = await this.prisma.customer.findUnique({ where: { id: customer.customerId } });
-      if (!existing) throw new NotFoundException('Cliente nao encontrado');
-      return {
+      if (!existing) throw new NotFoundException('Cliente não encontrado');
+      return this.buildOrderCustomerSnapshot({
         name: existing.name,
         phone: existing.phone ?? null,
-        address: existing.address ?? null,
-        placeId: existing.placeId ?? null,
-        lat: existing.lat ?? null,
-        lng: existing.lng ?? null,
-        deliveryNotes: existing.deliveryNotes ?? null
-      };
+        address: ('address' in customer ? customer.address : null) ?? existing.address ?? null,
+        addressLine1: ('addressLine1' in customer ? customer.addressLine1 : null) ?? existing.addressLine1 ?? null,
+        addressLine2: ('addressLine2' in customer ? customer.addressLine2 : null) ?? existing.addressLine2 ?? null,
+        neighborhood: ('neighborhood' in customer ? customer.neighborhood : null) ?? existing.neighborhood ?? null,
+        city: ('city' in customer ? customer.city : null) ?? existing.city ?? null,
+        state: ('state' in customer ? customer.state : null) ?? existing.state ?? null,
+        postalCode: ('postalCode' in customer ? customer.postalCode : null) ?? existing.postalCode ?? null,
+        country: ('country' in customer ? customer.country : null) ?? existing.country ?? null,
+        placeId: ('placeId' in customer ? customer.placeId : null) ?? existing.placeId ?? null,
+        lat: ('lat' in customer ? customer.lat : null) ?? existing.lat ?? null,
+        lng: ('lng' in customer ? customer.lng : null) ?? existing.lng ?? null,
+        deliveryNotes: ('deliveryNotes' in customer ? customer.deliveryNotes : null) ?? existing.deliveryNotes ?? null
+      });
     }
 
-    return {
+    return this.buildOrderCustomerSnapshot({
       name: customer.name,
       phone: customer.phone ?? null,
       address: customer.address ?? null,
+      addressLine1: 'addressLine1' in customer ? customer.addressLine1 ?? null : null,
+      addressLine2: 'addressLine2' in customer ? customer.addressLine2 ?? null : null,
+      neighborhood: 'neighborhood' in customer ? customer.neighborhood ?? null : null,
+      city: 'city' in customer ? customer.city ?? null : null,
+      state: 'state' in customer ? customer.state ?? null : null,
+      postalCode: 'postalCode' in customer ? customer.postalCode ?? null : null,
+      country: 'country' in customer ? customer.country ?? null : null,
       placeId: 'placeId' in customer ? customer.placeId ?? null : null,
       lat: 'lat' in customer ? customer.lat ?? null : null,
       lng: 'lng' in customer ? customer.lng ?? null : null,
       deliveryNotes: customer.deliveryNotes ?? null
-    };
+    });
   }
 
   private async priceOrderItems(
     tx: TransactionClient | PrismaService,
-    items: Array<{ productId: number; quantity: number }>
+    items: Array<{ productId: number; quantity: number }>,
+    options?: {
+      allowInactiveProductIds?: ReadonlySet<number>;
+      excludeOrderId?: number | null;
+    }
   ) {
     const parsedItems = items.map((item) =>
       OrderItemSchema.pick({ productId: true, quantity: true }).parse(item)
@@ -1875,12 +2699,94 @@ export class OrdersService {
     const productIds = Array.from(new Set(parsedItems.map((item) => item.productId)));
     const products = await tx.product.findMany({ where: { id: { in: productIds } } });
     const productMap = new Map(products.map((product) => [product.id, product]));
+    const allowInactiveProductIds = options?.allowInactiveProductIds ?? new Set<number>();
+    const trackedCompanionProducts = products.filter(
+      (product) =>
+        isCouponCompanionCategory(product.category) &&
+        typeof product.inventoryItemId === 'number' &&
+        product.inventoryItemId > 0 &&
+        typeof product.inventoryQtyPerSaleUnit === 'number' &&
+        product.inventoryQtyPerSaleUnit > 0
+    );
+    const trackedCompanionItemIds = Array.from(
+      new Set(trackedCompanionProducts.map((product) => product.inventoryItemId as number))
+    );
+    const trackedCompanionBalancesByItemId =
+      trackedCompanionItemIds.length > 0
+        ? this.buildInventoryBalanceByItemId(
+            await tx.inventoryMovement.findMany({
+              where: {
+                itemId: { in: trackedCompanionItemIds },
+                ...(options?.excludeOrderId ? { orderId: { not: options.excludeOrderId } } : {})
+              },
+              select: {
+                itemId: true,
+                type: true,
+                quantity: true
+              },
+              orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
+            })
+          )
+        : new Map<number, number>();
+    const salesLimitStates = await loadProductSalesLimitStates(tx, products, {
+      excludeOrderId: options?.excludeOrderId ?? null
+    });
+    const requestedQuantityByProductId = new Map<number, number>();
+    for (const item of parsedItems) {
+      requestedQuantityByProductId.set(
+        item.productId,
+        (requestedQuantityByProductId.get(item.productId) || 0) + item.quantity
+      );
+    }
+
+    for (const [productId, requestedQuantity] of requestedQuantityByProductId.entries()) {
+      const product = productMap.get(productId);
+      if (!product) throw new NotFoundException('Produto não encontrado');
+      const trackedCompanionBalance =
+        typeof product.inventoryItemId === 'number'
+          ? this.toQty(trackedCompanionBalancesByItemId.get(product.inventoryItemId) || 0)
+          : null;
+      const trackedCompanionRequiredQty =
+        isCouponCompanionCategory(product.category) &&
+        typeof product.inventoryQtyPerSaleUnit === 'number' &&
+        product.inventoryQtyPerSaleUnit > 0
+          ? this.toQty(requestedQuantity * product.inventoryQtyPerSaleUnit)
+          : null;
+      const temporarilyOutOfStockCompanion =
+        trackedCompanionRequiredQty != null &&
+        trackedCompanionBalance != null &&
+        trackedCompanionBalance <= 0;
+
+      if (product.active === false && !allowInactiveProductIds.has(product.id) && !temporarilyOutOfStockCompanion) {
+        throw new BadRequestException('Produto indisponível.');
+      }
+      if (trackedCompanionRequiredQty != null && trackedCompanionBalance != null) {
+        if (trackedCompanionBalance <= 0) {
+          throw new BadRequestException(`${product.name} está temporariamente sem estoque.`);
+        }
+        if (trackedCompanionRequiredQty > trackedCompanionBalance) {
+          throw new BadRequestException(`Estoque insuficiente para ${product.name}.`);
+        }
+      }
+      const salesLimitState = salesLimitStates.get(product.id);
+      if (salesLimitState && requestedQuantity > salesLimitState.remainingUnits) {
+        throw new BadRequestException(
+          salesLimitState.remainingUnits > 0
+            ? `Limite de ${product.name} excedido. Restam ${salesLimitState.remainingBoxes.toLocaleString('pt-BR', {
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 2
+              })} caixa(s).`
+            : `${product.name} esgotou o limite configurado e ficou indisponível.`
+        );
+      }
+    }
 
     const itemsData: Array<{ productId: number; quantity: number; unitPrice: number; total: number }> = [];
     const manifestItems: Array<{ productId: number; quantity: number; name: string }> = [];
+    const productionItems: Array<{ quantity: number; productName: string; productUnit: string | null }> = [];
     for (const item of parsedItems) {
       const product = productMap.get(item.productId);
-      if (!product) throw new NotFoundException('Produto nao encontrado');
+      if (!product) throw new NotFoundException('Produto não encontrado');
       const unitPrice = this.toUnitPrice(product.price);
       const total = this.toMoney(unitPrice * item.quantity);
       itemsData.push({ productId: item.productId, quantity: item.quantity, unitPrice, total });
@@ -1889,10 +2795,73 @@ export class OrdersService {
         quantity: item.quantity,
         name: product.name
       });
+      productionItems.push({
+        quantity: item.quantity,
+        productName: product.name,
+        productUnit: product.unit ?? null
+      });
     }
 
-    const subtotal = await this.calculateOrderSubtotalFromItems(tx, parsedItems);
-    return { parsedItems, itemsData, subtotal, manifestItems };
+    const { subtotal, couponEligibleSubtotal } = await this.calculateOrderSubtotalsFromItems(tx, parsedItems);
+    return {
+      parsedItems,
+      itemsData,
+      subtotal,
+      couponEligibleSubtotal,
+      manifestItems,
+      productionTotalBroas: this.resolveOrderProductionBroaCount(productionItems)
+    };
+  }
+
+  private async syncLimitedProductsAfterOrderChange(
+    tx: TransactionClient,
+    productIds: number[]
+  ) {
+    const uniqueProductIds = Array.from(new Set(productIds)).filter((id) => Number.isFinite(id));
+    if (uniqueProductIds.length === 0) return;
+
+    const products = await tx.product.findMany({
+      where: {
+        id: { in: uniqueProductIds },
+        salesLimitEnabled: true,
+        salesLimitBoxes: { gt: 0 },
+        salesLimitActivatedAt: { not: null },
+        active: true
+      },
+      select: {
+        id: true,
+        salesLimitEnabled: true,
+        salesLimitBoxes: true,
+        salesLimitActivatedAt: true
+      }
+    });
+    if (products.length === 0) return;
+
+    const states = await loadProductSalesLimitStates(tx, products);
+    const exhaustedIds = products
+      .filter((product) => states.get(product.id)?.exhausted)
+      .map((product) => product.id);
+    if (exhaustedIds.length === 0) return;
+
+    await tx.product.updateMany({
+      where: {
+        id: { in: exhaustedIds },
+        active: true
+      },
+      data: {
+        active: false
+      }
+    });
+  }
+
+  private async syncProductAvailabilityAfterInventoryChange(
+    tx: TransactionClient,
+    productIds: number[]
+  ) {
+    const uniqueProductIds = Array.from(new Set(productIds)).filter((id) => Number.isFinite(id));
+    if (uniqueProductIds.length === 0) return;
+    await syncCompanionProductActiveStateByProductIds(tx, uniqueProductIds);
+    await this.syncLimitedProductsAfterOrderChange(tx, uniqueProductIds);
   }
 
   private intakeStageFrom(
@@ -1910,7 +2879,9 @@ export class OrdersService {
     if (payload.intent === 'DRAFT') return 'DRAFT' as const;
 
     const pixStatus = payment && (payment.status === 'PAGO' || payment.paidAt) ? 'PAGO' : 'PENDENTE';
-    if (payment && pixStatus === 'PENDENTE') return 'PIX_PENDING' as const;
+    if (payment && pixStatus === 'PENDENTE') {
+      return payment.method === 'pix' ? ('PIX_PENDING' as const) : ('PAYMENT_PENDING' as const);
+    }
     if (payment && pixStatus === 'PAGO' && order.scheduledAt) return 'SCHEDULED' as const;
     if (payment && pixStatus === 'PAGO') return 'PAID' as const;
     return 'CONFIRMED' as const;
@@ -1927,16 +2898,18 @@ export class OrdersService {
       providerRef: string | null;
       method: string;
     } | null,
-    pixCharge: PixCharge | null
+    pixCharge: PixCharge | null,
+    cardCheckout: CheckoutCard | null
   ) {
     const pixStatus = payment && (payment.status === 'PAGO' || payment.paidAt) ? 'PAGO' : 'PENDENTE';
+    const paymentMethod: PaymentMethod = payment?.method === 'card' ? 'card' : 'pix';
     return OrderIntakeMetaSchema.parse({
       version: 1,
       channel: payload.source.channel,
       intent: payload.intent,
       stage: this.intakeStageFrom(payload, order, payment),
       fulfillmentMode: payload.fulfillment.mode,
-      paymentMethod: 'pix',
+      paymentMethod,
       pixStatus,
       paymentId: payment?.id ?? null,
       dueAt: payment?.dueDate?.toISOString() ?? null,
@@ -1948,6 +2921,7 @@ export class OrdersService {
       deliveryQuoteStatus: this.normalizeDeliveryQuoteStatus(order.deliveryQuoteStatus),
       deliveryQuoteExpiresAt: order.deliveryQuoteExpiresAt?.toISOString() ?? null,
       pixCharge,
+      cardCheckout,
       orderId: order.id!,
       customerId: order.customerId
     });
@@ -1955,12 +2929,13 @@ export class OrdersService {
 
   private async findStoredIntakeResult(
     tx: TransactionClient,
-    idemKey: string
+    idemKey: string,
+    scope = ORDER_INTAKE_SCOPE
   ): Promise<{ order: ReturnType<OrdersService['withFinancial']>; intake: OrderIntakeMeta } | null> {
     const record = await tx.idempotencyRecord.findUnique({
       where: {
         scope_idemKey: {
-          scope: ORDER_INTAKE_SCOPE,
+          scope,
           idemKey
         }
       }
@@ -1975,7 +2950,7 @@ export class OrdersService {
       if (!parsed.orderId || !parsed.intake) return null;
       const order = await tx.order.findUnique({
         where: { id: parsed.orderId },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
       if (!order) return null;
       const intakePayload =
@@ -1983,7 +2958,9 @@ export class OrdersService {
       return {
         order: this.withFinancial(order),
         intake: OrderIntakeMetaSchema.parse({
+          paymentMethod: 'pix',
           pixCharge: null,
+          cardCheckout: null,
           ...intakePayload,
           deliveryProvider: this.normalizeDeliveryProvider(intakePayload.deliveryProvider as string | null | undefined),
           deliveryFeeSource: this.normalizeDeliveryFeeSource(intakePayload.deliveryFeeSource as string | null | undefined),
@@ -2001,12 +2978,13 @@ export class OrdersService {
     tx: TransactionClient,
     idemKey: string,
     requestHash: string,
-    result: { order: ReturnType<OrdersService['withFinancial']>; intake: OrderIntakeMeta }
+    result: { order: ReturnType<OrdersService['withFinancial']>; intake: OrderIntakeMeta },
+    scope = ORDER_INTAKE_SCOPE
   ) {
     await tx.idempotencyRecord.upsert({
       where: {
         scope_idemKey: {
-          scope: ORDER_INTAKE_SCOPE,
+          scope,
           idemKey
         }
       },
@@ -2019,7 +2997,7 @@ export class OrdersService {
         expiresAt: this.intakeRecordExpiry()
       },
       create: {
-        scope: ORDER_INTAKE_SCOPE,
+        scope,
         idemKey,
         requestHash,
         responseJson: JSON.stringify({
@@ -2033,11 +3011,47 @@ export class OrdersService {
 
   async intake(payload: unknown) {
     const data = OrderIntakeSchema.parse(payload);
-    const isExternalIntakeChannel =
-      data.source.channel === 'CUSTOMER_LINK' || data.source.channel === 'WHATSAPP_FLOW';
+    const idemKey = this.intakeIdemKey(data);
+    const requestHash = this.intakeRequestHash(data);
+    if (idemKey) {
+      const stored = await this.prisma.$transaction(async (tx) => {
+        const existingRecord = await tx.idempotencyRecord.findUnique({
+          where: {
+            scope_idemKey: {
+              scope: ORDER_INTAKE_SCOPE,
+              idemKey
+            }
+          }
+        });
+        if (!existingRecord) return null;
+        if (existingRecord.requestHash !== requestHash) {
+          throw new BadRequestException('Chave de idempotencia reutilizada com payload diferente.');
+        }
+        return this.findStoredIntakeResult(tx, idemKey);
+      });
+      if (stored) {
+        return stored;
+      }
+    }
+
+    const isExternalIntakeChannel = data.source.channel === 'CUSTOMER_LINK';
     const quoteCustomer = await this.resolveDeliveryQuoteCustomer(data.customer);
     const pricedOrder = await this.priceOrderItems(this.prisma, data.order.items);
+    const { discount, discountPct } = this.resolveOrderDiscountInput(pricedOrder.subtotal, data.order);
+    const preflightResolvedCoupon = normalizeCouponCode(data.order.couponCode)
+      ? await this.resolveCouponDiscount({
+          couponCode: data.order.couponCode,
+          subtotal: pricedOrder.couponEligibleSubtotal,
+          customerId: 'customerId' in data.customer ? data.customer.customerId : null,
+          customerPhone: quoteCustomer.phone ?? null
+        })
+      : null;
+    const quoteDiscount = preflightResolvedCoupon ? preflightResolvedCoupon.discountAmount : discount;
+    const quoteSubtotal = this.toMoney(Math.max(pricedOrder.subtotal - quoteDiscount, 0));
     const scheduledAt = this.parseOptionalDateTime(data.fulfillment.scheduledAt);
+    await this.ensureScheduleDayIsOpen(this.prisma, scheduledAt, {
+      requestedTotalBroas: pricedOrder.productionTotalBroas
+    });
     const deliveryQuote = await this.deliveriesService.resolveDeliverySelection(
       data.delivery,
       this.buildDeliveryQuoteDraft({
@@ -2046,11 +3060,18 @@ export class OrdersService {
         customerName: quoteCustomer.name,
         customerPhone: quoteCustomer.phone,
         customerAddress: quoteCustomer.address,
+        customerAddressLine1: quoteCustomer.addressLine1,
+        customerAddressLine2: quoteCustomer.addressLine2,
+        customerNeighborhood: quoteCustomer.neighborhood,
+        customerCity: quoteCustomer.city,
+        customerState: quoteCustomer.state,
+        customerPostalCode: quoteCustomer.postalCode,
+        customerCountry: quoteCustomer.country,
         customerPlaceId: quoteCustomer.placeId,
         customerLat: quoteCustomer.lat,
         customerLng: quoteCustomer.lng,
         customerDeliveryNotes: quoteCustomer.deliveryNotes,
-        subtotal: pricedOrder.subtotal,
+        subtotal: quoteSubtotal,
         items: pricedOrder.manifestItems
       }),
       {
@@ -2067,9 +3088,6 @@ export class OrdersService {
       | null = null;
 
     const result = await this.prisma.$transaction(async (tx) => {
-      const idemKey = this.intakeIdemKey(data);
-      const requestHash = this.intakeRequestHash(data);
-
       if (idemKey) {
         const existingRecord = await tx.idempotencyRecord.findUnique({
           where: {
@@ -2090,14 +3108,84 @@ export class OrdersService {
       }
 
       const customer = await this.resolveIntakeCustomer(tx, data.customer);
+      const orderCustomerSnapshot =
+        'customerId' in data.customer
+          ? this.buildOrderCustomerSnapshot({
+              name: customer.name,
+              phone: customer.phone,
+              address: ('address' in data.customer ? data.customer.address : null) ?? customer.address,
+              addressLine1:
+                ('addressLine1' in data.customer ? data.customer.addressLine1 : null) ?? customer.addressLine1,
+              addressLine2:
+                ('addressLine2' in data.customer ? data.customer.addressLine2 : null) ?? customer.addressLine2,
+              neighborhood:
+                ('neighborhood' in data.customer ? data.customer.neighborhood : null) ?? customer.neighborhood,
+              city: ('city' in data.customer ? data.customer.city : null) ?? customer.city,
+              state: ('state' in data.customer ? data.customer.state : null) ?? customer.state,
+              postalCode:
+                ('postalCode' in data.customer ? data.customer.postalCode : null) ?? customer.postalCode,
+              country: ('country' in data.customer ? data.customer.country : null) ?? customer.country,
+              placeId: ('placeId' in data.customer ? data.customer.placeId : null) ?? customer.placeId,
+              lat: ('lat' in data.customer ? data.customer.lat : null) ?? customer.lat,
+              lng: ('lng' in data.customer ? data.customer.lng : null) ?? customer.lng,
+              deliveryNotes:
+                ('deliveryNotes' in data.customer ? data.customer.deliveryNotes : null) ?? customer.deliveryNotes
+            })
+          : this.buildOrderCustomerSnapshot({
+              name: data.customer.name ?? customer.name,
+              phone: data.customer.phone ?? customer.phone,
+              address: data.customer.address ?? customer.address,
+              addressLine1:
+                ('addressLine1' in data.customer ? data.customer.addressLine1 : null) ?? customer.addressLine1,
+              addressLine2:
+                ('addressLine2' in data.customer ? data.customer.addressLine2 : null) ?? customer.addressLine2,
+              neighborhood:
+                ('neighborhood' in data.customer ? data.customer.neighborhood : null) ?? customer.neighborhood,
+              city: ('city' in data.customer ? data.customer.city : null) ?? customer.city,
+              state: ('state' in data.customer ? data.customer.state : null) ?? customer.state,
+              postalCode:
+                ('postalCode' in data.customer ? data.customer.postalCode : null) ?? customer.postalCode,
+              country: ('country' in data.customer ? data.customer.country : null) ?? customer.country,
+              placeId: ('placeId' in data.customer ? data.customer.placeId : null) ?? customer.placeId,
+              lat: ('lat' in data.customer ? data.customer.lat : null) ?? customer.lat,
+              lng: ('lng' in data.customer ? data.customer.lng : null) ?? customer.lng,
+              deliveryNotes: data.customer.deliveryNotes ?? customer.deliveryNotes
+            });
       const { itemsData, subtotal } = pricedOrder;
-      const discount = this.toMoney(data.order.discount ?? 0);
-      const deliveryFee = this.toMoney(deliveryQuote.fee ?? 0);
-      const total = this.computeOrderTotal(subtotal, discount, deliveryFee);
+      const quotedDeliveryFee = this.toMoney(deliveryQuote.fee ?? 0);
+      const appliedCoupon = normalizeCouponCode(data.order.couponCode);
+      const resolvedCoupon = appliedCoupon
+        ? await this.resolveCouponDiscount({
+            couponCode: appliedCoupon,
+            subtotal: pricedOrder.couponEligibleSubtotal,
+            customerId: customer.id,
+            customerPhone: customer.phone ?? null,
+            client: tx
+          })
+        : null;
+      const effectiveDiscount = resolvedCoupon ? resolvedCoupon.discountAmount : discount;
+      const effectiveDiscountPct = resolvedCoupon ? resolvedCoupon.discountPct : discountPct;
+      const sponsoredDeliveryFee = this.resolveMarketingSponsoredDeliveryFee({
+        quotedDeliveryFee,
+        discountPct: effectiveDiscountPct,
+        fulfillmentMode: data.fulfillment.mode,
+        allowSponsoredDelivery: data.source.channel === 'INTERNAL_DASHBOARD'
+      });
+      const deliveryFee = compareMoney(sponsoredDeliveryFee, 0) > 0 ? 0 : quotedDeliveryFee;
+      const total = this.computeOrderTotal(subtotal, effectiveDiscount, deliveryFee);
+      let normalizedNotes = data.order.notes ?? null;
 
-      if (isExternalIntakeChannel) {
-        await this.ensureOrderScheduleCapacityAllowed(tx, scheduledAt, {
-          reference: new Date()
+      if (resolvedCoupon?.code) {
+        normalizedNotes = mergeAppliedCouponIntoNotes(normalizedNotes, {
+          code: resolvedCoupon.code,
+          discountPct: resolvedCoupon.discountPct
+        });
+      }
+
+      if (data.source.channel === 'INTERNAL_DASHBOARD' && compareMoney(effectiveDiscountPct, 0) > 0) {
+        normalizedNotes = mergeMarketingSamplesIntoNotes(normalizedNotes, {
+          discountPct: effectiveDiscountPct,
+          sponsoredDeliveryFee
         });
       }
 
@@ -2105,9 +3193,10 @@ export class OrdersService {
         data: {
           publicNumber: await allocateNextPublicNumber(tx, 'ORDER'),
           customerId: customer.id,
+          ...this.flattenOrderCustomerSnapshot(orderCustomerSnapshot),
           status: 'ABERTO',
           fulfillmentMode: data.fulfillment.mode,
-          notes: data.order.notes ?? null,
+          notes: normalizedNotes,
           scheduledAt,
           subtotal,
           deliveryFee,
@@ -2116,13 +3205,14 @@ export class OrdersService {
           deliveryQuoteStatus: deliveryQuote.status,
           deliveryQuoteRef: deliveryQuote.quoteToken ?? null,
           deliveryQuoteExpiresAt: this.parseOptionalDateTime(deliveryQuote.expiresAt ?? null),
-          discount,
+          discount: effectiveDiscount,
+          couponCode: resolvedCoupon?.code ?? null,
           total,
           items: {
             create: itemsData
           }
         },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
 
       let paymentRecord: {
@@ -2135,17 +3225,19 @@ export class OrdersService {
         providerRef: string | null;
         method: string;
       } | null = null;
+      let cardCheckout: CheckoutCard | null = null;
 
       if (data.intent !== 'DRAFT' && data.payment) {
+        const normalizedPaymentStatus = compareMoney(total, 0) <= 0 ? 'PAGO' : data.payment.status;
         paymentRecord = await tx.payment.create({
           data: {
             orderId: createdOrder.id,
             amount: total,
-            method: 'pix',
-            status: data.payment.status,
+            method: data.payment.method,
+            status: normalizedPaymentStatus,
             dueDate: data.payment.dueAt ? new Date(data.payment.dueAt) : scheduledAt,
             paidAt:
-              data.payment.status === 'PAGO'
+              normalizedPaymentStatus === 'PAGO'
                 ? data.payment.paidAt
                   ? new Date(data.payment.paidAt)
                   : new Date()
@@ -2155,40 +3247,82 @@ export class OrdersService {
         });
 
         if (paymentRecord.status !== 'PAGO' && !paymentRecord.paidAt) {
-          paymentRecord = await this.paymentsService.ensurePixChargeOnRecord(tx, paymentRecord);
+          if (paymentRecord.method === 'pix') {
+            paymentRecord = await this.paymentsService.ensurePixChargeOnRecord(tx, paymentRecord);
+          } else if (paymentRecord.method === 'card' && compareMoney(paymentRecord.amount, 0) > 0) {
+            const ensuredCardCheckout = await this.paymentsService.ensureSumUpHostedCheckoutOnRecord(tx, paymentRecord, {
+              orderPublicNumber: createdOrder.publicNumber ?? null,
+              publicAppOrigin: data.source.publicAppOrigin ?? null
+            });
+            paymentRecord = ensuredCardCheckout.payment;
+            cardCheckout = ensuredCardCheckout.cardCheckout;
+          }
         }
       }
 
       const hydratedOrder = await tx.order.findUnique({
         where: { id: createdOrder.id },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
-      if (!hydratedOrder) throw new NotFoundException('Pedido nao encontrado');
+      if (!hydratedOrder) throw new NotFoundException('Pedido não encontrado');
 
-      await this.syncOrderInventoryAndMassPrepEvent(tx, hydratedOrder);
+      await this.syncOrderInventoryArtifacts(tx, hydratedOrder);
+      await this.syncProductAvailabilityAfterInventoryChange(
+        tx,
+        itemsData.map((item) => item.productId)
+      );
 
       const freshOrder = await tx.order.findUnique({
         where: { id: createdOrder.id },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
-      if (!freshOrder) throw new NotFoundException('Pedido nao encontrado');
+      if (!freshOrder) throw new NotFoundException('Pedido não encontrado');
 
       const order = this.withFinancial(freshOrder);
+      const productNameById =
+        freshOrder.items.length > 0
+          ? new Map(
+              (
+                await tx.product.findMany({
+                  where: {
+                    id: {
+                      in: Array.from(new Set(freshOrder.items.map((item) => item.productId)))
+                    }
+                  },
+                  select: { id: true, name: true }
+                })
+              ).map((product) => [product.id, product.name] as const)
+            )
+          : new Map<number, string>();
+      const orderAlertPayload = {
+        ...order,
+        items: order.items.map((item) => ({
+          ...item,
+          name: productNameById.get(item.productId) || null
+        }))
+      };
       const latestPayment =
         paymentRecord
           ? freshOrder.payments.find((entry) => entry.id === paymentRecord?.id) ?? paymentRecord
           : null;
       const pixCharge =
-        latestPayment && latestPayment.method === 'pix'
+        latestPayment &&
+        latestPayment.method === 'pix' &&
+        latestPayment.status !== 'PAGO' &&
+        !latestPayment.paidAt &&
+        compareMoney(latestPayment.amount, 0) > 0
           ? this.paymentsService.buildPixCharge(latestPayment)
           : null;
       const result = {
         order,
-        intake: this.buildOrderIntakeMeta(data, order, latestPayment, pixCharge)
+        intake: this.buildOrderIntakeMeta(data, order, latestPayment, pixCharge, cardCheckout)
       };
 
       if (data.intent !== 'DRAFT') {
-        createdFreshResult = result;
+        createdFreshResult = {
+          ...result,
+          order: orderAlertPayload
+        };
       }
 
       if (idemKey) {
@@ -2205,31 +3339,15 @@ export class OrdersService {
     return result;
   }
 
-  async intakeWhatsAppFlow(payload: unknown) {
-    const data = whatsappFlowIntakeSchema.parse(payload);
-    return this.intake({
-      ...data,
-      payment: data.payment ?? {
-        method: 'pix',
-        status: 'PENDENTE',
-        dueAt: data.fulfillment.scheduledAt ?? null
-      },
-      source: {
-        channel: 'WHATSAPP_FLOW',
-        externalId: data.source.externalId ?? null,
-        idempotencyKey: data.source.idempotencyKey ?? data.source.externalId ?? null,
-        originLabel: data.source.originLabel ?? 'whatsapp-flow'
-      }
-    });
-  }
-
-  async intakeCustomerForm(payload: unknown) {
+  async intakeCustomerForm(payload: unknown, options?: { publicAppOrigin?: string | null }) {
     const data = this.parseExternalOrderSubmission(payload, {
       defaultChannel: 'PUBLIC_FORM',
       defaultOriginLabel: 'customer-form'
     });
+    this.assertPublicFormDeliveryAddress(data.customer, data.fulfillment.mode);
     return this.intakeExternalSubmission(data, {
-      intakeChannel: data.source.channel === 'WHATSAPP_FLOW' ? 'WHATSAPP_FLOW' : 'CUSTOMER_LINK'
+      intakeChannel: 'CUSTOMER_LINK',
+      publicAppOrigin: options?.publicAppOrigin ?? null
     });
   }
 
@@ -2238,8 +3356,9 @@ export class OrdersService {
       defaultChannel: 'PUBLIC_FORM',
       defaultOriginLabel: 'customer-form'
     });
+    this.assertPublicFormDeliveryAddress(data.customer, data.fulfillment.mode);
     return this.previewExternalSubmission(data, {
-      intakeChannel: data.source.channel === 'WHATSAPP_FLOW' ? 'WHATSAPP_FLOW' : 'CUSTOMER_LINK'
+      intakeChannel: 'CUSTOMER_LINK'
     });
   }
 
@@ -2267,39 +3386,9 @@ export class OrdersService {
     return this.paymentsService.getOrderPixCharge(orderId);
   }
 
-  async sendPixChargeWhatsApp(orderId: number) {
-    const order = await this.getRaw(orderId);
-    const financialOrder = this.withFinancial(order);
-    if (financialOrder.paymentStatus === 'PAGO') {
-      throw new BadRequestException('Pedido ja esta pago. Nao ha PIX para enviar.');
-    }
-
-    const phone = normalizePhone(order.customer?.phone);
-    if (!phone) {
-      throw new BadRequestException('Cliente sem telefone valido para WhatsApp.');
-    }
-
-    const pixCharge = await this.paymentsService.getOrderPixCharge(orderId);
-    if (!pixCharge.payable) {
-      throw new BadRequestException('Cobranca PIX ainda nao esta pronta para envio.');
-    }
-
-    const amount = financialOrder.balanceDue > 0 ? financialOrder.balanceDue : financialOrder.total;
-    const customerName =
-      normalizeTitle(order.customer?.firstName || order.customer?.name || undefined) ?? 'cliente';
-
-    return this.whatsAppService.sendPixCharge({
-      customerName,
-      phone,
-      orderId: order.id,
-      amountLabel: this.formatCurrencyBR(amount),
-      copyPasteCode: pixCharge.copyPasteCode
-    });
-  }
-
   async list() {
     const orders = await this.prisma.order.findMany({
-      include: { items: true, customer: true, payments: true },
+      include: orderWithRelationsInclude,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
     });
     return orders.map((order) => this.withFinancial(order));
@@ -2369,108 +3458,19 @@ export class OrdersService {
     });
   }
 
-  async listMassPrepEvents() {
-    const records = await this.prisma.idempotencyRecord.findMany({
-      where: { scope: MASS_PREP_EVENT_SCOPE },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
-    });
-
-    const events = records
-      .map((record) => this.parseMassPrepEvent(record.responseJson))
-      .filter((entry): entry is MassPrepEvent => Boolean(entry));
-
-    return events.sort((left, right) => {
-      const leftTime = new Date(left.startsAt).getTime();
-      const rightTime = new Date(right.startsAt).getTime();
-      return leftTime - rightTime;
-    });
-  }
-
-  async removeMassPrepEvent(orderId: number) {
-    const order = await this.prisma.order.findUnique({ where: { id: orderId }, select: { id: true } });
-    if (!order) throw new NotFoundException('Pedido nao encontrado');
-
-    await this.prisma.idempotencyRecord.deleteMany({
-      where: {
-        scope: MASS_PREP_EVENT_SCOPE,
-        idemKey: this.massPrepEventIdemKey(orderId)
-      }
-    });
-  }
-
-  async updateMassPrepEventStatus(orderId: number, payload: unknown) {
-    const data = massPrepEventStatusPayloadSchema.parse(payload ?? {});
-
-    return this.prisma.$transaction(async (tx) => {
-      const order = await tx.order.findUnique({
-        where: { id: orderId },
-        select: { id: true, status: true }
-      });
-      if (!order) throw new NotFoundException('Pedido nao encontrado');
-
-      const event = await this.getMassPrepEvent(tx, orderId);
-      if (!event) {
-        throw new NotFoundException('Evento FAZER MASSA nao encontrado para este pedido.');
-      }
-
-      if (event.status === data.status) {
-        return event;
-      }
-
-      const allowed = massPrepEventStatusTransitions[event.status] || [];
-      if (!allowed.includes(data.status)) {
-        throw new BadRequestException(`Transicao invalida: ${event.status} -> ${data.status}`);
-      }
-
-      let preparedRecipes = event.massRecipes;
-      if (event.status === 'INGREDIENTES' && data.status === 'PREPARO') {
-        preparedRecipes = await this.prepareMassForEvent(tx, event);
-      }
-
-      const updated = massPrepEventSchema.parse({
-        ...event,
-        massRecipes: preparedRecipes,
-        status: data.status
-      });
-      await this.saveMassPrepEvent(tx, updated);
-
-      if (data.status === 'NO_FORNO' && order.status !== 'EM_PREPARACAO') {
-        const allowedOrderStatuses = statusTransitions[order.status] || [];
-        if (!allowedOrderStatuses.includes('EM_PREPARACAO')) {
-          throw new BadRequestException(
-            `Pedido nao pode sincronizar para NO FORNO a partir de ${order.status}.`
-          );
-        }
-        await tx.order.update({
-          where: { id: order.id },
-          data: { status: 'EM_PREPARACAO' }
-        });
-      }
-
-      if (data.status === 'PRONTA' && order.status !== 'PRONTO') {
-        const allowedOrderStatuses = statusTransitions[order.status] || [];
-        if (!allowedOrderStatuses.includes('PRONTO')) {
-          throw new BadRequestException(
-            `Pedido nao pode sincronizar para PRONTO a partir de ${order.status}.`
-          );
-        }
-        await tx.order.update({
-          where: { id: order.id },
-          data: { status: 'PRONTO' }
-        });
-      }
-
-      return updated;
-    });
-  }
-
   async create(payload: unknown) {
-    const data = OrderSchema.pick({ customerId: true, notes: true, discount: true, scheduledAt: true, items: true, fulfillmentMode: true }).parse(
-      payload
-    );
+    const data = OrderSchema.pick({
+      customerId: true,
+      notes: true,
+      discount: true,
+      discountPct: true,
+      scheduledAt: true,
+      items: true,
+      fulfillmentMode: true
+    }).parse(payload);
     const items = data.items ?? [];
     if (items.length === 0) {
-      throw new BadRequestException('Itens sao obrigatorios');
+      throw new BadRequestException('Itens são obrigatórios');
     }
     const result = await this.intake({
       version: 1,
@@ -2485,6 +3485,7 @@ export class OrdersService {
       order: {
         items,
         discount: data.discount ?? 0,
+        discountPct: data.discountPct ?? undefined,
         notes: data.notes ?? undefined
       },
       payment: {
@@ -2507,61 +3508,223 @@ export class OrdersService {
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.order.findUnique({
         where: { id },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
-      if (!existing) throw new NotFoundException('Pedido nao encontrado');
+      if (!existing) throw new NotFoundException('Pedido não encontrado');
       const previousTargetDate = this.orderTargetDate(existing).date;
 
       const nextScheduledAt = Object.prototype.hasOwnProperty.call(data, 'scheduledAt')
         ? this.parseOptionalDateTime(data.scheduledAt)
         : undefined;
-
-      const subtotal = await this.calculateOrderSubtotalFromItems(
+      const nextFulfillmentMode = data.fulfillmentMode ?? existing.fulfillmentMode ?? 'DELIVERY';
+      const pricedOrder = await this.priceOrderItems(
         tx,
         existing.items.map((item) => ({
           productId: item.productId,
           quantity: item.quantity
-        }))
+        })),
+        {
+          allowInactiveProductIds: new Set(existing.items.map((item) => item.productId)),
+          excludeOrderId: existing.id
+        }
       );
-      const discount = this.toMoney(data.discount ?? existing.discount ?? 0);
-      const total = this.computeOrderTotal(subtotal, discount, this.toMoney(existing.deliveryFee ?? 0));
+      const subtotal = pricedOrder.subtotal;
+      const shouldUpdateDiscount =
+        Object.prototype.hasOwnProperty.call(data, 'discount') ||
+        Object.prototype.hasOwnProperty.call(data, 'discountPct');
+      const { discount, discountPct } =
+        Object.prototype.hasOwnProperty.call(data, 'discount') || Object.prototype.hasOwnProperty.call(data, 'discountPct')
+          ? this.resolveOrderDiscountInput(subtotal, {
+              discount: data.discount,
+              discountPct: data.discountPct
+            })
+          : this.resolveOrderDiscountInput(subtotal, {
+              discount: existing.discount ?? 0
+            });
+      const currentSnapshot = this.extractOrderCustomerSnapshot(existing);
+      const nextCustomerSnapshot = data.customerSnapshot
+        ? this.buildOrderCustomerSnapshot({
+            name:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'name')
+                ? data.customerSnapshot.name ?? null
+                : currentSnapshot.name,
+            phone:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'phone')
+                ? data.customerSnapshot.phone ?? null
+                : currentSnapshot.phone,
+            address:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'address')
+                ? data.customerSnapshot.address ?? null
+                : currentSnapshot.address,
+            addressLine1:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'addressLine1')
+                ? data.customerSnapshot.addressLine1 ?? null
+                : currentSnapshot.addressLine1,
+            addressLine2:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'addressLine2')
+                ? data.customerSnapshot.addressLine2 ?? null
+                : currentSnapshot.addressLine2,
+            neighborhood:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'neighborhood')
+                ? data.customerSnapshot.neighborhood ?? null
+                : currentSnapshot.neighborhood,
+            city:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'city')
+                ? data.customerSnapshot.city ?? null
+                : currentSnapshot.city,
+            state:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'state')
+                ? data.customerSnapshot.state ?? null
+                : currentSnapshot.state,
+            postalCode:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'postalCode')
+                ? data.customerSnapshot.postalCode ?? null
+                : currentSnapshot.postalCode,
+            country:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'country')
+                ? data.customerSnapshot.country ?? null
+                : currentSnapshot.country,
+            placeId:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'placeId')
+                ? data.customerSnapshot.placeId ?? null
+                : currentSnapshot.placeId,
+            lat:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'lat')
+                ? data.customerSnapshot.lat ?? null
+                : currentSnapshot.lat,
+            lng:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'lng')
+                ? data.customerSnapshot.lng ?? null
+                : currentSnapshot.lng,
+            deliveryNotes:
+              Object.prototype.hasOwnProperty.call(data.customerSnapshot, 'deliveryNotes')
+                ? data.customerSnapshot.deliveryNotes ?? null
+                : currentSnapshot.deliveryNotes
+          })
+        : currentSnapshot;
+      if (!nextCustomerSnapshot.name) {
+        throw new BadRequestException('Nome do cliente e obrigatorio.');
+      }
+      const quoteScheduledAt = nextScheduledAt ?? existing.scheduledAt;
+      await this.ensureScheduleDayIsOpen(tx, quoteScheduledAt, {
+        requestedTotalBroas: pricedOrder.productionTotalBroas,
+        currentScheduledAt: existing.scheduledAt
+      });
+      const deliveryQuote = await this.deliveriesService.resolveDeliverySelection(
+        undefined,
+        this.buildDeliveryQuoteDraft({
+          fulfillmentMode: nextFulfillmentMode === 'PICKUP' ? 'PICKUP' : 'DELIVERY',
+          scheduledAt: quoteScheduledAt?.toISOString() ?? new Date().toISOString(),
+          customerName: nextCustomerSnapshot.name,
+          customerPhone: nextCustomerSnapshot.phone,
+          customerAddress: nextCustomerSnapshot.address,
+          customerAddressLine1: nextCustomerSnapshot.addressLine1,
+          customerAddressLine2: nextCustomerSnapshot.addressLine2,
+          customerNeighborhood: nextCustomerSnapshot.neighborhood,
+          customerCity: nextCustomerSnapshot.city,
+          customerState: nextCustomerSnapshot.state,
+          customerPostalCode: nextCustomerSnapshot.postalCode,
+          customerCountry: nextCustomerSnapshot.country,
+          customerPlaceId: nextCustomerSnapshot.placeId,
+          customerLat: nextCustomerSnapshot.lat,
+          customerLng: nextCustomerSnapshot.lng,
+          customerDeliveryNotes: nextCustomerSnapshot.deliveryNotes,
+          items: pricedOrder.manifestItems,
+          subtotal: this.toMoney(Math.max(subtotal - discount, 0))
+        }),
+        {
+          enforceExternalSchedule: false,
+          allowManualFallback: true,
+          persistQuoteRecord: false
+        }
+      );
+      const quotedDeliveryFee = this.toMoney(deliveryQuote.fee ?? 0);
+      const sponsoredDeliveryFee = this.resolveMarketingSponsoredDeliveryFee({
+        quotedDeliveryFee,
+        discountPct,
+        fulfillmentMode: nextFulfillmentMode,
+        allowSponsoredDelivery: true
+      });
+      const deliveryFee = compareMoney(sponsoredDeliveryFee, 0) > 0 ? 0 : quotedDeliveryFee;
+      const total = this.computeOrderTotal(subtotal, discount, deliveryFee);
       const amountPaid = this.getPaidAmount(existing.payments || []);
       this.ensureOrderTotalCoversPaid(total, amountPaid);
-
+      const shouldUpdateNotes = Object.prototype.hasOwnProperty.call(data, 'notes') || shouldUpdateDiscount;
+      let nextNotes = shouldUpdateNotes
+        ? preserveOrderNoteMetadata(
+            existing.notes ?? null,
+            Object.prototype.hasOwnProperty.call(data, 'notes')
+              ? data.notes ?? null
+              : stripOrderNoteMetadata(existing.notes ?? null)
+          )
+        : undefined;
+      if (nextNotes !== undefined) {
+        nextNotes = mergeMarketingSamplesIntoNotes(
+          nextNotes,
+          compareMoney(discountPct, 0) > 0
+            ? {
+                discountPct,
+                sponsoredDeliveryFee
+              }
+            : null
+        );
+      }
       const updated = await tx.order.update({
         where: { id },
         data: {
-          ...(Object.prototype.hasOwnProperty.call(data, 'notes') ? { notes: data.notes ?? null } : {}),
+          ...(nextNotes !== undefined ? { notes: nextNotes } : {}),
+          ...this.flattenOrderCustomerSnapshot(nextCustomerSnapshot),
           discount,
           subtotal,
+          fulfillmentMode: nextFulfillmentMode,
+          deliveryFee,
+          deliveryProvider: deliveryQuote.provider,
+          deliveryFeeSource: deliveryQuote.source,
+          deliveryQuoteStatus: deliveryQuote.status,
+          deliveryQuoteRef: deliveryQuote.quoteToken ?? null,
+          deliveryQuoteExpiresAt: this.parseOptionalDateTime(deliveryQuote.expiresAt ?? null),
           total,
           ...(nextScheduledAt !== undefined ? { scheduledAt: nextScheduledAt } : {})
         },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
+      await this.syncPendingPixPaymentsForOrderTotal(tx, updated.id, total);
+      const refreshedUpdated = await tx.order.findUnique({
+        where: { id: updated.id },
+        include: orderWithRelationsInclude
+      });
+      if (!refreshedUpdated) {
+        throw new NotFoundException('Pedido não encontrado');
+      }
 
-      await this.syncOrderInventoryAndMassPrepEvent(tx, updated);
-      const nextTargetDate = this.orderTargetDate(updated).date;
+      await this.syncOrderInventoryArtifacts(tx, refreshedUpdated);
+      const nextTargetDate = this.orderTargetDate(refreshedUpdated).date;
       if (nextTargetDate !== previousTargetDate) {
         await this.syncPaperBagReservationsForCustomerDateGroup(tx, {
-          customerId: updated.customerId,
+          customerId: refreshedUpdated.customerId,
           targetDate: previousTargetDate
         });
       }
-      return this.withFinancial(updated);
+      return this.withFinancial(refreshedUpdated);
+    }, {
+      maxWait: 15_000,
+      timeout: 15_000
     });
   }
 
   async remove(id: number) {
     await this.prisma.$transaction(async (tx) => {
-      const order = await tx.order.findUnique({ where: { id } });
-      if (!order) throw new NotFoundException('Pedido nao encontrado');
+      const order = await tx.order.findUnique({ where: { id }, include: { items: true } });
+      if (!order) throw new NotFoundException('Pedido não encontrado');
       const targetDate = this.orderTargetDate(order).date;
       await this.assertOrderRemovable(tx, id);
 
       await this.clearOrderFormulaArtifacts(tx, id);
+      await this.syncProductAvailabilityAfterInventoryChange(
+        tx,
+        order.items.map((item) => item.productId)
+      );
       await tx.order.delete({ where: { id } });
-      await this.clearMassPrepEventArtifact(tx, id);
       await this.syncPaperBagReservationsForCustomerDateGroup(tx, {
         customerId: order.customerId,
         targetDate
@@ -2573,11 +3736,29 @@ export class OrdersService {
     const data = OrderItemSchema.pick({ productId: true, quantity: true }).parse(payload);
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({ where: { id: orderId }, include: { items: true } });
-      if (!order) throw new NotFoundException('Pedido nao encontrado');
+      if (!order) throw new NotFoundException('Pedido não encontrado');
       await this.assertOrderItemsMutable(tx, order);
 
       const product = await tx.product.findUnique({ where: { id: data.productId } });
-      if (!product) throw new NotFoundException('Produto nao encontrado');
+      if (!product) throw new NotFoundException('Produto não encontrado');
+
+      await this.priceOrderItems(
+        tx,
+        [
+          ...order.items.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity
+          })),
+          {
+            productId: data.productId,
+            quantity: data.quantity
+          }
+        ],
+        {
+          allowInactiveProductIds: new Set(order.items.map((item) => item.productId)),
+          excludeOrderId: order.id
+        }
+      );
 
       const unitPrice = this.toUnitPrice(product.price);
       const total = this.toMoney(unitPrice * data.quantity);
@@ -2602,16 +3783,28 @@ export class OrdersService {
           quantity: data.quantity
         }
       ];
-      const newSubtotal = await this.calculateOrderSubtotalFromItems(tx, nextSubtotalItems);
-      const newTotal = this.computeOrderTotal(newSubtotal, order.discount, this.toMoney(order.deliveryFee ?? 0));
-      await tx.order.update({ where: { id: orderId }, data: { subtotal: newSubtotal, total: newTotal } });
+      const pricing = await this.resolveExistingOrderItemsPricing(tx, order, nextSubtotalItems);
+      await tx.order.update({
+        where: { id: orderId },
+        data: {
+          subtotal: pricing.subtotal,
+          discount: pricing.discount,
+          couponCode: pricing.couponCode,
+          notes: pricing.notes,
+          total: pricing.total
+        }
+      });
 
       const updatedOrder = await tx.order.findUnique({
         where: { id: orderId },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
-      if (!updatedOrder) throw new NotFoundException('Pedido nao encontrado');
-      await this.syncOrderInventoryAndMassPrepEvent(tx, updatedOrder);
+      if (!updatedOrder) throw new NotFoundException('Pedido não encontrado');
+      await this.syncOrderInventoryArtifacts(tx, updatedOrder);
+      await this.syncProductAvailabilityAfterInventoryChange(
+        tx,
+        updatedOrder.items.map((item) => item.productId)
+      );
       return this.withFinancial(updatedOrder);
     });
   }
@@ -2623,7 +3816,7 @@ export class OrdersService {
         where: { id: orderId },
         include: { items: true, payments: true }
       });
-      if (!order) throw new NotFoundException('Pedido nao encontrado');
+      if (!order) throw new NotFoundException('Pedido não encontrado');
       await this.assertOrderItemsMutable(tx, order);
 
       const quantityByProductId = new Map<number, number>();
@@ -2636,26 +3829,31 @@ export class OrdersService {
         .map(([productId, quantity]) => ({ productId, quantity }))
         .filter((item) => item.quantity > 0);
       if (normalizedItems.length === 0) {
-        throw new BadRequestException('Itens sao obrigatorios');
+        throw new BadRequestException('Itens são obrigatórios');
       }
 
       const productIds = normalizedItems.map((item) => item.productId);
       const products = await tx.product.findMany({ where: { id: { in: productIds } } });
       const productMap = new Map(products.map((product) => [product.id, product]));
+      const allowInactiveProductIds = new Set(order.items.map((item) => item.productId));
+
+      await this.priceOrderItems(tx, normalizedItems, {
+        allowInactiveProductIds,
+        excludeOrderId: order.id
+      });
 
       const itemsData = [] as Array<{ productId: number; quantity: number; unitPrice: number; total: number }>;
       for (const item of normalizedItems) {
         const product = productMap.get(item.productId);
-        if (!product) throw new NotFoundException('Produto nao encontrado');
+        if (!product) throw new NotFoundException('Produto não encontrado');
         const unitPrice = this.toUnitPrice(product.price);
         const total = this.toMoney(unitPrice * item.quantity);
         itemsData.push({ productId: item.productId, quantity: item.quantity, unitPrice, total });
       }
 
-      const subtotal = await this.calculateOrderSubtotalFromItems(tx, normalizedItems);
-      const total = this.computeOrderTotal(subtotal, order.discount, this.toMoney(order.deliveryFee ?? 0));
+      const pricing = await this.resolveExistingOrderItemsPricing(tx, order, normalizedItems);
       const amountPaid = this.getPaidAmount(order.payments || []);
-      this.ensureOrderTotalCoversPaid(total, amountPaid);
+      this.ensureOrderTotalCoversPaid(pricing.total, amountPaid);
 
       await tx.orderItem.deleteMany({ where: { orderId } });
       await tx.orderItem.createMany({
@@ -2667,11 +3865,21 @@ export class OrdersService {
 
       const updatedOrder = await tx.order.update({
         where: { id: orderId },
-        data: { subtotal, total },
-        include: { items: true, customer: true, payments: true }
+        data: {
+          subtotal: pricing.subtotal,
+          discount: pricing.discount,
+          couponCode: pricing.couponCode,
+          notes: pricing.notes,
+          total: pricing.total
+        },
+        include: orderWithRelationsInclude
       });
 
-      await this.syncOrderInventoryAndMassPrepEvent(tx, updatedOrder);
+      await this.syncOrderInventoryArtifacts(tx, updatedOrder);
+      await this.syncProductAvailabilityAfterInventoryChange(
+        tx,
+        updatedOrder.items.map((item) => item.productId)
+      );
       return this.withFinancial(updatedOrder);
     });
   }
@@ -2682,34 +3890,47 @@ export class OrdersService {
         where: { id: orderId },
         include: { items: true, payments: true }
       });
-      if (!order) throw new NotFoundException('Pedido nao encontrado');
+      if (!order) throw new NotFoundException('Pedido não encontrado');
       await this.assertOrderItemsMutable(tx, order);
 
       const item = await tx.orderItem.findUnique({ where: { id: itemId } });
-      if (!item || item.orderId !== orderId) throw new NotFoundException('Item nao encontrado');
+      if (!item || item.orderId !== orderId) throw new NotFoundException('Item não encontrado');
 
       await tx.orderItem.delete({ where: { id: itemId } });
 
       const remaining = order.items.filter((i) => i.id !== itemId);
-      const newSubtotal = await this.calculateOrderSubtotalFromItems(
+      const pricing = await this.resolveExistingOrderItemsPricing(
         tx,
+        order,
         remaining.map((entry) => ({
           productId: entry.productId,
           quantity: entry.quantity
         }))
       );
-      const newTotal = this.computeOrderTotal(newSubtotal, order.discount, this.toMoney(order.deliveryFee ?? 0));
       const amountPaid = this.getPaidAmount(order.payments || []);
-      this.ensureOrderTotalCoversPaid(newTotal, amountPaid);
+      this.ensureOrderTotalCoversPaid(pricing.total, amountPaid);
 
-      await tx.order.update({ where: { id: orderId }, data: { subtotal: newSubtotal, total: newTotal } });
+      await tx.order.update({
+        where: { id: orderId },
+        data: {
+          subtotal: pricing.subtotal,
+          discount: pricing.discount,
+          couponCode: pricing.couponCode,
+          notes: pricing.notes,
+          total: pricing.total
+        }
+      });
 
       const updatedOrder = await tx.order.findUnique({
         where: { id: orderId },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
-      if (!updatedOrder) throw new NotFoundException('Pedido nao encontrado');
-      await this.syncOrderInventoryAndMassPrepEvent(tx, updatedOrder);
+      if (!updatedOrder) throw new NotFoundException('Pedido não encontrado');
+      await this.syncOrderInventoryArtifacts(tx, updatedOrder);
+      await this.syncProductAvailabilityAfterInventoryChange(
+        tx,
+        updatedOrder.items.map((entry) => entry.productId)
+      );
       return this.withFinancial(updatedOrder);
     });
   }
@@ -2720,14 +3941,23 @@ export class OrdersService {
     return this.prisma.$transaction(async (tx) => {
       const existingOrder = await tx.order.findUnique({
         where: { id: orderId },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
       if (!existingOrder) {
-        throw new NotFoundException('Pedido nao encontrado');
+        throw new NotFoundException('Pedido não encontrado');
       }
 
-      const path = resolveOrderStatusPath(existingOrder.status, status);
+      const currentStatus = normalizeOrderStatus(existingOrder.status) || 'ABERTO';
+      const path = resolveOrderStatusPath(currentStatus, status);
       if (path.length === 0) {
+        if (existingOrder.status !== currentStatus) {
+          const normalizedOrder = await tx.order.update({
+            where: { id: orderId },
+            data: { status: currentStatus },
+            include: orderWithRelationsInclude
+          });
+          return this.withFinancial(normalizedOrder);
+        }
         return this.withFinancial(existingOrder);
       }
 
@@ -2737,18 +3967,18 @@ export class OrdersService {
         updatedOrder = await tx.order.update({
           where: { id: orderId },
           data: { status: stepStatus },
-          include: { items: true, customer: true, payments: true }
+          include: orderWithRelationsInclude
         });
         if (stepStatus === 'CANCELADO') {
           await this.clearOrderFormulaArtifacts(tx, orderId);
-          await this.clearMassPrepEventArtifact(tx, orderId);
+          await this.syncProductAvailabilityAfterInventoryChange(
+            tx,
+            updatedOrder.items.map((item) => item.productId)
+          );
           await this.syncPaperBagReservationsForCustomerDateGroup(tx, {
             customerId: updatedOrder.customerId,
             targetDate: this.orderTargetDate(updatedOrder).date
           });
-        }
-        if (stepStatus === 'EM_PREPARACAO' || stepStatus === 'PRONTO' || stepStatus === 'ENTREGUE') {
-          await this.syncMassPrepEventStatusFromOrderStatus(tx, orderId, stepStatus);
         }
       }
 
@@ -2762,11 +3992,38 @@ export class OrdersService {
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({
         where: { id: orderId },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
-      if (!order) throw new NotFoundException('Pedido nao encontrado');
+      if (!order) throw new NotFoundException('Pedido não encontrado');
       if (order.status === 'CANCELADO') {
-        throw new BadRequestException('Nao e possivel registrar pagamento para pedido cancelado.');
+        throw new BadRequestException('Não é possível registrar pagamento para pedido cancelado.');
+      }
+
+      if (!data.paid) {
+        const paidPaymentIds = order.payments
+          .filter((payment) => payment.status === 'PAGO' || Boolean(payment.paidAt))
+          .map((payment) => payment.id);
+
+        if (paidPaymentIds.length > 0) {
+          await tx.payment.updateMany({
+            where: {
+              id: {
+                in: paidPaymentIds
+              }
+            },
+            data: {
+              status: 'PENDENTE',
+              paidAt: null
+            }
+          });
+        }
+
+        const updated = await tx.order.findUnique({
+          where: { id: orderId },
+          include: orderWithRelationsInclude
+        });
+        if (!updated) throw new NotFoundException('Pedido não encontrado');
+        return this.withFinancial(updated);
       }
 
       const total = this.toMoney(order.total ?? 0);
@@ -2777,27 +4034,36 @@ export class OrdersService {
         return this.withFinancial(order);
       }
 
-      const reusablePendingPayment = order.payments.find(
-        (payment) =>
-          payment.status !== 'PAGO' &&
-          !payment.paidAt &&
-          payment.method.trim().toLowerCase() === 'pix' &&
-          compareMoney(payment.amount, balanceDue) === 0
-      );
+      const pendingPaymentIds = order.payments
+        .filter((payment) => payment.status !== 'PAGO' || !payment.paidAt)
+        .map((payment) => payment.id);
 
-      if (reusablePendingPayment) {
-        await tx.payment.update({
-          where: { id: reusablePendingPayment.id },
+      if (pendingPaymentIds.length > 0) {
+        await tx.payment.updateMany({
+          where: {
+            id: {
+              in: pendingPaymentIds
+            }
+          },
           data: {
             status: 'PAGO',
             paidAt: data.paidAt ? new Date(data.paidAt) : new Date()
           }
         });
-      } else {
+      }
+
+      const paidAfterReuse = this.toMoney(
+        order.payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
+      );
+      const remainingBalance = moneyFromMinorUnits(
+        Math.max(moneyToMinorUnits(total) - moneyToMinorUnits(paidAfterReuse), 0)
+      );
+
+      if (compareMoney(remainingBalance, 0) > 0) {
         await tx.payment.create({
           data: {
             orderId: order.id,
-            amount: balanceDue,
+            amount: remainingBalance,
             method: 'pix',
             status: 'PAGO',
             paidAt: data.paidAt ? new Date(data.paidAt) : new Date()
@@ -2807,9 +4073,9 @@ export class OrdersService {
 
       const updated = await tx.order.findUnique({
         where: { id: orderId },
-        include: { items: true, customer: true, payments: true }
+        include: orderWithRelationsInclude
       });
-      if (!updated) throw new NotFoundException('Pedido nao encontrado');
+      if (!updated) throw new NotFoundException('Pedido não encontrado');
       return this.withFinancial(updated);
     });
   }

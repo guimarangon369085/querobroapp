@@ -1,7 +1,9 @@
 import { getPublicAppOrigin } from '@/lib/public-site-config';
 
 const devDefaultBaseUrl = 'http://127.0.0.1:3001';
+const devDefaultWebOrigin = 'http://127.0.0.1:3000';
 const productionApiHostname = 'api.querobroa.com.br';
+const internalApiProxyPath = '/api/internal';
 
 function isLoopbackHostname(hostname: string) {
   const normalized = hostname.trim().toLowerCase();
@@ -114,4 +116,21 @@ export function getApiBaseUrl() {
   return configuredBaseUrl || devDefaultBaseUrl;
 }
 
-export { devDefaultBaseUrl, productionApiHostname, resolveProductionApiBaseUrlFromHostname };
+export function getInternalApiBaseUrl() {
+  if (typeof window !== 'undefined') {
+    const browserHostname = window.location.hostname;
+    if (isLoopbackHostname(browserHostname)) {
+      return getLocalDevBaseUrl(normalizeBaseUrl(process.env.NEXT_PUBLIC_API_URL));
+    }
+    return `${window.location.origin}${internalApiProxyPath}`;
+  }
+
+  const origin = getPublicAppOrigin({ allowLocalFallback: true });
+  if (origin) {
+    return `${origin}${internalApiProxyPath}`;
+  }
+
+  return `${devDefaultWebOrigin}${internalApiProxyPath}`;
+}
+
+export { devDefaultBaseUrl, internalApiProxyPath, productionApiHostname, resolveProductionApiBaseUrlFromHostname };

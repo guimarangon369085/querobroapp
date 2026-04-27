@@ -15,11 +15,13 @@ test(
     const { apiUrl, shutdown } = await ensureApiServer();
     const created = {
       inventoryItemId: null,
+      companionInventoryItemId: null,
       batchId: null,
       orderId: null,
       customerId: null,
       bomId: null,
-      productId: null
+      productId: null,
+      companionProductId: null
     };
 
     t.after(async () => {
@@ -36,7 +38,9 @@ test(
         const cleanupMovements = movements
           .filter(
             (movement) =>
-              movement.orderId === created.orderId || movement.itemId === created.inventoryItemId
+              movement.orderId === created.orderId ||
+              movement.itemId === created.inventoryItemId ||
+              movement.itemId === created.companionInventoryItemId
           )
           .sort((left, right) => right.id - left.id);
 
@@ -55,11 +59,17 @@ test(
         created.orderId ? () => request(apiUrl, `/orders/${created.orderId}`, { method: 'DELETE' }) : null,
         created.bomId ? () => request(apiUrl, `/boms/${created.bomId}`, { method: 'DELETE' }) : null,
         created.productId ? () => request(apiUrl, `/inventory-products/${created.productId}`, { method: 'DELETE' }) : null,
+        created.companionProductId
+          ? () => request(apiUrl, `/inventory-products/${created.companionProductId}`, { method: 'DELETE' })
+          : null,
         created.customerId
           ? () => request(apiUrl, `/customers/${created.customerId}`, { method: 'DELETE' })
           : null,
         created.inventoryItemId
           ? () => request(apiUrl, `/inventory-items/${created.inventoryItemId}`, { method: 'DELETE' })
+          : null,
+        created.companionInventoryItemId
+          ? () => request(apiUrl, `/inventory-items/${created.companionInventoryItemId}`, { method: 'DELETE' })
           : null
       ].filter(Boolean);
 
@@ -116,6 +126,27 @@ test(
     });
     created.productId = product.id;
 
+    const companionProduct = await request(apiUrl, '/inventory-products', {
+      method: 'POST',
+      body: {
+        name: `Cafe da Sessao [TESTE_E2E] ${suffix}`,
+        category: 'Amigos da Broa',
+        unit: 'unidade',
+        price: 8,
+        active: true,
+        imageUrl: '/querobroa-brand/cardapio/sabores-caixa.jpg',
+        inventoryQtyPerSaleUnit: 90,
+        companionInventory: {
+          balance: 1000,
+          unit: 'g',
+          purchasePackSize: 500,
+          purchasePackCost: 25
+        }
+      }
+    });
+    created.companionProductId = companionProduct.id;
+    created.companionInventoryItemId = companionProduct.inventoryItemId;
+
     const existingBoms = await request(apiUrl, '/boms');
     const existingBom = existingBoms.find((entry) => entry.productId === product.id) || null;
     const bomPayload = {
@@ -158,10 +189,27 @@ test(
       body: {
         customerId: customer.id,
         scheduledAt,
-        items: [{ productId: product.id, quantity: 4 }]
+        items: [
+          { productId: product.id, quantity: 4 },
+          { productId: companionProduct.id, quantity: 3 }
+        ]
       }
     });
     created.orderId = order.id;
+
+    const existingOrders = await request(apiUrl, '/orders');
+    for (const existingOrder of existingOrders) {
+      if (existingOrder.id === order.id) continue;
+      if (existingOrder.status === 'CANCELADO' || existingOrder.status === 'ENTREGUE') continue;
+      try {
+        await request(apiUrl, `/orders/${existingOrder.id}/status`, {
+          method: 'PATCH',
+          body: { status: 'CANCELADO' }
+        });
+      } catch {
+        // melhor esforco para garantir fila deterministica neste teste
+      }
+    }
 
     const requirements = await request(apiUrl, '/production/requirements?date=2032-01-15');
     const requirementRow = requirements.rows.find((row) => row.ingredientId === inventoryItem.id);
@@ -169,15 +217,34 @@ test(
     assert.ok(approxEqual(requirementRow.requiredQty, 20));
     assert.ok(approxEqual(requirementRow.availableQty, 1000));
     assert.ok(approxEqual(requirementRow.shortageQty, 0));
+    const companionRequirementRow = requirements.rows.find(
+      (row) => row.ingredientId === created.companionInventoryItemId
+    );
+    assert.ok(companionRequirementRow, 'Companheiro deveria aparecer no D+1 via estoque direto');
+    assert.ok(approxEqual(companionRequirementRow.requiredQty, 270));
+    assert.ok(approxEqual(companionRequirementRow.availableQty, 1000));
+    assert.ok(approxEqual(companionRequirementRow.shortageQty, 0));
+    assert.equal(
+      requirements.warnings.some((warning) => warning.productId === companionProduct.id),
+      false,
+      'Companheiro com estoque direto nao deve gerar warning de BOM'
+    );
 
-    await request(apiUrl, `/orders/${order.id}/status`, {
-      method: 'PATCH',
-      body: { status: 'CONFIRMADO' }
-    });
+    const planning = await request(apiUrl, '/production/stock-planning');
+    assert.equal(
+      planning.bomWarnings.some((warning) => warning.productId === companionProduct.id),
+      false,
+      'Companheiro com estoque direto nao deve aparecer como BOM faltante no planejamento'
+    );
+    assert.equal(
+      planning.shortageItems.some((row) => row.itemId === created.companionInventoryItemId),
+      false,
+      'Companheiro com saldo suficiente nao deve entrar em falta'
+    );
 
     const queue = await request(apiUrl, '/production/queue');
     const queueRow = queue.queue.find((entry) => entry.orderId === order.id);
-    assert.ok(queueRow, 'Pedido confirmado deveria entrar na fila de producao');
+    assert.ok(queueRow, 'Pedido aberto deveria entrar na fila de producao');
     assert.ok(approxEqual(queueRow.totalBroas, 4));
     assert.ok(approxEqual(queueRow.remainingBroas, 4));
 

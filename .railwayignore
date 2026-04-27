@@ -3,6 +3,7 @@
 .githooks
 .turbo
 .next
+.next-*
 node_modules
 **/node_modules
 output
@@ -11,15 +12,17 @@ coverage
 .tools
 .DS_Store
 apps/**/.next
+apps/**/.next-*
 apps/**/dist
 apps/**/build
+apps/**/.codex-temp
+**/*.tsbuildinfo
 apps/api/prisma/dev.db
 apps/api/prisma/dev.db-journal
 apps/api/dev.db
 apps/api/dev.db-journal
 /apps/mobile
 /apps/web/public/querobroa
-/apps/web/public/querobroa-brand/commerce
 /apps/web/public/querobroa-brand/references
 /apps/web/public/querobroa-brand/icons/querobroa-icon-source.png
 /apps/web/public/querobroa-brand/queijo-brown.jpg

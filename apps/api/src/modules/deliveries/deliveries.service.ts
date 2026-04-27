@@ -11,19 +11,24 @@ import {
   DeliveryQuoteDraftSchema,
   DeliveryQuoteResponseSchema,
   DeliveryQuoteSelectionSchema,
+  mergeMarketingSamplesIntoNotes,
   OrderFulfillmentModeEnum,
   moneyFromMinorUnits,
   moneyToMinorUnits,
+  parseMarketingSamplesDiscountPct,
   roundMoney
 } from '@querobroapp/shared';
+import type { DeliveryPricingConfig } from '@querobroapp/shared';
 import { PrismaService } from '../../prisma.service.js';
 import {
   externalOrderScheduleErrorMessage,
   isExternalOrderScheduleAllowed
 } from '../../common/external-order-schedule.js';
+import { normalizeCustomerAddressPayload } from '../../common/customer-profile.js';
 import type { DeliveryDispatchInput, DeliveryQuoteInput } from './delivery-provider.js';
 import { LocalDeliveryProvider } from './local-delivery.provider.js';
 import { FIXED_PICKUP_ORIGIN } from './pickup-origin.js';
+import { DeliveryPricingConfigService } from './delivery-pricing-config.service.js';
 
 type OrderWithDeliveryContext = Awaited<ReturnType<DeliveriesService['getOrderForDelivery']>>;
 type DeliveryQuoteDraft = typeof DeliveryQuoteDraftSchema._type;
@@ -86,7 +91,6 @@ type DeliveryTrackingRecord = DeliveryJob & {
   quoteFee: number | null;
   quoteExpiresAt: string | null;
 };
-
 type LegacyDeliveryTrackingRecord = Partial<DeliveryTrackingRecord> & {
   provider?: string;
   mode?: string;
@@ -105,33 +109,43 @@ type QuoteRecordPayload = {
 
 const DELIVERY_TRACKING_SCOPE = 'DELIVERY_TRACKING';
 const DELIVERY_QUOTE_SCOPE = 'DELIVERY_QUOTE';
-const DELIVERY_BASE_FEE = 12;
-const DELIVERY_EXTENDED_FEE = 18;
-const DELIVERY_BASE_DISTANCE_LIMIT_KM = 5;
-const DELIVERY_PRICING_RULE_VERSION = 'radius-5km-v1';
+const DELIVERY_PRICING_RULE_VERSION = 'runtime-config-v1';
 const EARTH_RADIUS_KM = 6371;
 @Injectable()
 export class DeliveriesService {
   private readonly localProvider = new LocalDeliveryProvider();
 
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(DeliveryPricingConfigService)
+    private readonly deliveryPricingConfig: DeliveryPricingConfigService = new DeliveryPricingConfigService()
+  ) {}
+
+  async getPricingConfig() {
+    return this.deliveryPricingConfig.getConfig();
+  }
+
+  async updatePricingConfig(input: unknown) {
+    return this.deliveryPricingConfig.updateConfig(input);
+  }
 
   async quoteDelivery(
     payload: unknown,
-    options?: { enforceExternalSchedule?: boolean; allowManualFallback?: boolean }
+    options?: { enforceExternalSchedule?: boolean; allowManualFallback?: boolean; persistQuoteRecord?: boolean }
   ) {
     const draft = DeliveryQuoteDraftSchema.parse(payload);
     try {
       return await this.quoteForDraft(draft, {
         enforceExternalSchedule: options?.enforceExternalSchedule ?? true,
-        allowManualFallback: options?.allowManualFallback ?? false
+        allowManualFallback: options?.allowManualFallback ?? false,
+        persistQuoteRecord: options?.persistQuoteRecord ?? true
       });
     } catch (error) {
       if (error instanceof BadRequestException || error instanceof BadGatewayException || error instanceof NotFoundException) {
         throw error;
       }
       const detail = error instanceof Error ? error.message : 'unknown error';
-      throw new BadGatewayException(`Nao foi possivel calcular o frete agora. (${detail})`);
+      throw new BadGatewayException(`Não foi possível calcular o frete agora. (${detail})`);
     }
   }
 
@@ -154,13 +168,20 @@ export class DeliveriesService {
         mode: order.fulfillmentMode === OrderFulfillmentModeEnum.enum.DELIVERY ? 'DELIVERY' : 'PICKUP',
         scheduledAt: order.scheduledAt?.toISOString() || new Date().toISOString(),
         customer: {
-          name: order.customer?.name ?? null,
-          phone: order.customer?.phone ?? null,
+          name: this.resolveOrderCustomerProfile(order).name || null,
+          phone: this.resolveOrderCustomerProfile(order).phone || null,
           address: draft.dropoffAddress,
+          addressLine1: this.resolveOrderCustomerProfile(order).addressLine1,
+          addressLine2: this.resolveOrderCustomerProfile(order).addressLine2,
+          neighborhood: this.resolveOrderCustomerProfile(order).neighborhood,
+          city: this.resolveOrderCustomerProfile(order).city,
+          state: this.resolveOrderCustomerProfile(order).state,
+          postalCode: this.resolveOrderCustomerProfile(order).postalCode,
+          country: this.resolveOrderCustomerProfile(order).country,
           placeId: draft.dropoffPlaceId,
           lat: draft.dropoffLat,
           lng: draft.dropoffLng,
-          deliveryNotes: order.customer?.deliveryNotes ?? null
+          deliveryNotes: this.resolveOrderCustomerProfile(order).deliveryNotes
         },
         manifest: {
           items: draft.items.map((item) => ({
@@ -178,9 +199,17 @@ export class DeliveriesService {
       }
     );
 
+    const marketingDiscountPct = parseMarketingSamplesDiscountPct(order.notes);
+    const sponsoredDeliveryFee =
+      order.fulfillmentMode === OrderFulfillmentModeEnum.enum.DELIVERY &&
+      marketingDiscountPct != null &&
+      Number(marketingDiscountPct) >= 100
+        ? this.toMoney(quote.fee ?? 0)
+        : 0;
+    const chargeableDeliveryFee = sponsoredDeliveryFee > 0 ? 0 : this.toMoney(quote.fee ?? 0);
     const subtotalMinorUnits = moneyToMinorUnits(order.subtotal ?? 0);
     const discountMinorUnits = moneyToMinorUnits(order.discount ?? 0);
-    const deliveryFeeMinorUnits = moneyToMinorUnits(quote.fee ?? 0);
+    const deliveryFeeMinorUnits = moneyToMinorUnits(chargeableDeliveryFee);
     const nextSubtotalAfterDiscount = Math.max(subtotalMinorUnits - discountMinorUnits, 0);
     const nextTotal = moneyFromMinorUnits(nextSubtotalAfterDiscount + deliveryFeeMinorUnits);
     const paidMinorUnits = payments.reduce((sum, payment) => {
@@ -190,20 +219,27 @@ export class DeliveriesService {
       return sum;
     }, 0);
     if (nextSubtotalAfterDiscount + deliveryFeeMinorUnits < paidMinorUnits) {
-      throw new BadRequestException('O frete recalculado deixaria o total abaixo do valor ja pago no pedido.');
+      throw new BadRequestException('O frete recalculado deixaria o total abaixo do valor já pago no pedido.');
     }
 
     await this.prisma.$transaction(async (tx) => {
       await tx.order.update({
         where: { id: orderId },
         data: {
-          deliveryFee: this.toMoney(quote.fee ?? 0),
+          deliveryFee: chargeableDeliveryFee,
           deliveryProvider: quote.provider,
           deliveryFeeSource: quote.source,
           deliveryQuoteStatus: quote.status,
           deliveryQuoteRef: quote.quoteToken ?? null,
           deliveryQuoteExpiresAt: this.parseOptionalDateTime(quote.expiresAt ?? null),
-          total: nextTotal
+          total: nextTotal,
+          notes:
+            marketingDiscountPct != null
+              ? mergeMarketingSamplesIntoNotes(order.notes, {
+                  discountPct: marketingDiscountPct,
+                  sponsoredDeliveryFee
+                })
+              : order.notes
         }
       });
 
@@ -228,7 +264,7 @@ export class DeliveriesService {
   async resolveDeliverySelection(
     selectionPayload: unknown,
     draftPayload: DeliveryQuoteDraft,
-    options?: { enforceExternalSchedule?: boolean; allowManualFallback?: boolean }
+    options?: { enforceExternalSchedule?: boolean; allowManualFallback?: boolean; persistQuoteRecord?: boolean }
   ) {
     const draft = DeliveryQuoteDraftSchema.parse(draftPayload);
     if (draft.mode !== OrderFulfillmentModeEnum.enum.DELIVERY) {
@@ -238,7 +274,8 @@ export class DeliveriesService {
       this.ensureExternalOrderQuoteScheduleAllowed(draft.scheduledAt);
     }
 
-    const requestHash = this.quoteRequestHash(draft);
+    const pricingConfig = await this.deliveryPricingConfig.getConfig();
+    const requestHash = this.quoteRequestHash(draft, pricingConfig);
     const selection = DeliveryQuoteSelectionSchema.parse(selectionPayload ?? {});
     const quoteToken = selection.quoteToken?.trim();
 
@@ -246,7 +283,8 @@ export class DeliveriesService {
       return this.quoteForDraft(draft, {
         forceRefresh: true,
         enforceExternalSchedule: options?.enforceExternalSchedule,
-        allowManualFallback: options?.allowManualFallback
+        allowManualFallback: options?.allowManualFallback,
+        persistQuoteRecord: options?.persistQuoteRecord ?? true
       });
     }
 
@@ -255,7 +293,7 @@ export class DeliveriesService {
       stored &&
       stored.requestHash === requestHash &&
       !this.isQuoteExpired(stored.quote) &&
-        this.isAcceptableDeliveryQuote(stored.quote)
+      this.isAcceptableDeliveryQuote(stored.quote)
     ) {
       return stored.quote;
     }
@@ -263,7 +301,8 @@ export class DeliveriesService {
     const refreshed = await this.quoteForDraft(draft, {
       forceRefresh: true,
       enforceExternalSchedule: options?.enforceExternalSchedule,
-      allowManualFallback: options?.allowManualFallback
+      allowManualFallback: options?.allowManualFallback,
+      persistQuoteRecord: options?.persistQuoteRecord ?? true
     });
     throw new BadRequestException({
       code: 'DELIVERY_QUOTE_REFRESH_REQUIRED',
@@ -282,7 +321,7 @@ export class DeliveriesService {
         provider: 'NONE',
         mode: 'PROVIDER',
         ready: false,
-        reason: 'Pedido marcado para retirada. Nao ha entrega para solicitar.',
+        reason: 'Pedido marcado para retirada. Não há entrega para solicitar.',
         missingRequirements: ['pedido configurado como retirada'],
         draft,
         quoteStatus: 'NOT_REQUIRED',
@@ -308,7 +347,7 @@ export class DeliveriesService {
   async startOrderDelivery(orderId: number) {
     const order = await this.getOrderForDelivery(orderId);
     if (order.fulfillmentMode !== OrderFulfillmentModeEnum.enum.DELIVERY) {
-      throw new BadRequestException('Pedido configurado como retirada. Nao ha envio para solicitar.');
+      throw new BadRequestException('Pedido configurado como retirada. Não há envio para solicitar.');
     }
     if (!['PRONTO', 'ENTREGUE'].includes(order.status)) {
       throw new BadRequestException('Entrega so pode ser iniciada quando o pedido estiver PRONTO.');
@@ -419,7 +458,7 @@ export class DeliveriesService {
     await this.getOrderForDelivery(orderId);
     const tracking = await this.readTracking(orderId);
     if (!tracking) {
-      throw new NotFoundException('Entrega ainda nao foi iniciada para este pedido.');
+      throw new NotFoundException('Entrega ainda não foi iniciada para este pedido.');
     }
 
     const delivered = await this.persistSyncedTracking({
@@ -453,7 +492,12 @@ export class DeliveriesService {
 
   private async quoteForDraft(
     draftPayload: DeliveryQuoteDraft,
-    options?: { forceRefresh?: boolean; enforceExternalSchedule?: boolean; allowManualFallback?: boolean }
+    options?: {
+      forceRefresh?: boolean;
+      enforceExternalSchedule?: boolean;
+      allowManualFallback?: boolean;
+      persistQuoteRecord?: boolean;
+    }
   ) {
     const draft = DeliveryQuoteDraftSchema.parse(draftPayload);
     if (draft.mode !== OrderFulfillmentModeEnum.enum.DELIVERY) {
@@ -463,7 +507,8 @@ export class DeliveriesService {
       this.ensureExternalOrderQuoteScheduleAllowed(draft.scheduledAt);
     }
 
-    const requestHash = this.quoteRequestHash(draft);
+    const pricingConfig = await this.deliveryPricingConfig.getConfig();
+    const requestHash = this.quoteRequestHash(draft, pricingConfig);
     const quoteToken = this.quoteToken(requestHash);
     if (!options?.forceRefresh) {
       const existing = await this.readQuoteRecord(quoteToken);
@@ -482,7 +527,7 @@ export class DeliveriesService {
     const distanceKm = this.resolveDeliveryDistanceKm(input);
     const normalized = DeliveryQuoteResponseSchema.parse({
       provider: 'LOCAL',
-      fee: this.resolveFixedDeliveryFee(distanceKm),
+      fee: this.resolveFixedDeliveryFee(distanceKm, pricingConfig),
       currencyCode: 'BRL',
       source: 'MANUAL_FALLBACK',
       status: 'QUOTED',
@@ -493,23 +538,39 @@ export class DeliveriesService {
       breakdownLabel: null
     });
 
+    if (options?.persistQuoteRecord === false) {
+      return DeliveryQuoteResponseSchema.parse({
+        ...normalized,
+        quoteToken: null,
+        providerQuoteId: null,
+        expiresAt: null
+      });
+    }
+
     await this.saveQuoteRecord(quoteToken, requestHash, normalized);
     return normalized;
   }
 
-  private resolveFixedDeliveryFee(distanceKm: number | null) {
-    const exceedsDistanceLimit =
-      typeof distanceKm === 'number' && Number.isFinite(distanceKm) && distanceKm > DELIVERY_BASE_DISTANCE_LIMIT_KM;
-    return this.toMoney(exceedsDistanceLimit ? DELIVERY_EXTENDED_FEE : DELIVERY_BASE_FEE);
+  private resolveFixedDeliveryFee(distanceKm: number | null, pricingConfig: DeliveryPricingConfig) {
+    if (typeof distanceKm !== 'number' || !Number.isFinite(distanceKm)) {
+      return this.toMoney(pricingConfig.fallbackWithoutCoordinatesFee);
+    }
+
+    const matchedTier = pricingConfig.tiers.find((tier) => distanceKm <= tier.maxKm);
+    if (!matchedTier) {
+      throw new BadRequestException(pricingConfig.outOfAreaMessage);
+    }
+
+    return this.toMoney(matchedTier.fee);
   }
 
   private assertQuoteInputReady(input: DeliveryQuoteInput) {
     if (!input.dropoffAddress.trim()) {
-      throw new BadRequestException('Endereco de entrega obrigatorio para cotar frete.');
+      throw new BadRequestException('Endereço de entrega obrigatório para cotar frete.');
     }
     if (this.isPickupAndDropoffSameAddress(input.pickupAddress, input.dropoffAddress)) {
       throw new BadRequestException(
-        'O endereco de entrega coincide com o ponto de retirada. Selecione retirada ou informe outro destino.'
+        'O endereço de entrega coincide com o ponto de retirada. Selecione retirada ou informe outro destino.'
       );
     }
   }
@@ -558,7 +619,7 @@ export class DeliveriesService {
   private ensureExternalOrderQuoteScheduleAllowed(scheduledAt: string | null | undefined) {
     const parsed = scheduledAt ? new Date(scheduledAt) : null;
     if (!parsed || Number.isNaN(parsed.getTime())) {
-      throw new BadRequestException('Data/hora do pedido invalida.');
+      throw new BadRequestException('Data/hora do pedido inválida.');
     }
     if (isExternalOrderScheduleAllowed(parsed)) return;
     throw new BadRequestException(externalOrderScheduleErrorMessage());
@@ -570,20 +631,22 @@ export class DeliveriesService {
 
   private buildQuoteInput(draft: DeliveryQuoteDraft): DeliveryQuoteInput {
     const pickupOrigin = this.pickupOrigin();
+    const totalUnits = this.resolveDraftManifestTotalUnits(draft);
+    const customer = this.normalizeQuoteCustomer(draft.customer);
     return {
       orderId: null,
       pickupName: pickupOrigin.name,
       pickupPhone: pickupOrigin.phone,
       pickupAddress: pickupOrigin.address,
-      dropoffName: this.normalizeText(draft.customer.name) || 'Cliente',
-      dropoffPhone: this.normalizeText(draft.customer.phone) || '',
-      dropoffAddress: this.normalizeText(draft.customer.address),
-      dropoffPlaceId: this.normalizeText(draft.customer.placeId) || null,
-      dropoffLat: typeof draft.customer.lat === 'number' && Number.isFinite(draft.customer.lat) ? draft.customer.lat : null,
-      dropoffLng: typeof draft.customer.lng === 'number' && Number.isFinite(draft.customer.lng) ? draft.customer.lng : null,
+      dropoffName: this.normalizeText(customer.name) || 'Cliente',
+      dropoffPhone: this.normalizeText(customer.phone) || '',
+      dropoffAddress: this.normalizeText(customer.address),
+      dropoffPlaceId: this.normalizeText(customer.placeId) || null,
+      dropoffLat: typeof customer.lat === 'number' && Number.isFinite(customer.lat) ? customer.lat : null,
+      dropoffLng: typeof customer.lng === 'number' && Number.isFinite(customer.lng) ? customer.lng : null,
       scheduledAt: draft.scheduledAt,
       orderTotal: this.toMoney(draft.manifest.subtotal),
-      totalUnits: Math.max(Math.floor(draft.manifest.totalUnits || 0), 0),
+      totalUnits,
       manifestSummary: this.buildManifestSummary(draft.manifest.items),
       items: draft.manifest.items.map((item) => ({ name: item.name, quantity: item.quantity }))
     };
@@ -627,7 +690,59 @@ export class DeliveriesService {
     };
   }
 
-  private quoteRequestHash(draft: DeliveryQuoteDraft) {
+  private resolveDraftManifestTotalUnits(draft: DeliveryQuoteDraft) {
+    return draft.manifest.items.reduce(
+      (sum, item) => sum + Math.max(Math.floor(Number(item.quantity) || 0), 0),
+      0
+    );
+  }
+
+  private buildQuoteAddressSummary(input: {
+    addressLine1?: string | null;
+    addressLine2?: string | null;
+    neighborhood?: string | null;
+    city?: string | null;
+    state?: string | null;
+    postalCode?: string | null;
+  }) {
+    const addressLine1 = this.normalizeText(input.addressLine1) || null;
+    const addressLine2 = this.normalizeText(input.addressLine2) || null;
+    const neighborhood = this.normalizeText(input.neighborhood) || null;
+    const city = this.normalizeText(input.city) || null;
+    const state = this.normalizeText(input.state)?.toUpperCase() || null;
+    const postalCode = this.normalizeText(input.postalCode) || null;
+    const cityAndState = city && state ? `${city} - ${state}` : city || state || null;
+    const parts = [addressLine1, addressLine2, neighborhood, cityAndState, postalCode].filter(Boolean);
+    return parts.length > 0 ? parts.join(', ') : null;
+  }
+
+  private normalizeQuoteCustomer(customer: DeliveryQuoteDraft['customer']) {
+    const normalizedAddress = normalizeCustomerAddressPayload({
+      address: customer.address ?? null,
+      addressLine1: customer.addressLine1 ?? null,
+      addressLine2: customer.addressLine2 ?? null,
+      neighborhood: customer.neighborhood ?? null,
+      city: customer.city ?? null,
+      state: customer.state ?? null,
+      postalCode: customer.postalCode ?? null,
+      country: customer.country ?? null,
+      placeId: customer.placeId ?? null,
+      lat: customer.lat ?? null,
+      lng: customer.lng ?? null,
+      deliveryNotes: customer.deliveryNotes ?? null
+    });
+    const structuredSummary = this.buildQuoteAddressSummary(normalizedAddress);
+
+    return {
+      name: this.normalizeText(customer.name) || null,
+      phone: this.normalizeText(customer.phone) || null,
+      ...normalizedAddress,
+      address: structuredSummary || normalizedAddress.address
+    };
+  }
+
+  private quoteRequestHash(draft: DeliveryQuoteDraft, pricingConfig: DeliveryPricingConfig) {
+    const customer = this.normalizeQuoteCustomer(draft.customer);
     const itemSignature = draft.manifest.items
       .map((item) => ({
         signature: this.resolveManifestItemSignature(item.name),
@@ -645,17 +760,20 @@ export class DeliveriesService {
       .update(
         JSON.stringify({
           pricingRuleVersion: DELIVERY_PRICING_RULE_VERSION,
+          pricingConfig: {
+            tiers: pricingConfig.tiers,
+            fallbackWithoutCoordinatesFee: pricingConfig.fallbackWithoutCoordinatesFee,
+            outOfAreaMessage: pricingConfig.outOfAreaMessage
+          },
           mode: draft.mode,
           scheduledAt: draft.scheduledAt,
           pickupAddress: this.pickupOriginKey(),
-          customerAddress: this.normalizeText(draft.customer.address),
-          customerPlaceId: this.normalizeText(draft.customer.placeId),
-          customerLat:
-            typeof draft.customer.lat === 'number' && Number.isFinite(draft.customer.lat) ? draft.customer.lat : null,
-          customerLng:
-            typeof draft.customer.lng === 'number' && Number.isFinite(draft.customer.lng) ? draft.customer.lng : null,
+          customerAddress: this.normalizeText(customer.address),
+          customerPlaceId: this.normalizeText(customer.placeId),
+          customerLat: typeof customer.lat === 'number' && Number.isFinite(customer.lat) ? customer.lat : null,
+          customerLng: typeof customer.lng === 'number' && Number.isFinite(customer.lng) ? customer.lng : null,
           subtotal: this.toMoney(draft.manifest.subtotal),
-          totalUnits: draft.manifest.totalUnits,
+          totalUnits: this.resolveDraftManifestTotalUnits(draft),
           items: itemSignature
         })
       )
@@ -779,10 +897,39 @@ export class DeliveriesService {
     });
 
     if (!order) {
-      throw new NotFoundException('Pedido nao encontrado.');
+      throw new NotFoundException('Pedido não encontrado.');
     }
 
     return order;
+  }
+
+  private resolveOrderCustomerProfile(order: OrderWithDeliveryContext) {
+    return {
+      name: String(order.customerName ?? order.customer?.name ?? '').trim(),
+      phone: String(order.customerPhone ?? order.customer?.phone ?? '').trim(),
+      address: this.normalizeText(order.customerAddress ?? order.customer?.address) || null,
+      addressLine1: this.normalizeText(order.customerAddressLine1 ?? order.customer?.addressLine1) || null,
+      addressLine2: this.normalizeText(order.customerAddressLine2 ?? order.customer?.addressLine2) || null,
+      neighborhood: this.normalizeText(order.customerNeighborhood ?? order.customer?.neighborhood) || null,
+      city: this.normalizeText(order.customerCity ?? order.customer?.city) || null,
+      state: this.normalizeText(order.customerState ?? order.customer?.state) || null,
+      postalCode: this.normalizeText(order.customerPostalCode ?? order.customer?.postalCode) || null,
+      country: this.normalizeText(order.customerCountry ?? order.customer?.country) || null,
+      placeId: this.normalizeText(order.customerPlaceId ?? order.customer?.placeId) || null,
+      lat:
+        typeof order.customerLat === 'number' && Number.isFinite(order.customerLat)
+          ? order.customerLat
+          : typeof order.customer?.lat === 'number' && Number.isFinite(order.customer.lat)
+            ? order.customer.lat
+            : null,
+      lng:
+        typeof order.customerLng === 'number' && Number.isFinite(order.customerLng)
+          ? order.customerLng
+          : typeof order.customer?.lng === 'number' && Number.isFinite(order.customer.lng)
+            ? order.customer.lng
+            : null,
+      deliveryNotes: this.normalizeText(order.customerDeliveryNotes ?? order.customer?.deliveryNotes) || null
+    };
   }
 
   private buildOrderDraft(order: OrderWithDeliveryContext): DeliveryDraft {
@@ -791,17 +938,16 @@ export class DeliveriesService {
       name: item.product?.name || `Produto ${item.productId}`,
       quantity: item.quantity
     }));
+    const customer = this.resolveOrderCustomerProfile(order);
 
     return {
       orderId: order.id,
-      customerName: (order.customer?.name || '').trim(),
-      customerPhone: (order.customer?.phone || '').trim(),
-      dropoffAddress: this.buildCustomerAddress(order.customer),
-      dropoffPlaceId: this.normalizeText(order.customer?.placeId) || null,
-      dropoffLat:
-        typeof order.customer?.lat === 'number' && Number.isFinite(order.customer.lat) ? order.customer.lat : null,
-      dropoffLng:
-        typeof order.customer?.lng === 'number' && Number.isFinite(order.customer.lng) ? order.customer.lng : null,
+      customerName: customer.name,
+      customerPhone: customer.phone,
+      dropoffAddress: this.buildCustomerAddress(order),
+      dropoffPlaceId: customer.placeId,
+      dropoffLat: customer.lat,
+      dropoffLng: customer.lng,
       orderTotal: this.toMoney(order.total ?? 0),
       totalUnits: items.reduce((sum, item) => sum + Math.max(Math.floor(item.quantity || 0), 0), 0),
       scheduledAt: order.scheduledAt?.toISOString() || '',
@@ -811,11 +957,12 @@ export class DeliveriesService {
   }
 
   private collectMissingRequirements(order: OrderWithDeliveryContext, draft: DeliveryDraft) {
+    const customer = this.resolveOrderCustomerProfile(order);
     return [
-      ...(!this.hasPickupOriginConfigured() ? ['origem de coleta sem endereco configurado'] : []),
-      ...(!order.customer?.name?.trim() ? ['cliente sem nome'] : []),
-      ...(!order.customer?.phone?.trim() ? ['cliente sem telefone'] : []),
-      ...(!draft.dropoffAddress ? ['cliente sem endereco completo para entrega'] : []),
+      ...(!this.hasPickupOriginConfigured() ? ['origem de coleta sem endereço configurado'] : []),
+      ...(!customer.name ? ['cliente sem nome'] : []),
+      ...(!customer.phone ? ['cliente sem telefone'] : []),
+      ...(!draft.dropoffAddress ? ['cliente sem endereço completo para entrega'] : []),
       ...((order.items || []).length === 0 ? ['pedido sem itens'] : [])
     ];
   }
@@ -824,8 +971,8 @@ export class DeliveriesService {
     return roundMoney(value);
   }
 
-  private buildCustomerAddress(customer?: OrderWithDeliveryContext['customer'] | null) {
-    if (!customer) return '';
+  private buildCustomerAddress(order: OrderWithDeliveryContext) {
+    const customer = this.resolveOrderCustomerProfile(order);
 
     const normalizedFallback = (customer.address || '').trim();
     const cityState = [customer.city, customer.state].filter(Boolean).join(' - ');

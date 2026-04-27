@@ -108,7 +108,6 @@ ABERTO -> CONFIRMADO -> EM_PREPARACAO -> PRONTO -> ENTREGUE
 
 ### Integracoes visiveis em `Pedidos`
 
-- WhatsApp Flow: o launch local funciona por preview local estavel.
 - Producao: fila e proxima fornada continuam integradas.
 - Entrega: frete calculado internamente no backend e fluxo local persistente.
 - Pagamento: continua registrando parcial ou total.

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Delete, Inject, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Delete, Inject, UploadedFile, UseInterceptors, Query } from '@nestjs/common';
 import { InventoryService } from './inventory.service.js';
 import {
   InventoryProductsService,
@@ -66,6 +66,11 @@ export class InventoryController {
     return this.service.overview();
   }
 
+  @Get('inventory-price-board')
+  listPriceBoard() {
+    return this.service.listPriceBoard();
+  }
+
   @Post('inventory-items')
   createItem(@Body() body: unknown) {
     return this.service.createItem(body);
@@ -76,9 +81,19 @@ export class InventoryController {
     return this.service.updateItem(parseWithSchema(idSchema, id), body);
   }
 
+  @Put('inventory-items/:id/purchase-price')
+  updatePurchasePrice(@Param('id') id: string, @Body() body: unknown) {
+    return this.service.updatePurchasePrice(parseWithSchema(idSchema, id), body);
+  }
+
   @Post('inventory-items/refresh-purchase-costs')
   refreshPurchaseCosts() {
     return this.service.refreshPurchaseCosts();
+  }
+
+  @Post('inventory-items/research-price-baseline')
+  applyResearchPriceBaseline() {
+    return this.service.applyResearchPriceBaseline();
   }
 
   @Post('inventory-items/:id/effective-balance')
@@ -93,18 +108,13 @@ export class InventoryController {
   }
 
   @Get('inventory-movements')
-  listMovements() {
-    return this.service.listMovements();
+  listMovements(@Query('limit') limit?: string) {
+    return this.service.listMovements(limit ? parseWithSchema(idSchema, limit) : undefined);
   }
 
   @Post('inventory-movements')
   createMovement(@Body() body: unknown) {
     return this.service.createMovement(body);
-  }
-
-  @Post('inventory-mass-ready/prepare')
-  prepareMassReady(@Body() body: unknown) {
-    return this.service.prepareMassReady(body);
   }
 
   @Delete('inventory-movements/:id')

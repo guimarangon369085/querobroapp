@@ -127,7 +127,7 @@ test(
     });
     assert.equal(updatedOrder.scheduledAt, rescheduledAt);
 
-    const transitions = ['CONFIRMADO', 'EM_PREPARACAO', 'PRONTO', 'ENTREGUE'];
+    const transitions = ['PRONTO', 'ENTREGUE'];
     let lastOrder = updatedOrder;
 
     for (const status of transitions) {

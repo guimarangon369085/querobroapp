@@ -39,6 +39,9 @@ stop_pattern() {
 }
 
 stop_pattern "pnpm --filter @querobroapp/api dev" "pnpm api dev"
+stop_pattern "pnpm dev:web:published-local" "pnpm public mirror"
+stop_pattern "node scripts/public-site-mirror.mjs" "public mirror"
+stop_pattern "pnpm --filter @querobroapp/web dev:ops-local" "pnpm web ops-local"
 stop_pattern "pnpm --filter @querobroapp/web dev" "pnpm web dev"
 stop_pattern "tsx watch src/main.ts" "tsx watch API"
 stop_pattern "next dev -H 127.0.0.1" "next dev"

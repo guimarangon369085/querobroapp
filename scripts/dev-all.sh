@@ -14,10 +14,21 @@ if [ -z "$PNPM_BIN" ]; then
   exit 1
 fi
 
+bash "$ROOT/scripts/check-local-node-version.sh"
+bash "$ROOT/scripts/clean-local-sqlite-paths.sh"
+bash "$ROOT/scripts/check-local-env.sh"
+bash "$ROOT/scripts/check-prisma-migration-drift.sh"
+
 API_PID=""
+MIRROR_PID=""
 WEB_PID=""
 SHUTDOWN_DONE=0
 API_AUTH_ENABLED="${APP_AUTH_ENABLED:-false}"
+API_LOG="/tmp/querobroapp-api.log"
+MIRROR_LOG="/tmp/querobroapp-public-mirror.log"
+WEB_LOG="/tmp/querobroapp-web.log"
+MIRROR_URL="http://127.0.0.1:3000/pedido"
+OPS_WEB_URL="http://127.0.0.1:3003/pedidos"
 
 wait_for_http() {
   local name="$1"
@@ -121,6 +132,7 @@ cleanup() {
   echo "Encerrando ambiente QUEROBROAPP..."
 
   terminate_managed_process "$WEB_PID" "WEB"
+  terminate_managed_process "$MIRROR_PID" "MIRROR"
   terminate_managed_process "$API_PID" "API"
 
   ./scripts/kill-ports.sh >/dev/null 2>&1 || true
@@ -136,33 +148,47 @@ trap cleanup EXIT INT TERM HUP
 "$PNPM_BIN" --filter @querobroapp/shared build
 "$PNPM_BIN" --filter @querobroapp/api prisma:migrate:dev
 
-# Start API and Web in background and keep this shell alive as lifecycle owner.
-APP_AUTH_ENABLED="$API_AUTH_ENABLED" "$PNPM_BIN" --filter @querobroapp/api dev > /tmp/querobroapp-api.log 2>&1 &
+: > "$API_LOG"
+: > "$MIRROR_LOG"
+: > "$WEB_LOG"
+
+# Start API, published mirror and local ops web in background and keep this shell alive.
+APP_AUTH_ENABLED="$API_AUTH_ENABLED" "$PNPM_BIN" --filter @querobroapp/api dev > "$API_LOG" 2>&1 &
 API_PID=$!
 
-"$PNPM_BIN" --filter @querobroapp/web dev > /tmp/querobroapp-web.log 2>&1 &
+"$PNPM_BIN" dev:web:published-local > "$MIRROR_LOG" 2>&1 &
+MIRROR_PID=$!
+
+"$PNPM_BIN" dev:web:ops-local > "$WEB_LOG" 2>&1 &
 WEB_PID=$!
 
 cat <<EOF
-API PID: $API_PID (logs: /tmp/querobroapp-api.log)
-WEB PID: $WEB_PID (logs: /tmp/querobroapp-web.log)
+API PID: $API_PID (logs: $API_LOG)
+MIRROR PID: $MIRROR_PID (logs: $MIRROR_LOG)
+WEB PID: $WEB_PID (logs: $WEB_LOG)
 EOF
 
 wait_for_http "API" "http://127.0.0.1:3001/health" 120
-./scripts/wait-web-dev-ready.sh "http://127.0.0.1:3000/pedidos" 120
+wait_for_http "MIRROR" "$MIRROR_URL" 120
+./scripts/wait-web-dev-ready.sh "$OPS_WEB_URL" 120
 
 if command -v open >/dev/null 2>&1; then
-  open "http://127.0.0.1:3000/pedidos" >/dev/null 2>&1 || true
+  open "$OPS_WEB_URL" >/dev/null 2>&1 || true
 elif command -v xdg-open >/dev/null 2>&1; then
-  xdg-open "http://127.0.0.1:3000/pedidos" >/dev/null 2>&1 || true
+  xdg-open "$OPS_WEB_URL" >/dev/null 2>&1 || true
 fi
 
-echo "URL: http://127.0.0.1:3000/pedidos"
-echo "Feche esta janela (ou Ctrl+C) para encerrar API e Web."
+echo "Mirror: $MIRROR_URL"
+echo "Ops: $OPS_WEB_URL"
+echo "Feche esta janela (ou Ctrl+C) para encerrar API, mirror e web."
 
 while true; do
   if ! kill -0 "$API_PID" >/dev/null 2>&1; then
     echo "API encerrou inesperadamente."
+    exit 1
+  fi
+  if ! kill -0 "$MIRROR_PID" >/dev/null 2>&1; then
+    echo "MIRROR encerrou inesperadamente."
     exit 1
   fi
   if ! kill -0 "$WEB_PID" >/dev/null 2>&1; then

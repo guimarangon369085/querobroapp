@@ -13,9 +13,20 @@ if [ -z "$PNPM_BIN" ]; then
   exit 1
 fi
 
+bash "$ROOT/scripts/check-local-node-version.sh"
+bash "$ROOT/scripts/clean-local-sqlite-paths.sh"
+bash "$ROOT/scripts/check-local-env.sh"
+bash "$ROOT/scripts/check-prisma-migration-drift.sh"
+
 API_PID=""
+MIRROR_PID=""
 WEB_PID=""
 SHUTDOWN_DONE=0
+API_LOG="/tmp/querobroapp-api.log"
+MIRROR_LOG="/tmp/querobroapp-public-mirror.log"
+WEB_LOG="/tmp/querobroapp-web.log"
+MIRROR_URL="http://127.0.0.1:3000/pedido"
+OPS_WEB_URL="http://127.0.0.1:3003/pedidos"
 
 wait_for_http() {
   local name="$1"
@@ -116,6 +127,7 @@ cleanup() {
   SHUTDOWN_DONE=1
 
   terminate_managed_process "$WEB_PID" "WEB"
+  terminate_managed_process "$MIRROR_PID" "MIRROR"
   terminate_managed_process "$API_PID" "API"
   ./scripts/kill-ports.sh >/dev/null 2>&1 || true
   return "$exit_code"
@@ -128,19 +140,28 @@ trap cleanup EXIT INT TERM HUP
 "$PNPM_BIN" --filter @querobroapp/shared build
 "$PNPM_BIN" --filter @querobroapp/api prisma:migrate:dev
 
-"$PNPM_BIN" --filter @querobroapp/api dev > /tmp/querobroapp-api.log 2>&1 &
+: > "$API_LOG"
+: > "$MIRROR_LOG"
+: > "$WEB_LOG"
+
+"$PNPM_BIN" --filter @querobroapp/api dev > "$API_LOG" 2>&1 &
 API_PID=$!
 
-"$PNPM_BIN" --filter @querobroapp/web dev > /tmp/querobroapp-web.log 2>&1 &
+"$PNPM_BIN" dev:web:published-local > "$MIRROR_LOG" 2>&1 &
+MIRROR_PID=$!
+
+"$PNPM_BIN" dev:web:ops-local > "$WEB_LOG" 2>&1 &
 WEB_PID=$!
 
 cat <<OUT
-API PID: $API_PID (logs: /tmp/querobroapp-api.log)
-WEB PID: $WEB_PID (logs: /tmp/querobroapp-web.log)
+API PID: $API_PID (logs: $API_LOG)
+MIRROR PID: $MIRROR_PID (logs: $MIRROR_LOG)
+WEB PID: $WEB_PID (logs: $WEB_LOG)
 OUT
 
 wait_for_http "API" "http://127.0.0.1:3001/health" 120
-./scripts/wait-web-dev-ready.sh "http://127.0.0.1:3000/pedidos" 120
+wait_for_http "MIRROR" "$MIRROR_URL" 120
+./scripts/wait-web-dev-ready.sh "$OPS_WEB_URL" 120
 
 echo "Executando pnpm qa:smoke..."
 "$PNPM_BIN" qa:smoke

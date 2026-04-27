@@ -250,7 +250,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
         notify({
           type: 'error',
           title: 'Falha ao desfazer',
-          message: err instanceof Error ? err.message : 'Nao foi possivel desfazer a acao.'
+          message: err instanceof Error ? err.message : 'Não foi possível desfazer a ação.'
         });
       }
     },

@@ -126,6 +126,147 @@ Objetivo da sessao:
 No fim, registrar nova entrada no HANDOFF_LOG.
 ```
 
+## Entrada 049
+
+### 1) Metadados
+
+- Data/hora: 2026-04-14 23:05 -03
+- Canal origem: Codex Terminal
+- Canal destino: Codex Terminal / ChatGPT Online-Mobile
+- Repo path: `/Users/gui/querobroapp`
+- Branch: `codex/dashboard-cogs-order-ingredients-2026-03-23`
+- Commit base (opcional): `f8fca96`
+
+### 2) Objetivo da sessao encerrada
+
+- Objetivo: Fechar a grande rodada de publicacao de `AMIGAS DA BROA`, consolidar estoque direto/auto-inativacao e revisar o produto para encerramento do dia.
+- Resultado entregue: fluxo publicado e validado com `AMIGAS DA BROA`, `Caixas Mistas` no padrao de gaveta, cupom incidindo so em Broas, acentuacao PT-BR revisada nas copys expostas e ambiente local limpo para retomada.
+- O que ficou pendente: validacao de uso real com mais itens de `AMIGAS DA BROA` cadastrados e refinamento fino de layout/copy conforme o catalogo crescer.
+
+### 3) Mudancas tecnicas
+
+- Arquivos alterados:
+- `apps/web/src/app/pedido/public-order-page.tsx`
+- `apps/web/src/app/estoque/page.tsx`
+- `apps/web/src/features/orders/order-box-catalog.ts`
+- `apps/web/src/features/orders/order-card-artwork.tsx`
+- `apps/api/src/modules/orders/orders.service.ts`
+- `apps/api/src/modules/inventory/inventory-products.service.ts`
+- `apps/api/src/modules/inventory/inventory.service.ts`
+- `apps/api/src/modules/production/production.service.ts`
+- `apps/api/src/modules/orders/order-notifications.service.ts`
+- `docs/PROJECT_SNAPSHOT.md`
+- `docs/NEXT_STEP_PLAN.md`
+- Comportamento novo:
+- `AMIGAS DA BROA` usa estoque direto por produto, sem ficha tecnica/BOM e com inativacao automatica quando o saldo zera.
+- reposicao manual reativa o produto automaticamente.
+- cupons passaram a afetar apenas as Broas.
+- `Caixas Mistas` ganharam card unico, collage dedicada e gaveta com adicao por sabor.
+- o lote final revisou acentuacoes em Portugues Brasileiro nas interfaces e nas mensagens expostas da API.
+- Riscos/regressoes:
+- o repo permanece com grande volume de mudancas locais nao consolidadas em commit unico; exige cuidado antes de refatoracoes amplas.
+- ainda vale fazer prova real em mobile com mais produtos `AMIGAS` para detectar overflow/crop residual de imagens muito verticais.
+
+### 4) Validacao
+
+- Comandos executados:
+- `pnpm --filter @querobroapp/shared build`
+- `pnpm --filter @querobroapp/api build`
+- `pnpm --filter @querobroapp/web build`
+- `pnpm --filter @querobroapp/web exec tsc -p tsconfig.json --noEmit`
+- `pnpm validate:public-deploy`
+- `./scripts/stop-all.sh`
+- Testes que passaram:
+- builds de `shared`, `api` e `web`
+- validacao publica final com `/=200`, `/pedido=200`, `/pedidos -> /acesso`, `apiHealth=ok`, preview `PIX_PENDING` e quote `LOCAL / MANUAL_FALLBACK`
+- Testes nao executados (e motivo):
+- `qa:browser-smoke` e `qa:critical-e2e` nao foram reexecutados neste fechamento; o ciclo foi de consolidacao/publicacao final, nao de QA pesado.
+
+### 5) Contexto para retomada
+
+- Decisoes importantes:
+- manter `AMIGAS DA BROA` sem BOM e com estoque direto no proprio produto.
+- manter cupom restrito a Broas.
+- manter `Caixas Mistas` e `Monte Sua Caixa` convergindo no padrao de card + gaveta, mas preservando logicas diferentes de composicao.
+- Suposicoes feitas:
+- a infraestrutura publicada atual (web + api) ja esta estabilizada para receber novos itens `AMIGAS` sem nova mudanca estrutural.
+- Bloqueios:
+- nenhum bloqueio tecnico ativo.
+- Proximo passo recomendado (1 acao objetiva):
+- cadastrar mais 2 a 4 produtos reais de `AMIGAS DA BROA` e validar o comportamento completo do cliente em mobile real.
+
+### 6) Prompt pronto para proximo canal
+
+```txt
+Continuar o projeto querobroapp com base neste handoff.
+Leia primeiro:
+- docs/MEMORY_VAULT.md
+- docs/querobroapp-context.md
+- docs/NEXT_STEP_PLAN.md
+- ultimas 80 linhas de docs/HANDOFF_LOG.md
+
+Objetivo da sessao:
+refinar e validar a sessao AMIGAS DA BROA com novos produtos reais, sem quebrar o fluxo publico de /pedido
+
+No fim, registrar nova entrada no HANDOFF_LOG.
+```
+
+## 2026-04-16 21:35 -03
+
+### 1) Metadados
+
+- Data/hora: 2026-04-16 21:35:11 -03
+- Branch: `codex/dashboard-cogs-order-ingredients-2026-03-23`
+- Objetivo da sessao: Consolidar o pacote publicado de `AMIGAS DA BROA`, estabilizar fluxos publicos/operacionais relacionados e alinhar o feed publico do catalogo do WhatsApp com o catalogo atual da web.
+
+### 2) O que foi entregue
+
+- Resultado principal:
+  - `AMIGAS DA BROA` foi integrada ao `/pedido` e ao quick create de `/pedidos`, com estoque direto por produto, auto-inativacao por saldo, cupom incidindo apenas sobre Broas e refinamentos de UI dos cards/gavetas.
+  - O erro de frete no fechamento com endereco alternativo foi corrigido ao alinhar preview e submit entre `/pedido`, `/pedidos` e API.
+  - O feed publico `meta-catalog.csv` foi atualizado e publicado com `18` linhas, incluindo `AMIGAS DA BROA` em grupo proprio e `Caixa Mista de Romeu e Julieta`.
+- Arquivos alterados:
+  - `apps/api/src/modules/orders/orders.service.ts`
+  - `apps/api/src/modules/deliveries/deliveries.service.ts`
+  - `apps/api/src/modules/inventory/*`
+  - `apps/web/src/app/pedido/public-order-page.tsx`
+  - `apps/web/src/features/orders/*`
+  - `apps/web/public/meta-catalog.csv`
+  - `docs/PROJECT_SNAPSHOT.md`
+  - `docs/NEXT_STEP_PLAN.md`
+- Comandos de validacao executados:
+  - `pnpm --filter @querobroapp/api build`
+  - `pnpm --filter @querobroapp/web build`
+  - `node --test tests/delivery-quote-intake-consistency.test.mjs`
+  - `pnpm validate:public-deploy`
+- Testes que passaram:
+  - build da API e do web
+  - validacao publica do deploy
+  - teste de consistencia de frete entre quote e intake
+- Testes nao executados (e motivo):
+  - `pnpm qa:browser-smoke` e `pnpm qa:critical-e2e` nao foram reexecutados neste fechamento; o dia ficou concentrado em ajustes incrementais e validacoes direcionadas de build/deploy/fluxo critico.
+
+### 3) Estado tecnico
+
+- O que esta estavel:
+  - `https://querobroa.com.br/pedido` publicado com `AMIGAS DA BROA`
+  - quick create de `/pedidos` com `AMIGAS`
+  - feed publico `https://querobroa.com.br/meta-catalog.csv` atualizado
+  - deploy web Railway `548b8cc5-de8c-4ce0-b68b-3c6292fb03b1` em `SUCCESS`
+- Riscos ou pendencias abertas:
+  - a organizacao final do grupo `AMIGAS DA BROA` dentro do Commerce Manager ainda depende de sessao autenticada no Meta; o feed ja publica os labels necessarios.
+  - a worktree local continua ampla e suja por varios lotes acumulados; nao foi feita limpeza de codigo alem da parada de processos e caches locais.
+- Suposicoes feitas:
+  - o catalogo do WhatsApp/Meta continua dependendo do feed CSV publico, nao de sincronizacao automatica por API do Meta a partir deste repositorio.
+- Comandos atuais de reboot/teste (se houve mudanca):
+  - reboot local continua em `./scripts/dev-all.sh`
+  - parada local em `./scripts/stop-all.sh`
+  - limpeza de cache web em `./scripts/reset-web-dev-cache.sh`
+
+### 4) Proximo passo
+
+- Proxima acao objetiva (1 linha): Entrar autenticado no Commerce Manager e montar/publicar o conjunto separado de `AMIGAS DA BROA` usando os labels do feed ja publicado.
+
 ## Entrada 047
 
 ### 1) Metadados

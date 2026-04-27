@@ -15,6 +15,7 @@ export default function robots(): MetadataRoute.Robots {
           '/clientes',
           '/estoque',
           '/dashboard',
+          '/cupons',
           '/inicio',
           '/jornada',
           '/hoje',
@@ -24,8 +25,7 @@ export default function robots(): MetadataRoute.Robots {
           '/producao',
           '/produtos',
           '/saidas',
-          '/caixa',
-          '/whatsapp-flow'
+          '/caixa'
         ]
       }
     ],

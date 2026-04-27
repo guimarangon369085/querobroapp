@@ -314,6 +314,6 @@ test(
       (sum, movement) => sum + Number(movement.quantity || 0),
       0
     );
-    assert.ok(approxEqual(totalMassReadyReservationsAfterCancel, 1 / 3));
+    assert.ok(approxEqual(totalMassReadyReservationsAfterCancel, 7 / 36));
   }
 );

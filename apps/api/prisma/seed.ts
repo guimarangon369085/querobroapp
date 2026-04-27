@@ -1,6 +1,21 @@
 import { PrismaClient } from '@prisma/client';
+import {
+  MASS_READY_BROAS_PER_RECIPE,
+  OFFICIAL_BROA_FILLING_QTY_PER_UNIT,
+  OFFICIAL_BROA_RECIPE_BUTTER_G,
+  OFFICIAL_BROA_RECIPE_CANJICA_FUBA_G,
+  OFFICIAL_BROA_RECIPE_EGGS_UNITS,
+  OFFICIAL_BROA_RECIPE_MILK_ML,
+  OFFICIAL_BROA_RECIPE_SUGAR_G,
+  OFFICIAL_BROA_RECIPE_WHEAT_FLOUR_G,
+  ORDER_PAPER_BAG_BOX_CAPACITY,
+  ORDER_BOX_UNITS,
+  ORDER_PAPER_MANTEIGA_CM_PER_BOX
+} from '../src/modules/inventory/inventory-formulas.js';
 
 const prisma = new PrismaClient();
+const OFFICIAL_BROA_BOXES_PER_RECIPE = MASS_READY_BROAS_PER_RECIPE / ORDER_BOX_UNITS;
+const OFFICIAL_BROA_PAPER_BAGS_PER_RECIPE = OFFICIAL_BROA_BOXES_PER_RECIPE / ORDER_PAPER_BAG_BOX_CAPACITY;
 
 type ProductSeed = {
   name: string;
@@ -32,7 +47,7 @@ type OrderSeedPayment = {
 type OrderSeed = {
   key: string;
   customerPhone: string;
-  status: 'ABERTO' | 'CONFIRMADO' | 'EM_PREPARACAO' | 'PRONTO' | 'ENTREGUE' | 'CANCELADO';
+  status: 'ABERTO' | 'PRONTO' | 'ENTREGUE' | 'CANCELADO';
   discount?: number;
   daysAgo?: number;
   items: OrderSeedItem[];
@@ -256,29 +271,74 @@ async function ensureBroaBoms(broaProductId: number | undefined, inventoryMap: M
         productId: broaProductId,
         name: bomDef.name,
         saleUnitLabel: 'Caixa com 7 broas',
-        yieldUnits: 21
+        yieldUnits: MASS_READY_BROAS_PER_RECIPE
       }
     });
 
     const baseItems = [
-      { name: 'Farinha de trigo', qtyPerRecipe: 130, qtyPerSaleUnit: 130 / 3, qtyPerUnit: 130 / 21 },
-      { name: 'Fuba de canjica', qtyPerRecipe: 130, qtyPerSaleUnit: 130 / 3, qtyPerUnit: 130 / 21 },
-      { name: 'Acucar', qtyPerRecipe: 120, qtyPerSaleUnit: 40, qtyPerUnit: 120 / 21 },
-      { name: 'Manteiga', qtyPerRecipe: 150, qtyPerSaleUnit: 50, qtyPerUnit: 150 / 21 },
-      { name: 'Leite', qtyPerRecipe: 240, qtyPerSaleUnit: 80, qtyPerUnit: 240 / 21 },
-      { name: 'Ovos', qtyPerRecipe: 6, qtyPerSaleUnit: 2, qtyPerUnit: 6 / 21 },
-      { name: 'Sacola', qtyPerRecipe: 1.5, qtyPerSaleUnit: 0.5, qtyPerUnit: 1 / 14 },
-      { name: 'Caixa de plastico', qtyPerRecipe: 3, qtyPerSaleUnit: 1, qtyPerUnit: 1 / 7 },
-      { name: 'Papel manteiga', qtyPerRecipe: 48, qtyPerSaleUnit: 16, qtyPerUnit: 16 / 7 }
+      {
+        name: 'Farinha de trigo',
+        qtyPerRecipe: OFFICIAL_BROA_RECIPE_WHEAT_FLOUR_G,
+        qtyPerSaleUnit: (OFFICIAL_BROA_RECIPE_WHEAT_FLOUR_G / MASS_READY_BROAS_PER_RECIPE) * ORDER_BOX_UNITS,
+        qtyPerUnit: OFFICIAL_BROA_RECIPE_WHEAT_FLOUR_G / MASS_READY_BROAS_PER_RECIPE
+      },
+      {
+        name: 'Fuba de canjica',
+        qtyPerRecipe: OFFICIAL_BROA_RECIPE_CANJICA_FUBA_G,
+        qtyPerSaleUnit: (OFFICIAL_BROA_RECIPE_CANJICA_FUBA_G / MASS_READY_BROAS_PER_RECIPE) * ORDER_BOX_UNITS,
+        qtyPerUnit: OFFICIAL_BROA_RECIPE_CANJICA_FUBA_G / MASS_READY_BROAS_PER_RECIPE
+      },
+      {
+        name: 'Acucar',
+        qtyPerRecipe: OFFICIAL_BROA_RECIPE_SUGAR_G,
+        qtyPerSaleUnit: (OFFICIAL_BROA_RECIPE_SUGAR_G / MASS_READY_BROAS_PER_RECIPE) * ORDER_BOX_UNITS,
+        qtyPerUnit: OFFICIAL_BROA_RECIPE_SUGAR_G / MASS_READY_BROAS_PER_RECIPE
+      },
+      {
+        name: 'Manteiga',
+        qtyPerRecipe: OFFICIAL_BROA_RECIPE_BUTTER_G,
+        qtyPerSaleUnit: (OFFICIAL_BROA_RECIPE_BUTTER_G / MASS_READY_BROAS_PER_RECIPE) * ORDER_BOX_UNITS,
+        qtyPerUnit: OFFICIAL_BROA_RECIPE_BUTTER_G / MASS_READY_BROAS_PER_RECIPE
+      },
+      {
+        name: 'Leite',
+        qtyPerRecipe: OFFICIAL_BROA_RECIPE_MILK_ML,
+        qtyPerSaleUnit: (OFFICIAL_BROA_RECIPE_MILK_ML / MASS_READY_BROAS_PER_RECIPE) * ORDER_BOX_UNITS,
+        qtyPerUnit: OFFICIAL_BROA_RECIPE_MILK_ML / MASS_READY_BROAS_PER_RECIPE
+      },
+      {
+        name: 'Ovos',
+        qtyPerRecipe: OFFICIAL_BROA_RECIPE_EGGS_UNITS,
+        qtyPerSaleUnit: (OFFICIAL_BROA_RECIPE_EGGS_UNITS / MASS_READY_BROAS_PER_RECIPE) * ORDER_BOX_UNITS,
+        qtyPerUnit: OFFICIAL_BROA_RECIPE_EGGS_UNITS / MASS_READY_BROAS_PER_RECIPE
+      },
+      {
+        name: 'Sacola',
+        qtyPerRecipe: OFFICIAL_BROA_PAPER_BAGS_PER_RECIPE,
+        qtyPerSaleUnit: 1 / ORDER_PAPER_BAG_BOX_CAPACITY,
+        qtyPerUnit: 1 / (ORDER_BOX_UNITS * ORDER_PAPER_BAG_BOX_CAPACITY)
+      },
+      {
+        name: 'Caixa de plastico',
+        qtyPerRecipe: OFFICIAL_BROA_BOXES_PER_RECIPE,
+        qtyPerSaleUnit: 1,
+        qtyPerUnit: 1 / ORDER_BOX_UNITS
+      },
+      {
+        name: 'Papel manteiga',
+        qtyPerRecipe: (ORDER_PAPER_MANTEIGA_CM_PER_BOX / ORDER_BOX_UNITS) * MASS_READY_BROAS_PER_RECIPE,
+        qtyPerSaleUnit: ORDER_PAPER_MANTEIGA_CM_PER_BOX,
+        qtyPerUnit: ORDER_PAPER_MANTEIGA_CM_PER_BOX / ORDER_BOX_UNITS
+      }
     ];
 
     const items = [...baseItems];
     if (bomDef.filling) {
       items.push({
         name: bomDef.filling,
-        qtyPerRecipe: bomDef.qtyPerSaleUnit ? (bomDef.qtyPerSaleUnit * 21) / 7 : 105,
-        qtyPerSaleUnit: bomDef.qtyPerSaleUnit ?? 35,
-        qtyPerUnit: bomDef.qtyPerSaleUnit ? bomDef.qtyPerSaleUnit / 7 : 5
+        qtyPerRecipe: OFFICIAL_BROA_FILLING_QTY_PER_UNIT * MASS_READY_BROAS_PER_RECIPE,
+        qtyPerSaleUnit: OFFICIAL_BROA_FILLING_QTY_PER_UNIT * ORDER_BOX_UNITS,
+        qtyPerUnit: OFFICIAL_BROA_FILLING_QTY_PER_UNIT
       });
     }
 
@@ -321,20 +381,20 @@ async function createInventoryConsumptionForOrder(orderId: number, items: Array<
     if (!bom) continue;
     const unitsPerSale = parseSaleUnits(bom.saleUnitLabel);
     for (const bomItem of bom.items) {
-      let perSale = bomItem.qtyPerSaleUnit ?? null;
-      if (perSale == null && bomItem.qtyPerUnit != null) {
-        perSale = bomItem.qtyPerUnit * unitsPerSale;
+      let perUnit = bomItem.qtyPerUnit ?? null;
+      if (perUnit == null && bomItem.qtyPerSaleUnit != null) {
+        perUnit = unitsPerSale > 0 ? bomItem.qtyPerSaleUnit / unitsPerSale : bomItem.qtyPerSaleUnit;
       }
-      if (perSale == null && bomItem.qtyPerRecipe != null && bom.yieldUnits) {
-        perSale = bomItem.qtyPerRecipe / bom.yieldUnits;
+      if (perUnit == null && bomItem.qtyPerRecipe != null && bom.yieldUnits) {
+        perUnit = bomItem.qtyPerRecipe / bom.yieldUnits;
       }
-      if (perSale == null) continue;
+      if (perUnit == null) continue;
       await prisma.inventoryMovement.create({
         data: {
           itemId: bomItem.itemId,
           orderId,
           type: 'OUT',
-          quantity: perSale * orderItem.quantity,
+          quantity: perUnit * orderItem.quantity,
           reason: 'Consumo por pedido (seed)'
         }
       });
@@ -350,7 +410,7 @@ async function ensureSeedOrders(
     {
       key: '[seed] PED-001',
       customerPhone: '+55 11 98888-0000',
-      status: 'CONFIRMADO',
+      status: 'ABERTO',
       discount: 5,
       daysAgo: 1,
       items: [
