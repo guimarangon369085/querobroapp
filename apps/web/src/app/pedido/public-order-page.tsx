@@ -2,6 +2,7 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  computeSumUpCardPayableTotal,
   EXTERNAL_ORDER_DELIVERY_WINDOWS,
   buildCompanionProductMakerLine,
   resolveCompanionProductProfile,
@@ -1298,7 +1299,9 @@ export function PublicOrderPage({
         : null;
   const hasActiveDeliveryQuoteToken = Boolean(activeDeliveryQuote?.quoteToken);
   const deliveryFee = activeDeliveryQuote?.fee ?? 0;
-  const displayTotal = discountedSubtotal + deliveryFee;
+  const netDisplayTotal = discountedSubtotal + deliveryFee;
+  const displayTotal =
+    sumupEnabled && form.paymentMethod === 'card' ? computeSumUpCardPayableTotal(netDisplayTotal) : netDisplayTotal;
 
   const fetchPublicScheduleAvailability = useCallback(async (options?: {
     requestedDate?: string | null;

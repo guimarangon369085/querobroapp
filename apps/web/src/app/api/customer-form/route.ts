@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { computeSumUpCardPayableTotal } from '@querobroapp/shared';
 import { resolveServerBridgeApiBaseUrl } from '@/lib/server-bridge-api-base-url';
 
 export const dynamic = 'force-dynamic';
@@ -19,12 +20,12 @@ function sanitizePublicCustomerFormSuccessPayload(payload: unknown) {
 
   const orderRecord = order as Record<string, unknown>;
   const intakeRecord = intake as Record<string, unknown>;
+  const paymentMethod = intakeRecord.paymentMethod === 'card' ? 'card' : 'pix';
+  const storedTotal =
+    typeof orderRecord.total === 'number' && Number.isFinite(orderRecord.total) ? orderRecord.total : null;
   return {
     order: {
-      total:
-        typeof orderRecord.total === 'number' && Number.isFinite(orderRecord.total)
-          ? orderRecord.total
-          : null,
+      total: paymentMethod === 'card' && storedTotal != null ? computeSumUpCardPayableTotal(storedTotal) : storedTotal,
       scheduledAt: typeof orderRecord.scheduledAt === 'string' ? orderRecord.scheduledAt : null
     },
     intake: {
@@ -34,7 +35,7 @@ function sanitizePublicCustomerFormSuccessPayload(payload: unknown) {
         typeof intakeRecord.deliveryFee === 'number' && Number.isFinite(intakeRecord.deliveryFee)
           ? intakeRecord.deliveryFee
           : 0,
-      paymentMethod: intakeRecord.paymentMethod === 'card' ? 'card' : 'pix',
+      paymentMethod,
       pixCharge: intakeRecord.pixCharge ?? null,
       cardCheckout: intakeRecord.cardCheckout ?? null
     }

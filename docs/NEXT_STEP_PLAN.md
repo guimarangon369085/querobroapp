@@ -1,6 +1,6 @@
 # NEXT_STEP_PLAN
 
-Ultima atualizacao: 2026-04-26
+Ultima atualizacao: 2026-04-27
 
 ## Objetivo da fase atual
 
@@ -40,6 +40,7 @@ Criterio de pronto:
 
 ### Teste real do canal externo com total final correto
 
+- Publicado em 2026-04-27: o ramo `Cartão` do `/pedido` passou a gross-upar o total do cliente com a taxa online vigente da SumUp (`5,99%`) sem contaminar o valor líquido operacional do pedido. O preview público agora sobe de `R$ 57,00` para `R$ 60,64` no mesmo pedido ao alternar de `PIX` para `CARTÃO`, o `/pedido` publicado atualiza o total em tempo real (`R$ 40,00 -> R$ 42,55` em validação manual) e o checkout hospedado da SumUp abre com esse mesmo valor bruto. Deploys em produção: API `aff8d265-8c32-4493-9552-a55726de8a49` e web `f5d06d60-58b8-4322-98f1-c171477e3033`.
 - Validar em produção o novo ramo `Cartão` da SumUp em `/pedido`, incluindo criação do pedido com `PAYMENT_PENDING`, redirecionamento para checkout hospedado, sync de status e retorno seguro para a tela final.
 - Configurar `ORDER_FORM_BRIDGE_TOKEN` onde houver auth ligada.
 - Montar o `Google Form` real com os labels definidos em `docs/GOOGLE_FORMS_BRIDGE.md`.

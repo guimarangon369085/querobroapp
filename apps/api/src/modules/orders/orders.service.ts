@@ -5,6 +5,7 @@ import { PrismaService } from '../../prisma.service.js';
 import {
   type CardCheckout,
   compareMoney,
+  computeSumUpCardPayableTotal,
   ExternalOrderDeliveryWindowKeyEnum,
   ExternalOrderScheduleAvailabilitySchema,
   ExternalOrderSubmissionPreviewSchema,
@@ -2084,7 +2085,8 @@ export class OrdersService {
 
     const deliveryFee = this.toMoney(deliveryQuote.fee ?? 0);
     const discount = coupon.discountAmount;
-    const total = this.computeOrderTotal(pricedOrder.subtotal, discount, deliveryFee);
+    const netTotal = this.computeOrderTotal(pricedOrder.subtotal, discount, deliveryFee);
+    const total = data.paymentMethod === 'card' ? computeSumUpCardPayableTotal(netTotal) : netTotal;
 
     return ExternalOrderSubmissionPreviewSchema.parse({
       version: 1,

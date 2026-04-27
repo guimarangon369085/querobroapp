@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma.service.js';
 import {
   CardCheckoutSchema,
+  computeSumUpCardPayableTotal,
   moneyToMinorUnits,
   PaymentSchema,
   PaymentStatusEnum,
@@ -800,7 +801,7 @@ export class PaymentsService {
       paymentId: payment.id,
       orderId: payment.orderId,
       orderPublicNumber: input.orderPublicNumber,
-      amount: payment.amount,
+      amount: computeSumUpCardPayableTotal(payment.amount),
       publicAppOrigin: input.publicAppOrigin
     });
 

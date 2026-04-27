@@ -1,8 +1,10 @@
 # PROJECT_SNAPSHOT
 
-Ultima atualizacao: 2026-04-26
+Ultima atualizacao: 2026-04-27
 
 ## Estado atual
+
+- 2026-04-27: o `/pedido` publicado passou a repassar automaticamente ao cliente a taxa de cartão da integração SumUp no total exibido e no checkout hospedado, sem alterar o valor líquido operacional do pedido dentro do app. O backend agora mantém `order.total` e `payment.amount` internos como base líquida, mas calcula o bruto do cartão com gross-up da taxa online vigente da SumUp (`5,99%`) para o preview público, total ao escolher `CARTÃO`, tela `/pedidofinalizado` e valor aberto na própria página da SumUp. Validação pública concluída: preview publicado `PIX = R$ 57,00` vs `CARTÃO = R$ 60,64`, checagem real em `/pedido` com `Tradicional` `R$ 40,00 -> R$ 42,55` ao alternar para cartão, e deploys publicados/validados: API `aff8d265-8c32-4493-9552-a55726de8a49` e web `f5d06d60-58b8-4322-98f1-c171477e3033`.
 
 - 2026-04-26: o fluxo de cupons publicado foi reabilitado ponta a ponta. A API deixou de sobrescrever cadastros vivos com metadados históricos em `dashboard/coupons/analytics`, a tela `/cupons` passou a mesclar `GET /dashboard/coupons` com `GET /dashboard/coupons/analytics` para preservar cadastros editáveis mesmo com uso antigo, e cupons sem linha viva no banco deixaram de ser becos sem saída: agora podem ser recriados pela própria interface com o mesmo código, percentual e limite. Deploys publicados e validados: API `0d7d7251-5561-42f2-8054-132b89951315` e web `650a6438-c55c-4f50-8895-66dae3c4c1e7`, com `pnpm validate:public-deploy` verde. Como recuperação operacional segura, os `5` cupons que existiam apenas no histórico (`BROASVINDAS`, `AISAEDABROA`, `AMIGABROA`, `ASASHAEDABROA`, `CAROLBROAK`) foram recriados em produção como cadastros vivos `inativos`, preservando o histórico de uso e devolvendo `Salvar/Excluir` na UI sem reativar campanha antiga por engano.
 

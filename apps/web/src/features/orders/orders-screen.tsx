@@ -21,6 +21,7 @@ import {
   IconShoppingBag
 } from '@tabler/icons-react';
 import {
+  computeSumUpCardPayableTotal,
   EXTERNAL_ORDER_DELIVERY_WINDOWS,
   normalizeOrderStatus,
   parseAppliedCouponFromNotes,
@@ -1671,7 +1672,10 @@ function OrdersPageContent() {
         returnLabel: 'Voltar para pedidos',
         productSubtotal: Math.max(roundMoney((createdOrder.total || 0) - (created.intake.deliveryFee || 0)), 0),
         order: {
-          total: createdOrder.total ?? null,
+          total:
+            created.intake.paymentMethod === 'card'
+              ? computeSumUpCardPayableTotal(createdOrder.total ?? 0)
+              : createdOrder.total ?? null,
           scheduledAt: createdOrder.scheduledAt ?? null
         },
         intake: {

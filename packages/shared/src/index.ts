@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export * from './lib/money.js';
+export * from './lib/payment-surcharges.js';
 export * from './lib/external-order-schedule.js';
 export * from './lib/business-profile.js';
 

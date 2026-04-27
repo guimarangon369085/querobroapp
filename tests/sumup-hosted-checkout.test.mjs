@@ -212,6 +212,8 @@ test('sumup hosted checkout: preview e intake público respeitam cartão e idemp
   assert.equal(first.intake.pixCharge, null);
   assert.equal(first.intake.cardCheckout.provider, 'SUMUP');
   assert.match(first.intake.cardCheckout.hostedCheckoutUrl, /^https:\/\/checkout\.sumup\.test\/pay\//);
+  assert.equal(preview.order.total > first.order.total, true);
+  assert.equal(fakeSumUp.getCheckout(first.intake.cardCheckout.checkoutId)?.amount, preview.order.total);
   assert.equal(
     fakeSumUp.getCheckout(first.intake.cardCheckout.checkoutId)?.checkout_reference,
     first.intake.cardCheckout.reference
