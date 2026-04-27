@@ -1125,7 +1125,7 @@ export function OrderQuickCreate({
                             </div>
                             {temporarilyOutOfStock ? (
                               <p className="mt-2 text-[0.68rem] font-semibold uppercase leading-5 tracking-[0.08em] text-[color:var(--tone-roast-ink)] sm:text-[0.72rem]">
-                                Temporariamente sem estoque - em breve
+                                Temporariamente sem estoque
                               </p>
                             ) : null}
                             <p className="public-order-box-card__price public-order-box-card__price--companion mt-1 text-sm font-semibold text-[color:var(--ink-strong)] xl:pt-3 xl:text-[1rem]">

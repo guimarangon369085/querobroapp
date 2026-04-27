@@ -4852,7 +4852,7 @@ function OrdersPageContent() {
                           </div>
                           {row.temporarilyOutOfStock ? (
                             <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[color:var(--tone-roast-ink)]">
-                              Temporariamente sem estoque - em breve
+                              Temporariamente sem estoque
                             </p>
                           ) : null}
                         </div>
