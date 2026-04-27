@@ -2324,7 +2324,18 @@ export class DashboardService {
     const statusMix = new Map<string, number>();
     const fulfillmentMix = new Map<string, number>();
     const quoteMix = new Map<string, number>();
-    const deliveryOrdersTotal = activeOrders.filter((order) => order.fulfillmentMode === 'DELIVERY').length;
+    const statementCoverageStart = bankStatementSummary.coverage.availableStart;
+    const statementCoverageEnd = bankStatementSummary.coverage.availableEnd;
+    const statementComparableOrders =
+      rangeStartsAt && bankStatementSummary.coverage.partial && statementCoverageStart && statementCoverageEnd
+        ? activeOrders.filter((order) => {
+            const dayKey = toDayKey(order.createdAt);
+            return dayKey >= statementCoverageStart && dayKey <= statementCoverageEnd;
+          })
+        : activeOrders;
+    const deliveryOrdersTotal = statementComparableOrders.filter(
+      (order) => order.fulfillmentMode === 'DELIVERY',
+    ).length;
 
     let paidRevenueTotal = 0;
     const paidRevenueByDay = new Map<string, number>();
@@ -2341,10 +2352,16 @@ export class DashboardService {
         quoteMix.set(label, (quoteMix.get(label) || 0) + 1);
       }
 
-      const paidAmount = sumBy(
-        order.payments.filter((payment) => payment.status === 'PAGO' || Boolean(payment.paidAt)),
-        (payment) => payment.amount || 0,
-      );
+      const paidPayments = order.payments
+        .filter((payment) => payment.status === 'PAGO' || Boolean(payment.paidAt))
+        .sort((left, right) => {
+          const leftTime = left.paidAt?.getTime() || 0;
+          const rightTime = right.paidAt?.getTime() || 0;
+          if (leftTime !== rightTime) return leftTime - rightTime;
+          return left.id - right.id;
+        });
+      const paidAmount = sumBy(paidPayments, (payment) => payment.amount || 0);
+      const recognizedPaidAmount = Math.min(round2(order.total || 0), round2(paidAmount));
       const balanceDue = Math.max(round2(order.total || 0) - round2(paidAmount), 0);
 
       if (balanceDue > 0.009) {
@@ -2364,15 +2381,20 @@ export class DashboardService {
         });
       }
 
-      for (const payment of order.payments) {
+      paidRevenueTotal = round2(paidRevenueTotal + recognizedPaidAmount);
+
+      let remainingRecognizedAmount = recognizedPaidAmount;
+      for (const payment of paidPayments) {
         const isPaid = payment.status === 'PAGO' || Boolean(payment.paidAt);
         if (!isPaid || !payment.paidAt) continue;
-        paidRevenueTotal += payment.amount || 0;
+        const recognizedChunk = Math.min(round2(payment.amount || 0), remainingRecognizedAmount);
+        if (recognizedChunk <= 0) continue;
         const dayKey = toDayKey(payment.paidAt);
         paidRevenueByDay.set(
           dayKey,
-          round2((paidRevenueByDay.get(dayKey) || 0) + (payment.amount || 0)),
+          round2((paidRevenueByDay.get(dayKey) || 0) + recognizedChunk),
         );
+        remainingRecognizedAmount = round2(remainingRecognizedAmount - recognizedChunk);
       }
     }
 
@@ -2381,7 +2403,7 @@ export class DashboardService {
     const productNetRevenueTotal = sumBy(activeOrders, (order) =>
       Math.max(round2(order.subtotal || 0) - round2(order.discount || 0), 0),
     );
-    const deliveryRevenueTotal = sumBy(activeOrders, (order) => order.deliveryFee || 0);
+    const deliveryRevenueTotal = sumBy(statementComparableOrders, (order) => order.deliveryFee || 0);
     const discountTotal = sumBy(activeOrders, (order) => order.discount || 0);
     const marketingSamplesInvestmentTotal = sumBy(activeOrders, (order) =>
       parseMarketingSamplesDiscountPct(order.notes) != null

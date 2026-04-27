@@ -428,3 +428,112 @@ test('extrato concilia PIX já pago mesmo com order.customerName vazio e pagador
   assert.equal(transaction.matchedPaymentId, payment.id);
   assert.equal(transaction.matchedOrderId, intake.order.id);
 });
+
+test('dashboard limita o recebido ao total do pedido mesmo com pagamento historico excedente', async (t) => {
+  const { apiUrl, shutdown } = await ensureApiServer();
+  const created = {
+    orderId: null,
+    customerId: null,
+    productId: null,
+    paymentId: null,
+  };
+
+  const apiPort = Number(new URL(apiUrl).port || 0);
+  const databasePath = path.join(process.cwd(), 'output', 'tests', `api-${apiPort}.db`);
+  const previousDatabaseUrl = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = `file:${databasePath}`;
+  const prisma = new PrismaClient();
+
+  t.after(async () => {
+    await prisma.$disconnect();
+    if (typeof previousDatabaseUrl === 'undefined') {
+      delete process.env.DATABASE_URL;
+    } else {
+      process.env.DATABASE_URL = previousDatabaseUrl;
+    }
+    if (created.paymentId) {
+      try {
+        await request(apiUrl, `/payments/${created.paymentId}`, { method: 'DELETE' });
+      } catch {}
+    }
+    if (created.orderId) {
+      try {
+        await request(apiUrl, `/orders/${created.orderId}`, { method: 'DELETE' });
+      } catch {}
+    }
+    if (created.customerId) {
+      try {
+        await request(apiUrl, `/customers/${created.customerId}`, { method: 'DELETE' });
+      } catch {}
+    }
+    if (created.productId) {
+      try {
+        await request(apiUrl, `/inventory-products/${created.productId}`, { method: 'DELETE' });
+      } catch {}
+    }
+    await shutdown();
+  });
+
+  const baselineSummary = await request(apiUrl, '/dashboard/summary?days=30');
+  const baselinePaidRevenue = Number(baselineSummary.selectedPeriod.business.kpis.paidRevenueInRange || 0);
+
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const product = await request(apiUrl, '/inventory-products', {
+    method: 'POST',
+    body: {
+      name: `Dashboard Recebido ${suffix}`,
+      category: 'Teste',
+      unit: 'un',
+      price: 45,
+      active: true,
+    },
+  });
+  created.productId = product.id;
+
+  const customer = await request(apiUrl, '/customers', {
+    method: 'POST',
+    body: {
+      name: `Cliente Recebido ${suffix}`,
+      phone: `11${String(Date.now()).slice(-9)}`,
+      address: 'Rua Dashboard, 45',
+    },
+  });
+  created.customerId = customer.id;
+
+  const order = await request(apiUrl, '/orders', {
+    method: 'POST',
+    body: {
+      customerId: customer.id,
+      fulfillmentMode: 'PICKUP',
+      items: [{ productId: product.id, quantity: 1 }],
+    },
+  });
+  created.orderId = order.id;
+
+  const payment = await request(apiUrl, '/payments', {
+    method: 'POST',
+    body: {
+      orderId: order.id,
+      amount: order.total,
+      method: 'pix',
+      status: 'PAGO',
+    },
+  });
+  created.paymentId = payment.id;
+
+  await prisma.payment.update({
+    where: { id: payment.id },
+    data: {
+      amount: Number((order.total + 40).toFixed(2)),
+    },
+  });
+
+  const summary = await request(apiUrl, '/dashboard/summary?days=30');
+  assert.equal(
+    approxEqual(
+      Number(summary.selectedPeriod.business.kpis.paidRevenueInRange || 0) - baselinePaidRevenue,
+      order.total,
+    ),
+    true,
+  );
+});

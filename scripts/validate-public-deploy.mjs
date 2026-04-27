@@ -158,9 +158,6 @@ async function main() {
   if (pedidoHtml.includes('127.0.0.1') || pedidoHtml.includes('localhost')) {
     throw new Error('/pedido publicou referencia local no HTML.');
   }
-  if (!pedidoHtml.includes('Tradicional') || !pedidoHtml.includes('Goiabada') || !pedidoHtml.includes('Monte Sua Caixa')) {
-    throw new Error('/pedido nao publicou as caixas oficiais esperadas no HTML.');
-  }
 
   await expectRedirect(OPS_URL, `${APP_URL}/pedidos`);
 

@@ -98,6 +98,7 @@ Criterio de pronto:
 - Manter no `/dashboard` o bloco de extrato bancario como unica fonte de caixa real, garantindo que importacao de `.eml/.csv/.ofx` continue conciliando PIX pendente e atualizando custos/fluxo imediatamente.
 - Fechado neste lote: o fluxo financeiro deixou de depender da bridge local do Nubank e passou a operar por importacao manual do extrato semanal direto no dashboard.
 - Fechado neste lote: a conciliacao do extrato agora tambem reconhece `PIX` ja pago por `valor + paidAt/dueDate/scheduledAt`, mesmo com `order.customerName` nulo, e o plano de contas do dashboard passou a separar tesouraria, tributos, gateway, embalagem e insumos com breakdown explicito.
+- Fechado neste lote: o `Recebido` do dashboard agora respeita o teto do `total` por pedido, sem inflar por pagamentos historicos excedentes, e o bloco de extrato passou a denunciar cobertura parcial quando o periodo escolhido supera a janela importada.
 - Proximo foco financeiro: revisar apenas os `4` inflows ainda sem match no extrato publicado (`1` repasse SumUp sem pagamento correspondente, `1` PIX de `R$ 73,90`, `1` PIX de `R$ 52,00` com ambiguidade residual e `1` PIX de `R$ 15,00` sem pedido candidato) antes de ampliar novas automacoes contabeis.
 - Manter `Novo pedido` de `/pedidos` estavel em mobile, sem popup deformado nem quebra no bloco de quantidade.
 - Manter `/pedidos` mobile sem FAB flutuante para `Novo pedido`, usando acao inline no proprio painel.

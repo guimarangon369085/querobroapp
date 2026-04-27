@@ -126,6 +126,18 @@ type BankStatementUnmatchedInflow = {
   description: string;
 };
 
+type BankStatementCoverageSummary = {
+  requestedStart: string | null;
+  requestedEnd: string;
+  availableStart: string | null;
+  availableEnd: string | null;
+  latestImportPeriodStart: string | null;
+  latestImportPeriodEnd: string | null;
+  coveredDays: number;
+  requestedDays: number | null;
+  partial: boolean;
+};
+
 type BankStatementDashboardSummary = {
   latestImport: BankStatementLatestImportSummary;
   dailySeries: BankStatementDailyEntry[];
@@ -133,6 +145,7 @@ type BankStatementDashboardSummary = {
   classificationBreakdown: BankStatementClassificationBreakdownEntry[];
   reconciliation: BankStatementReconciliationSummary;
   unmatchedInflows: BankStatementUnmatchedInflow[];
+  coverage: BankStatementCoverageSummary;
 };
 
 type BankStatementImportResult = {
@@ -3133,6 +3146,53 @@ export class BankStatementsService {
       }
     }
 
+    const availableStart =
+      inRange.length > 0
+        ? toDayKey(inRange.reduce((best, entry) => (entry.bookedAt < best ? entry.bookedAt : best), inRange[0].bookedAt))
+        : latestImport?.periodStart
+          ? toDayKey(latestImport.periodStart)
+          : null;
+    const availableEnd =
+      inRange.length > 0
+        ? toDayKey(inRange.reduce((best, entry) => (entry.bookedAt > best ? entry.bookedAt : best), inRange[0].bookedAt))
+        : latestImport?.periodEnd
+          ? toDayKey(latestImport.periodEnd)
+          : null;
+    const latestImportPeriodStart = latestImport?.periodStart ? toDayKey(latestImport.periodStart) : null;
+    const latestImportPeriodEnd = latestImport?.periodEnd ? toDayKey(latestImport.periodEnd) : null;
+    const requestedStart = startsAt ? toDayKey(startsAt) : null;
+    const requestedEnd = toDayKey(asOf);
+    const coveredDays =
+      availableStart && availableEnd
+        ? Math.max(
+            Math.round(
+              (new Date(`${availableEnd}T12:00:00.000Z`).getTime() -
+                new Date(`${availableStart}T12:00:00.000Z`).getTime()) /
+                (24 * 60 * 60 * 1000),
+            ) + 1,
+            0,
+          )
+        : 0;
+    const requestedDays =
+      requestedStart != null
+        ? Math.max(
+            Math.round(
+              (new Date(`${requestedEnd}T12:00:00.000Z`).getTime() -
+                new Date(`${requestedStart}T12:00:00.000Z`).getTime()) /
+                (24 * 60 * 60 * 1000),
+            ) + 1,
+            0,
+          )
+        : null;
+    const partialCoverage = Boolean(
+      requestedStart &&
+        requestedDays &&
+        (availableStart == null ||
+          availableEnd == null ||
+          availableStart > requestedStart ||
+          availableEnd < requestedEnd),
+    );
+
     const categories = [...categoryMap.entries()]
       .map(([key, entry]: [StatementCategory, { amount: number; count: number }]) => ({
         key,
@@ -3209,6 +3269,17 @@ export class BankStatementsService {
       unmatchedInflows: unmatchedInflows
         .sort((left, right) => right.amount - left.amount)
         .slice(0, 12),
+      coverage: {
+        requestedStart,
+        requestedEnd,
+        availableStart,
+        availableEnd,
+        latestImportPeriodStart,
+        latestImportPeriodEnd,
+        coveredDays,
+        requestedDays,
+        partial: partialCoverage,
+      },
     } satisfies BankStatementDashboardSummary;
   }
 }

@@ -299,6 +299,17 @@ type DashboardBusinessSummary = {
       nonOperationalOutflows: number;
       nonOperationalNet: number;
     };
+    coverage: {
+      requestedStart: string | null;
+      requestedEnd: string;
+      availableStart: string | null;
+      availableEnd: string | null;
+      latestImportPeriodStart: string | null;
+      latestImportPeriodEnd: string | null;
+      coveredDays: number;
+      requestedDays: number | null;
+      partial: boolean;
+    };
     unmatchedInflows: Array<{
       externalId: string;
       date: string;
@@ -568,6 +579,26 @@ function formatStatementStatusLabel(status?: 'RUNNING' | 'ATTENTION' | 'PENDING'
   if (status === 'RUNNING') return 'ATUALIZADO';
   if (status === 'ATTENTION') return 'DESATUALIZADO';
   return 'SEM EXTRATO';
+}
+
+function formatStatementCoverageLabel(coverage?: {
+  availableStart?: string | null;
+  availableEnd?: string | null;
+  coveredDays?: number | null;
+  partial?: boolean;
+} | null) {
+  if (!coverage?.availableStart || !coverage?.availableEnd) return null;
+  const startLabel = new Date(`${coverage.availableStart}T12:00:00.000Z`).toLocaleDateString('pt-BR');
+  const endLabel = new Date(`${coverage.availableEnd}T12:00:00.000Z`).toLocaleDateString('pt-BR');
+  const rangeLabel =
+    coverage.availableStart === coverage.availableEnd
+      ? startLabel
+      : `${startLabel}–${endLabel}`;
+  const daysLabel =
+    typeof coverage.coveredDays === 'number' && coverage.coveredDays > 0
+      ? ` · ${formatNumber(coverage.coveredDays)} dia(s)`
+      : '';
+  return `${coverage.partial ? 'Cobertura parcial' : 'Cobertura bancária'} ${rangeLabel}${daysLabel}`;
 }
 
 const STATEMENT_CATEGORY_LABELS: Record<StatementCategory, string> = {
@@ -2086,22 +2117,24 @@ export default function DashboardScreen() {
   const statementOverview = activeBusiness?.statement || null;
   const latestStatementImport = statementImportFeedback || statementOverview?.latestImport || null;
   const statementDrawerLatestImport = statementReview?.latestImport || latestStatementImport;
+  const statementCoverageLabel = formatStatementCoverageLabel(statementOverview?.coverage);
   const statementStatusLabel = statementUploading
     ? 'PROCESSANDO...'
     : formatStatementStatusLabel(latestStatementImport?.status);
   const statementFeedbackMessage = statementUploading
     ? 'Processando o extrato e recalculando os indicadores financeiros...'
       : latestStatementImport?.importedAt
-        ? `Última atualização: ${new Date(latestStatementImport.importedAt).toLocaleString('pt-BR')} · ${formatNumber(latestStatementImport.transactionCount)} linha(s) · ${formatNumber(latestStatementImport.unmatchedInflowsCount)} sem match`
+        ? `Última atualização: ${new Date(latestStatementImport.importedAt).toLocaleString('pt-BR')} · ${formatNumber(latestStatementImport.transactionCount)} linha(s) · ${formatNumber(latestStatementImport.unmatchedInflowsCount)} sem match${statementCoverageLabel ? ` · ${statementCoverageLabel}` : ''}`
       : 'Aceita .eml, .csv ou .ofx do Nu Empresas';
   const statementInsightCards = useMemo(() => {
     if (!statementOverview) return [];
+    const coverageMeta = formatStatementCoverageLabel(statementOverview.coverage);
     return [
       {
         label: 'Receita conciliada',
         value: formatCurrencyBR(statementOverview.reconciliation.matchedRevenue),
         tone: 'mint' as const,
-        meta: `${formatNumber(statementOverview.reconciliation.matchedTransactionsCount)} lançamento(s)`,
+        meta: `${formatNumber(statementOverview.reconciliation.matchedTransactionsCount)} lançamento(s)${coverageMeta ? ` · ${coverageMeta}` : ''}`,
       },
       {
         label: 'Entradas sem match',
@@ -2110,13 +2143,13 @@ export default function DashboardScreen() {
           statementOverview.reconciliation.unmatchedInflows > 0
             ? ('amber' as const)
             : ('mint' as const),
-        meta: `${formatNumber(statementOverview.reconciliation.unmatchedTransactionsCount)} lançamento(s)`,
+        meta: `${formatNumber(statementOverview.reconciliation.unmatchedTransactionsCount)} lançamento(s)${coverageMeta ? ` · ${coverageMeta}` : ''}`,
       },
       {
         label: 'Saídas operacionais',
         value: formatCurrencyBR(statementOverview.reconciliation.operationalOutflows),
         tone: 'rose' as const,
-        meta: `${formatCurrencyBR(statementOverview.kpis.actualExpensesInRange)} entrando nos custos reais`,
+        meta: `${formatCurrencyBR(statementOverview.kpis.actualExpensesInRange)} entrando nos custos reais${coverageMeta ? ` · ${coverageMeta}` : ''}`,
       },
       {
         label: 'Mov. não operacionais',
@@ -2125,7 +2158,7 @@ export default function DashboardScreen() {
           statementOverview.reconciliation.nonOperationalNet >= 0
             ? ('sky' as const)
             : ('ink' as const),
-        meta: `${formatCurrencyBR(statementOverview.reconciliation.nonOperationalOutflows)} aplicados · ${formatCurrencyBR(statementOverview.reconciliation.nonOperationalInflows)} resgatados`,
+        meta: `${formatCurrencyBR(statementOverview.reconciliation.nonOperationalOutflows)} aplicados · ${formatCurrencyBR(statementOverview.reconciliation.nonOperationalInflows)} resgatados${coverageMeta ? ` · ${coverageMeta}` : ''}`,
       },
     ];
   }, [statementOverview]);
@@ -2173,6 +2206,7 @@ export default function DashboardScreen() {
   }, [activeTraffic]);
   const cockpitMetrics = useMemo(() => {
     if (!displaySummary || !activeBusiness) return [];
+    const coverageMeta = statementCoverageLabel;
     return [
       {
         label: 'Receita bruta',
@@ -2202,13 +2236,13 @@ export default function DashboardScreen() {
         value: formatCurrencyBR(activeBusiness.kpis.netCashFlowInRange),
         tone:
           activeBusiness.kpis.netCashFlowInRange >= 0 ? ('mint' as const) : ('rose' as const),
-        meta: `${formatCurrencyBR(activeBusiness.kpis.bankInflowInRange)} de entradas`,
+        meta: `${formatCurrencyBR(activeBusiness.kpis.bankInflowInRange)} de entradas${coverageMeta ? ` · ${coverageMeta}` : ''}`,
       },
       {
         label: 'Custos reais',
         value: formatCurrencyBR(activeBusiness.kpis.actualExpensesInRange),
         tone: 'rose' as const,
-        meta: `${formatCurrencyBR(activeBusiness.kpis.ingredientExpensesInRange)} em insumos`,
+        meta: `${formatCurrencyBR(activeBusiness.kpis.ingredientExpensesInRange)} em insumos${coverageMeta ? ` · ${coverageMeta}` : ''}`,
       },
       {
         label: 'COGS técnico',
@@ -2220,13 +2254,13 @@ export default function DashboardScreen() {
         label: 'Frete cobrado',
         value: formatCurrencyBR(activeBusiness.kpis.deliveryRevenueInRange),
         tone: 'amber' as const,
-        meta: `${formatNumber(activeBusiness.kpis.deliveryOrdersInRange)} entrega(s)`,
+        meta: `${formatNumber(activeBusiness.kpis.deliveryOrdersInRange)} entrega(s)${coverageMeta ? ` · ${coverageMeta}` : ''}`,
       },
       {
         label: 'Uber real',
         value: formatCurrencyBR(activeBusiness.kpis.deliveryExpensesInRange),
         tone: 'rose' as const,
-        meta: `${formatPercent(activeBusiness.kpis.deliveryCoveragePctInRange)} de cobertura`,
+        meta: `${formatPercent(activeBusiness.kpis.deliveryCoveragePctInRange)} de cobertura${coverageMeta ? ` · ${coverageMeta}` : ''}`,
       },
       {
         label: 'Saldo do frete',
@@ -2235,8 +2269,8 @@ export default function DashboardScreen() {
           activeBusiness.kpis.deliveryMarginInRange >= 0 ? ('mint' as const) : ('rose' as const),
         meta:
           activeBusiness.kpis.deliveryMarginInRange >= 0
-            ? 'Frete cobrindo o custo real'
-            : 'Frete abaixo do custo real',
+            ? `${coverageMeta ? `${coverageMeta} · ` : ''}Frete cobrindo o custo real`
+            : `${coverageMeta ? `${coverageMeta} · ` : ''}Frete abaixo do custo real`,
       },
       {
         label: 'Ticket médio',
@@ -2255,7 +2289,7 @@ export default function DashboardScreen() {
         value: formatCurrencyBR(activeBusiness.kpis.unmatchedInflowsInRange),
         tone:
           activeBusiness.kpis.unmatchedInflowsInRange > 0 ? ('amber' as const) : ('mint' as const),
-        meta: `${formatNumber(statementOverview?.latestImport.unmatchedInflowsCount || 0)} entrada(s)`,
+        meta: `${formatNumber(statementOverview?.latestImport.unmatchedInflowsCount || 0)} entrada(s)${coverageMeta ? ` · ${coverageMeta}` : ''}`,
       },
       {
         label: 'Extrato',
@@ -2267,12 +2301,13 @@ export default function DashboardScreen() {
               ? ('amber' as const)
               : ('ink' as const),
         meta:
-          statementOverview?.latestImport.periodEnd
+          coverageMeta ||
+          (statementOverview?.latestImport.periodEnd
             ? `Cobertura até ${new Date(statementOverview.latestImport.periodEnd).toLocaleDateString('pt-BR')}`
-            : 'Sem extrato importado',
+            : 'Sem extrato importado'),
       },
     ];
-  }, [activeBusiness, displaySummary, statementOverview]);
+  }, [activeBusiness, displaySummary, statementCoverageLabel, statementOverview]);
   const digitalOverviewCards = useMemo(() => {
     if (!activeTraffic) return [];
     return [
