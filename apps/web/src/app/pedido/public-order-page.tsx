@@ -753,6 +753,26 @@ export function PublicOrderPage({
   }, [companionProducts, expandedCompanionProductKey]);
 
   useEffect(() => {
+    const blockedKeys = companionProducts
+      .filter((product) => product.temporarilyOutOfStock)
+      .map((product) => product.key);
+    if (blockedKeys.length === 0) return;
+
+    setForm((current) => {
+      let changed = false;
+      const nextCompanions = { ...current.companions };
+
+      for (const key of blockedKeys) {
+        if (parseCountValue(String(nextCompanions[key] ?? '')) <= 0) continue;
+        nextCompanions[key] = '';
+        changed = true;
+      }
+
+      return changed ? { ...current, companions: nextCompanions } : current;
+    });
+  }, [companionProducts]);
+
+  useEffect(() => {
     if (!isMixedBoxesDrawerOpen) return;
     if (mixedBoxEntries.length > 0) return;
     setIsMixedBoxesDrawerOpen(false);
@@ -995,6 +1015,7 @@ export function PublicOrderPage({
       if (!productId) continue;
       const product = runtimeOrderCatalog.companionProductById.get(productId);
       if (!product) continue;
+      if (product.temporarilyOutOfStock) continue;
       const quantity = parseCountValue(String(rawValue));
       if (quantity <= 0) continue;
       normalized[product.key] = (normalized[product.key] || 0) + quantity;
@@ -2733,6 +2754,7 @@ export function PublicOrderPage({
                     {companionProducts.map((product) => {
                       const quantity = parsedCompanionCounts[product.key] || 0;
                       const active = quantity > 0;
+                      const temporarilyOutOfStock = product.temporarilyOutOfStock;
                       const companionLines = resolveCompanionProductPublicLines(product);
                       const companionTitle = splitCompanionCardTitle(companionLines.title);
                       return (
@@ -2754,7 +2776,9 @@ export function PublicOrderPage({
                                   alt={product.label}
                                   art={resolveOrderCardArt(product)}
                                   className="bg-white"
-                                  imageClassName="h-full w-full object-contain"
+                                  imageClassName={`h-full w-full object-contain ${
+                                    temporarilyOutOfStock ? 'grayscale opacity-70' : ''
+                                  }`}
                                   overlayClassName="absolute inset-0 bg-transparent"
                                   managedUploadFit="contain-tight"
                                   sizes="(max-width: 640px) 100px, (max-width: 1279px) 132px, (max-width: 1535px) 42vw, 22vw"
@@ -2770,6 +2794,11 @@ export function PublicOrderPage({
                                 {companionLines.subtitleLine ? <p>{companionLines.subtitleLine}</p> : null}
                                 {companionLines.makerLine ? <p>{companionLines.makerLine}</p> : null}
                               </div>
+                              {temporarilyOutOfStock ? (
+                                <p className="mt-2 text-[0.68rem] font-semibold uppercase leading-5 tracking-[0.08em] text-[color:var(--tone-roast-ink)] sm:text-[0.72rem]">
+                                  Temporariamente sem estoque - em breve
+                                </p>
+                              ) : null}
                               <p className="public-order-box-card__price public-order-box-card__price--companion mt-1 text-sm font-semibold text-[color:var(--ink-strong)] xl:pt-3 xl:text-[1rem]">
                                 {formatCurrencyBRL(product.price)}
                               </p>
@@ -2782,6 +2811,7 @@ export function PublicOrderPage({
                               onClick={() => setCompanionQuantity(product.key, Math.max(quantity - 1, 0))}
                               className="public-order-box-card__stepper public-order-box-card__stepper--companion rounded-[16px] border border-white/85 bg-white font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:rounded-[18px]"
                               aria-label={`Diminuir ${product.label}`}
+                              disabled={quantity <= 0}
                             >
                               −
                             </button>
@@ -2797,6 +2827,7 @@ export function PublicOrderPage({
                               onClick={() => setCompanionQuantity(product.key, quantity + 1)}
                               className="public-order-box-card__stepper public-order-box-card__stepper--companion rounded-[16px] border border-white/85 bg-white font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:rounded-[18px]"
                               aria-label={`Aumentar ${product.label}`}
+                              disabled={temporarilyOutOfStock}
                             >
                               +
                             </button>
@@ -3198,7 +3229,9 @@ export function PublicOrderPage({
                   alt={expandedCompanionProduct.label}
                   art={resolveOrderCardArt(expandedCompanionProduct)}
                   className="rounded-[24px] bg-white"
-                  imageClassName="h-full w-full object-contain"
+                  imageClassName={`h-full w-full object-contain ${
+                    expandedCompanionProduct.temporarilyOutOfStock ? 'grayscale opacity-70' : ''
+                  }`}
                   managedUploadFit="contain-tight"
                   overlayClassName="absolute inset-0 bg-transparent"
                   sizes="(max-width: 768px) 92vw, (max-width: 1280px) 72vw, 760px"
@@ -3208,6 +3241,11 @@ export function PublicOrderPage({
               <p className="whitespace-pre-line text-sm leading-6 text-[color:var(--ink-muted)]">
                 {resolveCompanionDrawerNote(expandedCompanionProduct)}
               </p>
+              {expandedCompanionProduct.temporarilyOutOfStock ? (
+                <p className="text-[0.76rem] font-semibold uppercase leading-5 tracking-[0.08em] text-[color:var(--tone-roast-ink)] sm:text-[0.8rem]">
+                  Temporariamente sem estoque - em breve
+                </p>
+              ) : null}
 
               <div className="public-order-image-drawer__actions">
                 <button
@@ -3237,7 +3275,7 @@ export function PublicOrderPage({
                       ? setCompanionQuantity(expandedCompanionProduct.key, expandedCompanionQuantity + 1)
                       : undefined
                   }
-                  disabled={!expandedCompanionProduct}
+                  disabled={!expandedCompanionProduct || expandedCompanionProduct.temporarilyOutOfStock}
                 >
                   Adicionar
                 </button>

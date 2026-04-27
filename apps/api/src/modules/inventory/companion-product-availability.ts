@@ -6,39 +6,11 @@ const COMPANION_CATALOG_CATEGORY_KEYS = new Set([
   normalizeInventoryLookup('Amigas da Broa')
 ]);
 
-function toQty(value: number) {
-  if (!Number.isFinite(value)) return 0;
-  return Math.round((value + Number.EPSILON) * 10000) / 10000;
-}
-
 function isCompanionCatalogCategory(category?: string | null) {
   return COMPANION_CATALOG_CATEGORY_KEYS.has(normalizeInventoryLookup(category ?? ''));
 }
 
-function buildBalanceByItemId(
-  movements: Array<{
-    itemId: number;
-    type: string;
-    quantity: number;
-  }>
-) {
-  const balanceByItem = new Map<number, number>();
-
-  for (const movement of movements) {
-    const current = balanceByItem.get(movement.itemId) || 0;
-    if (movement.type === 'IN') {
-      balanceByItem.set(movement.itemId, toQty(current + movement.quantity));
-    } else if (movement.type === 'OUT') {
-      balanceByItem.set(movement.itemId, toQty(current - movement.quantity));
-    } else if (movement.type === 'ADJUST') {
-      balanceByItem.set(movement.itemId, toQty(movement.quantity));
-    }
-  }
-
-  return balanceByItem;
-}
-
-type AvailabilityClient = Prisma.TransactionClient | { product: Prisma.TransactionClient['product']; inventoryMovement: Prisma.TransactionClient['inventoryMovement'] };
+type AvailabilityClient = Prisma.TransactionClient | { product: Prisma.TransactionClient['product'] };
 
 export async function syncCompanionProductActiveStateByItemIds(
   client: AvailabilityClient,
@@ -59,7 +31,6 @@ export async function syncCompanionProductActiveStateByItemIds(
     select: {
       id: true,
       category: true,
-      active: true,
       inventoryItemId: true
     }
   })).filter((product) => isCompanionCatalogCategory(product.category));
@@ -71,64 +42,9 @@ export async function syncCompanionProductActiveStateByItemIds(
     };
   }
 
-  const trackedItemIds = Array.from(
-    new Set(
-      products
-        .map((product) => product.inventoryItemId)
-        .filter((itemId): itemId is number => typeof itemId === 'number' && itemId > 0)
-    )
-  );
-  const movements = await client.inventoryMovement.findMany({
-    where: {
-      itemId: { in: trackedItemIds }
-    },
-    select: {
-      itemId: true,
-      type: true,
-      quantity: true
-    },
-    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
-  });
-  const balanceByItemId = buildBalanceByItemId(movements);
-
-  const activateIds: number[] = [];
-  const deactivateIds: number[] = [];
-
-  for (const product of products) {
-    const itemId = product.inventoryItemId;
-    if (!(typeof itemId === 'number' && itemId > 0)) continue;
-    const balance = toQty(balanceByItemId.get(itemId) || 0);
-    const shouldBeActive = balance > 0;
-    if (shouldBeActive && product.active === false) {
-      activateIds.push(product.id);
-    } else if (!shouldBeActive && product.active !== false) {
-      deactivateIds.push(product.id);
-    }
-  }
-
-  if (activateIds.length > 0) {
-    await client.product.updateMany({
-      where: {
-        id: { in: activateIds },
-        active: false
-      },
-      data: { active: true }
-    });
-  }
-
-  if (deactivateIds.length > 0) {
-    await client.product.updateMany({
-      where: {
-        id: { in: deactivateIds },
-        active: true
-      },
-      data: { active: false }
-    });
-  }
-
   return {
-    activatedIds: activateIds,
-    deactivatedIds: deactivateIds
+    activatedIds: [] as number[],
+    deactivatedIds: [] as number[]
   };
 }
 
@@ -163,4 +79,3 @@ export async function syncCompanionProductActiveStateByProductIds(
 
   return syncCompanionProductActiveStateByItemIds(client, itemIds);
 }
-

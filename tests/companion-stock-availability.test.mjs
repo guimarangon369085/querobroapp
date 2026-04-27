@@ -3,13 +3,13 @@ import test from 'node:test';
 import { ensureApiServer, request } from './lib/api-server.mjs';
 
 test(
-  'amigas da broa desativa ao esgotar no pedido e reativa na reposicao manual',
+  'amigas da broa continuam visiveis sem estoque, bloqueiam nova compra e liberam apos reposicao',
   { timeout: 180000 },
   async (t) => {
     const { apiUrl, shutdown } = await ensureApiServer();
     const created = {
-      orderId: null,
-      customerId: null,
+      orderIds: [],
+      customerIds: [],
       productId: null,
       inventoryItemId: null,
       replenishMovementId: null
@@ -21,7 +21,7 @@ test(
         const cleanupMovements = movements
           .filter(
             (movement) =>
-              movement.orderId === created.orderId || movement.itemId === created.inventoryItemId
+              created.orderIds.includes(movement.orderId) || movement.itemId === created.inventoryItemId
           )
           .sort((left, right) => right.id - left.id);
 
@@ -37,11 +37,11 @@ test(
       }
 
       const cleanupSteps = [
-        created.orderId ? () => request(apiUrl, `/orders/${created.orderId}`, { method: 'DELETE' }) : null,
+        ...created.orderIds.map((orderId) => () => request(apiUrl, `/orders/${orderId}`, { method: 'DELETE' })),
         created.productId
           ? () => request(apiUrl, `/inventory-products/${created.productId}`, { method: 'DELETE' })
           : null,
-        created.customerId ? () => request(apiUrl, `/customers/${created.customerId}`, { method: 'DELETE' }) : null,
+        ...created.customerIds.map((customerId) => () => request(apiUrl, `/customers/${customerId}`, { method: 'DELETE' })),
         created.inventoryItemId
           ? () => request(apiUrl, `/inventory-items/${created.inventoryItemId}`, { method: 'DELETE' })
           : null
@@ -112,22 +112,55 @@ test(
       }
     });
 
-    created.orderId = intake.order.id;
-    created.customerId = intake.intake.customerId;
+    created.orderIds.push(intake.order.id);
+    created.customerIds.push(intake.intake.customerId);
 
     const depletedProduct = await request(apiUrl, `/inventory-products/${product.id}`);
-    assert.equal(depletedProduct.active, false);
+    assert.equal(depletedProduct.active, true);
 
     const movementsAfterOrder = await request(apiUrl, '/inventory-movements');
     const reservationMovement = movementsAfterOrder.find(
       (movement) =>
-        movement.orderId === created.orderId &&
+        movement.orderId === created.orderIds[0] &&
         movement.itemId === created.inventoryItemId &&
         movement.source === 'ORDER_COMPANION' &&
         movement.type === 'OUT'
     );
     assert.ok(reservationMovement, 'Baixa direta do produto deveria existir no pedido');
     assert.equal(Number(reservationMovement.quantity), 180);
+
+    await assert.rejects(
+      () =>
+        request(apiUrl, '/orders/intake', {
+          method: 'POST',
+          body: {
+            version: 1,
+            intent: 'CONFIRMED',
+            customer: {
+              name: `Cliente Amigas 2 ${suffix}`,
+              phone: '11999997777',
+              address: 'Rua das Amigas, 20'
+            },
+            fulfillment: {
+              mode: 'PICKUP',
+              scheduledAt: new Date(Date.UTC(2033, 0, 12, 16, 0, 0)).toISOString()
+            },
+            order: {
+              items: [{ productId: product.id, quantity: 1 }]
+            },
+            payment: {
+              method: 'pix',
+              status: 'PENDENTE'
+            },
+            source: {
+              channel: 'CUSTOMER_LINK',
+              externalId: `amigas-out-${suffix}`,
+              idempotencyKey: `amigas-out-${suffix}`
+            }
+          }
+        }),
+      /temporariamente sem estoque/i
+    );
 
     const replenishMovement = await request(apiUrl, '/inventory-movements', {
       method: 'POST',
@@ -142,6 +175,37 @@ test(
 
     const replenishedProduct = await request(apiUrl, `/inventory-products/${product.id}`);
     assert.equal(replenishedProduct.active, true);
+
+    const replenishedIntake = await request(apiUrl, '/orders/intake', {
+      method: 'POST',
+      body: {
+        version: 1,
+        intent: 'CONFIRMED',
+        customer: {
+          name: `Cliente Amigas 3 ${suffix}`,
+          phone: '11999996666',
+          address: 'Rua das Amigas, 30'
+        },
+        fulfillment: {
+          mode: 'PICKUP',
+          scheduledAt: new Date(Date.UTC(2033, 0, 12, 17, 0, 0)).toISOString()
+        },
+        order: {
+          items: [{ productId: product.id, quantity: 1 }]
+        },
+        payment: {
+          method: 'pix',
+          status: 'PENDENTE'
+        },
+        source: {
+          channel: 'CUSTOMER_LINK',
+          externalId: `amigas-restock-${suffix}`,
+          idempotencyKey: `amigas-restock-${suffix}`
+        }
+      }
+    });
+    created.orderIds.push(replenishedIntake.order.id);
+    created.customerIds.push(replenishedIntake.intake.customerId);
+    assert.ok(replenishedIntake.order?.id);
   }
 );
-

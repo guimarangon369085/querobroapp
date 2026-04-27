@@ -381,6 +381,27 @@ export class OrdersService {
     return balance;
   }
 
+  private buildInventoryBalanceByItemId(
+    movements: Array<{
+      itemId: number;
+      type: string;
+      quantity: number;
+    }>
+  ) {
+    const balanceByItemId = new Map<number, number>();
+    for (const movement of movements) {
+      const current = balanceByItemId.get(movement.itemId) || 0;
+      if (movement.type === 'IN') {
+        balanceByItemId.set(movement.itemId, this.toQty(current + movement.quantity));
+      } else if (movement.type === 'OUT') {
+        balanceByItemId.set(movement.itemId, this.toQty(current - movement.quantity));
+      } else if (movement.type === 'ADJUST') {
+        balanceByItemId.set(movement.itemId, this.toQty(movement.quantity));
+      }
+    }
+    return balanceByItemId;
+  }
+
   private formatDate(value: Date) {
     const year = value.getFullYear();
     const month = String(value.getMonth() + 1).padStart(2, '0');
@@ -2679,6 +2700,34 @@ export class OrdersService {
     const products = await tx.product.findMany({ where: { id: { in: productIds } } });
     const productMap = new Map(products.map((product) => [product.id, product]));
     const allowInactiveProductIds = options?.allowInactiveProductIds ?? new Set<number>();
+    const trackedCompanionProducts = products.filter(
+      (product) =>
+        isCouponCompanionCategory(product.category) &&
+        typeof product.inventoryItemId === 'number' &&
+        product.inventoryItemId > 0 &&
+        typeof product.inventoryQtyPerSaleUnit === 'number' &&
+        product.inventoryQtyPerSaleUnit > 0
+    );
+    const trackedCompanionItemIds = Array.from(
+      new Set(trackedCompanionProducts.map((product) => product.inventoryItemId as number))
+    );
+    const trackedCompanionBalancesByItemId =
+      trackedCompanionItemIds.length > 0
+        ? this.buildInventoryBalanceByItemId(
+            await tx.inventoryMovement.findMany({
+              where: {
+                itemId: { in: trackedCompanionItemIds },
+                ...(options?.excludeOrderId ? { orderId: { not: options.excludeOrderId } } : {})
+              },
+              select: {
+                itemId: true,
+                type: true,
+                quantity: true
+              },
+              orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
+            })
+          )
+        : new Map<number, number>();
     const salesLimitStates = await loadProductSalesLimitStates(tx, products, {
       excludeOrderId: options?.excludeOrderId ?? null
     });
@@ -2693,8 +2742,31 @@ export class OrdersService {
     for (const [productId, requestedQuantity] of requestedQuantityByProductId.entries()) {
       const product = productMap.get(productId);
       if (!product) throw new NotFoundException('Produto não encontrado');
-      if (product.active === false && !allowInactiveProductIds.has(product.id)) {
+      const trackedCompanionBalance =
+        typeof product.inventoryItemId === 'number'
+          ? this.toQty(trackedCompanionBalancesByItemId.get(product.inventoryItemId) || 0)
+          : null;
+      const trackedCompanionRequiredQty =
+        isCouponCompanionCategory(product.category) &&
+        typeof product.inventoryQtyPerSaleUnit === 'number' &&
+        product.inventoryQtyPerSaleUnit > 0
+          ? this.toQty(requestedQuantity * product.inventoryQtyPerSaleUnit)
+          : null;
+      const temporarilyOutOfStockCompanion =
+        trackedCompanionRequiredQty != null &&
+        trackedCompanionBalance != null &&
+        trackedCompanionBalance <= 0;
+
+      if (product.active === false && !allowInactiveProductIds.has(product.id) && !temporarilyOutOfStockCompanion) {
         throw new BadRequestException('Produto indisponível.');
+      }
+      if (trackedCompanionRequiredQty != null && trackedCompanionBalance != null) {
+        if (trackedCompanionBalance <= 0) {
+          throw new BadRequestException(`${product.name} está temporariamente sem estoque.`);
+        }
+        if (trackedCompanionRequiredQty > trackedCompanionBalance) {
+          throw new BadRequestException(`Estoque insuficiente para ${product.name}.`);
+        }
       }
       const salesLimitState = salesLimitStates.get(product.id);
       if (salesLimitState && requestedQuantity > salesLimitState.remainingUnits) {
@@ -3669,9 +3741,6 @@ export class OrdersService {
 
       const product = await tx.product.findUnique({ where: { id: data.productId } });
       if (!product) throw new NotFoundException('Produto não encontrado');
-      if (product.active === false) {
-        throw new BadRequestException('Produto indisponível.');
-      }
 
       await this.priceOrderItems(
         tx,
@@ -3777,9 +3846,6 @@ export class OrdersService {
       for (const item of normalizedItems) {
         const product = productMap.get(item.productId);
         if (!product) throw new NotFoundException('Produto não encontrado');
-        if (product.active === false && !allowInactiveProductIds.has(product.id)) {
-          throw new BadRequestException('Produto indisponível.');
-        }
         const unitPrice = this.toUnitPrice(product.price);
         const total = this.toMoney(unitPrice * item.quantity);
         itemsData.push({ productId: item.productId, quantity: item.quantity, unitPrice, total });

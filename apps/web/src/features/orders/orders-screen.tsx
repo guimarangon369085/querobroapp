@@ -65,6 +65,7 @@ import {
   buildRuntimeOrderCatalog,
   calculateOrderSubtotalFromProductItems,
   compactOrderProductName,
+  isRuntimeOrderCompanionTemporarilyOutOfStock,
   resolveRuntimeOrderItemGroup,
   resolveOrderVirtualBoxLabel
 } from './order-box-catalog';
@@ -1773,7 +1774,10 @@ function OrdersPageContent() {
   const orderableProducts = useMemo(() => {
     const canonical = deferredProducts.filter((product) => {
       const itemGroup = resolveRuntimeOrderItemGroup(product);
-      return product.active !== false && (itemGroup === 'FLAVOR' || itemGroup === 'COMPANION');
+      return (
+        (product.active !== false || isRuntimeOrderCompanionTemporarilyOutOfStock(product)) &&
+        (itemGroup === 'FLAVOR' || itemGroup === 'COMPANION')
+      );
     });
 
     if (canonical.length > 0) {
@@ -1827,7 +1831,8 @@ function OrdersPageContent() {
       productId: product.id,
       productName: product.displayTitle || compactOrderProductName(product.name),
       productMeta: [product.displayFlavor, product.measureLabel, product.displayMakerLine].filter(Boolean).join(' • '),
-      price: Number(product.price || 0)
+      price: Number(product.price || 0),
+      temporarilyOutOfStock: product.temporarilyOutOfStock
     }));
     const knownProductIds = new Set(knownRows.map((row) => row.productId));
     const extraRows = Object.entries(selectedOrderCompanionDraftByProductId)
@@ -1842,7 +1847,8 @@ function OrdersPageContent() {
           productId: entry.productId,
           productName: compactOrderProductName(fallbackProduct?.name ?? `Produto ${entry.productId}`),
           productMeta: fallbackProduct?.category || '',
-          price: Number(fallbackProduct?.price || 0)
+          price: Number(fallbackProduct?.price || 0),
+          temporarilyOutOfStock: false
         };
       });
 
@@ -4844,6 +4850,11 @@ function OrdersPageContent() {
                             {row.productMeta ? <span>{row.productMeta}</span> : null}
                             <span>{formatCurrencyBR(row.price)}</span>
                           </div>
+                          {row.temporarilyOutOfStock ? (
+                            <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[color:var(--tone-roast-ink)]">
+                              Temporariamente sem estoque - em breve
+                            </p>
+                          ) : null}
                         </div>
                         <div className="flex flex-wrap items-center gap-1 sm:justify-end">
                           <button
@@ -4862,7 +4873,7 @@ function OrdersPageContent() {
                             type="button"
                             className="app-button app-button-primary px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-60"
                             onClick={() => addSelectedOrderCompanionQuantity(row.productId, 1)}
-                            disabled={controlsDisabled}
+                            disabled={controlsDisabled || row.temporarilyOutOfStock}
                             aria-label={`Aumentar ${row.productName}`}
                           >
                             +1

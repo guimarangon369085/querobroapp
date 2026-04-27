@@ -57,6 +57,7 @@ export type RuntimeOrderCompanionProduct = {
   name: string;
   category: string | null;
   active: boolean;
+  temporarilyOutOfStock: boolean;
   label: string;
   displayTitle: string;
   displayFlavor: string | null;
@@ -526,7 +527,15 @@ export function resolveRuntimeOrderFlavorKind(value?: string | null): RuntimeOrd
 
 type OrderProductArtSource = Pick<
   Product,
-  'id' | 'name' | 'category' | 'imageUrl' | 'active' | 'measureLabel' | 'drawerNote'
+  | 'id'
+  | 'name'
+  | 'category'
+  | 'imageUrl'
+  | 'active'
+  | 'measureLabel'
+  | 'drawerNote'
+  | 'companionInventory'
+  | 'inventoryQtyPerSaleUnit'
 > & {
   price?: number | null;
   unit?: string | null;
@@ -566,6 +575,17 @@ export function resolveRuntimeOrderItemGroup(
     return 'FLAVOR';
   }
   return 'OTHER';
+}
+
+export function isRuntimeOrderCompanionTemporarilyOutOfStock(
+  product?: Pick<OrderProductArtSource, 'category' | 'companionInventory'> | null
+) {
+  if (!isRuntimeOrderCompanionCategory(product?.category)) {
+    return false;
+  }
+
+  const balance = product?.companionInventory?.balance;
+  return typeof balance === 'number' && Number.isFinite(balance) && balance <= 0;
 }
 
 function findOrderFlavorProductByCode(
@@ -773,6 +793,13 @@ export function buildRuntimeOrderCatalog(
     (product): product is OrderProductArtSource & { id: number } =>
       typeof product.id === 'number' && product.active !== false && product.salesLimitExhausted !== true
   );
+  const companionSourceProducts = (products || []).filter(
+    (product): product is OrderProductArtSource & { id: number } =>
+      typeof product.id === 'number' &&
+      resolveRuntimeOrderItemGroup(product) === 'COMPANION' &&
+      product.salesLimitExhausted !== true &&
+      (product.active !== false || isRuntimeOrderCompanionTemporarilyOutOfStock(product))
+  );
   const canonicalProducts = activeProducts.filter((product) => isRuntimeOrderFlavorProductSource(product));
   const fallbackProducts = activeProducts.filter((product) => isRuntimeOrderFallbackFlavorProductSource(product));
   const sourceProducts = canonicalProducts.length > 0 ? canonicalProducts : fallbackProducts;
@@ -819,18 +846,19 @@ export function buildRuntimeOrderCatalog(
   );
   const traditionalFlavor =
     flavorProducts.find((product) => product.kind === 'TRADITIONAL') || null;
-  const companionProducts = activeProducts
-    .filter((product) => resolveRuntimeOrderItemGroup(product) === 'COMPANION')
+  const companionProducts = companionSourceProducts
     .map((product) => {
       const profile = resolveCompanionProductProfile(product);
       const label = buildCompanionProductName(profile) || compactOrderProductName(product.name);
       const imageUrl = product.imageUrl || resolveCompanionProductCanonicalImageUrl(product) || null;
+      const temporarilyOutOfStock = isRuntimeOrderCompanionTemporarilyOutOfStock(product);
       return {
         id: product.id,
         key: `companion:${product.id}`,
         name: product.name,
         category: product.category ?? null,
-        active: true,
+        active: product.active !== false,
+        temporarilyOutOfStock,
         label,
         displayTitle: profile?.title || compactOrderProductName(product.name),
         displayFlavor: profile?.flavor ?? null,

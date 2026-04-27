@@ -1088,6 +1088,7 @@ export function OrderQuickCreate({
                   {companionProductsForCards.map(({ runtime, product }) => {
                     const selectedQty = quantityByProductId.get(product.id!) || 0;
                     const isSelected = selectedQty > 0;
+                    const temporarilyOutOfStock = runtime.temporarilyOutOfStock;
                     const productArt = resolveOrderCardArt(product);
                     const secondaryLine = [runtime.displayFlavor, runtime.measureLabel].filter(Boolean).join(' • ');
                     return (
@@ -1105,7 +1106,9 @@ export function OrderQuickCreate({
                                 alt={runtime.label}
                                 art={productArt}
                                 className="bg-white"
-                                imageClassName="h-full w-full object-contain"
+                                imageClassName={`h-full w-full object-contain ${
+                                  temporarilyOutOfStock ? 'grayscale opacity-70' : ''
+                                }`}
                                 overlayClassName="absolute inset-0 bg-transparent"
                                 managedUploadFit="contain-tight"
                                 sizes="(max-width: 640px) 100px, (max-width: 1279px) 132px, (max-width: 1535px) 42vw, 22vw"
@@ -1120,6 +1123,11 @@ export function OrderQuickCreate({
                               {secondaryLine ? <p>{secondaryLine}</p> : null}
                               {runtime.displayMakerLine ? <p>{runtime.displayMakerLine}</p> : null}
                             </div>
+                            {temporarilyOutOfStock ? (
+                              <p className="mt-2 text-[0.68rem] font-semibold uppercase leading-5 tracking-[0.08em] text-[color:var(--tone-roast-ink)] sm:text-[0.72rem]">
+                                Temporariamente sem estoque - em breve
+                              </p>
+                            ) : null}
                             <p className="public-order-box-card__price public-order-box-card__price--companion mt-1 text-sm font-semibold text-[color:var(--ink-strong)] xl:pt-3 xl:text-[1rem]">
                               {formatCurrencyBR(Number(product.price || 0))}
                             </p>
@@ -1147,6 +1155,7 @@ export function OrderQuickCreate({
                             type="button"
                             onClick={() => onAddProductUnits(product.id!, 1)}
                             className="public-order-box-card__stepper public-order-box-card__stepper--companion rounded-[16px] border border-white/85 bg-white font-semibold text-[color:var(--ink-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] transition hover:bg-white sm:rounded-[18px]"
+                            disabled={temporarilyOutOfStock}
                             aria-label={`Aumentar ${runtime.label}`}
                           >
                             +
