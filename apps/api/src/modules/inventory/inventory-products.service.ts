@@ -167,6 +167,186 @@ export class InventoryProductsService {
     return balanceByItem;
   }
 
+  private async findExistingCompanionInventoryItemByName(
+    tx: Prisma.TransactionClient | PrismaService,
+    productName?: string | null
+  ) {
+    const normalizedName = normalizeText(productName ?? undefined);
+    if (!normalizedName) return null;
+
+    return tx.inventoryItem.findFirst({
+      where: {
+        category: 'INGREDIENTE',
+        name: normalizedName
+      },
+      select: {
+        id: true,
+        name: true,
+        unit: true,
+        purchasePackSize: true,
+        purchasePackCost: true,
+        leadTimeDays: true,
+        safetyStockQty: true,
+        reorderPointQty: true,
+        targetStockQty: true,
+        perishabilityDays: true,
+        criticality: true,
+        preferredSupplier: true
+      },
+      orderBy: { id: 'asc' }
+    });
+  }
+
+  private resolveLegacyCompanionInventoryQtyPerSaleUnit(params: {
+    inventoryQtyPerSaleUnit?: number | null;
+    inventoryItemPurchasePackSize?: number | null;
+  }) {
+    const currentQty = this.toQty(params.inventoryQtyPerSaleUnit || 0);
+    if (currentQty > 0) return currentQty;
+
+    const packSizeQty = this.toQty(params.inventoryItemPurchasePackSize || 0);
+    if (packSizeQty > 0) return packSizeQty;
+
+    return null;
+  }
+
+  private async repairLegacyCompanionInventoryLinks<
+    T extends {
+      id: number;
+      name: string;
+      category: string | null;
+      inventoryItemId?: number | null;
+      inventoryQtyPerSaleUnit?: number | null;
+    }
+  >(tx: Prisma.TransactionClient | PrismaService, products: T[]) {
+    const candidates = products.filter(
+      (product) =>
+        isCompanionCatalogCategory(product.category ?? '') &&
+        (!product.inventoryItemId ||
+          !(typeof product.inventoryQtyPerSaleUnit === 'number' && product.inventoryQtyPerSaleUnit > 0))
+    );
+
+    if (candidates.length === 0) {
+      return products;
+    }
+
+    const distinctNames = Array.from(
+      new Set(
+        candidates
+          .map((product) => normalizeText(product.name ?? undefined) ?? null)
+          .filter((value): value is string => Boolean(value))
+      )
+    );
+    const distinctInventoryItemIds = Array.from(
+      new Set(
+        candidates
+          .map((product) => product.inventoryItemId ?? null)
+          .filter((value): value is number => typeof value === 'number' && value > 0)
+      )
+    );
+
+    const matchingInventoryItems = await tx.inventoryItem.findMany({
+      where: {
+        OR: [
+          distinctNames.length > 0
+            ? {
+                category: 'INGREDIENTE',
+                name: {
+                  in: distinctNames
+                }
+              }
+            : undefined,
+          distinctInventoryItemIds.length > 0
+            ? {
+                id: {
+                  in: distinctInventoryItemIds
+                }
+              }
+            : undefined
+        ].filter(Boolean) as Prisma.InventoryItemWhereInput[]
+      },
+      select: {
+        id: true,
+        name: true,
+        purchasePackSize: true
+      },
+      orderBy: { id: 'asc' }
+    });
+
+    if (matchingInventoryItems.length === 0) {
+      return products;
+    }
+
+    const inventoryItemById = new Map(matchingInventoryItems.map((item) => [item.id, item]));
+    const inventoryItemByName = new Map(
+      matchingInventoryItems.map((item) => [normalizeText(item.name ?? undefined) ?? item.name, item])
+    );
+
+    const patchedByProductId = new Map<
+      number,
+      {
+        inventoryItemId: number | null;
+        inventoryQtyPerSaleUnit: number | null;
+      }
+    >();
+
+    for (const product of candidates) {
+      const inventoryItem =
+        (typeof product.inventoryItemId === 'number' && product.inventoryItemId > 0
+          ? inventoryItemById.get(product.inventoryItemId)
+          : null) ||
+        inventoryItemByName.get(normalizeText(product.name ?? undefined) ?? product.name) ||
+        null;
+      if (!inventoryItem) continue;
+
+      const nextInventoryItemId = product.inventoryItemId ?? inventoryItem.id;
+      const nextInventoryQtyPerSaleUnit = this.resolveLegacyCompanionInventoryQtyPerSaleUnit({
+        inventoryQtyPerSaleUnit: product.inventoryQtyPerSaleUnit ?? null,
+        inventoryItemPurchasePackSize: inventoryItem.purchasePackSize ?? null
+      });
+
+      const shouldPatchInventoryItemId = nextInventoryItemId !== (product.inventoryItemId ?? null);
+      const shouldPatchInventoryQty =
+        nextInventoryQtyPerSaleUnit != null &&
+        Math.abs((product.inventoryQtyPerSaleUnit ?? 0) - nextInventoryQtyPerSaleUnit) >= 0.0001;
+
+      if (!shouldPatchInventoryItemId && !shouldPatchInventoryQty) continue;
+
+      await tx.product.update({
+        where: { id: product.id },
+        data: {
+          inventoryItemId: nextInventoryItemId,
+          ...(shouldPatchInventoryQty
+            ? {
+                inventoryQtyPerSaleUnit: nextInventoryQtyPerSaleUnit
+              }
+            : {})
+        }
+      });
+
+      patchedByProductId.set(product.id, {
+        inventoryItemId: nextInventoryItemId,
+        inventoryQtyPerSaleUnit: shouldPatchInventoryQty
+          ? nextInventoryQtyPerSaleUnit
+          : product.inventoryQtyPerSaleUnit ?? null
+      });
+    }
+
+    if (patchedByProductId.size === 0) {
+      return products;
+    }
+
+    return products.map((product) => {
+      const patched = patchedByProductId.get(product.id);
+      if (!patched) return product;
+      return {
+        ...product,
+        inventoryItemId: patched.inventoryItemId,
+        inventoryQtyPerSaleUnit: patched.inventoryQtyPerSaleUnit
+      };
+    });
+  }
+
   private async createPriceEntryIfChanged(
     client: Prisma.TransactionClient | PrismaService,
     params: {
@@ -420,11 +600,11 @@ export class InventoryProductsService {
       normalizeText(params.companionInventory.preferredSupplier ?? undefined) ?? null;
 
     const currentInventoryItem =
-      typeof params.inventoryItemId === 'number' && params.inventoryItemId > 0
+      (typeof params.inventoryItemId === 'number' && params.inventoryItemId > 0
         ? await tx.inventoryItem.findUnique({
             where: { id: params.inventoryItemId }
           })
-        : null;
+        : null) || (await this.findExistingCompanionInventoryItemByName(tx, params.productName));
 
     const currentMovements = currentInventoryItem
       ? await tx.inventoryMovement.findMany({
@@ -1011,7 +1191,8 @@ export class InventoryProductsService {
 
   async list() {
     const products = await this.prisma.product.findMany({ orderBy: { id: 'desc' } });
-    const withDisplayImageUrls = await this.resolveDisplayProductImageUrls(products);
+    const repairedProducts = await this.repairLegacyCompanionInventoryLinks(this.prisma, products);
+    const withDisplayImageUrls = await this.resolveDisplayProductImageUrls(repairedProducts);
     const withSalesLimitState = await this.enrichProductsWithSalesLimitState(this.prisma, withDisplayImageUrls);
     const withCompanionInventory = await this.enrichProductsWithCompanionInventory(
       this.prisma,
@@ -1023,7 +1204,8 @@ export class InventoryProductsService {
   async get(id: number) {
     const product = await this.prisma.product.findUnique({ where: { id } });
     if (!product) throw new NotFoundException('Produto não encontrado');
-    const [withDisplayImageUrl] = await this.resolveDisplayProductImageUrls([product]);
+    const [repairedProduct] = await this.repairLegacyCompanionInventoryLinks(this.prisma, [product]);
+    const [withDisplayImageUrl] = await this.resolveDisplayProductImageUrls([repairedProduct]);
     const [withSalesLimitState] = await this.enrichProductsWithSalesLimitState(this.prisma, [withDisplayImageUrl]);
     const [withCompanionInventory] = await this.enrichProductsWithCompanionInventory(this.prisma, [
       withSalesLimitState
