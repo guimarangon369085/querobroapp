@@ -344,7 +344,7 @@ test('importacao do extrato classifica venda por nome + valor mesmo sem PIX pend
   const matchedTransaction = review.transactions.find((item) => item.externalId === `txn-order-match-${suffix}`);
   assert.ok(matchedTransaction, 'lancamento deve aparecer no review');
   assert.equal(matchedTransaction.category, 'SALES');
-  assert.equal(matchedTransaction.matchedPaymentId, null);
+  assert.equal(Boolean(matchedTransaction.matchedPaymentId), true);
   assert.equal(matchedTransaction.matchedOrderId, intake.order.id);
 });
 

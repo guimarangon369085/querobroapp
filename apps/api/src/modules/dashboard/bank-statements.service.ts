@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { roundMoney } from '@querobroapp/shared';
 import { PrismaService } from '../../prisma.service.js';
+import { readBusinessRuntimeProfile } from '../../common/business-profile.js';
 import { PaymentsService } from '../payments/payments.service.js';
 
 const SAO_PAULO_TIMEZONE = 'America/Sao_Paulo';
@@ -93,6 +94,30 @@ type BankStatementCategoryEntry = {
   tone: 'positive' | 'neutral' | 'warning';
 };
 
+type BankStatementClassificationBreakdownEntry = {
+  code: string;
+  label: string;
+  baseCategory: StatementCategory;
+  tone: 'positive' | 'neutral' | 'warning';
+  isOperational: boolean;
+  amount: number;
+  inflowAmount: number;
+  outflowAmount: number;
+  count: number;
+};
+
+type BankStatementReconciliationSummary = {
+  matchedRevenue: number;
+  matchedTransactionsCount: number;
+  unmatchedInflows: number;
+  unmatchedTransactionsCount: number;
+  otherInflows: number;
+  operationalOutflows: number;
+  nonOperationalInflows: number;
+  nonOperationalOutflows: number;
+  nonOperationalNet: number;
+};
+
 type BankStatementUnmatchedInflow = {
   externalId: string;
   date: string;
@@ -105,6 +130,8 @@ type BankStatementDashboardSummary = {
   latestImport: BankStatementLatestImportSummary;
   dailySeries: BankStatementDailyEntry[];
   categories: BankStatementCategoryEntry[];
+  classificationBreakdown: BankStatementClassificationBreakdownEntry[];
+  reconciliation: BankStatementReconciliationSummary;
   unmatchedInflows: BankStatementUnmatchedInflow[];
 };
 
@@ -179,6 +206,38 @@ type StatementOrderRevenueCandidate = {
   createdAt: Date;
 };
 
+type StatementCardSettlementCandidate = {
+  paymentId: number;
+  orderId: number;
+  publicNumber: number;
+  customerName: string;
+  amount: number;
+  createdAt: Date;
+  dueAt: Date | null;
+  paidAt: Date | null;
+  providerRef: string | null;
+  status: string;
+  timingScore: number;
+  totalScore: number;
+};
+
+type StatementSettledPixCandidate = {
+  paymentId: number;
+  orderId: number;
+  publicNumber: number;
+  customerName: string;
+  amount: number;
+  createdAt: Date;
+  scheduledAt: Date | null;
+  dueAt: Date | null;
+  paidAt: Date | null;
+  status: string;
+  timingScore: number;
+  timingDeltaHours: number;
+  nameScore: number;
+  totalScore: number;
+};
+
 type UpdateStatementTransactionInput = {
   classificationCode?: string | null;
   matchedPaymentId?: number | null;
@@ -244,6 +303,22 @@ const DEFAULT_CLASSIFICATION_OPTIONS: Array<{
     sortOrder: 20,
   },
   {
+    code: 'PIX_CUSTOMER_UNMATCHED',
+    label: 'PIX cliente sem match',
+    baseCategory: 'UNMATCHED_INFLOW',
+    tone: 'warning',
+    isOperational: true,
+    sortOrder: 25,
+  },
+  {
+    code: 'SUMUP_SETTLEMENT_UNMATCHED',
+    label: 'Repasse SumUp sem match',
+    baseCategory: 'UNMATCHED_INFLOW',
+    tone: 'warning',
+    isOperational: true,
+    sortOrder: 27,
+  },
+  {
     code: 'MARKETPLACE_REFUND',
     label: 'Reembolso marketplace',
     baseCategory: 'MARKETPLACE_REFUND',
@@ -260,12 +335,28 @@ const DEFAULT_CLASSIFICATION_OPTIONS: Array<{
     sortOrder: 40,
   },
   {
+    code: 'INGREDIENTS_SUPPLIER',
+    label: 'Fornecedor de insumos',
+    baseCategory: 'INGREDIENTS',
+    tone: 'warning',
+    isOperational: true,
+    sortOrder: 42,
+  },
+  {
     code: 'DELIVERY',
     label: 'Frete',
     baseCategory: 'DELIVERY',
     tone: 'warning',
     isOperational: true,
     sortOrder: 50,
+  },
+  {
+    code: 'DELIVERY_UBER',
+    label: 'Uber / logística',
+    baseCategory: 'DELIVERY',
+    tone: 'warning',
+    isOperational: true,
+    sortOrder: 52,
   },
   {
     code: 'PACKAGING',
@@ -276,12 +367,28 @@ const DEFAULT_CLASSIFICATION_OPTIONS: Array<{
     sortOrder: 60,
   },
   {
+    code: 'PACKAGING_SUPPLIER',
+    label: 'Fornecedor de embalagem',
+    baseCategory: 'PACKAGING',
+    tone: 'warning',
+    isOperational: true,
+    sortOrder: 62,
+  },
+  {
     code: 'SOFTWARE',
     label: 'Software',
     baseCategory: 'SOFTWARE',
     tone: 'neutral',
     isOperational: true,
     sortOrder: 70,
+  },
+  {
+    code: 'SOFTWARE_SUBSCRIPTION',
+    label: 'Assinatura de software',
+    baseCategory: 'SOFTWARE',
+    tone: 'neutral',
+    isOperational: true,
+    sortOrder: 72,
   },
   {
     code: 'MARKETPLACE',
@@ -300,12 +407,68 @@ const DEFAULT_CLASSIFICATION_OPTIONS: Array<{
     sortOrder: 90,
   },
   {
+    code: 'OWNER_CAPITAL',
+    label: 'Aporte / transferência de sócio',
+    baseCategory: 'OWNER',
+    tone: 'neutral',
+    isOperational: false,
+    sortOrder: 92,
+  },
+  {
+    code: 'TAXES',
+    label: 'Tributos',
+    baseCategory: 'OTHER_EXPENSE',
+    tone: 'warning',
+    isOperational: true,
+    sortOrder: 94,
+  },
+  {
+    code: 'OFFICE_SUPPLIES',
+    label: 'Material administrativo',
+    baseCategory: 'OTHER_EXPENSE',
+    tone: 'warning',
+    isOperational: true,
+    sortOrder: 96,
+  },
+  {
+    code: 'PAYMENT_GATEWAY',
+    label: 'Serviços financeiros / gateway',
+    baseCategory: 'OTHER_EXPENSE',
+    tone: 'warning',
+    isOperational: true,
+    sortOrder: 98,
+  },
+  {
+    code: 'TREASURY_APPLICATION',
+    label: 'Aplicação de tesouraria',
+    baseCategory: 'OTHER_EXPENSE',
+    tone: 'neutral',
+    isOperational: false,
+    sortOrder: 99,
+  },
+  {
     code: 'OTHER_EXPENSE',
     label: 'Outra saída',
     baseCategory: 'OTHER_EXPENSE',
     tone: 'warning',
     isOperational: true,
     sortOrder: 100,
+  },
+  {
+    code: 'TREASURY_REDEMPTION',
+    label: 'Resgate de tesouraria',
+    baseCategory: 'OTHER_INFLOW',
+    tone: 'neutral',
+    isOperational: false,
+    sortOrder: 105,
+  },
+  {
+    code: 'TREASURY_YIELD',
+    label: 'Rendimento financeiro',
+    baseCategory: 'OTHER_INFLOW',
+    tone: 'neutral',
+    isOperational: false,
+    sortOrder: 107,
   },
   {
     code: 'OTHER_INFLOW',
@@ -667,7 +830,8 @@ function inferOperationalCategory(normalizedDescription: string) {
 
   if (
     normalizedDescription.includes('BUYPACK') ||
-    normalizedDescription.includes('DESCARTAVEIS')
+    normalizedDescription.includes('DESCARTAVEIS') ||
+    normalizedDescription.includes('LINT EMBALAGENS')
   ) {
     return 'PACKAGING' as StatementCategory;
   }
@@ -684,10 +848,45 @@ function inferOperationalCategory(normalizedDescription: string) {
 }
 
 function ownerKeywords() {
-  return String(process.env.BANK_STATEMENT_OWNER_KEYWORDS || '')
+  const businessProfile = readBusinessRuntimeProfile();
+  const baseKeywords = [
+    businessProfile.legalName,
+    businessProfile.bank.accountHolder,
+    businessProfile.brandName,
+    String(businessProfile.legalName || '').replace(/^\d[\d./ -]*/, '').trim(),
+  ];
+
+  const envKeywords = String(process.env.BANK_STATEMENT_OWNER_KEYWORDS || '')
     .split(',')
     .map((entry) => normalizeText(entry))
     .filter(Boolean);
+
+  return [...baseKeywords, ...envKeywords]
+    .map((entry) => normalizeText(entry))
+    .filter(Boolean)
+    .filter((entry, index, list) => list.indexOf(entry) === index);
+}
+
+type StatementAutoClassification = {
+  normalizedDescription: string;
+  counterpartyName: string | null;
+  direction: StatementDirection;
+  transactionKind: StatementKind;
+  category: StatementCategory;
+  classificationCode: string | null;
+  isOperational: boolean;
+  settlementProvider: 'SUMUP' | null;
+};
+
+function matchesOwnerCounterparty(counterpartyName?: string | null) {
+  const normalizedCounterparty = normalizeText(counterpartyName);
+  if (!normalizedCounterparty) return false;
+  return ownerKeywords().some(
+    (entry) =>
+      entry === normalizedCounterparty ||
+      entry.includes(normalizedCounterparty) ||
+      normalizedCounterparty.includes(entry),
+  );
 }
 
 function classifyStatementTransaction(base: {
@@ -695,15 +894,66 @@ function classifyStatementTransaction(base: {
   bookedAt: Date;
   amount: number;
   description: string;
-}) {
+}): StatementAutoClassification {
   const normalizedDescription = normalizeText(base.description);
   const direction: StatementDirection = base.amount >= 0 ? 'INFLOW' : 'OUTFLOW';
   const counterpartyName = extractCounterpartyName(base.description, direction);
-  const normalizedCounterparty = normalizeText(counterpartyName);
-  const ownerMatch =
-    normalizedCounterparty && ownerKeywords().some((entry) => normalizedCounterparty.includes(entry));
+  const ownerMatch = matchesOwnerCounterparty(counterpartyName);
   const operationalCategory = inferOperationalCategory(normalizedDescription);
   const isRefund = normalizedDescription.startsWith('ESTORNO');
+  const isSumUpSettlement =
+    direction === 'INFLOW' &&
+    normalizedDescription.includes('SUMUP') &&
+    (normalizedDescription.includes('TRANSFERENCIA RECEBIDA') ||
+      normalizedDescription.includes('RECEBIMENTO') ||
+      normalizedDescription.includes('CREDITO'));
+
+  if (
+    direction === 'OUTFLOW' &&
+    (normalizedDescription.includes('APLICACAO RDB') ||
+      normalizedDescription.includes('APLICACAO CAIXINHA'))
+  ) {
+    return {
+      normalizedDescription,
+      counterpartyName,
+      direction,
+      transactionKind: 'OTHER',
+      category: 'OTHER_EXPENSE',
+      classificationCode: 'TREASURY_APPLICATION',
+      isOperational: false,
+      settlementProvider: null,
+    };
+  }
+
+  if (
+    direction === 'INFLOW' &&
+    (normalizedDescription.includes('RESGATE RDB') ||
+      normalizedDescription.includes('RESGATE CAIXINHA'))
+  ) {
+    return {
+      normalizedDescription,
+      counterpartyName,
+      direction,
+      transactionKind: 'OTHER',
+      category: 'OTHER_INFLOW',
+      classificationCode: 'TREASURY_REDEMPTION',
+      isOperational: false,
+      settlementProvider: null,
+    };
+  }
+
+  if (direction === 'INFLOW' && normalizedDescription.includes('RENDIMENTO RDB')) {
+    return {
+      normalizedDescription,
+      counterpartyName,
+      direction,
+      transactionKind: 'OTHER',
+      category: 'OTHER_INFLOW',
+      classificationCode: 'TREASURY_YIELD',
+      isOperational: false,
+      settlementProvider: null,
+    };
+  }
 
   if (direction === 'INFLOW') {
     if (normalizedDescription.includes('REEMBOLSO RECEBIDO PELO PIX - PIX MARKETPLACE')) {
@@ -714,6 +964,8 @@ function classifyStatementTransaction(base: {
         transactionKind: 'REFUND' as StatementKind,
         category: 'MARKETPLACE_REFUND' as StatementCategory,
         isOperational: true,
+        classificationCode: 'MARKETPLACE_REFUND',
+        settlementProvider: null,
       };
     }
 
@@ -725,6 +977,30 @@ function classifyStatementTransaction(base: {
         transactionKind: 'REFUND' as StatementKind,
         category: operationalCategory,
         isOperational: true,
+        classificationCode:
+          operationalCategory === 'DELIVERY'
+            ? 'DELIVERY_UBER'
+            : operationalCategory === 'INGREDIENTS'
+              ? 'INGREDIENTS_SUPPLIER'
+              : operationalCategory === 'PACKAGING'
+                ? 'PACKAGING_SUPPLIER'
+                : operationalCategory === 'SOFTWARE'
+                  ? 'SOFTWARE_SUBSCRIPTION'
+                  : operationalCategory,
+        settlementProvider: null,
+      };
+    }
+
+    if (isSumUpSettlement) {
+      return {
+        normalizedDescription,
+        counterpartyName,
+        direction,
+        transactionKind: 'OTHER',
+        category: 'UNMATCHED_INFLOW',
+        classificationCode: 'SUMUP_SETTLEMENT_UNMATCHED',
+        isOperational: true,
+        settlementProvider: 'SUMUP',
       };
     }
 
@@ -739,6 +1015,8 @@ function classifyStatementTransaction(base: {
         transactionKind: 'PIX_IN' as StatementKind,
         category: ownerMatch ? ('OWNER' as StatementCategory) : ('UNMATCHED_INFLOW' as StatementCategory),
         isOperational: !ownerMatch,
+        classificationCode: ownerMatch ? 'OWNER_CAPITAL' : 'PIX_CUSTOMER_UNMATCHED',
+        settlementProvider: null,
       };
     }
 
@@ -749,6 +1027,50 @@ function classifyStatementTransaction(base: {
       transactionKind: 'OTHER' as StatementKind,
       category: ownerMatch ? ('OWNER' as StatementCategory) : ('OTHER_INFLOW' as StatementCategory),
       isOperational: !ownerMatch,
+      classificationCode: ownerMatch ? 'OWNER_CAPITAL' : 'OTHER_INFLOW',
+      settlementProvider: null,
+    };
+  }
+
+  if (
+    normalizedDescription.includes('DAS-SIMPLES NACIONAL') ||
+    normalizedDescription.includes('DAS SIMPLES NACIONAL')
+  ) {
+    return {
+      normalizedDescription,
+      counterpartyName,
+      direction,
+      transactionKind: 'OTHER',
+      category: 'OTHER_EXPENSE',
+      classificationCode: 'TAXES',
+      isOperational: true,
+      settlementProvider: null,
+    };
+  }
+
+  if (normalizedDescription.includes('KALUNGA')) {
+    return {
+      normalizedDescription,
+      counterpartyName,
+      direction,
+      transactionKind: normalizedDescription.includes('COMPRA NO DEBITO') ? 'DEBIT_PURCHASE' : 'OTHER',
+      category: 'OTHER_EXPENSE',
+      classificationCode: 'OFFICE_SUPPLIES',
+      isOperational: true,
+      settlementProvider: null,
+    };
+  }
+
+  if (normalizedDescription.includes('VINDI PAGAMENTOS ONLINE')) {
+    return {
+      normalizedDescription,
+      counterpartyName,
+      direction,
+      transactionKind: normalizedDescription.includes('TRANSFERENCIA ENVIADA PELO PIX') ? 'PIX_OUT' : 'OTHER',
+      category: 'OTHER_EXPENSE',
+      classificationCode: 'PAYMENT_GATEWAY',
+      isOperational: true,
+      settlementProvider: null,
     };
   }
 
@@ -764,6 +1086,17 @@ function classifyStatementTransaction(base: {
           : ('PIX_OUT' as StatementKind),
       category: operationalCategory,
       isOperational: true,
+      classificationCode:
+        operationalCategory === 'DELIVERY'
+          ? 'DELIVERY_UBER'
+          : operationalCategory === 'INGREDIENTS'
+            ? 'INGREDIENTS_SUPPLIER'
+            : operationalCategory === 'PACKAGING'
+              ? 'PACKAGING_SUPPLIER'
+              : operationalCategory === 'SOFTWARE'
+                ? 'SOFTWARE_SUBSCRIPTION'
+                : operationalCategory,
+      settlementProvider: null,
     };
   }
 
@@ -772,9 +1105,11 @@ function classifyStatementTransaction(base: {
       normalizedDescription,
       counterpartyName,
       direction,
-      transactionKind: 'PIX_OUT' as StatementKind,
-      category: ownerMatch ? ('OWNER' as StatementCategory) : ('OTHER_EXPENSE' as StatementCategory),
-      isOperational: !ownerMatch,
+        transactionKind: 'PIX_OUT' as StatementKind,
+        category: ownerMatch ? ('OWNER' as StatementCategory) : ('OTHER_EXPENSE' as StatementCategory),
+        isOperational: !ownerMatch,
+        classificationCode: ownerMatch ? 'OWNER_CAPITAL' : 'OTHER_EXPENSE',
+        settlementProvider: null,
     };
   }
 
@@ -785,6 +1120,8 @@ function classifyStatementTransaction(base: {
     transactionKind: normalizedDescription.startsWith('ESTORNO') ? ('REFUND' as StatementKind) : ('OTHER' as StatementKind),
     category: 'OTHER_EXPENSE' as StatementCategory,
     isOperational: true,
+    classificationCode: 'OTHER_EXPENSE',
+    settlementProvider: null,
   };
 }
 
@@ -911,7 +1248,6 @@ export class BankStatementsService {
       where: {
         status: { not: 'CANCELADO' },
         createdAt: { gte: lookbackStart },
-        customerName: { not: null },
       },
       select: {
         id: true,
@@ -920,6 +1256,11 @@ export class BankStatementsService {
         createdAt: true,
         scheduledAt: true,
         customerName: true,
+        customer: {
+          select: {
+            name: true,
+          },
+        },
         payments: {
           select: {
             amount: true,
@@ -932,7 +1273,10 @@ export class BankStatementsService {
 
     const candidates = orders
       .map((order) => {
-        const nameMatch = this.paymentsService.describeHumanNameMatch(order.customerName, counterpartyName);
+        const nameMatch = this.buildBestStatementNameMatch(
+          [order.customerName, order.customer?.name],
+          counterpartyName,
+        );
         const nameScore = nameMatch.score;
         if (nameScore < 0.72 && !nameMatch.strongFirstAndLast) return null;
 
@@ -968,7 +1312,7 @@ export class BankStatementsService {
         return {
           orderId: order.id,
           publicNumber: order.publicNumber ?? order.id,
-          customerName: order.customerName || 'Cliente sem nome',
+          customerName: order.customerName || order.customer?.name || 'Cliente sem nome',
           nameScore,
           strongFirstAndLast: nameMatch.strongFirstAndLast,
           exactFirstAndLast: nameMatch.exactFirstAndLast,
@@ -1015,6 +1359,336 @@ export class BankStatementsService {
   }) {
     const candidates = await this.findLikelyOrderRevenueCandidates(input);
     return this.chooseLikelyOrderRevenueCandidate(candidates);
+  }
+
+  private buildBestStatementNameMatch(
+    names: Array<string | null | undefined>,
+    counterpartyName?: string | null,
+  ) {
+    let bestName = names.find((value) => String(value || '').trim()) || null;
+    let bestMatch = this.paymentsService.describeHumanNameMatch(bestName, counterpartyName);
+
+    for (const candidateName of names) {
+      const normalizedCandidate = String(candidateName || '').trim();
+      if (!normalizedCandidate) continue;
+      const candidateMatch = this.paymentsService.describeHumanNameMatch(
+        normalizedCandidate,
+        counterpartyName,
+      );
+      if (candidateMatch.score > bestMatch.score) {
+        bestName = normalizedCandidate;
+        bestMatch = candidateMatch;
+      }
+    }
+
+    return {
+      bestName: bestName || null,
+      ...bestMatch,
+    };
+  }
+
+  private getStatementSettledPixLookbackDays() {
+    const raw = Number(process.env.BANK_STATEMENT_SETTLED_PIX_LOOKBACK_DAYS || '');
+    if (!Number.isFinite(raw) || raw <= 0) return 45;
+    return Math.min(Math.floor(raw), 180);
+  }
+
+  private async loadBlockedStatementPaymentIds() {
+    const transactionsUsingPayments = await this.prisma.bankStatementTransaction.findMany({
+      where: {
+        matchedPaymentId: { not: null },
+      },
+      select: { matchedPaymentId: true },
+    });
+
+    return new Set(
+      transactionsUsingPayments
+        .map((entry) => entry.matchedPaymentId)
+        .filter((entry): entry is number => typeof entry === 'number'),
+    );
+  }
+
+  private computeStatementSettledPixTimingDeltaHours(input: {
+    paidAt?: Date | null;
+    dueAt?: Date | null;
+    scheduledAt?: Date | null;
+    createdAt: Date;
+    bookedAt: Date;
+  }) {
+    const anchors = [input.paidAt, input.dueAt, input.scheduledAt, input.createdAt].filter(
+      (value): value is Date => Boolean(value),
+    );
+    const deltaHours = anchors.reduce((best, anchor) => {
+      const current = Math.abs(anchor.getTime() - input.bookedAt.getTime()) / (60 * 60 * 1000);
+      return Math.min(best, current);
+    }, Number.POSITIVE_INFINITY);
+    return Number.isFinite(deltaHours) ? deltaHours : Number.POSITIVE_INFINITY;
+  }
+
+  private computeStatementSettledPixTimingScore(deltaHours: number) {
+    if (!Number.isFinite(deltaHours)) return 0.34;
+    if (deltaHours <= 12) return 1;
+    if (deltaHours <= 24) return 0.97;
+    if (deltaHours <= 48) return 0.93;
+    if (deltaHours <= 72) return 0.88;
+    if (deltaHours <= 7 * 24) return 0.76;
+    if (deltaHours <= 14 * 24) return 0.62;
+    return 0.46;
+  }
+
+  private async findLikelySettledPixCandidates(input: {
+    amount: number;
+    bookedAt: Date;
+    counterpartyName?: string | null;
+    currentPaymentId?: number | null;
+  }) {
+    const lookbackStart = new Date(input.bookedAt);
+    lookbackStart.setDate(lookbackStart.getDate() - this.getStatementSettledPixLookbackDays());
+    const blockedPaymentIds = await this.loadBlockedStatementPaymentIds();
+
+    const payments = await this.prisma.payment.findMany({
+      where: {
+        method: 'pix',
+        amount: round2(input.amount),
+        paidAt: { not: null },
+        order: {
+          status: { not: 'CANCELADO' },
+          createdAt: { gte: lookbackStart },
+        },
+      },
+      include: {
+        order: {
+          select: {
+            id: true,
+            publicNumber: true,
+            createdAt: true,
+            scheduledAt: true,
+            customerName: true,
+            customer: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: [{ id: 'desc' }],
+    });
+
+    return payments
+      .filter((payment) => payment.id === input.currentPaymentId || !blockedPaymentIds.has(payment.id))
+      .map((payment) => {
+        const nameMatch = this.buildBestStatementNameMatch(
+          [payment.order.customerName, payment.order.customer?.name],
+          input.counterpartyName,
+        );
+        const timingDeltaHours = this.computeStatementSettledPixTimingDeltaHours({
+          paidAt: payment.paidAt,
+          dueAt: payment.dueDate,
+          scheduledAt: payment.order.scheduledAt,
+          createdAt: payment.order.createdAt,
+          bookedAt: input.bookedAt,
+        });
+        const timingScore = this.computeStatementSettledPixTimingScore(timingDeltaHours);
+        const statusScore = payment.status === 'PAGO' ? 1 : 0.82;
+        const totalScore = Math.min(
+          0.999,
+          timingScore * 0.74 + statusScore * 0.12 + nameMatch.score * 0.14,
+        );
+
+        return {
+          paymentId: payment.id,
+          orderId: payment.order.id,
+          publicNumber: payment.order.publicNumber ?? payment.order.id,
+          customerName:
+            payment.order.customerName || payment.order.customer?.name || 'Cliente sem nome',
+          amount: round2(Number(payment.amount || 0)),
+          createdAt: payment.order.createdAt,
+          scheduledAt: payment.order.scheduledAt,
+          dueAt: payment.dueDate,
+          paidAt: payment.paidAt,
+          status: payment.status,
+          timingScore,
+          timingDeltaHours,
+          nameScore: nameMatch.score,
+          totalScore,
+        } satisfies StatementSettledPixCandidate;
+      })
+      .sort((left, right) => {
+        const scoreDelta = right.totalScore - left.totalScore;
+        if (Math.abs(scoreDelta) > 0.0001) return scoreDelta;
+        const timingDelta = left.timingDeltaHours - right.timingDeltaHours;
+        if (Math.abs(timingDelta) > 0.0001) return timingDelta;
+        const nameDelta = right.nameScore - left.nameScore;
+        if (Math.abs(nameDelta) > 0.0001) return nameDelta;
+        return right.paymentId - left.paymentId;
+      });
+  }
+
+  private chooseLikelySettledPixCandidate(candidates: StatementSettledPixCandidate[]) {
+    const top = candidates[0] || null;
+    const second = candidates[1] || null;
+    if (!top) return null;
+
+    const scoreGap = second ? top.totalScore - second.totalScore : 1;
+    const timingGapHours = second
+      ? Math.max(second.timingDeltaHours - top.timingDeltaHours, 0)
+      : Number.POSITIVE_INFINITY;
+
+    if (!second && top.timingDeltaHours <= 48) return top;
+    if (top.timingDeltaHours <= 12 && timingGapHours >= 12) return top;
+    if (top.timingDeltaHours <= 24 && timingGapHours >= 24) return top;
+    if (top.nameScore >= 0.86 && top.timingScore >= 0.84 && scoreGap >= 0.04) return top;
+    if (top.timingScore >= 0.93 && scoreGap >= 0.08) return top;
+    if (top.timingScore >= 0.88 && scoreGap >= 0.12) return top;
+    return null;
+  }
+
+  private async findLikelySettledPixMatch(input: {
+    amount: number;
+    bookedAt: Date;
+    counterpartyName?: string | null;
+    currentPaymentId?: number | null;
+  }) {
+    const candidates = await this.findLikelySettledPixCandidates(input);
+    return this.chooseLikelySettledPixCandidate(candidates);
+  }
+
+  private getStatementCardSettlementLookbackDays() {
+    const raw = Number(process.env.BANK_STATEMENT_CARD_SETTLEMENT_LOOKBACK_DAYS || '');
+    if (!Number.isFinite(raw) || raw <= 0) return 60;
+    return Math.min(Math.floor(raw), 180);
+  }
+
+  private parseSumUpCheckoutId(providerRef?: string | null) {
+    const raw = String(providerRef || '').trim();
+    if (!raw) return null;
+    const match = raw.match(/^SUMUP:(.+)$/i);
+    return match?.[1]?.trim() || null;
+  }
+
+  private computeStatementCardSettlementTimingScore(input: {
+    paidAt?: Date | null;
+    dueAt?: Date | null;
+    createdAt: Date;
+    bookedAt: Date;
+  }) {
+    const anchors = [input.paidAt, input.dueAt, input.createdAt].filter(
+      (value): value is Date => Boolean(value),
+    );
+    const deltaDays = anchors.reduce((best, anchor) => {
+      const current = Math.abs(anchor.getTime() - input.bookedAt.getTime()) / (24 * 60 * 60 * 1000);
+      return Math.min(best, current);
+    }, Number.POSITIVE_INFINITY);
+
+    if (!Number.isFinite(deltaDays)) return 0.38;
+    if (deltaDays <= 1) return 1;
+    if (deltaDays <= 3) return 0.93;
+    if (deltaDays <= 7) return 0.84;
+    if (deltaDays <= 14) return 0.72;
+    if (deltaDays <= 30) return 0.58;
+    return 0.42;
+  }
+
+  private async findLikelyCardSettlementCandidates(input: {
+    amount: number;
+    bookedAt: Date;
+    currentPaymentId?: number | null;
+  }) {
+    const lookbackStart = new Date(input.bookedAt);
+    lookbackStart.setDate(lookbackStart.getDate() - this.getStatementCardSettlementLookbackDays());
+
+    const transactionsUsingPayments = await this.prisma.bankStatementTransaction.findMany({
+      where: {
+        matchedPaymentId: { not: null },
+      },
+      select: { matchedPaymentId: true },
+    });
+    const blockedPaymentIds = new Set(
+      transactionsUsingPayments
+        .map((entry) => entry.matchedPaymentId)
+        .filter((entry): entry is number => typeof entry === 'number'),
+    );
+
+    const payments = await this.prisma.payment.findMany({
+      where: {
+        method: 'card',
+        amount: round2(input.amount),
+        order: {
+          status: { not: 'CANCELADO' },
+          createdAt: { gte: lookbackStart },
+        },
+      },
+      include: {
+        order: {
+          select: {
+            id: true,
+            publicNumber: true,
+            createdAt: true,
+            customerName: true,
+          },
+        },
+      },
+      orderBy: [{ id: 'desc' }],
+    });
+
+    return payments
+      .filter((payment) => payment.id === input.currentPaymentId || !blockedPaymentIds.has(payment.id))
+      .map((payment) => {
+        const timingScore = this.computeStatementCardSettlementTimingScore({
+          paidAt: payment.paidAt,
+          dueAt: payment.dueDate,
+          createdAt: payment.order.createdAt,
+          bookedAt: input.bookedAt,
+        });
+        const providerScore = this.parseSumUpCheckoutId(payment.providerRef) ? 1 : 0.68;
+        const statusScore = payment.status === 'PAGO' || payment.paidAt ? 1 : 0.76;
+        const totalScore = Math.min(0.999, timingScore * 0.62 + providerScore * 0.28 + statusScore * 0.1);
+
+        return {
+          paymentId: payment.id,
+          orderId: payment.order.id,
+          publicNumber: payment.order.publicNumber ?? payment.order.id,
+          customerName: payment.order.customerName || 'Cliente sem nome',
+          amount: round2(Number(payment.amount || 0)),
+          createdAt: payment.order.createdAt,
+          dueAt: payment.dueDate,
+          paidAt: payment.paidAt,
+          providerRef: payment.providerRef,
+          status: payment.status,
+          timingScore,
+          totalScore,
+        } satisfies StatementCardSettlementCandidate;
+      })
+      .sort((left, right) => {
+        const scoreDelta = right.totalScore - left.totalScore;
+        if (Math.abs(scoreDelta) > 0.0001) return scoreDelta;
+        const paidDelta = Number(Boolean(right.paidAt)) - Number(Boolean(left.paidAt));
+        if (paidDelta !== 0) return paidDelta;
+        return right.paymentId - left.paymentId;
+      });
+  }
+
+  private chooseLikelyCardSettlementCandidate(candidates: StatementCardSettlementCandidate[]) {
+    const top = candidates[0] || null;
+    const second = candidates[1] || null;
+    if (!top) return null;
+
+    const scoreGap = second ? top.totalScore - second.totalScore : 1;
+    if (!second && top.totalScore >= 0.7) return top;
+    if (this.parseSumUpCheckoutId(top.providerRef) && top.totalScore >= 0.82 && scoreGap >= 0.08) return top;
+    if (Boolean(top.paidAt) && top.totalScore >= 0.8 && scoreGap >= 0.1) return top;
+    if (top.totalScore >= 0.9 && scoreGap >= 0.05) return top;
+    return null;
+  }
+
+  private async findLikelyCardSettlementMatch(input: {
+    amount: number;
+    bookedAt: Date;
+    currentPaymentId?: number | null;
+  }) {
+    const candidates = await this.findLikelyCardSettlementCandidates(input);
+    return this.chooseLikelyCardSettlementCandidate(candidates);
   }
 
   private buildStatementRevenueGroupKey(input: {
@@ -1155,7 +1829,6 @@ export class BankStatementsService {
     const unmatchedInflowsCount = transactions.filter(
       (entry) =>
         entry.direction === 'INFLOW' &&
-        entry.transactionKind === 'PIX_IN' &&
         entry.matchedPaymentId == null &&
         entry.matchedOrderId == null &&
         entry.category === 'UNMATCHED_INFLOW',
@@ -1268,7 +1941,8 @@ export class BankStatementsService {
       const classified = classifyStatementTransaction(parsed);
       let category = classified.category;
       let isOperational = classified.isOperational;
-      let classificationCode = this.defaultClassificationCodeForCategory(category);
+      let classificationCode =
+        classified.classificationCode || this.defaultClassificationCodeForCategory(category);
       let manualClassification = existingEntry?.manualClassification ?? false;
       let manualMatch = existingEntry?.manualMatch ?? false;
       let matchedPaymentId = existingEntry?.matchedPaymentId ?? null;
@@ -1297,61 +1971,99 @@ export class BankStatementsService {
         !matchedPaymentId &&
         !matchedOrderId &&
         classified.direction === 'INFLOW' &&
-        classified.transactionKind === 'PIX_IN' &&
-        classified.category === 'UNMATCHED_INFLOW' &&
-        classified.counterpartyName
+        classified.category === 'UNMATCHED_INFLOW'
       ) {
-        const reconciliation = await this.paymentsService.reconcilePixWebhook({
-          payerName: classified.counterpartyName,
-          amount: Math.abs(parsed.amount),
-          paidAt: parsed.bookedAt.toISOString(),
-          source: 'bank-statement-import',
-          sourceTransactionId: parsed.externalId,
-          metadata: {
-            description: parsed.description,
-            fileName: extracted.fileName,
-          },
-        });
+        if (classified.settlementProvider === 'SUMUP') {
+          const cardMatch = await this.findLikelyCardSettlementMatch({
+            amount: Math.abs(parsed.amount),
+            bookedAt: parsed.bookedAt,
+          });
 
-        if (
-          reconciliation?.matched &&
-          'payment' in reconciliation &&
-          reconciliation.payment?.id
-        ) {
-          matchedPaymentId = reconciliation.payment.id;
-          matchedOrderId =
-            'order' in reconciliation && reconciliation.order?.id
-              ? reconciliation.order.id
-              : null;
-          category = 'SALES';
-          classificationCode = this.defaultClassificationCodeForCategory('SALES');
-          matchedPaymentsCount += 1;
-        } else {
-          const groupedOrderId = groupedOrderRevenuePlans.get(parsed.externalId) ?? null;
-          const orderMatch =
-            groupedOrderId != null
-              ? { orderId: groupedOrderId }
-              : await this.findLikelyOrderRevenueMatch({
-                  amount: Math.abs(parsed.amount),
-                  counterpartyName: classified.counterpartyName,
-                  bookedAt: parsed.bookedAt,
-                });
-
-          if (orderMatch) {
-            matchedOrderId = orderMatch.orderId;
+          if (cardMatch) {
+            const checkoutId = this.parseSumUpCheckoutId(cardMatch.providerRef);
+            if (checkoutId) {
+              try {
+                await this.paymentsService.syncSumUpCheckoutById(checkoutId);
+              } catch {}
+            }
+            matchedPaymentId = cardMatch.paymentId;
+            matchedOrderId = cardMatch.orderId;
             category = 'SALES';
             classificationCode = this.defaultClassificationCodeForCategory('SALES');
             matchedPaymentsCount += 1;
           } else {
             unmatchedInflowsCount += 1;
           }
+        } else if (classified.transactionKind === 'PIX_IN' && classified.counterpartyName) {
+          const reconciliation = await this.paymentsService.reconcilePixWebhook({
+            payerName: classified.counterpartyName,
+            amount: Math.abs(parsed.amount),
+            paidAt: parsed.bookedAt.toISOString(),
+            source: 'bank-statement-import',
+            sourceTransactionId: parsed.externalId,
+            metadata: {
+              description: parsed.description,
+              fileName: extracted.fileName,
+            },
+          });
+
+          if (
+            reconciliation?.matched &&
+            'payment' in reconciliation &&
+            reconciliation.payment?.id
+          ) {
+            matchedPaymentId = reconciliation.payment.id;
+            matchedOrderId =
+              'order' in reconciliation && reconciliation.order?.id
+                ? reconciliation.order.id
+                : null;
+            category = 'SALES';
+            classificationCode = this.defaultClassificationCodeForCategory('SALES');
+            matchedPaymentsCount += 1;
+          } else {
+            const settledPixMatch = await this.findLikelySettledPixMatch({
+              amount: Math.abs(parsed.amount),
+              counterpartyName: classified.counterpartyName,
+              bookedAt: parsed.bookedAt,
+            });
+
+            if (settledPixMatch) {
+              matchedPaymentId = settledPixMatch.paymentId;
+              matchedOrderId = settledPixMatch.orderId;
+              category = 'SALES';
+              classificationCode = this.defaultClassificationCodeForCategory('SALES');
+              matchedPaymentsCount += 1;
+            } else {
+              const groupedOrderId = groupedOrderRevenuePlans.get(parsed.externalId) ?? null;
+              const orderMatch =
+                groupedOrderId != null
+                  ? { orderId: groupedOrderId }
+                  : await this.findLikelyOrderRevenueMatch({
+                      amount: Math.abs(parsed.amount),
+                      counterpartyName: classified.counterpartyName,
+                      bookedAt: parsed.bookedAt,
+                    });
+
+              if (orderMatch) {
+                matchedOrderId = orderMatch.orderId;
+                category = 'SALES';
+                classificationCode = this.defaultClassificationCodeForCategory('SALES');
+                matchedPaymentsCount += 1;
+              } else {
+                unmatchedInflowsCount += 1;
+              }
+            }
+          }
+        } else {
+          unmatchedInflowsCount += 1;
         }
       } else if (matchedPaymentId || matchedOrderId) {
         category = 'SALES';
         classificationCode = this.defaultClassificationCodeForCategory('SALES');
         matchedPaymentsCount += 1;
       } else if (!manualClassification) {
-        classificationCode = this.defaultClassificationCodeForCategory(category);
+        classificationCode =
+          classified.classificationCode || this.defaultClassificationCodeForCategory(category);
       }
 
       if (category === 'OWNER') {
@@ -1384,7 +2096,6 @@ export class BankStatementsService {
     unmatchedInflowsCount = normalizedTransactions.filter(
       (entry) =>
         entry.direction === 'INFLOW' &&
-        entry.transactionKind === 'PIX_IN' &&
         entry.matchedPaymentId == null &&
         entry.matchedOrderId == null &&
         entry.category === 'UNMATCHED_INFLOW',
@@ -1470,6 +2181,192 @@ export class BankStatementsService {
       ok: true,
       import: await this.getLatestImportSummary(new Date(), importRecord.id),
     } as BankStatementImportResult;
+  }
+
+  async reprocessLatestImport(asOf = new Date()) {
+    const latestImport = await this.prisma.bankStatementImport.findFirst({
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+    if (!latestImport) {
+      throw new BadRequestException('Nenhum extrato foi importado ainda.');
+    }
+
+    const [transactions, classificationOptions] = await Promise.all([
+      this.prisma.bankStatementTransaction.findMany({
+        where: { latestImportId: latestImport.id },
+        orderBy: [{ bookedAt: 'asc' }, { id: 'asc' }],
+      }),
+      this.ensureClassificationOptions(),
+    ]);
+
+    const classificationOptionMap = new Map(
+      classificationOptions.map((option) => [option.code, option]),
+    );
+    const existingTransactionMap = new Map<string, ExistingStatementTransaction>(
+      transactions.map((entry) => [
+        entry.externalId,
+        {
+          matchedPaymentId: entry.matchedPaymentId,
+          matchedOrderId: entry.matchedOrderId,
+          classificationCode: entry.classificationCode,
+          manualClassification: entry.manualClassification,
+          manualMatch: entry.manualMatch,
+          category: entry.category,
+          isOperational: entry.isOperational,
+        },
+      ]),
+    );
+    const parsedTransactions = transactions.map((entry) => ({
+      externalId: entry.externalId,
+      bookedAt: entry.bookedAt,
+      amount: round2(entry.amount),
+      description: entry.description,
+    }));
+    const groupedOrderRevenuePlans = await this.planGroupedOrderRevenueMatches(
+      parsedTransactions,
+      existingTransactionMap,
+    );
+
+    for (const parsed of parsedTransactions) {
+      const existingEntry = existingTransactionMap.get(parsed.externalId) || null;
+      const classified = classifyStatementTransaction(parsed);
+      let category = classified.category;
+      let isOperational = classified.isOperational;
+      let classificationCode =
+        classified.classificationCode || this.defaultClassificationCodeForCategory(category);
+      let manualClassification = existingEntry?.manualClassification ?? false;
+      let manualMatch = existingEntry?.manualMatch ?? false;
+      let matchedPaymentId = existingEntry?.matchedPaymentId ?? null;
+      let matchedOrderId = existingEntry?.matchedOrderId ?? null;
+
+      if (manualClassification && existingEntry?.classificationCode) {
+        const existingOption = classificationOptionMap.get(existingEntry.classificationCode);
+        classificationCode = existingEntry.classificationCode;
+        if (existingOption) {
+          category = existingOption.baseCategory;
+          isOperational = existingOption.isOperational;
+        } else if (isStatementCategory(existingEntry.category)) {
+          category = existingEntry.category;
+          isOperational = existingEntry.isOperational;
+        }
+      }
+
+      if (
+        !manualMatch &&
+        !matchedPaymentId &&
+        !matchedOrderId &&
+        classified.direction === 'INFLOW' &&
+        classified.category === 'UNMATCHED_INFLOW'
+      ) {
+        if (classified.settlementProvider === 'SUMUP') {
+          const cardMatch = await this.findLikelyCardSettlementMatch({
+            amount: Math.abs(parsed.amount),
+            bookedAt: parsed.bookedAt,
+          });
+          if (cardMatch) {
+            const checkoutId = this.parseSumUpCheckoutId(cardMatch.providerRef);
+            if (checkoutId) {
+              try {
+                await this.paymentsService.syncSumUpCheckoutById(checkoutId);
+              } catch {}
+            }
+            matchedPaymentId = cardMatch.paymentId;
+            matchedOrderId = cardMatch.orderId;
+            category = 'SALES';
+            classificationCode = this.defaultClassificationCodeForCategory('SALES');
+          }
+        } else if (classified.transactionKind === 'PIX_IN' && classified.counterpartyName) {
+          const reconciliation = await this.paymentsService.reconcilePixWebhook({
+            payerName: classified.counterpartyName,
+            amount: Math.abs(parsed.amount),
+            paidAt: parsed.bookedAt.toISOString(),
+            source: 'bank-statement-reprocess',
+            sourceTransactionId: parsed.externalId,
+            metadata: {
+              description: parsed.description,
+              fileName: latestImport.fileName,
+            },
+          });
+
+          if (
+            reconciliation?.matched &&
+            'payment' in reconciliation &&
+            reconciliation.payment?.id
+          ) {
+            matchedPaymentId = reconciliation.payment.id;
+            matchedOrderId =
+              'order' in reconciliation && reconciliation.order?.id
+                ? reconciliation.order.id
+                : null;
+            category = 'SALES';
+            classificationCode = this.defaultClassificationCodeForCategory('SALES');
+          } else {
+            const settledPixMatch = await this.findLikelySettledPixMatch({
+              amount: Math.abs(parsed.amount),
+              counterpartyName: classified.counterpartyName,
+              bookedAt: parsed.bookedAt,
+            });
+            if (settledPixMatch) {
+              matchedPaymentId = settledPixMatch.paymentId;
+              matchedOrderId = settledPixMatch.orderId;
+              category = 'SALES';
+              classificationCode = this.defaultClassificationCodeForCategory('SALES');
+            } else {
+              const groupedOrderId = groupedOrderRevenuePlans.get(parsed.externalId) ?? null;
+              const orderMatch =
+                groupedOrderId != null
+                  ? { orderId: groupedOrderId }
+                  : await this.findLikelyOrderRevenueMatch({
+                      amount: Math.abs(parsed.amount),
+                      counterpartyName: classified.counterpartyName,
+                      bookedAt: parsed.bookedAt,
+                    });
+              if (orderMatch) {
+                matchedOrderId = orderMatch.orderId;
+                category = 'SALES';
+                classificationCode = this.defaultClassificationCodeForCategory('SALES');
+              }
+            }
+          }
+        }
+      } else if (matchedPaymentId || matchedOrderId) {
+        category = 'SALES';
+        classificationCode = this.defaultClassificationCodeForCategory('SALES');
+      } else if (!manualClassification) {
+        classificationCode =
+          classified.classificationCode || this.defaultClassificationCodeForCategory(category);
+      }
+
+      if (category === 'OWNER') {
+        isOperational = false;
+      }
+
+      await this.prisma.bankStatementTransaction.update({
+        where: { externalId: parsed.externalId },
+        data: {
+          bookedAt: parsed.bookedAt,
+          amount: parsed.amount,
+          description: parsed.description,
+          normalizedDescription: classified.normalizedDescription,
+          direction: classified.direction,
+          transactionKind: classified.transactionKind,
+          category,
+          classificationCode,
+          manualClassification,
+          manualMatch,
+          counterpartyName: classified.counterpartyName,
+          isOperational,
+          matchedPaymentId,
+          matchedOrderId,
+        },
+      });
+    }
+
+    await this.syncImportMetrics(latestImport.id);
+    return {
+      latestImport: await this.getLatestImportSummary(asOf, latestImport.id),
+      review: await this.getReviewSummary(asOf),
+    };
   }
 
   async getReviewSummary(asOf = new Date()) {
@@ -1596,6 +2493,17 @@ export class BankStatementsService {
       payerName: transaction.counterpartyName,
       currentPaymentId: transaction.matchedPaymentId,
     });
+    const settledPixCandidates = await this.findLikelySettledPixCandidates({
+      amount: Math.abs(transaction.amount),
+      bookedAt: transaction.bookedAt,
+      counterpartyName: transaction.counterpartyName,
+      currentPaymentId: transaction.matchedPaymentId,
+    });
+    const cardSettlementCandidates = await this.findLikelyCardSettlementCandidates({
+      amount: Math.abs(transaction.amount),
+      bookedAt: transaction.bookedAt,
+      currentPaymentId: transaction.matchedPaymentId,
+    });
 
     const orderCandidates = await this.findLikelyOrderRevenueCandidates({
       amount: Math.abs(transaction.amount),
@@ -1621,6 +2529,50 @@ export class BankStatementsService {
           customerName: candidate.customerName,
         }) || `Pedido #${candidate.publicNumber}`,
     }));
+
+    for (const candidate of settledPixCandidates) {
+      if (candidates.some((entry) => entry.paymentId === candidate.paymentId)) continue;
+      candidates.push({
+        matchType: 'PAYMENT',
+        paymentId: candidate.paymentId,
+        orderId: candidate.orderId,
+        publicNumber: candidate.publicNumber,
+        customerName: candidate.customerName,
+        amount: candidate.amount,
+        createdAt: candidate.createdAt.toISOString(),
+        dueAt: candidate.dueAt?.toISOString() ?? candidate.scheduledAt?.toISOString() ?? null,
+        nameScore: Number(candidate.totalScore.toFixed(3)),
+        current: transaction.matchedPaymentId === candidate.paymentId,
+        label:
+          this.formatMatchedPaymentLabel({
+            orderId: candidate.orderId,
+            publicNumber: candidate.publicNumber,
+            customerName: candidate.customerName,
+          }) || `Pedido #${candidate.publicNumber}`,
+      });
+    }
+
+    for (const candidate of cardSettlementCandidates) {
+      if (candidates.some((entry) => entry.paymentId === candidate.paymentId)) continue;
+      candidates.push({
+        matchType: 'PAYMENT',
+        paymentId: candidate.paymentId,
+        orderId: candidate.orderId,
+        publicNumber: candidate.publicNumber,
+        customerName: candidate.customerName,
+        amount: candidate.amount,
+        createdAt: candidate.createdAt.toISOString(),
+        dueAt: candidate.dueAt?.toISOString() ?? null,
+        nameScore: Number(candidate.totalScore.toFixed(3)),
+        current: transaction.matchedPaymentId === candidate.paymentId,
+        label:
+          this.formatMatchedPaymentLabel({
+            orderId: candidate.orderId,
+            publicNumber: candidate.publicNumber,
+            customerName: candidate.customerName,
+          }) || `Pedido #${candidate.publicNumber}`,
+      });
+    }
 
     const paymentOrderIds = new Set(candidates.map((candidate) => candidate.orderId));
     for (const candidate of orderCandidates) {
@@ -1739,7 +2691,13 @@ export class BankStatementsService {
           : null;
 
       if (transaction.matchedPaymentId && transaction.matchedPaymentId !== requestedMatch) {
-        await this.paymentsService.reopenPixPayment(transaction.matchedPaymentId);
+        const currentMatchedPayment = await this.prisma.payment.findUnique({
+          where: { id: transaction.matchedPaymentId },
+          select: { method: true },
+        });
+        if (currentMatchedPayment?.method === 'pix') {
+          await this.paymentsService.reopenPixPayment(transaction.matchedPaymentId);
+        }
       }
 
       if (requestedMatch != null && requestedOrderMatch != null) {
@@ -1759,19 +2717,48 @@ export class BankStatementsService {
           throw new BadRequestException('Este pagamento já está conciliado em outro lançamento.');
         }
 
-        const settlement = await this.paymentsService.settlePixWebhook({
-          paymentId: requestedMatch,
-          amount: Math.abs(transaction.amount),
-          paidAt: transaction.bookedAt.toISOString(),
-          source: 'bank-statement-manual',
-          metadata: {
-            sourceTransactionId: transaction.externalId,
-            description: transaction.description,
+        const payment = await this.prisma.payment.findUnique({
+          where: { id: requestedMatch },
+          select: {
+            id: true,
+            method: true,
+            orderId: true,
+            status: true,
+            paidAt: true,
+            providerRef: true,
           },
         });
+        if (!payment) {
+          throw new BadRequestException('Pagamento do extrato não encontrado.');
+        }
 
-        nextMatchedPaymentId = requestedMatch;
-        nextMatchedOrderId = settlement.payment.orderId;
+        if (payment.method === 'pix') {
+          nextMatchedPaymentId = requestedMatch;
+          if (payment.status === 'PAGO' || payment.paidAt) {
+            nextMatchedOrderId = payment.orderId;
+          } else {
+            const settlement = await this.paymentsService.settlePixWebhook({
+              paymentId: requestedMatch,
+              amount: Math.abs(transaction.amount),
+              paidAt: transaction.bookedAt.toISOString(),
+              source: 'bank-statement-manual',
+              metadata: {
+                sourceTransactionId: transaction.externalId,
+                description: transaction.description,
+              },
+            });
+            nextMatchedOrderId = settlement.payment.orderId;
+          }
+        } else {
+          const checkoutId = this.parseSumUpCheckoutId(payment.providerRef);
+          if (checkoutId) {
+            try {
+              await this.paymentsService.syncSumUpCheckoutById(checkoutId);
+            } catch {}
+          }
+          nextMatchedPaymentId = payment.id;
+          nextMatchedOrderId = payment.orderId;
+        }
       } else if (requestedOrderMatch != null) {
         const matchedOrder = await this.prisma.order.findUnique({
           where: { id: requestedOrderMatch },
@@ -1797,9 +2784,12 @@ export class BankStatementsService {
       description: transaction.description,
     });
 
-    let nextClassificationCode = transaction.classificationCode || this.defaultClassificationCodeForCategory(
-      isStatementCategory(transaction.category) ? transaction.category : autoClassification.category,
-    );
+    let nextClassificationCode =
+      transaction.classificationCode ||
+      autoClassification.classificationCode ||
+      this.defaultClassificationCodeForCategory(
+        isStatementCategory(transaction.category) ? transaction.category : autoClassification.category,
+      );
     let nextCategory = isStatementCategory(transaction.category)
       ? transaction.category
       : autoClassification.category;
@@ -1824,7 +2814,9 @@ export class BankStatementsService {
       nextManualClassification = true;
     } else if (hasAnyMatchInput && (transaction.matchedPaymentId != null || transaction.matchedOrderId != null)) {
       nextCategory = autoClassification.category;
-      nextClassificationCode = this.defaultClassificationCodeForCategory(autoClassification.category);
+      nextClassificationCode =
+        autoClassification.classificationCode ||
+        this.defaultClassificationCodeForCategory(autoClassification.category);
       nextIsOperational = autoClassification.category === 'OWNER' ? false : autoClassification.isOperational;
       nextManualClassification = false;
     }
@@ -1919,18 +2911,20 @@ export class BankStatementsService {
   }
 
   async loadDataset() {
-    const [latestImport, transactions] = await Promise.all([
+    const [latestImport, transactions, classificationOptions] = await Promise.all([
       this.prisma.bankStatementImport.findFirst({
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       }),
       this.prisma.bankStatementTransaction.findMany({
         orderBy: [{ bookedAt: 'asc' }, { id: 'asc' }],
       }),
+      this.ensureClassificationOptions(),
     ]);
 
     return {
       latestImport,
       transactions,
+      classificationOptions,
     };
   }
 
@@ -1979,8 +2973,9 @@ export class BankStatementsService {
     startsAt?: Date;
     latestImport: Awaited<ReturnType<BankStatementsService['loadDataset']>>['latestImport'];
     transactions: Awaited<ReturnType<BankStatementsService['loadDataset']>>['transactions'];
+    classificationOptions: Awaited<ReturnType<BankStatementsService['ensureClassificationOptions']>>;
   }) {
-    const { asOf, startsAt, latestImport, transactions } = params;
+    const { asOf, startsAt, latestImport, transactions, classificationOptions } = params;
     const inRange = startsAt
       ? transactions.filter((entry) => entry.bookedAt.getTime() >= startsAt.getTime())
       : transactions;
@@ -1990,7 +2985,25 @@ export class BankStatementsService {
       StatementCategory,
       { amount: number; count: number }
     >();
+    const classificationOptionMap = new Map(
+      classificationOptions.map((option) => [option.code, option]),
+    );
+    const classificationMap = new Map<
+      string,
+      Omit<BankStatementClassificationBreakdownEntry, 'label' | 'baseCategory' | 'tone' | 'isOperational'>
+    >();
     const unmatchedInflows: BankStatementUnmatchedInflow[] = [];
+    const reconciliation: BankStatementReconciliationSummary = {
+      matchedRevenue: 0,
+      matchedTransactionsCount: 0,
+      unmatchedInflows: 0,
+      unmatchedTransactionsCount: 0,
+      otherInflows: 0,
+      operationalOutflows: 0,
+      nonOperationalInflows: 0,
+      nonOperationalOutflows: 0,
+      nonOperationalNet: 0,
+    };
 
     const ensureDay = (date: string) => {
       const current = dailyMap.get(date);
@@ -2025,16 +3038,47 @@ export class BankStatementsService {
       categoryEntry.count += 1;
       categoryMap.set(transaction.category as StatementCategory, categoryEntry);
 
+      const fallbackCode =
+        transaction.classificationCode ||
+        this.defaultClassificationCodeForCategory(
+          isStatementCategory(transaction.category)
+            ? (transaction.category as StatementCategory)
+            : 'OTHER_EXPENSE',
+        );
+      const classificationEntry = classificationMap.get(fallbackCode) || {
+        code: fallbackCode,
+        amount: 0,
+        inflowAmount: 0,
+        outflowAmount: 0,
+        count: 0,
+      };
+      classificationEntry.amount = round2(classificationEntry.amount + transaction.amount);
+      if (transaction.amount > 0) {
+        classificationEntry.inflowAmount = round2(classificationEntry.inflowAmount + transaction.amount);
+      } else if (transaction.amount < 0) {
+        classificationEntry.outflowAmount = round2(
+          classificationEntry.outflowAmount + Math.abs(transaction.amount),
+        );
+      }
+      classificationEntry.count += 1;
+      classificationMap.set(fallbackCode, classificationEntry);
+
       if (transaction.amount > 0) {
         day.bankInflow = round2(day.bankInflow + transaction.amount);
       }
 
       if (transaction.category === 'SALES') {
         day.matchedRevenue = round2(day.matchedRevenue + Math.max(transaction.amount, 0));
+        reconciliation.matchedRevenue = round2(
+          reconciliation.matchedRevenue + Math.max(transaction.amount, 0),
+        );
+        reconciliation.matchedTransactionsCount += 1;
       }
 
       if (transaction.category === 'UNMATCHED_INFLOW' && transaction.amount > 0) {
         day.unmatchedInflows = round2(day.unmatchedInflows + transaction.amount);
+        reconciliation.unmatchedInflows = round2(reconciliation.unmatchedInflows + transaction.amount);
+        reconciliation.unmatchedTransactionsCount += 1;
         unmatchedInflows.push({
           externalId: transaction.externalId,
           date: dateKey,
@@ -2042,14 +3086,34 @@ export class BankStatementsService {
           counterpartyName: transaction.counterpartyName,
           description: transaction.description,
         });
+      } else if (transaction.amount > 0 && transaction.category !== 'SALES') {
+        reconciliation.otherInflows = round2(reconciliation.otherInflows + transaction.amount);
       }
 
       if (!transaction.isOperational) {
+        if (transaction.amount > 0) {
+          reconciliation.nonOperationalInflows = round2(
+            reconciliation.nonOperationalInflows + transaction.amount,
+          );
+          reconciliation.nonOperationalNet = round2(
+            reconciliation.nonOperationalNet + transaction.amount,
+          );
+        } else if (transaction.amount < 0) {
+          reconciliation.nonOperationalOutflows = round2(
+            reconciliation.nonOperationalOutflows + Math.abs(transaction.amount),
+          );
+          reconciliation.nonOperationalNet = round2(
+            reconciliation.nonOperationalNet + transaction.amount,
+          );
+        }
         continue;
       }
 
       if (transaction.amount < 0) {
         day.actualExpenses = round2(day.actualExpenses + Math.abs(transaction.amount));
+        reconciliation.operationalOutflows = round2(
+          reconciliation.operationalOutflows + Math.abs(transaction.amount),
+        );
       }
 
       if (transaction.category === 'INGREDIENTS') {
@@ -2077,6 +3141,26 @@ export class BankStatementsService {
         count: entry.count,
         tone: CATEGORY_TONES[key],
       }))
+      .sort((left, right) => Math.abs(right.amount) - Math.abs(left.amount));
+
+    const classificationBreakdown = [...classificationMap.entries()]
+      .map(([code, entry]) => {
+        const option = classificationOptionMap.get(code) || null;
+        const baseCategory =
+          option?.baseCategory ||
+          (isStatementCategory(code) ? code : 'OTHER_EXPENSE');
+        return {
+          code,
+          label: option?.label || CATEGORY_LABELS[baseCategory] || code,
+          baseCategory,
+          tone: option?.tone || deriveStatementTone(baseCategory),
+          isOperational: option?.isOperational ?? baseCategory !== 'OWNER',
+          amount: round2(entry.amount),
+          inflowAmount: round2(entry.inflowAmount),
+          outflowAmount: round2(entry.outflowAmount),
+          count: entry.count,
+        } satisfies BankStatementClassificationBreakdownEntry;
+      })
       .sort((left, right) => Math.abs(right.amount) - Math.abs(left.amount));
 
     return {
@@ -2111,6 +3195,17 @@ export class BankStatementsService {
           },
       dailySeries: [...dailyMap.values()].sort((left, right) => left.date.localeCompare(right.date)),
       categories,
+      classificationBreakdown,
+      reconciliation: {
+        ...reconciliation,
+        matchedRevenue: round2(reconciliation.matchedRevenue),
+        unmatchedInflows: round2(reconciliation.unmatchedInflows),
+        otherInflows: round2(reconciliation.otherInflows),
+        operationalOutflows: round2(reconciliation.operationalOutflows),
+        nonOperationalInflows: round2(reconciliation.nonOperationalInflows),
+        nonOperationalOutflows: round2(reconciliation.nonOperationalOutflows),
+        nonOperationalNet: round2(reconciliation.nonOperationalNet),
+      },
       unmatchedInflows: unmatchedInflows
         .sort((left, right) => right.amount - left.amount)
         .slice(0, 12),

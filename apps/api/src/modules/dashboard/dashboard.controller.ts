@@ -104,6 +104,12 @@ export class DashboardController {
     return this.bankStatementsService.getReviewSummary();
   }
 
+  @Post('bank-statements/reprocess-latest')
+  async reprocessLatestBankStatement() {
+    const result = await this.bankStatementsService.reprocessLatestImport();
+    return result.review;
+  }
+
   @Get('bank-statements/transactions/:id/match-candidates')
   getBankStatementMatchCandidates(@Param('id') id: string) {
     return this.bankStatementsService.getTransactionMatchCandidates(parseWithSchema(idSchema, id));

@@ -1924,6 +1924,7 @@ export class DashboardService {
       asOf,
       latestImport: statementDataset.latestImport,
       transactions: statementDataset.transactions,
+      classificationOptions: statementDataset.classificationOptions,
     });
     const integrations = this.buildIntegrationRails(bankStatementSummary);
 
@@ -1960,6 +1961,7 @@ export class DashboardService {
         startsAt: selectedWindow.startsAt,
         latestImport: statementDataset.latestImport,
         transactions: statementDataset.transactions,
+        classificationOptions: statementDataset.classificationOptions,
       }),
     });
     const normalizedSelectedBusiness = {

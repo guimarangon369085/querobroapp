@@ -277,6 +277,28 @@ type DashboardBusinessSummary = {
       count: number;
       tone: 'positive' | 'neutral' | 'warning';
     }>;
+    classificationBreakdown: Array<{
+      code: string;
+      label: string;
+      baseCategory: string;
+      tone: 'positive' | 'neutral' | 'warning';
+      isOperational: boolean;
+      amount: number;
+      inflowAmount: number;
+      outflowAmount: number;
+      count: number;
+    }>;
+    reconciliation: {
+      matchedRevenue: number;
+      matchedTransactionsCount: number;
+      unmatchedInflows: number;
+      unmatchedTransactionsCount: number;
+      otherInflows: number;
+      operationalOutflows: number;
+      nonOperationalInflows: number;
+      nonOperationalOutflows: number;
+      nonOperationalNet: number;
+    };
     unmatchedInflows: Array<{
       externalId: string;
       date: string;
@@ -2072,6 +2094,45 @@ export default function DashboardScreen() {
       : latestStatementImport?.importedAt
         ? `Última atualização: ${new Date(latestStatementImport.importedAt).toLocaleString('pt-BR')} · ${formatNumber(latestStatementImport.transactionCount)} linha(s) · ${formatNumber(latestStatementImport.unmatchedInflowsCount)} sem match`
       : 'Aceita .eml, .csv ou .ofx do Nu Empresas';
+  const statementInsightCards = useMemo(() => {
+    if (!statementOverview) return [];
+    return [
+      {
+        label: 'Receita conciliada',
+        value: formatCurrencyBR(statementOverview.reconciliation.matchedRevenue),
+        tone: 'mint' as const,
+        meta: `${formatNumber(statementOverview.reconciliation.matchedTransactionsCount)} lançamento(s)`,
+      },
+      {
+        label: 'Entradas sem match',
+        value: formatCurrencyBR(statementOverview.reconciliation.unmatchedInflows),
+        tone:
+          statementOverview.reconciliation.unmatchedInflows > 0
+            ? ('amber' as const)
+            : ('mint' as const),
+        meta: `${formatNumber(statementOverview.reconciliation.unmatchedTransactionsCount)} lançamento(s)`,
+      },
+      {
+        label: 'Saídas operacionais',
+        value: formatCurrencyBR(statementOverview.reconciliation.operationalOutflows),
+        tone: 'rose' as const,
+        meta: `${formatCurrencyBR(statementOverview.kpis.actualExpensesInRange)} entrando nos custos reais`,
+      },
+      {
+        label: 'Mov. não operacionais',
+        value: formatCurrencyBR(statementOverview.reconciliation.nonOperationalNet),
+        tone:
+          statementOverview.reconciliation.nonOperationalNet >= 0
+            ? ('sky' as const)
+            : ('ink' as const),
+        meta: `${formatCurrencyBR(statementOverview.reconciliation.nonOperationalOutflows)} aplicados · ${formatCurrencyBR(statementOverview.reconciliation.nonOperationalInflows)} resgatados`,
+      },
+    ];
+  }, [statementOverview]);
+  const statementClassificationLeaders = useMemo(
+    () => (statementOverview?.classificationBreakdown || []).slice(0, 8),
+    [statementOverview],
+  );
   const sourceEfficiencyCards = useMemo(() => {
     if (!activeTraffic?.attributedSources?.length) return [];
     const bestSubmitRate = [...activeTraffic.attributedSources]
@@ -2509,7 +2570,7 @@ export default function DashboardScreen() {
                 />
               </div>
 
-              <div className="grid gap-3 rounded-[24px] border border-white/80 bg-white/84 p-4 shadow-[0_10px_24px_rgba(57,39,24,0.06)]">
+            <div className="grid gap-3 rounded-[24px] border border-white/80 bg-white/84 p-4 shadow-[0_10px_24px_rgba(57,39,24,0.06)]">
                 <div className="grid gap-2">
                   <input
                     ref={statementFileInputRef}
@@ -2547,6 +2608,65 @@ export default function DashboardScreen() {
               ) : null}
             </div>
           </div>
+
+            {statementOverview ? (
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)]">
+                <div className="grid gap-3 rounded-[24px] border border-white/80 bg-white/86 p-4 shadow-[0_10px_24px_rgba(57,39,24,0.06)]">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-[color:var(--ink-strong)]">
+                      Plano de contas
+                    </p>
+                    <span className="text-xs text-neutral-500">
+                      {formatNumber(statementOverview.classificationBreakdown.length)} leitura(s)
+                    </span>
+                  </div>
+                  {statementClassificationLeaders.length ? (
+                    <div className="grid gap-3">
+                      {statementClassificationLeaders.map((entry) => (
+                        <div
+                          key={entry.code}
+                          className="flex flex-wrap items-start justify-between gap-3 rounded-[20px] border border-white/75 bg-white/78 px-4 py-3"
+                        >
+                          <div className="grid gap-1">
+                            <strong className="text-sm text-[color:var(--ink-strong)]">
+                              {entry.label}
+                            </strong>
+                            <p className="text-xs text-neutral-500">
+                              {STATEMENT_CATEGORY_LABELS[entry.baseCategory as StatementCategory]} ·{' '}
+                              {formatNumber(entry.count)} lançamento(s)
+                              {entry.isOperational ? ' · operacional' : ' · não operacional'}
+                            </p>
+                          </div>
+                          <div className="grid gap-1 text-right">
+                            <strong className="text-sm text-[color:var(--ink-strong)]">
+                              {formatCurrencyBR(entry.amount)}
+                            </strong>
+                            <p className="text-xs text-neutral-500">
+                              Entradas {formatCurrencyBR(entry.inflowAmount)} · Saídas{' '}
+                              {formatCurrencyBR(entry.outflowAmount)}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <CompactEmpty message="Sem plano de contas disponível neste recorte." />
+                  )}
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {statementInsightCards.map((card) => (
+                    <MetricCard
+                      key={card.label}
+                      label={card.label}
+                      value={card.value}
+                      tone={card.tone}
+                      meta={card.meta}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
         </SectionPanel>
 
           <SectionPanel
