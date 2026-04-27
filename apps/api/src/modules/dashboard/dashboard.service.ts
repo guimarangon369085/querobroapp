@@ -983,28 +983,34 @@ export class DashboardService {
 
       const existing = analyticsByCode.get(code);
       if (existing) {
+        const preserveLiveCoupon = Boolean(existing.coupon.id) && existing.coupon.historicalOnly === false;
         if (typeof params.id === 'number' && !existing.coupon.id) {
           existing.coupon.id = params.id;
         }
-        if (typeof params.discountPct === 'number' && params.discountPct > 0) {
+        if (
+          typeof params.discountPct === 'number' &&
+          params.discountPct > 0 &&
+          (!preserveLiveCoupon || existing.coupon.discountPct <= 0)
+        ) {
           existing.coupon.discountPct = round2(params.discountPct);
         }
         if (
           typeof params.usageLimitPerCustomer === 'number' &&
-          params.usageLimitPerCustomer > 0
+          params.usageLimitPerCustomer > 0 &&
+          (!preserveLiveCoupon || !existing.coupon.usageLimitPerCustomer)
         ) {
           existing.coupon.usageLimitPerCustomer = Math.floor(params.usageLimitPerCustomer);
         }
-        if (typeof params.active === 'boolean') {
+        if (typeof params.active === 'boolean' && !preserveLiveCoupon) {
           existing.coupon.active = params.active;
         }
-        if (params.createdAt) {
+        if (params.createdAt && !preserveLiveCoupon) {
           existing.coupon.createdAt =
             params.createdAt instanceof Date
               ? params.createdAt.toISOString()
               : String(params.createdAt || '').trim() || existing.coupon.createdAt;
         }
-        if (params.updatedAt) {
+        if (params.updatedAt && !preserveLiveCoupon) {
           existing.coupon.updatedAt =
             params.updatedAt instanceof Date
               ? params.updatedAt.toISOString()

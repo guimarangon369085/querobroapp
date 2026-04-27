@@ -15,7 +15,7 @@ type CouponDraft = {
   active: boolean;
 };
 
-type CouponAnalytics = {
+type CouponRecord = {
   id?: number;
   code: string;
   discountPct: number;
@@ -23,6 +23,9 @@ type CouponAnalytics = {
   active: boolean;
   createdAt?: string | null;
   updatedAt?: string | null;
+};
+
+type CouponAnalytics = CouponRecord & {
   historicalOnly?: boolean;
   metrics: {
     uses: number;
@@ -117,6 +120,80 @@ function resolveCouponKey(coupon: Pick<CouponAnalytics, 'id' | 'code'>) {
   return typeof coupon.id === 'number' && coupon.id > 0 ? `id-${coupon.id}` : `code-${coupon.code}`;
 }
 
+function buildCouponAnalyticsRecord(coupon: CouponRecord): CouponAnalytics {
+  return {
+    id: coupon.id,
+    code: coupon.code,
+    discountPct: coupon.discountPct,
+    usageLimitPerCustomer: coupon.usageLimitPerCustomer ?? null,
+    active: coupon.active,
+    createdAt: coupon.createdAt ?? null,
+    updatedAt: coupon.updatedAt ?? null,
+    historicalOnly: false,
+    metrics: {
+      uses: 0,
+      distinctCustomers: 0,
+      discountInvestmentTotal: 0,
+      subtotalTotal: 0,
+      netRevenueTotal: 0,
+      averageDiscountAmount: 0,
+      lastUsedAt: null,
+    },
+    customers: [],
+    recentOrders: [],
+  };
+}
+
+function mergeCouponPayloads(params: {
+  analyticsPayload?: CouponAnalytics[] | null;
+  couponsPayload?: CouponRecord[] | null;
+}) {
+  const analyticsPayload = Array.isArray(params.analyticsPayload) ? params.analyticsPayload : [];
+  const couponsPayload = Array.isArray(params.couponsPayload) ? params.couponsPayload : [];
+  const merged = new Map<string, CouponAnalytics>();
+
+  for (const coupon of analyticsPayload) {
+    const normalizedCode = normalizeCouponCodeInput(coupon.code);
+    if (!normalizedCode) continue;
+    merged.set(normalizedCode, {
+      ...coupon,
+      code: normalizedCode,
+      historicalOnly: Boolean(coupon.historicalOnly),
+    });
+  }
+
+  for (const coupon of couponsPayload) {
+    const normalizedCode = normalizeCouponCodeInput(coupon.code);
+    if (!normalizedCode) continue;
+
+    const existing = merged.get(normalizedCode);
+    if (existing) {
+      merged.set(normalizedCode, {
+        ...existing,
+        id: coupon.id,
+        code: normalizedCode,
+        discountPct: coupon.discountPct,
+        usageLimitPerCustomer: coupon.usageLimitPerCustomer ?? null,
+        active: coupon.active,
+        createdAt: coupon.createdAt ?? existing.createdAt ?? null,
+        updatedAt: coupon.updatedAt ?? existing.updatedAt ?? null,
+        historicalOnly: false,
+      });
+      continue;
+    }
+
+    merged.set(normalizedCode, buildCouponAnalyticsRecord({ ...coupon, code: normalizedCode }));
+  }
+
+  return Array.from(merged.values()).sort(
+    (left, right) =>
+      Number(right.active) - Number(left.active) ||
+      Number(left.historicalOnly) - Number(right.historicalOnly) ||
+      right.metrics.uses - left.metrics.uses ||
+      left.code.localeCompare(right.code, 'pt-BR'),
+  );
+}
+
 function MetricCard({
   label,
   value,
@@ -189,9 +266,7 @@ export default function CouponsScreen() {
       setCoupons(normalized);
       setCouponDrafts(
         Object.fromEntries(
-          normalized
-            .filter((coupon) => !coupon.historicalOnly)
-            .map((coupon) => [resolveCouponKey(coupon), buildCouponDraft(coupon)]),
+          normalized.map((coupon) => [resolveCouponKey(coupon), buildCouponDraft(coupon)]),
         ),
       );
     });
@@ -205,10 +280,30 @@ export default function CouponsScreen() {
       }
 
       try {
-        const payload = await apiFetch<CouponAnalytics[]>('/dashboard/coupons/analytics', {
-          cache: 'no-store',
-        });
-        syncCoupons(payload);
+        const [analyticsResult, couponsResult] = await Promise.allSettled([
+          apiFetch<CouponAnalytics[]>('/dashboard/coupons/analytics', {
+            cache: 'no-store',
+          }),
+          apiFetch<CouponRecord[]>('/dashboard/coupons', {
+            cache: 'no-store',
+          }),
+        ]);
+
+        if (analyticsResult.status === 'rejected' && couponsResult.status === 'rejected') {
+          throw analyticsResult.reason instanceof Error
+            ? analyticsResult.reason
+            : couponsResult.reason instanceof Error
+              ? couponsResult.reason
+              : new Error('Não foi possível carregar os cupons.');
+        }
+
+        syncCoupons(
+          mergeCouponPayloads({
+            analyticsPayload:
+              analyticsResult.status === 'fulfilled' ? analyticsResult.value : [],
+            couponsPayload: couponsResult.status === 'fulfilled' ? couponsResult.value : [],
+          }),
+        );
         setError(null);
       } catch (loadError) {
         const message =
@@ -323,7 +418,6 @@ export default function CouponsScreen() {
 
   const handleSaveCoupon = useCallback(
     async (coupon: CouponAnalytics) => {
-      if (coupon.historicalOnly || !coupon.id) return;
       const couponKey = resolveCouponKey(coupon);
       const draft = couponDrafts[couponKey];
       if (!draft) return;
@@ -332,7 +426,9 @@ export default function CouponsScreen() {
         setCouponSavingKey(couponKey);
         const saved = await persistCoupon({ id: coupon.id, draft });
         await loadCoupons({ silent: true });
-        notifySuccess(`Cupom ${saved.code} atualizado.`);
+        notifySuccess(
+          coupon.id ? `Cupom ${saved.code} atualizado.` : `Cupom ${saved.code} recuperado.`,
+        );
       } catch (saveError) {
         notifyError(
           saveError instanceof Error ? saveError.message : 'Não foi possível salvar o cupom.',
@@ -346,7 +442,7 @@ export default function CouponsScreen() {
 
   const handleDeleteCoupon = useCallback(
     async (coupon: CouponAnalytics) => {
-      if (coupon.historicalOnly || !coupon.id) return;
+      if (!coupon.id) return;
       const couponKey = resolveCouponKey(coupon);
 
       try {
@@ -543,10 +639,11 @@ export default function CouponsScreen() {
 
                   {coupon.historicalOnly ? (
                     <div className="rounded-[20px] border border-dashed border-[color:var(--tone-gold-line)] bg-[color:var(--tone-gold-surface)] px-4 py-3 text-sm text-[color:var(--tone-gold-ink)]">
-                      Este código aparece em pedidos antigos, mas não existe mais como cadastro editável.
+                      Este código sobreviveu no histórico de pedidos. Salve abaixo para recriar o cadastro editável.
                     </div>
-                  ) : (
-                    <div className="grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(140px,180px)_150px_minmax(120px,150px)_130px_auto_auto] lg:items-end">
+                  ) : null}
+
+                  <div className="grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(140px,180px)_150px_minmax(120px,150px)_130px_auto_auto] lg:items-end">
                       <label className="grid gap-1.5 text-sm text-neutral-600">
                         <span>Código</span>
                         <input
@@ -611,18 +708,19 @@ export default function CouponsScreen() {
                         disabled={saving || deleting}
                         onClick={() => void handleSaveCoupon(coupon)}
                       >
-                        {saving ? 'Salvando...' : 'Salvar'}
+                        {saving ? 'Salvando...' : coupon.id ? 'Salvar' : 'Recuperar'}
                       </button>
-                      <button
-                        type="button"
-                        className="app-button app-button-ghost"
-                        disabled={saving || deleting}
-                        onClick={() => void handleDeleteCoupon(coupon)}
-                      >
-                        {deleting ? 'Excluindo...' : 'Excluir'}
-                      </button>
+                      {coupon.id ? (
+                        <button
+                          type="button"
+                          className="app-button app-button-ghost"
+                          disabled={saving || deleting}
+                          onClick={() => void handleDeleteCoupon(coupon)}
+                        >
+                          {deleting ? 'Excluindo...' : 'Excluir'}
+                        </button>
+                      ) : null}
                     </div>
-                  )}
 
                   <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.25fr)]">
                     <section className="grid gap-3 rounded-[22px] border border-white/75 bg-white/72 p-4">

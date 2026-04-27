@@ -335,6 +335,9 @@ test('coupon analytics consolida usos, clientes e investimento do desconto', asy
   const record = analytics.find((entry) => entry.code === coupon.code);
   assert.ok(record);
   assert.equal(record.historicalOnly, false);
+  assert.equal(record.active, true);
+  assert.equal(record.discountPct, 15);
+  assert.equal(record.usageLimitPerCustomer, 3);
   assert.equal(record.metrics.uses, 2);
   assert.equal(record.metrics.distinctCustomers, 2);
   assert.equal(record.metrics.discountInvestmentTotal, 12.75);
@@ -352,6 +355,100 @@ test('coupon analytics consolida usos, clientes e investimento do desconto', asy
     record.customers.some((entry) => entry.customerName === `Cliente Analytics B ${suffix}`),
     true,
   );
+});
+
+test('coupon analytics permite recuperar um cupom que ficou apenas no histórico', async (t) => {
+  const formToken = String(process.env.ORDER_FORM_BRIDGE_TOKEN || '').trim();
+  const { apiUrl, shutdown } = await ensureApiServer();
+
+  t.after(async () => {
+    await shutdown();
+  });
+
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const coupon = await request(apiUrl, '/dashboard/coupons', {
+    method: 'POST',
+    headers: formToken ? { Authorization: `Bearer ${formToken}` } : undefined,
+    body: {
+      code: `RECUPERA-${suffix}`,
+      discountPct: 12,
+      usageLimitPerCustomer: 2,
+      active: true,
+    },
+  });
+
+  const intake = await request(apiUrl, '/orders/intake/customer-form', {
+    method: 'POST',
+    headers: formToken ? { Authorization: `Bearer ${formToken}` } : undefined,
+    body: {
+      version: 1,
+      customer: {
+        name: `Cliente Recupera ${suffix}`,
+        phone: '31999999993',
+      },
+      fulfillment: {
+        mode: 'PICKUP',
+        scheduledAt: new Date(Date.UTC(2030, 2, 22, 13, 0, 0)).toISOString(),
+      },
+      flavors: {
+        T: 7,
+        G: 0,
+        D: 0,
+        Q: 0,
+        R: 0,
+      },
+      couponCode: coupon.code,
+      source: {
+        externalId: `coupon-recover-${suffix}`,
+      },
+    },
+  });
+
+  assert.equal(intake.order.couponCode, coupon.code);
+
+  await request(apiUrl, `/dashboard/coupons/${coupon.id}`, {
+    method: 'DELETE',
+    headers: formToken ? { Authorization: `Bearer ${formToken}` } : undefined,
+  });
+
+  const historicalAnalytics = await request(apiUrl, '/dashboard/coupons/analytics', {
+    headers: formToken ? { Authorization: `Bearer ${formToken}` } : undefined,
+  });
+
+  const historicalRecord = historicalAnalytics.find((entry) => entry.code === coupon.code);
+  assert.ok(historicalRecord);
+  assert.equal(historicalRecord.historicalOnly, true);
+  assert.equal(historicalRecord.id, undefined);
+  assert.equal(historicalRecord.metrics.uses, 1);
+
+  const recreated = await request(apiUrl, '/dashboard/coupons', {
+    method: 'POST',
+    headers: formToken ? { Authorization: `Bearer ${formToken}` } : undefined,
+    body: {
+      code: coupon.code,
+      discountPct: 18,
+      usageLimitPerCustomer: 4,
+      active: false,
+    },
+  });
+
+  assert.equal(recreated.code, coupon.code);
+  assert.equal(recreated.discountPct, 18);
+  assert.equal(recreated.usageLimitPerCustomer, 4);
+  assert.equal(recreated.active, false);
+
+  const restoredAnalytics = await request(apiUrl, '/dashboard/coupons/analytics', {
+    headers: formToken ? { Authorization: `Bearer ${formToken}` } : undefined,
+  });
+
+  const restoredRecord = restoredAnalytics.find((entry) => entry.code === coupon.code);
+  assert.ok(restoredRecord);
+  assert.equal(restoredRecord.historicalOnly, false);
+  assert.equal(restoredRecord.id, recreated.id);
+  assert.equal(restoredRecord.discountPct, 18);
+  assert.equal(restoredRecord.usageLimitPerCustomer, 4);
+  assert.equal(restoredRecord.active, false);
+  assert.equal(restoredRecord.metrics.uses, 1);
 });
 
 test('customer-form preview aplica desconto do cupom no total e nas notas', async (t) => {

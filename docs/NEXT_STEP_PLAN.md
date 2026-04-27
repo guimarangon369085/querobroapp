@@ -57,6 +57,7 @@ Criterio de pronto:
 
 ### Refino final de Estoque e Pedidos
 
+- Publicado em 2026-04-26: `/cupons` voltou a operar com cadastro vivo mesmo quando um código só sobrevive no histórico. O web agora permite recuperar/recriar esses códigos a partir da própria tela, e a produção já teve os `5` cupons históricos recriados como registros vivos `inativos`, mantendo histórico de uso e devolvendo `Salvar/Excluir` na interface. Deploys em produção: API `0d7d7251-5561-42f2-8054-132b89951315` e web `650a6438-c55c-4f50-8895-66dae3c4c1e7`.
 - Publicado em 2026-04-26: `AMIGAS DA BROA` ganhou fallback canonico de descricao por item no `shared`/API/web para quando `drawerNote` vier nulo, evitando a copia generica `Toque fora da gaveta...` no `/pedido`. Deploys em producao: API `f888f261-2f9a-4f85-b18b-fdee1c4b2be5` e web `0d74d3e8-f5f5-41f5-b2a1-84bdf670be0d`.
 - Continuar reduzindo densidade visual e scroll na visao `Dia`.
 - Continuar a extracao dos blocos grandes restantes de `orders-screen` para componentes menores.
