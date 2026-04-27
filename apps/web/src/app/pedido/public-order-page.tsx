@@ -3,6 +3,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   computeSumUpCardPayableTotal,
+  computeSumUpCardSurchargeAmount,
   EXTERNAL_ORDER_DELIVERY_WINDOWS,
   buildCompanionProductMakerLine,
   resolveCompanionProductProfile,
@@ -1300,6 +1301,8 @@ export function PublicOrderPage({
   const hasActiveDeliveryQuoteToken = Boolean(activeDeliveryQuote?.quoteToken);
   const deliveryFee = activeDeliveryQuote?.fee ?? 0;
   const netDisplayTotal = discountedSubtotal + deliveryFee;
+  const cardSurchargeAmount =
+    sumupEnabled && form.paymentMethod === 'card' ? computeSumUpCardSurchargeAmount(netDisplayTotal) : 0;
   const displayTotal =
     sumupEnabled && form.paymentMethod === 'card' ? computeSumUpCardPayableTotal(netDisplayTotal) : netDisplayTotal;
 
@@ -3028,6 +3031,16 @@ export function PublicOrderPage({
                           : formatCurrencyBRL(0)}
                       </strong>
                     </div>
+                    {sumupEnabled && form.paymentMethod === 'card' ? (
+                      <div className="rounded-[18px] border border-[rgba(126,79,45,0.08)] bg-white px-3 py-3">
+                        <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--ink-muted)]">
+                          Taxa do cartão
+                        </span>
+                        <strong className="mt-1 block text-base text-[color:var(--ink-strong)]">
+                          {formatCurrencyBRL(cardSurchargeAmount)}
+                        </strong>
+                      </div>
+                    ) : null}
                   </div>
                   <div className="flex items-center justify-between gap-3 border-t border-[rgba(126,79,45,0.08)] pt-3">
                     <span className="text-sm font-semibold text-[color:var(--ink-strong)]">Total</span>

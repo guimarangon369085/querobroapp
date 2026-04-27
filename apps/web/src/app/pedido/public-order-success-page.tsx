@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { type CardCheckout, type PixCharge } from '@querobroapp/shared';
+import { computeSumUpCardSurchargeAmount, type CardCheckout, type PixCharge } from '@querobroapp/shared';
 import { useFeedback } from '@/components/feedback-provider';
 import {
   clearStoredOrderFinalized,
@@ -171,6 +171,7 @@ export function PublicOrderSuccessPage() {
 
   const { intake, order, productSubtotal } = successPayload;
   const isCardPayment = intake.paymentMethod === 'card';
+  const cardSurchargeAmount = isCardPayment ? computeSumUpCardSurchargeAmount(productSubtotal + intake.deliveryFee) : 0;
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(234,223,200,0.5),transparent_34%),radial-gradient(circle_at_top_right,rgba(210,228,219,0.54),transparent_30%),linear-gradient(180deg,#fbf4ea_0%,#f7efe3_100%)]">
@@ -197,6 +198,14 @@ export function PublicOrderSuccessPage() {
                 {formatCurrencyBRL(intake.deliveryFee)}
               </strong>
             </div>
+            {isCardPayment ? (
+              <div className="flex items-center justify-between gap-3 rounded-[24px] bg-white/78 px-4 py-3">
+                <span>Taxa do cartão</span>
+                <strong className="text-lg text-[color:var(--ink-strong)]">
+                  {formatCurrencyBRL(cardSurchargeAmount)}
+                </strong>
+              </div>
+            ) : null}
             <div className="flex items-center justify-between gap-3 rounded-[24px] bg-white/78 px-4 py-3">
               <span>Total</span>
               <strong className="text-lg text-[color:var(--ink-strong)]">{formatCurrencyBRL(order.total)}</strong>
