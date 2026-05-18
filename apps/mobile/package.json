@@ -12,16 +12,16 @@
   "dependencies": {
     "@babel/runtime": "^7.29.2",
     "@querobroapp/shared": "workspace:*",
-    "expo": "~55.0.8",
-    "expo-constants": "~55.0.9",
-    "expo-status-bar": "~55.0.4",
-    "libphonenumber-js": "^1.12.38",
-    "react": "18.3.1",
-    "react-native": "0.83.2"
+    "expo": "~55.0.24",
+    "expo-constants": "~55.0.16",
+    "expo-status-bar": "~55.0.6",
+    "libphonenumber-js": "^1.13.2",
+    "react": "19.2.6",
+    "react-native": "0.85.3"
   },
   "devDependencies": {
-    "@types/react": "18.3.28",
-    "react-dom": "18.3.1",
-    "typescript": "~5.9.2"
+    "@types/react": "19.2.14",
+    "react-dom": "19.2.6",
+    "typescript": "~6.0.3"
   }
 }
